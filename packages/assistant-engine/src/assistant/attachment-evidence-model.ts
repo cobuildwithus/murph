@@ -46,10 +46,23 @@ type PreparedRoutingEvidence = PreparedRoutingImage
 
 export type AssistantInputAttachmentModelBundle = InboxModelAttachmentBundle
 
+export type AssistantInputAttachmentModelBundleSource =
+  | AssistantInputAttachmentModelBundle
+  | {
+      bundle: AssistantInputAttachmentModelBundle
+      inputId: string
+    }
+
+interface NormalizedAssistantInputAttachmentModelBundleSource {
+  bundle: AssistantInputAttachmentModelBundle
+  inputId: string | null
+}
+
 export interface AssistantInputAttachmentEvidenceReadFailure {
   attachmentOrdinal: number
   details: string
   errorCode: string
+  inputId?: string
   kind: 'image' | 'raw' | 'derived'
 }
 
@@ -140,7 +153,7 @@ export function hasAssistantInputAttachmentEvidenceCandidate(
 }
 
 export async function prepareAssistantInputMultimodalUserMessageContent(input: {
-  attachmentSources: readonly AssistantInputAttachmentModelBundle[]
+  attachmentSources: readonly AssistantInputAttachmentModelBundleSource[]
   fallbackContextLabel?: string
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   prompt: string
@@ -150,7 +163,12 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   inputMode: InboxModelInputMode
   userMessageContent: AssistantUserMessageContentPart[] | null
 }> {
-  const preparedInputMode = inferAssistantInputMultimodalInputMode(input.attachmentSources)
+  const attachmentSources = normalizeAttachmentModelBundleSources(
+    input.attachmentSources,
+  )
+  const preparedInputMode = inferAssistantInputMultimodalInputMode(
+    attachmentSources.map((source) => source.bundle),
+  )
   if (preparedInputMode === 'text-only') {
     return {
       fallbackError: null,
@@ -160,7 +178,7 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   }
 
   const routingEvidence = await readPreparedRoutingEvidence({
-    attachmentSources: input.attachmentSources,
+    attachmentSources,
     fallbackContextLabel: input.fallbackContextLabel,
     onEvidenceReadFailure: input.onEvidenceReadFailure,
     vaultRoot: input.vaultRoot,
@@ -212,6 +230,24 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
     inputMode: 'multimodal',
     userMessageContent: content,
   }
+}
+
+function normalizeAttachmentModelBundleSources(
+  sources: readonly AssistantInputAttachmentModelBundleSource[],
+): NormalizedAssistantInputAttachmentModelBundleSource[] {
+  return sources.map((source) => {
+    if ('bundle' in source) {
+      return {
+        bundle: source.bundle,
+        inputId: normalizeNullableString(source.inputId),
+      }
+    }
+
+    return {
+      bundle: source,
+      inputId: null,
+    }
+  })
 }
 
 function buildMetadataFragment(
@@ -345,7 +381,7 @@ async function buildDerivedTextSources(input: {
 }
 
 async function readPreparedRoutingEvidence(input: {
-  attachmentSources: readonly AssistantInputAttachmentModelBundle[]
+  attachmentSources: readonly NormalizedAssistantInputAttachmentModelBundleSource[]
   fallbackContextLabel?: string
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   vaultRoot: string
@@ -357,7 +393,8 @@ async function readPreparedRoutingEvidence(input: {
   const evidence: PreparedRoutingEvidence[] = []
   const errors: string[] = []
 
-  for (const attachment of input.attachmentSources) {
+  for (const source of input.attachmentSources) {
+    const attachment = source.bundle
     const rawPath = normalizeAssistantInputRawArtifactPath(attachment.storedPath ?? null)
     if (!attachment.routingImage.eligible || !rawPath) {
       continue
@@ -384,6 +421,7 @@ async function readPreparedRoutingEvidence(input: {
         attachmentOrdinal: attachment.ordinal,
         details,
         errorCode: 'image_read_failed',
+        ...(source.inputId ? { inputId: source.inputId } : {}),
         kind: 'image',
       })
     }

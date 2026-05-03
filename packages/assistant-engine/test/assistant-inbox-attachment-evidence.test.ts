@@ -215,6 +215,84 @@ describe('inbox attachment evidence adapter', () => {
       Buffer.from('image bytes'),
     )
   })
+
+  it('preserves safe source extensions when MIME is missing or generic', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-inbox-evidence-'))
+    tempRoots.push(parentRoot)
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const attachments = [
+      createAttachment({
+        kind: 'image',
+        mime: null,
+        ordinal: 1,
+        storedPath: 'raw/inbox/cap_1/attachments/photo.jpg',
+      }),
+      createAttachment({
+        kind: 'document',
+        mime: null,
+        ordinal: 2,
+        storedPath: 'raw/inbox/cap_1/attachments/scan.pdf',
+      }),
+      createAttachment({
+        kind: 'image',
+        mime: 'application/octet-stream',
+        ordinal: 3,
+        storedPath: 'raw/inbox/cap_1/attachments/screenshot.png',
+      }),
+      createAttachment({
+        kind: 'image',
+        mime: null,
+        ordinal: 4,
+        storedPath: 'raw/inbox/cap_1/attachments/archive.exe',
+      }),
+      createAttachment({
+        kind: 'document',
+        mime: null,
+        ordinal: 5,
+        storedPath: 'raw/inbox/cap_1/attachments/scan',
+      }),
+      createAttachment({
+        kind: 'image',
+        mime: 'application/pdf',
+        ordinal: 6,
+        storedPath: 'raw/inbox/cap_1/attachments/photo.jpg',
+      }),
+    ]
+    await Promise.all(
+      attachments.map((attachment, index) =>
+        writeVaultFile(
+          vaultRoot,
+          attachment.storedPath!,
+          Buffer.from(`attachment ${index + 1}`),
+        ),
+      ),
+    )
+
+    const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
+      attachments,
+      inputId: 'ain_11111111111111111111111111111111',
+      vaultRoot,
+    })
+
+    expect(rawArtifactRefs.get(0)).toBe(
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.jpg',
+    )
+    expect(rawArtifactRefs.get(1)).toBe(
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/002.pdf',
+    )
+    expect(rawArtifactRefs.get(2)).toBe(
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/003.png',
+    )
+    expect(rawArtifactRefs.get(3)).toBe(
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/004.dat',
+    )
+    expect(rawArtifactRefs.get(4)).toBe(
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/005.bin',
+    )
+    expect(rawArtifactRefs.get(5)).toBe(
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/006.pdf',
+    )
+  })
 })
 
 function createAttachment(
@@ -228,7 +306,7 @@ function createAttachment(
     extractedText: input.extractedText ?? null,
     fileName: input.fileName ?? 'attachment.txt',
     kind: input.kind ?? 'document',
-    mime: input.mime ?? 'text/plain',
+    mime: input.mime === undefined ? 'text/plain' : input.mime,
     ordinal: input.ordinal ?? 1,
     originalPath: input.originalPath ?? null,
     parseState: input.parseState ?? null,

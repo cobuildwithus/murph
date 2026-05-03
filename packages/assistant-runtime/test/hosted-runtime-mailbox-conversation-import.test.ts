@@ -21,6 +21,7 @@ import {
 import {
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   listAssistantInputEvents,
+  updateAssistantInputAttachmentEvidence,
 } from "@murphai/assistant-engine";
 import {
   serializeHostedEmailThreadTarget,
@@ -77,7 +78,7 @@ describe("hosted mailbox conversation import adapter", () => {
         channel: "linq",
         linqMessage: {
           chatId: "chat_synthetic",
-          from: "+15550100000",
+          from: "redacted-contact-sentinel",
           isFromMe: false,
           messageId: "msg_synthetic_projection_failure",
           parts: [
@@ -91,11 +92,11 @@ describe("hosted mailbox conversation import adapter", () => {
               mimeType: "audio/mp4",
               size: 12_345,
               type: "voice_memo",
-              url: "https://signed.example.invalid/voice",
+              url: "redacted-attachment-url-sentinel",
             },
           ],
         },
-        phoneLookupKey: "+15550100000",
+        phoneLookupKey: "redacted-contact-sentinel",
       },
     });
     const order: string[] = [];
@@ -243,7 +244,7 @@ describe("hosted mailbox conversation import adapter", () => {
               byteSize: 256,
               derivedPath:
                 "derived/inbox/cap_synthetic_evidence_001/attachments/att_voice_1/manifest.json",
-              extractedText: "Transcribed voice note.",
+              extractedText: "Redacted attachment text sentinel.",
               fileName: "voice-note.m4a",
               kind: "audio",
               mime: "audio/mp4",
@@ -301,7 +302,7 @@ describe("hosted mailbox conversation import adapter", () => {
           {
             kind: "attachment_extracted_text",
             label: "attachment-1-extracted-text",
-            text: "Transcribed voice note.",
+            text: "Redacted attachment text sentinel.",
             truncated: false,
           },
         ],
@@ -320,6 +321,253 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     ]);
     assert.equal(JSON.stringify(listed.events[0]).includes("https://signed.example.invalid"), false);
+  });
+
+  test("does not downgrade useful hosted attachment evidence after replayed projection failure", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-replay-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_evidence_replay_001",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_evidence_replay",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_synthetic_evidence_replay",
+          parts: [
+            {
+              attachmentId: "voice_part_1",
+              fileName: "voice-note.m4a",
+              mimeType: "audio/mp4",
+              size: 256,
+              type: "voice_memo",
+              url: "redacted-attachment-url-sentinel",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: decodedWake.eventId,
+      id: "mailbox_item_evidence_replay_001",
+    });
+    await writeVaultFile(
+      vaultRoot,
+      "raw/inbox/linq/cap_synthetic_evidence_replay_001/attachments/01__voice-note.m4a",
+      Buffer.from("audio bytes"),
+    );
+
+    const firstOutcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_evidence_replay_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 1,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        return {
+          captureId: input.captureId,
+          attachments: [
+            {
+              attachmentId: "att_voice_1",
+              byteSize: 256,
+              derivedPath:
+                "derived/inbox/cap_synthetic_evidence_replay_001/attachments/att_voice_1/manifest.json",
+              extractedText: "Redacted attachment text sentinel.",
+              fileName: "voice-note.m4a",
+              kind: "audio",
+              mime: "audio/mp4",
+              ordinal: 1,
+              parseState: "succeeded",
+              sha256: "b".repeat(64),
+              storedPath:
+                "raw/inbox/linq/cap_synthetic_evidence_replay_001/attachments/01__voice-note.m4a",
+              transcriptText: null,
+            },
+          ],
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    assert.equal(firstOutcome.status, "imported");
+    await firstOutcome.afterCheckpoint?.();
+
+    const replayOutcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable on replay",
+        );
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    assert.equal(replayOutcome.status, "imported");
+    assert.deepEqual(await replayOutcome.afterCheckpoint?.(), {
+      attachmentEvidenceUpdated: false,
+      kind: "inbox_projection",
+      projectionUpdated: false,
+      reasonCode: "conversation-import.projection-failed",
+      status: "failed",
+    });
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    const evidence = listed.events[0]?.attachmentEvidence;
+    assert.equal(listed.events[0]?.projection.status, "succeeded");
+    assert.equal(evidence?.status, "available");
+    assert.equal(evidence?.reasonCode, null);
+    assert.equal(evidence?.source, "hosted-inbox-projection");
+    assert.equal(
+      evidence?.optionalInboxCaptureId,
+      "cap_synthetic_evidence_replay_001",
+    );
+    assert.equal(evidence?.attachments.length, 1);
+    assert.equal(
+      evidence?.attachments[0]?.raw?.path,
+      `raw/assistant-input/${listed.events[0]!.inputId}/attachments/001.m4a`,
+    );
+  });
+
+  test("does not downgrade partial hosted attachment evidence after replayed projection failure", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-partial-replay-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_evidence_partial_replay_001",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_evidence_partial_replay",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_synthetic_evidence_partial_replay",
+          parts: [
+            {
+              attachmentId: "voice_part_1",
+              fileName: "voice-note.m4a",
+              mimeType: "audio/mp4",
+              size: 256,
+              type: "voice_memo",
+              url: "redacted-attachment-url-sentinel",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: decodedWake.eventId,
+      id: "mailbox_item_evidence_partial_replay_001",
+    });
+    await writeVaultFile(
+      vaultRoot,
+      "raw/inbox/linq/cap_synthetic_evidence_partial_replay_001/attachments/01__voice-note.m4a",
+      Buffer.from("audio bytes"),
+    );
+
+    const firstOutcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_evidence_partial_replay_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 1,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        return {
+          captureId: input.captureId,
+          attachments: [
+            {
+              attachmentId: "att_voice_1",
+              byteSize: 256,
+              derivedPath:
+                "derived/inbox/cap_synthetic_evidence_partial_replay_001/attachments/att_voice_1/manifest.json",
+              extractedText: "Redacted attachment text sentinel.",
+              fileName: "voice-note.m4a",
+              kind: "audio",
+              mime: "audio/mp4",
+              ordinal: 1,
+              parseState: "succeeded",
+              sha256: "c".repeat(64),
+              storedPath:
+                "raw/inbox/linq/cap_synthetic_evidence_partial_replay_001/attachments/01__voice-note.m4a",
+              transcriptText: null,
+            },
+          ],
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    assert.equal(firstOutcome.status, "imported");
+    await firstOutcome.afterCheckpoint?.();
+
+    const seeded = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    const inputId = seeded.events[0]?.inputId;
+    if (!inputId) {
+      throw new Error("Expected seeded hosted input event.");
+    }
+    await updateAssistantInputAttachmentEvidence({
+      attachmentEvidence: {
+        ...seeded.events[0]!.attachmentEvidence,
+        reasonCode: "attachment.evidence_partial",
+        status: "partial",
+      },
+      inputId,
+      vault: vaultRoot,
+    });
+
+    const replayOutcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable on replay",
+        );
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    assert.equal(replayOutcome.status, "imported");
+    assert.deepEqual(await replayOutcome.afterCheckpoint?.(), {
+      attachmentEvidenceUpdated: false,
+      kind: "inbox_projection",
+      projectionUpdated: false,
+      reasonCode: "conversation-import.projection-failed",
+      status: "failed",
+    });
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    const evidence = listed.events[0]?.attachmentEvidence;
+    assert.equal(listed.events[0]?.projection.status, "succeeded");
+    assert.equal(evidence?.status, "partial");
+    assert.equal(evidence?.reasonCode, "attachment.evidence_partial");
+    assert.equal(evidence?.source, "hosted-inbox-projection");
+    assert.equal(evidence?.attachments.length, 1);
   });
 
   test("keeps hosted attachment evidence hydration failures nonblocking", async () => {
@@ -771,7 +1019,14 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(typeof outcome.afterCheckpoint, "function");
     assert.deepEqual(projectionUpdates, []);
 
-    await outcome.afterCheckpoint?.();
+    const effectResult = await outcome.afterCheckpoint?.();
+    assert.deepEqual(effectResult, {
+      attachmentEvidenceUpdated: null,
+      kind: "inbox_projection",
+      projectionUpdated: true,
+      reasonCode: "conversation-import.projection-failed",
+      status: "failed",
+    });
     assert.deepEqual(projectionUpdates, [
       {
         captureId: null,
@@ -779,6 +1034,87 @@ describe("hosted mailbox conversation import adapter", () => {
         status: "failed",
       },
     ]);
+  });
+
+  test("returns partial post-checkpoint result when projection update fails", async () => {
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_projection_update_failed_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: async () => ({
+        attachmentDescriptorCount: 0,
+        inputId: "ain_00000000000000000000000000000000",
+        async recordProjection() {
+          throw new Error("projection update unavailable");
+        },
+      }),
+      vaultRoot: "synthetic-vault-root",
+    });
+    if (outcome.status !== "imported") {
+      throw new Error("Expected imported mailbox outcome.");
+    }
+
+    assert.deepEqual(await outcome.afterCheckpoint?.(), {
+      attachmentEvidenceUpdated: null,
+      kind: "inbox_projection",
+      projectionUpdated: false,
+      reasonCode: "conversation-import.projection-update-failed",
+      status: "partial",
+    });
+  });
+
+  test("returns partial post-checkpoint result when attachment evidence update fails", async () => {
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_attachment_evidence_update_failed_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture() {
+        return {
+          attachments: [],
+          captureId: "cap_synthetic_attachment_evidence_update_failed_001",
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: async () => ({
+        attachmentDescriptorCount: 1,
+        inputId: "ain_00000000000000000000000000000000",
+        async recordAttachmentEvidence() {
+          throw new Error("attachment evidence update unavailable");
+        },
+        async recordProjection() {},
+      }),
+      vaultRoot: "synthetic-vault-root",
+    });
+    if (outcome.status !== "imported") {
+      throw new Error("Expected imported mailbox outcome.");
+    }
+
+    assert.deepEqual(await outcome.afterCheckpoint?.(), {
+      attachmentEvidenceUpdated: false,
+      kind: "inbox_projection",
+      projectionUpdated: true,
+      reasonCode: "conversation-import.attachment-evidence-update-failed",
+      status: "partial",
+    });
   });
 
   test("does not record Linq provider cleanup during mailbox import", async () => {

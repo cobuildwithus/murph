@@ -9,6 +9,7 @@ import type {
 import {
   fetchAndProcessHostedMailboxPrefix,
   type HostedMailboxImportLoopResult,
+  type HostedMailboxPostCheckpointEffect,
   type HostedMailboxResolvedImportItem,
   type HostedMailboxItemImportOutcome,
 } from "./mailbox-import.ts";
@@ -50,7 +51,7 @@ export interface HostedMailboxImportCheckpointRequestInput {
 }
 
 export interface HostedMailboxImportCheckpointResult {
-  afterCheckpointEffects: readonly (() => Promise<void>)[];
+  afterCheckpointEffects: readonly HostedMailboxPostCheckpointEffect[];
   checkpoint: HostedWorkspaceCheckpointResponse | null;
   importResult: HostedMailboxImportLoopResult;
   previousState: HostedMailboxImportState;
@@ -92,7 +93,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   const previousSystemMailboxState = await readHostedSystemMailboxCheckpointRollbackState({
     vaultRoot: input.vaultRoot,
   });
-  const afterCheckpointEffects: Array<() => Promise<void>> = [];
+  const afterCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     expectedUserId: input.expectedUserId,
     importItem: async (item) => {

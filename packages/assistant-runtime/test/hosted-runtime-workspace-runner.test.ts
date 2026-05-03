@@ -24,6 +24,9 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedExecutionConversationMessageWake,
+} from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -49,11 +52,18 @@ import {
   runHostedWorkspaceUntilIdleOrBudget,
 } from "../src/hosted-runtime.ts";
 import {
+  createHostedConversationMailboxImportItem,
+} from "../src/hosted-runtime/mailbox-conversation-import.ts";
+import {
   readHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   HostedMailboxUserMismatchError,
+  type HostedMailboxPostCheckpointEffectResult,
 } from "../src/hosted-runtime/mailbox-import.ts";
+import type {
+  NormalizedHostedAssistantRuntimeConfig,
+} from "../src/hosted-runtime/models.ts";
 import type {
   HostedRuntimeMailboxPort,
   HostedRuntimeUsageExportPort,
@@ -86,6 +96,19 @@ type SyntheticInputSource = {
     nextCursor: SyntheticConversationCursor;
   }>;
 };
+
+function createInboxProjectionEffectResult(
+  overrides: Partial<HostedMailboxPostCheckpointEffectResult> = {},
+): HostedMailboxPostCheckpointEffectResult {
+  return {
+    attachmentEvidenceUpdated: null,
+    kind: "inbox_projection",
+    projectionUpdated: true,
+    reasonCode: null,
+    status: "succeeded",
+    ...overrides,
+  };
+}
 const TEST_BROWSER_VAULT_REPLICA_REF = {
   byteLength: 256,
   dataVersion: "2026-04-26",
@@ -147,6 +170,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             afterCheckpoint: async () => {
               events.push("mailbox:afterCheckpoint");
+              return createInboxProjectionEffectResult();
             },
             status: "imported",
           };
@@ -253,8 +277,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               phase: "import",
               redactedJson: {
                 attemptedCount: 1,
+                effectAttachmentEvidenceUpdated: [null],
+                effectKinds: ["inbox_projection"],
+                effectProjectionUpdated: [true],
+                effectReasonCodes: [null],
+                effectStatuses: ["succeeded"],
                 errorCodes: [],
                 failedCount: 0,
+                partialCount: 0,
                 succeededCount: 1,
               },
               workspaceVersion: "0",
@@ -663,6 +693,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               return {
                 afterCheckpoint: async () => {
                   events.push("mailbox:afterCheckpoint");
+                  return createInboxProjectionEffectResult();
                 },
                 status: "imported",
               };
@@ -1825,6 +1856,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             afterCheckpoint: async () => {
               events.push("mailbox:afterCheckpoint");
+              return createInboxProjectionEffectResult();
             },
             status: "imported",
           };
@@ -1931,13 +1963,262 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(effectLog?.level, "warn");
       assert.deepEqual(effectLog?.redactedJson, {
         attemptedCount: 1,
+        effectAttachmentEvidenceUpdated: [],
+        effectKinds: [],
+        effectProjectionUpdated: [],
+        effectReasonCodes: [],
+        effectStatuses: [],
         errorCodes: ["post_checkpoint_effect_failed", "runtime_error"],
         failureCodeDetails: ["PROJECTION_UNAVAILABLE"],
         failureNames: ["Error"],
         failureSummaries: ["projection failed"],
         failedCount: 1,
+        partialCount: 0,
         succeededCount: 0,
       });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("logs reported mailbox post-checkpoint effect partial results", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_projection_partial_log",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_projection_partial_log",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return {
+            afterCheckpoint: async () =>
+              createInboxProjectionEffectResult({
+                attachmentEvidenceUpdated: false,
+                projectionUpdated: true,
+                reasonCode: "conversation-import.attachment-evidence-update-failed",
+                status: "partial",
+              }),
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_projection_partial_log",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_projection_partial_log",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      const effectLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
+      assert.ok(effectLog);
+      assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [effectLog] }));
+      assert.equal(effectLog.level, "warn");
+      assert.deepEqual(effectLog.redactedJson, {
+        attemptedCount: 1,
+        effectAttachmentEvidenceUpdated: [false],
+        effectKinds: ["inbox_projection"],
+        effectProjectionUpdated: [true],
+        effectReasonCodes: ["conversation-import.attachment-evidence-update-failed"],
+        effectStatuses: ["partial"],
+        errorCodes: ["post_checkpoint_effect_reported_partial"],
+        failedCount: 0,
+        partialCount: 1,
+        succeededCount: 0,
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("logs internally caught mailbox attachment evidence update failures", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          dedupeKey: "evt_synthetic_runner_attachment_update_failed",
+          id: "mailbox_item_runner_attachment_update_failed_log",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const conversationImportItem = createHostedConversationMailboxImportItem({
+      decodePayload: {
+        async decode() {
+          return {
+            status: "decoded",
+            wake: createRunnerConversationWake(),
+          };
+        },
+      },
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_runner_attachment_update_failed",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        assert.equal(input.captureId, "cap_synthetic_runner_attachment_update_failed");
+        return {
+          attachments: [],
+          captureId: input.captureId,
+        };
+      },
+      async prepareWakeContext() {},
+      runtime: createConversationRuntime(),
+      stageAssistantInputEvent: async () => ({
+        attachmentDescriptorCount: 1,
+        inputId: "ain_00000000000000000000000000000000",
+        async recordAttachmentEvidence() {
+          throw new Error("attachment evidence update unavailable");
+        },
+        async recordProjection() {},
+      }),
+      vaultRoot,
+    });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_attachment_update_failed_log",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          return conversationImportItem(item);
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_attachment_update_failed_log",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_attachment_update_failed_log",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      const effectLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
+      assert.ok(effectLog);
+      assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [effectLog] }));
+      assert.equal(effectLog?.level, "warn");
+      assert.deepEqual(effectLog?.redactedJson, {
+        attemptedCount: 1,
+        effectAttachmentEvidenceUpdated: [false],
+        effectKinds: ["inbox_projection"],
+        effectProjectionUpdated: [true],
+        effectReasonCodes: ["conversation-import.attachment-evidence-update-failed"],
+        effectStatuses: ["partial"],
+        errorCodes: ["post_checkpoint_effect_reported_partial"],
+        failedCount: 0,
+        partialCount: 1,
+        succeededCount: 0,
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("normalizes reported mailbox post-checkpoint reason codes before logging", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_projection_reason_log",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_projection_reason_log",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return {
+            afterCheckpoint: async () =>
+              createInboxProjectionEffectResult({
+                projectionUpdated: false,
+                reasonCode: "projection failed for private message",
+                status: "partial",
+              }),
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_projection_reason_log",
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      const effectLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
+      assert.deepEqual(effectLog?.redactedJson?.effectReasonCodes, ["unclassified"]);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -2421,6 +2702,80 @@ function createPlatform(input: {
     mailboxPort: input.mailboxPort,
     ...(input.usageExportPort ? { usageExportPort: input.usageExportPort } : {}),
     workspacePort: input.workspacePort,
+  };
+}
+
+function createConversationRuntime(): Pick<
+  NormalizedHostedAssistantRuntimeConfig,
+  "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
+> {
+  return {
+    forwardedEnv: {},
+    platform: {
+      artifactStore: {
+        async get() {
+          return null;
+        },
+        async put() {},
+      },
+      effectsPort: {
+        async readRawEmailMessage() {
+          return null;
+        },
+        async sendEmail() {},
+      },
+    },
+    platformEnv: {},
+    resolvedConfig: {
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+      managedAutoReplyChannels: [
+        {
+          capabilityReady: false,
+          channel: "email",
+          memberChannel: "email",
+        },
+        {
+          capabilityReady: true,
+          channel: "linq",
+          memberChannel: "linq",
+        },
+        {
+          capabilityReady: false,
+          channel: "telegram",
+          memberChannel: "telegram",
+        },
+      ],
+    },
+    userEnv: {},
+  };
+}
+
+function createRunnerConversationWake(): HostedExecutionConversationMessageWake {
+  return {
+    eventId: "evt_synthetic_runner_attachment_update_failed",
+    kind: "conversation.message",
+    message: {
+      channel: "linq",
+      linqMessage: {
+        chatId: "chat_synthetic_runner_attachment_update_failed",
+        from: "redacted-contact-sentinel",
+        isFromMe: false,
+        messageId: "msg_synthetic_runner_attachment_update_failed",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      phoneLookupKey: "redacted-contact-sentinel",
+    },
+    occurredAt: TEST_NOW,
+    userId: TEST_USER_ID,
   };
 }
 

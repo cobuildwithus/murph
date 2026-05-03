@@ -163,7 +163,7 @@ export function buildWorkspacePackagePackPreflightArgs(
     return null;
   }
 
-  return ["health-commons:generate"];
+  return ["--filter", HEALTH_COMMONS_PACKAGE_NAME, "run", "build"];
 }
 
 async function packWorkspacePackage(

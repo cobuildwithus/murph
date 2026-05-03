@@ -14,6 +14,7 @@ import {
   hasAssistantInputAttachmentEvidenceCandidate,
   prepareAssistantInputMultimodalUserMessageContent,
   type AssistantInputAttachmentModelBundle,
+  type AssistantInputAttachmentModelBundleSource,
 } from '../attachment-evidence-model.js'
 import { normalizeNullableString } from '../shared.js'
 
@@ -66,6 +67,11 @@ type AssistantAutoReplyPromptInputWithBundles = AssistantAutoReplyPromptInput & 
   attachmentBundles: readonly AssistantInputAttachmentModelBundle[]
 }
 
+/**
+ * Synchronous renderer for tests and diagnostics. Production auto-reply
+ * execution should use prepareAssistantAutoReplyInput() so derived manifests and
+ * file-backed attachment bundles are materialized before prompt construction.
+ */
 export function buildAssistantAutoReplyPrompt(
   inputs: readonly AssistantAutoReplyPromptInput[],
 ): AssistantAutoReplyPrompt {
@@ -161,17 +167,15 @@ export async function prepareAssistantAutoReplyInput(
 
   const hasTextualContent = textualSections.length > 0
   const nextPrompt = buildAssistantAutoReplyPromptText(inputs, textualSections)
+  const attachmentSources = buildPreparedAttachmentSources(preparedInputs)
 
   const preparedMultimodalInput =
     await prepareAssistantInputMultimodalUserMessageContent({
-      attachmentSources: preparedInputs.flatMap((entry) => entry.attachmentBundles),
+      attachmentSources,
       onEvidenceReadFailure(failure) {
         options.onEvent?.({
           type: 'input.reply-progress',
-          inputId: resolveAttachmentEvidenceReadFailureInputId(
-            preparedInputs,
-            failure.attachmentOrdinal,
-          ),
+          inputId: failure.inputId ?? inputs[0]?.inputId,
           details: 'nonblocking attachment evidence read failed',
           errorCode: failure.errorCode,
           failureContext: {
@@ -513,6 +517,17 @@ function renderPreparedAttachmentPromptSection(
   return `${label}\n${sections.join('\n\n')}`
 }
 
+function buildPreparedAttachmentSources(
+  inputs: readonly AssistantAutoReplyPromptInputWithBundles[],
+): AssistantInputAttachmentModelBundleSource[] {
+  return inputs.flatMap((entry) =>
+    entry.attachmentBundles.map((bundle) => ({
+      bundle,
+      inputId: entry.inputId,
+    })),
+  )
+}
+
 async function buildPromptAttachmentBundlesBestEffort(input: {
   entry: AssistantAutoReplyPromptInput
   onEvent?: (event: AssistantRunEvent) => void
@@ -544,15 +559,6 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
     })
     return []
   }
-}
-
-function resolveAttachmentEvidenceReadFailureInputId(
-  inputs: readonly AssistantAutoReplyPromptInputWithBundles[],
-  attachmentOrdinal: number,
-): string | undefined {
-  return inputs.find((entry) =>
-    entry.attachmentBundles.some((bundle) => bundle.ordinal === attachmentOrdinal)
-  )?.inputId ?? inputs[0]?.inputId
 }
 
 function normalizeAttachmentDescriptorPromptKind(

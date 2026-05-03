@@ -10,6 +10,7 @@ import {
 } from '../src/inbox-model-contracts.ts'
 import type {
   AssistantInputAttachmentEvidenceReadFailure,
+  AssistantInputAttachmentModelBundleSource,
 } from '../src/assistant/attachment-evidence-model.ts'
 import type { AssistantUserMessageContentPart } from '../src/assistant/content-types.ts'
 import type {
@@ -403,6 +404,33 @@ describe('buildAssistantAutoReplyPrompt', () => {
     }
     expect(result.prompt).toContain(
       'storedPath: raw/inbox/capture-1/attachments/01__scan.pdf',
+    )
+    expect(result.prompt).toContain(
+      'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
+    )
+  })
+
+  it('recognizes MIME-less assistant-input PDF refs from the stored path extension', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        attachments: [
+          createAttachment({
+            kind: 'document',
+            mime: null,
+            parseState: 'succeeded',
+            storedPath:
+              'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
+          }),
+        ],
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain(
+      'storedPath: raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf',
     )
     expect(result.prompt).toContain(
       'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
@@ -931,6 +959,123 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(onEvent).toHaveBeenCalledWith({
       type: 'input.reply-progress',
       inputId: 'event-1',
+      details: 'nonblocking attachment evidence read failed',
+      errorCode: 'image_read_failed',
+      failureContext: {
+        attachmentOrdinal: 1,
+      },
+      safeDetails: 'attachment_evidence_read_failed_nonblocking',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+  })
+
+  it('attributes grouped attachment read failures by input id when ordinals repeat', async () => {
+    const onEvent = vi.fn()
+    const firstBundle = createAttachmentBundle({
+      attachmentId: 'bundle-1',
+      kind: 'image',
+      mime: 'image/jpeg',
+      ordinal: 1,
+      routingImage: {
+        eligible: true,
+        reason: 'supported-format',
+        mediaType: 'image/jpeg',
+        extension: '.jpg',
+      },
+    })
+    const secondBundle = createAttachmentBundle({
+      attachmentId: 'bundle-2',
+      kind: 'image',
+      mime: 'image/png',
+      ordinal: 1,
+      routingImage: {
+        eligible: true,
+        reason: 'supported-format',
+        mediaType: 'image/png',
+        extension: '.png',
+      },
+    })
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles
+      .mockResolvedValueOnce([firstBundle])
+      .mockResolvedValueOnce([secondBundle])
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(true)
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockImplementationOnce(
+      async (input: {
+        attachmentSources: readonly AssistantInputAttachmentModelBundleSource[]
+        onEvidenceReadFailure?: (
+          failure: AssistantInputAttachmentEvidenceReadFailure,
+        ) => void
+      }) => {
+        const firstSource = input.attachmentSources[0]
+        const secondSource = input.attachmentSources[1]
+        if (
+          !firstSource ||
+          !secondSource ||
+          !('bundle' in firstSource) ||
+          !('bundle' in secondSource)
+        ) {
+          throw new Error('Expected paired attachment sources.')
+        }
+
+        expect(firstSource.inputId).toBe('event-1')
+        expect(firstSource.bundle).toBe(firstBundle)
+        expect(secondSource.inputId).toBe('event-2')
+        expect(secondSource.bundle).toBe(secondBundle)
+        input.onEvidenceReadFailure?.({
+          attachmentOrdinal: secondSource.bundle.ordinal,
+          details: 'attachment 1 image evidence unavailable',
+          errorCode: 'image_read_failed',
+          inputId: secondSource.inputId,
+          kind: 'image',
+        })
+        return {
+          fallbackError: null,
+          inputMode: 'text-only',
+          userMessageContent: null,
+        }
+      },
+    )
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              kind: 'image',
+              mime: 'image/jpeg',
+              storedPath: 'raw/inbox/capture-1/attachments/01__image.jpg',
+            }),
+          ],
+          captureOverrides: {
+            eventId: 'event-1',
+            text: 'First photo.',
+          },
+        }),
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              attachmentId: 'attachment-2',
+              kind: 'image',
+              mime: 'image/png',
+              storedPath: 'raw/inbox/capture-2/attachments/01__image.png',
+            }),
+          ],
+          captureOverrides: {
+            captureId: 'capture-2',
+            eventId: 'event-2',
+            text: 'Second photo.',
+          },
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+      { onEvent },
+    )
+
+    expect(result.kind).toBe('ready')
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'input.reply-progress',
+      inputId: 'event-2',
       details: 'nonblocking attachment evidence read failed',
       errorCode: 'image_read_failed',
       failureContext: {

@@ -193,6 +193,15 @@
       "@murphai/inboxd/connectors/email/parsed": [
         "packages/inboxd/src/connectors/email/parsed.ts"
       ],
+      "@murphai/inboxd/connectors/hosted-conversation": [
+        "packages/inboxd/src/connectors/hosted-conversation.ts"
+      ],
+      "@murphai/inboxd/connectors/linq/normalize": [
+        "packages/inboxd/src/connectors/linq/normalize.ts"
+      ],
+      "@murphai/inboxd/connectors/telegram/normalize": [
+        "packages/inboxd/src/connectors/telegram/normalize.ts"
+      ],
       "@murphai/inboxd/runtime": [
         "packages/inboxd/src/runtime.ts"
       ],

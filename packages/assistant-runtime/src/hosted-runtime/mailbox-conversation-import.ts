@@ -17,6 +17,7 @@ import {
 import {
   createAssistantInputAttachmentEvidenceFromInboxCapture,
   materializeAssistantInputAttachmentRawArtifactRefs,
+  readAssistantInputEvent,
   updateAssistantInputAttachmentEvidence,
   type AssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
@@ -30,6 +31,7 @@ import { createIntegratedInboxServices } from "@murphai/inbox-services";
 
 import type {
   HostedMailboxItemImportOutcome,
+  HostedMailboxPostCheckpointEffectResult,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
 import type {
@@ -51,6 +53,10 @@ const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
 const CONVERSATION_ATTACHMENT_EVIDENCE_FAILED_REASON =
   "conversation-import.attachment-evidence-failed";
+const CONVERSATION_PROJECTION_UPDATE_FAILED_REASON =
+  "conversation-import.projection-update-failed";
+const CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON =
+  "conversation-import.attachment-evidence-update-failed";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
 const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
@@ -113,7 +119,7 @@ export interface HostedConversationMailboxAssistantInputStageResult {
   inputId: string;
   recordAttachmentEvidence?(
     attachmentEvidence: AssistantInputAttachmentEvidence,
-  ): Promise<void>;
+  ): Promise<boolean>;
   recordProjection(
     input: HostedConversationMailboxAssistantInputProjectionUpdate,
   ): Promise<void>;
@@ -128,6 +134,11 @@ export type HostedConversationMailboxAssistantInputStager = (input: {
 export interface HostedConversationMailboxAttachmentEvidenceCapture {
   attachments: readonly InboxCaptureAttachmentLike[];
   captureId: string;
+}
+
+interface HostedConversationAttachmentEvidenceUpdateResult {
+  reasonCode: string | null;
+  updated: boolean | null;
 }
 
 export type HostedConversationMailboxAttachmentEvidenceCaptureLoader = (input: {
@@ -147,7 +158,7 @@ export type HostedConversationMailboxWakeContextPreparer = (input: {
 
 export type HostedConversationMailboxImportOutcome =
   | {
-      afterCheckpoint?: (() => Promise<void>) | null;
+      afterCheckpoint?: (() => Promise<HostedMailboxPostCheckpointEffectResult>) | null;
       captureId: string | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
@@ -266,7 +277,7 @@ export async function importHostedConversationMailboxItem(input: {
 
   return {
     afterCheckpoint: async () => {
-      await projectHostedConversationAssistantInputBestEffort({
+      return await projectHostedConversationAssistantInputBestEffort({
         importConversationWake,
         loadAttachmentEvidenceCapture,
         prepareWakeContext,
@@ -293,7 +304,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
-}): Promise<void> {
+}): Promise<HostedMailboxPostCheckpointEffectResult> {
   let imported: HostedConversationMailboxLocalImportResult;
   try {
     await input.prepareWakeContext({
@@ -307,35 +318,75 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       wake: input.wake,
     });
   } catch (error) {
-    await recordHostedConversationProjectionBestEffort(input.stagedInput, {
+    const reasonCode = readHostedConversationProjectionFailureReason(error);
+    const projectionUpdated = await recordHostedConversationProjectionBestEffort(input.stagedInput, {
       captureId: null,
-      reasonCode: readHostedConversationProjectionFailureReason(error),
+      reasonCode,
       status: "failed",
     });
-    await recordHostedConversationAttachmentEvidenceFailureBestEffort({
+    const attachmentEvidenceUpdated = await recordHostedConversationAttachmentEvidenceFailureBestEffort({
       optionalInboxCaptureId: null,
       reasonCode: readHostedConversationAttachmentEvidenceFailureReason(error),
       stagedInput: input.stagedInput,
     });
-    return;
+    return {
+      attachmentEvidenceUpdated,
+      kind: "inbox_projection",
+      projectionUpdated,
+      reasonCode,
+      status: "failed",
+    };
   }
 
   if (!imported.captureId) {
-    return;
+    return {
+      attachmentEvidenceUpdated: null,
+      kind: "inbox_projection",
+      projectionUpdated: null,
+      reasonCode: null,
+      status: "succeeded",
+    };
   }
 
-  await recordHostedConversationProjectionBestEffort(input.stagedInput, {
+  const projectionUpdated = await recordHostedConversationProjectionBestEffort(input.stagedInput, {
     captureId: imported.captureId,
     reasonCode: null,
     status: "succeeded",
   });
-  await recordHostedConversationAttachmentEvidenceFromProjectionBestEffort({
+  const attachmentEvidenceResult = await recordHostedConversationAttachmentEvidenceFromProjectionBestEffort({
     captureId: imported.captureId,
     loadAttachmentEvidenceCapture: input.loadAttachmentEvidenceCapture,
     requestId: input.wake.eventId,
     stagedInput: input.stagedInput,
     vaultRoot: input.vaultRoot,
   });
+  return buildHostedConversationProjectionEffectResult({
+    attachmentEvidenceResult,
+    projectionUpdated,
+  });
+}
+
+function buildHostedConversationProjectionEffectResult(input: {
+  attachmentEvidenceResult: HostedConversationAttachmentEvidenceUpdateResult;
+  projectionUpdated: boolean;
+}): HostedMailboxPostCheckpointEffectResult {
+  const reasonCode = input.projectionUpdated
+    ? input.attachmentEvidenceResult.reasonCode
+    : CONVERSATION_PROJECTION_UPDATE_FAILED_REASON;
+  const status =
+    input.projectionUpdated
+    && input.attachmentEvidenceResult.updated !== false
+    && !input.attachmentEvidenceResult.reasonCode
+      ? "succeeded"
+      : "partial";
+
+  return {
+    attachmentEvidenceUpdated: input.attachmentEvidenceResult.updated,
+    kind: "inbox_projection",
+    projectionUpdated: input.projectionUpdated,
+    reasonCode,
+    status,
+  };
 }
 
 async function recordHostedConversationAttachmentEvidenceFromProjectionBestEffort(input: {
@@ -344,9 +395,12 @@ async function recordHostedConversationAttachmentEvidenceFromProjectionBestEffor
   requestId: string | null;
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<HostedConversationAttachmentEvidenceUpdateResult> {
   if (!shouldRecordHostedConversationAttachmentEvidence(input.stagedInput)) {
-    return;
+    return {
+      reasonCode: null,
+      updated: null,
+    };
   }
 
   try {
@@ -355,7 +409,7 @@ async function recordHostedConversationAttachmentEvidenceFromProjectionBestEffor
       requestId: input.requestId,
       vaultRoot: input.vaultRoot,
     });
-    await recordHostedConversationAttachmentEvidenceBestEffort({
+    const updated = await recordHostedConversationAttachmentEvidenceBestEffort({
       attachmentEvidence:
         await createHostedConversationAttachmentEvidenceFromCaptureWithRawRefs({
           capture,
@@ -365,12 +419,21 @@ async function recordHostedConversationAttachmentEvidenceFromProjectionBestEffor
         }),
       stagedInput: input.stagedInput,
     });
+    return {
+      reasonCode: updated ? null : CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON,
+      updated,
+    };
   } catch (error) {
-    await recordHostedConversationAttachmentEvidenceFailureBestEffort({
+    const reasonCode = readHostedConversationAttachmentEvidenceFailureReason(error);
+    const updated = await recordHostedConversationAttachmentEvidenceFailureBestEffort({
       optionalInboxCaptureId: input.captureId,
-      reasonCode: readHostedConversationAttachmentEvidenceFailureReason(error),
+      reasonCode,
       stagedInput: input.stagedInput,
     });
+    return {
+      reasonCode,
+      updated,
+    };
   }
 }
 
@@ -450,14 +513,33 @@ async function stageHostedConversationAssistantInputEvent(input: {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
     inputId: event.inputId,
     async recordAttachmentEvidence(attachmentEvidence) {
-      await updateAssistantInputAttachmentEvidence({
+      if (attachmentEvidence.status === "failed") {
+        const latestEvent = await readAssistantInputEvent({
+          inputId: event.inputId,
+          vault: input.vaultRoot,
+        });
+        if (
+          isUsefulHostedAttachmentEvidence(
+            latestEvent?.attachmentEvidence ?? event.attachmentEvidence,
+          )
+        ) {
+          return false;
+        }
+      }
+
+      const updated = await updateAssistantInputAttachmentEvidence({
         attachmentEvidence: {
           ...attachmentEvidence,
           updatedAt: new Date().toISOString(),
         },
         inputId: event.inputId,
+        preserveUsefulEvidenceOnFailure: true,
         vault: input.vaultRoot,
       });
+      return !(
+        attachmentEvidence.status === "failed" &&
+        isUsefulHostedAttachmentEvidence(updated.attachmentEvidence)
+      );
     },
     async recordProjection(projection) {
       await updateAssistantInputProjection({
@@ -492,6 +574,12 @@ function readHostedConversationAttachmentEvidenceFailureReason(
   }
 
   return CONVERSATION_ATTACHMENT_EVIDENCE_FAILED_REASON;
+}
+
+function isUsefulHostedAttachmentEvidence(
+  evidence: AssistantInputAttachmentEvidence,
+): boolean {
+  return evidence.status === "available" || evidence.status === "partial";
 }
 
 function createHostedConversationAssistantInputEvent(input: {
@@ -912,26 +1000,29 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
 async function recordHostedConversationProjectionBestEffort(
   stagedInput: HostedConversationMailboxAssistantInputStageResult,
   projection: HostedConversationMailboxAssistantInputProjectionUpdate,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await stagedInput.recordProjection(projection);
+    return true;
   } catch {
     // Projection status is diagnostic/enrichment state; staged input remains durable.
+    return false;
   }
 }
 
 async function recordHostedConversationAttachmentEvidenceBestEffort(input: {
   attachmentEvidence: AssistantInputAttachmentEvidence;
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
-}): Promise<void> {
+}): Promise<boolean | null> {
   if (!input.stagedInput.recordAttachmentEvidence) {
-    return;
+    return null;
   }
 
   try {
-    await input.stagedInput.recordAttachmentEvidence(input.attachmentEvidence);
+    return await input.stagedInput.recordAttachmentEvidence(input.attachmentEvidence);
   } catch {
     // Attachment evidence is prompt materialization state. Staged input remains durable.
+    return false;
   }
 }
 
@@ -939,12 +1030,12 @@ async function recordHostedConversationAttachmentEvidenceFailureBestEffort(input
   optionalInboxCaptureId: string | null;
   reasonCode: string;
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
-}): Promise<void> {
+}): Promise<boolean | null> {
   if (!shouldRecordHostedConversationAttachmentEvidence(input.stagedInput)) {
-    return;
+    return null;
   }
 
-  await recordHostedConversationAttachmentEvidenceBestEffort({
+  return await recordHostedConversationAttachmentEvidenceBestEffort({
     attachmentEvidence: {
       attachments: [],
       optionalInboxCaptureId: input.optionalInboxCaptureId,

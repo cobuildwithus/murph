@@ -81,7 +81,10 @@ describe("runner bundle runtime artifact staging", () => {
       "build",
     ]);
     expect(buildWorkspacePackagePackPreflightArgs("@murphai/health-commons")).toEqual([
-      "health-commons:generate",
+      "--filter",
+      "@murphai/health-commons",
+      "run",
+      "build",
     ]);
     expect(buildWorkspacePackagePackPreflightArgs("@murphai/runtime-state")).toBeNull();
   });
