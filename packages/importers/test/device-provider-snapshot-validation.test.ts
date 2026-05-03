@@ -8,6 +8,24 @@ import {
 } from "@murphai/importers";
 
 describe("prepareDeviceProviderSnapshotImport", () => {
+  it("accepts snapshots when optional ingest metadata fields are omitted", async () => {
+    await expect(
+      prepareDeviceProviderSnapshotImport({
+        provider: "whoop",
+        snapshot: {
+          accountId: "whoop-user",
+          importedAt: "2026-04-08T00:00:00.000Z",
+          recoveries: [],
+          sleeps: [],
+          workouts: [],
+        },
+      }),
+    ).resolves.toMatchObject({
+      provider: "whoop",
+      accountId: "whoop-user",
+    });
+  });
+
   it("preserves schema issue details as the cause when top-level input validation fails", async () => {
     try {
       await prepareDeviceProviderSnapshotImport({
