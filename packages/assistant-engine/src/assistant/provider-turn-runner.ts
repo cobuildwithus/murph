@@ -240,8 +240,21 @@ async function executeAssistantProviderAttempt(input: {
 
   const attemptAt = new Date().toISOString()
   await recordProviderAttemptStarted({
+    activeTurnMessagesPresent:
+      (attemptPlan.routePlan.activeTurnMessages?.length ?? 0) > 0,
     attemptCount: attemptPlan.attemptCount,
     at: attemptAt,
+    conversationMessagesPresent:
+      (attemptPlan.routePlan.conversationMessages?.length ?? 0) > 0,
+    hasStoredThreadInstructionsFingerprint:
+      typeof attemptPlan.session.resumeState?.threadInstructionsFingerprint ===
+      'string',
+    hasThreadInstructionsFingerprint:
+      attemptPlan.routePlan.threadInstructionsFingerprint !== null,
+    hasResumeProviderSessionId:
+      attemptPlan.routePlan.resumeProviderSessionId !== null,
+    providerContinuationKind: attemptPlan.routePlan.providerContinuation.kind,
+    refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
     route: attemptPlan.route,
     sessionId: attemptPlan.session.sessionId,
     turnId: executionPlan.turnId,

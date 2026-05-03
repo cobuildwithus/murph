@@ -47,12 +47,6 @@ export function appendAssistantActiveTurnProviderExchange(input: {
   }
 }
 
-export function hasAssistantActiveTurnProviderHistory(
-  history: AssistantActiveTurnProviderHistory | null | undefined,
-): boolean {
-  return (history?.messages.length ?? 0) > 0
-}
-
 function buildAssistantActiveTurnUserHistoryMessage(input: {
   userMessageContent?: readonly AssistantUserMessageContentPart[] | null
   userPrompt: string

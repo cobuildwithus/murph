@@ -38,6 +38,7 @@ import {
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
 } from './delivery-service.js'
 import {
+  resolveAssistantResumeStateFromProviderTurn,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
 import {
@@ -425,7 +426,10 @@ export async function sendAssistantMessageLocal(
                 turnId: currentUserTurn.turnId,
               }) ?? providerRequestJournal
           }
-          currentSession = providerResult.session
+          currentSession = resolveActiveTurnProviderLoopSession({
+            providerResult,
+            threadScope,
+          })
           responseText = providerResult.response
           if (providerResult.nonReplayableProviderWork) {
             activeTurnRouteLock = providerResult.route
@@ -596,7 +600,7 @@ export async function sendAssistantMessageLocal(
           plan: sharedPlan,
           providerResult,
           providerResumeStateAction: resolveProviderResumeStateAction({
-            usedFallbackProviderFork: activeTurnHistory !== null,
+            providerSessionId: providerResult.providerSessionId ?? null,
             threadScope,
           }),
           persistUserPromptToTranscript: !userPromptPersistedToTranscript,
@@ -772,16 +776,46 @@ async function runAssistantTurnBestEffort(
 }
 
 function resolveProviderResumeStateAction(input: {
-  usedFallbackProviderFork: boolean
+  providerSessionId: string | null
   threadScope: AssistantProviderThreadScope
 }): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
   if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
   }
 
-  return input.usedFallbackProviderFork
-    ? 'preserve-existing'
-    : 'persist-from-provider-turn'
+  return normalizeNullableString(input.providerSessionId)
+    ? 'persist-from-provider-turn'
+    : 'preserve-existing'
+}
+
+function resolveActiveTurnProviderLoopSession(input: {
+  providerResult: ExecutedAssistantProviderTurnResult
+  threadScope: AssistantProviderThreadScope
+}): AssistantSession {
+  if (input.threadScope !== 'session-thread') {
+    return input.providerResult.session
+  }
+
+  const providerSessionId = normalizeNullableString(
+    input.providerResult.providerSessionId,
+  )
+  const routeId = normalizeNullableString(input.providerResult.route?.routeId)
+  if (!providerSessionId || !routeId) {
+    return {
+      ...input.providerResult.session,
+      resumeState: null,
+    }
+  }
+
+  return {
+    ...input.providerResult.session,
+    resumeState: resolveAssistantResumeStateFromProviderTurn({
+      providerSessionId,
+      routeId,
+      threadInstructionsFingerprint:
+        input.providerResult.threadInstructionsFingerprint,
+    }),
+  }
 }
 
 async function resolveAssistantActiveTurnInputAdmission(input: {

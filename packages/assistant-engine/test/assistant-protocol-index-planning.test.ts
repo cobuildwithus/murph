@@ -161,6 +161,82 @@ describe('assistant protocol index planning', () => {
     expect(planningMocks.resolveAssistantVaultOverviewBlock).not.toHaveBeenCalled()
   })
 
+  it('plans native resume while keeping active-turn history available for fallback', async () => {
+    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const route = createRoute()
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    const resumedPlan = await resolveAssistantRouteTurnPlan({
+      activeTurnHistory: {
+        acceptedInputIds: [],
+        messages: [
+          {
+            content: 'initial user prompt',
+            role: 'user',
+          },
+          {
+            content: 'draft assistant response',
+            role: 'assistant',
+          },
+        ],
+        nonReplayableProviderWork: false,
+      } satisfies AssistantActiveTurnProviderHistory,
+      executionContext: null,
+      input: createMessageInput(),
+      profile: executionProfile,
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession({
+        resumeState: {
+          providerSessionId: 'thread-active-turn',
+          resumeRouteId: route.routeId,
+          threadInstructionsFingerprint:
+            initialPlan.threadInstructionsFingerprint,
+        },
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(resumedPlan.resumeProviderSessionId).toBe('thread-active-turn')
+    expect(resumedPlan.refreshThreadInstructions).toBe(false)
+    expect(resumedPlan.activeTurnMessages).toEqual([
+      {
+        content: 'initial user prompt',
+        role: 'user',
+      },
+      {
+        content: 'draft assistant response',
+        role: 'assistant',
+      },
+    ])
+    expect(resumedPlan.providerContinuation).toEqual({
+      kind: 'provider-state-optimization',
+    })
+  })
+
   it('refreshes resumed thread instructions when the fingerprint changed', async () => {
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({

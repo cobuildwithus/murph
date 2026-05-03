@@ -47,7 +47,6 @@ import {
 } from '../system-prompt.js'
 import { buildAssistantVaultOverviewBlock } from '../vault-overview.js'
 import {
-  hasAssistantActiveTurnProviderHistory,
   type AssistantActiveTurnProviderHistory,
   type AssistantActiveTurnProviderHistoryMessage,
 } from '../active-turn-history.js'
@@ -285,11 +284,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     ...input.route.providerOptions,
   })
   const activeTurnHistory = input.activeTurnHistory ?? null
-  const activeTurnHistoryPresent =
-    hasAssistantActiveTurnProviderHistory(activeTurnHistory)
   const nativeResumeEnabled =
-    input.profile.threadScope === 'session-thread' &&
-    !activeTurnHistoryPresent
+    input.profile.threadScope === 'session-thread'
   const candidateResumeProviderSessionId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&

@@ -335,8 +335,14 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
           providerContinuation: {
             kind: 'explicit-structured-history',
           },
+          providerSessionId: 'provider-thread-active-turn',
           response: 'draft before late input',
+          route: {
+            routeId: 'route-active-turn',
+          },
           session,
+          threadInstructionsFingerprint:
+            `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
         },
       }
     })
@@ -348,8 +354,14 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
           providerContinuation: {
             kind: 'thread-start',
           },
+          providerSessionId: 'provider-thread-active-turn',
           response: 'final after late input',
+          route: {
+            routeId: 'route-active-turn',
+          },
           session,
+          threadInstructionsFingerprint:
+            `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
         },
       }
     })
@@ -504,6 +516,16 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     'Late follow up',
   )
   assert.deepEqual(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
+      .resumeState,
+    {
+      providerSessionId: 'provider-thread-active-turn',
+      resumeRouteId: 'route-active-turn',
+      threadInstructionsFingerprint:
+        `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+    },
+  )
+  assert.deepEqual(
     mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
       ?.messages,
     [
@@ -536,7 +558,7 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.providerResumeStateAction,
-    'preserve-existing',
+    'persist-from-provider-turn',
   )
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
@@ -566,6 +588,92 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
   assert.equal(result.prompt, 'Late follow up')
   assert.equal(result.response, 'final after late input')
+})
+
+test('sendAssistantMessageLocal clears stale loop resume state without a fresh provider thread', async () => {
+  const session = createAssistantSession({
+    resumeState: {
+      providerSessionId: 'old-provider-thread',
+      resumeRouteId: 'old-route',
+      threadInstructionsFingerprint:
+        `thread-instructions-v1:${'c'.repeat(64)}:${'d'.repeat(64)}`,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  mocks.executeProviderTurnWithRecovery
+    .mockImplementationOnce(async () => ({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'draft without fresh provider thread',
+        session,
+      },
+    }))
+    .mockImplementationOnce(async () => ({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        providerContinuation: {
+          kind: 'thread-start',
+        },
+        response: 'final after late input',
+        session: {
+          ...session,
+          resumeState: null,
+        },
+      },
+    }))
+  const activeTurnInput = vi.fn()
+    .mockResolvedValueOnce({
+      acceptedInputs: [
+        {
+          id: 'late-follow-up',
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: 'Late follow up',
+          source: 'manual',
+        },
+      ],
+      kind: 'accepted' as const,
+      prompt: 'Late follow up',
+      receiptMetadata: {},
+      transcriptText: 'Late follow up',
+    })
+    .mockResolvedValue({
+      kind: 'no-new-input' as const,
+    })
+
+  await sendAssistantMessageLocal({
+    activeTurnInput,
+    deliverResponse: false,
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
+      .resumeState,
+    null,
+  )
+  assert.deepEqual(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
+      ?.messages,
+    [
+      {
+        content: 'Initial prompt',
+        role: 'user',
+      },
+      {
+        content: 'draft without fresh provider thread',
+        role: 'assistant',
+      },
+    ],
+  )
 })
 
 test('sendAssistantMessageLocal journals provider request before provider execution resolves', async () => {
@@ -3643,6 +3751,17 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,
+    resolveAssistantResumeStateFromProviderTurn: (input: {
+      providerSessionId: string | null
+      routeId: string
+      threadInstructionsFingerprint?: string | null
+    }) => ({
+      providerSessionId: input.providerSessionId,
+      resumeRouteId: input.routeId,
+      ...(input.threadInstructionsFingerprint
+        ? { threadInstructionsFingerprint: input.threadInstructionsFingerprint }
+        : {}),
+    }),
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     appendAssistantTurnReceiptEvent: mocks.appendAssistantTurnReceiptEvent,

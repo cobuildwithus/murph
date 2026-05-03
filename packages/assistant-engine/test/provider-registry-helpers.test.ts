@@ -10,6 +10,7 @@ vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
 }))
 
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { createAssistantBinding } from '../src/assistant/bindings.ts'
 import {
@@ -243,6 +244,58 @@ describe('Codex assistant registry helpers', () => {
             },
             turn: {
               id: 'turn-snake-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cachedInputTokens: 77,
+        inputTokens: 101,
+        outputTokens: 13,
+        reasoningTokens: 5,
+        totalTokens: 119,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 77,
+        inputTokens: 101,
+        outputTokens: 13,
+        reasoningOutputTokens: 5,
+        totalTokens: 119,
+      },
+      expectedSourcePath: 'thread.tokenUsage.last',
+      name: 'Codex thread token usage notification',
+      rawEvents: [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 77,
+                inputTokens: 101,
+                outputTokens: 13,
+                reasoningOutputTokens: 5,
+                totalTokens: 119,
+              },
+              total: {
+                cachedInputTokens: 100,
+                inputTokens: 200,
+                outputTokens: 30,
+                reasoningOutputTokens: 7,
+                totalTokens: 237,
+              },
+            },
+            turnId: 'turn-token-usage',
+          },
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-token-usage',
               model: 'gpt-5.4',
             },
           },
@@ -631,6 +684,69 @@ describe('Codex assistant registry helpers', () => {
       providerActionCount: 1,
     })
     expect(attempt.result).toEqual(executionResult)
+  })
+
+  it('replays active-turn history only on stale native-resume fallback', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'ASSISTANT_CODEX_RESUME_STALE',
+          'thread/resume failed: no rollout found for thread id stale-thread',
+        ),
+      )
+      .mockResolvedValueOnce({
+        finalMessage: 'final after fallback',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'fresh-thread',
+        stderr: '',
+        stdout: '',
+        threadId: 'fresh-thread',
+        turnId: 'turn-fallback',
+      })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      activeTurnMessages: [
+        {
+          content: 'initial prompt',
+          role: 'user',
+        },
+        {
+          content: 'draft before interruption',
+          role: 'assistant',
+        },
+      ],
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resumeProviderSessionId: 'stale-thread',
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      prompt: expect.not.stringContaining('Active turn so far:'),
+      resumeSessionId: 'stale-thread',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      prompt: expect.stringContaining('Active turn so far:'),
+      resumeSessionId: undefined,
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+    ).toContain('draft before interruption')
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+    expect(attempt.result.providerContinuation).toEqual({
+      kind: 'thread-start',
+    })
   })
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {

@@ -7,8 +7,15 @@ import {
 } from '../turns.js'
 
 export async function recordProviderAttemptStarted(input: {
+  activeTurnMessagesPresent: boolean
   attemptCount: number
   at: string
+  conversationMessagesPresent: boolean
+  hasResumeProviderSessionId: boolean
+  hasStoredThreadInstructionsFingerprint: boolean
+  hasThreadInstructionsFingerprint: boolean
+  providerContinuationKind: string
+  refreshThreadInstructions: boolean
   route: CodexThreadIdentity
   sessionId: string
   turnId: string
@@ -39,6 +46,16 @@ export async function recordProviderAttemptStarted(input: {
       routeId: input.route.routeId,
       provider: input.route.provider,
       model: input.route.providerOptions.model,
+      modelProvider: input.route.providerOptions.modelProvider,
+      reasoningEffort: input.route.providerOptions.reasoningEffort,
+      providerContinuationKind: input.providerContinuationKind,
+      refreshThreadInstructions: input.refreshThreadInstructions,
+      hasResumeProviderSessionId: input.hasResumeProviderSessionId,
+      hasStoredThreadInstructionsFingerprint:
+        input.hasStoredThreadInstructionsFingerprint,
+      hasThreadInstructionsFingerprint: input.hasThreadInstructionsFingerprint,
+      activeTurnMessagesPresent: input.activeTurnMessagesPresent,
+      conversationMessagesPresent: input.conversationMessagesPresent,
     },
     counterDeltas: {
       providerAttempts: 1,
