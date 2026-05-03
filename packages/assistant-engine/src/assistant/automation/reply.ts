@@ -50,9 +50,12 @@ import {
   writeAssistantAutoReplySuppressionEvidence,
 } from './evidence.js'
 import {
+  AUTO_REPLY_RECEIPT_INPUT_ID_KEY,
+  AUTO_REPLY_RECEIPT_INPUT_IDS_KEY,
   computeAssistantAutoReplyRetryAt,
   isAssistantAutoReplyRepairableConfigError,
   isAssistantProviderCapacityError,
+  resolveAssistantAutoReplyRetryBudget,
 } from './auto-reply-retry.js'
 import {
   describeAssistantAutoReplyFailure,
@@ -88,8 +91,7 @@ import {
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
-const AUTO_REPLY_RECEIPT_INPUT_ID_KEY = 'autoReplyInputId'
-const AUTO_REPLY_RECEIPT_INPUT_IDS_KEY = 'autoReplyInputIds'
+const ASSISTANT_AUTO_REPLY_RETRY_BUDGET_RECEIPT_LIMIT = 200
 
 export interface AssistantAutoReplyGroupContext {
   firstInputId: string
@@ -273,6 +275,24 @@ export async function processAssistantAutoReplyGroup(input: {
 }): Promise<AssistantAutoReplyProcessResult> {
   let latestContext = input.context
   try {
+    const retryBudget = await loadAssistantAutoReplyRetryBudget({
+      inputIds: latestContext.inputIds,
+      vault: input.vault,
+    })
+    if (!retryBudget.allowed) {
+      return commitAssistantAutoReplyGroupOutcome({
+        context: latestContext,
+        onEvent: input.onEvent,
+        outcome: createSkippedGroupOutcome({
+          inputCount: latestContext.inputCount,
+          reason: formatAssistantAutoReplyRetryLimitReason(retryBudget),
+          stopScanning: false,
+          terminalSuppression: true,
+        }),
+        vault: input.vault,
+      })
+    }
+
     const resolved = await resolveAssistantAutoReplyGroupOutcome({
       ...input,
       onAcceptedContext(context) {
@@ -326,6 +346,28 @@ export async function processAssistantAutoReplyGroup(input: {
       vault: input.vault,
     })
   }
+}
+
+async function loadAssistantAutoReplyRetryBudget(input: {
+  inputIds: readonly string[]
+  vault: string
+}) {
+  const receipts = await listAssistantTurnReceipts(
+    input.vault,
+    ASSISTANT_AUTO_REPLY_RETRY_BUDGET_RECEIPT_LIMIT,
+  )
+  return resolveAssistantAutoReplyRetryBudget({
+    inputIds: input.inputIds,
+    receipts,
+  })
+}
+
+function formatAssistantAutoReplyRetryLimitReason(input: {
+  failedAttempts: number
+  maxFailedAttempts: number
+}): string {
+  const cappedAttempts = Math.max(input.failedAttempts, input.maxFailedAttempts)
+  return `auto-reply retry limit reached after ${cappedAttempts} failed attempt(s); suppressing this input instead of retrying indefinitely.`
 }
 
 async function resolveAssistantAutoReplyGroupOutcome(input: {

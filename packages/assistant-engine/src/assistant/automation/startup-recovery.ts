@@ -16,7 +16,10 @@ import {
 } from '../input-store.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { readAssistantAutoReplyTerminalEvidenceByEvidenceId } from './evidence.js'
-import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
+import {
+  readAssistantAutoReplyReceiptMetadata,
+  readAssistantAutoReplyRetryAt,
+} from './auto-reply-retry.js'
 import {
   type AssistantAutoReplyGroupItem,
   shouldGroupAdjacentConversationInput,
@@ -38,8 +41,6 @@ import {
   earliestAssistantAutomationWakeAt,
 } from './shared.js'
 
-const AUTO_REPLY_RECEIPT_INPUT_ID_KEY = 'autoReplyInputId'
-const AUTO_REPLY_RECEIPT_INPUT_IDS_KEY = 'autoReplyInputIds'
 const FAILED_RECEIPT_RECOVERY_RECEIPT_LIMIT = 200
 const TERMINAL_PROVIDER_VALIDATION_FAILURE_PATTERNS = [
   /\binput\.\d+\.output:\s*Invalid input\b/iu,
@@ -214,7 +215,7 @@ async function listReceiptRecoveryCandidates(input: {
   const nowMs = Date.now()
 
   for (const receipt of receipts) {
-    const metadata = readAutoReplyReceiptMetadata(receipt)
+    const metadata = readAssistantAutoReplyReceiptMetadata(receipt)
     if (!metadata) {
       continue
     }
@@ -362,51 +363,6 @@ async function loadAutoReplyRecoveryGroupItem(input: {
 
 function isAssistantInputEventId(value: string): boolean {
   return /^ain_[0-9a-f]{32}$/u.test(value)
-}
-
-function readAutoReplyReceiptMetadata(
-  receipt: AssistantTurnReceipt,
-): { inputIds: readonly string[]; primaryInputId: string } | null {
-  const inputIds: string[] = []
-  let primaryInputId: string | null = null
-
-  for (const event of receipt.timeline) {
-    if (
-      event.kind !== 'turn.started' &&
-      event.kind !== 'turn.input.accepted'
-    ) {
-      continue
-    }
-
-    const groupedInputIds = event.metadata[AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]
-      ?.split(',')
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0) ?? []
-    const eventPrimaryInputId =
-      event.metadata[AUTO_REPLY_RECEIPT_INPUT_ID_KEY]?.trim() ||
-      groupedInputIds[0] ||
-      null
-    if (eventPrimaryInputId && !inputIds.includes(eventPrimaryInputId)) {
-      inputIds.push(eventPrimaryInputId)
-    }
-    for (const inputId of groupedInputIds) {
-      if (!inputIds.includes(inputId)) {
-        inputIds.push(inputId)
-      }
-    }
-    if (primaryInputId === null && eventPrimaryInputId !== null) {
-      primaryInputId = eventPrimaryInputId
-    }
-  }
-
-  const resolvedPrimaryInputId = primaryInputId ?? inputIds[0] ?? null
-  return resolvedPrimaryInputId
-    ? {
-        inputIds:
-          inputIds.length > 0 ? inputIds : [resolvedPrimaryInputId],
-        primaryInputId: resolvedPrimaryInputId,
-      }
-    : null
 }
 
 function hasUnsafeDeliveryEvidence(receipt: AssistantTurnReceipt): boolean {
