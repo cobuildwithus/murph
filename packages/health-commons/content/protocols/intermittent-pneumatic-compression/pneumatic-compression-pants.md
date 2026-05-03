@@ -210,11 +210,12 @@ protocol:
   - Safety screening and stop rules are stronger than efficacy claims because direct recovery trials do not provide a robust consumer adverse-event denominator.
   - Use clinician guidance before starting if any relevant medical condition, medication, recent surgery/injury, sensory issue, skin issue, unexplained swelling, or clot/travel-risk context makes compression risk uncertain.
   tips:
-  - Same device and settings throughout — changing the dose confounds the signal.
-  - Rate soreness (0-10) and perceived recovery (0-10) with each session.
-  - No new massage, cold plunge, sauna, aggressive stretching, supplement, or major load change during the test.
-  - Too intense? Lower pressure or stop — higher pressure is not proven better.
-  - For travel or prolonged sitting this is comfort-only, not a VTE plan replacement.
+  - Before day 1, record device model, garment coverage, mode, pressure level, posture, and trigger.
+  - Make the first session a tolerance check: lowest comfortable pressure, 20 minutes, easy removal path.
+  - Sit or recline and keep tubing clear; stop and remove the garment for bracing, tingling, numbness, or hotspot pressure.
+  - Do not add massage, cold plunge, sauna, aggressive stretching, blood-flow restriction, or new recovery supplements during the test.
+  - After removal, inspect skin immediately and later that day; log pressure marks, symptoms, and resolution.
+  - Compare matched triggers: same workout type, standing day, or sitting duration; never use it as a clot plan.
   keepInMind:
   - The direct evidence is mixed and strongest for subjective soreness or perceived recovery, not for guaranteed performance, muscle-damage, biomarker, wearable-recovery, or inflammation changes.
   - Most direct studies used athletic or healthy post-exercise settings; disease, travel-risk, and hospital IPC evidence belongs to separate supervised branches.

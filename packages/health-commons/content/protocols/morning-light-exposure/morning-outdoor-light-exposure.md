@@ -278,11 +278,12 @@ protocol:
     - "Use shade, hat, sunscreen, sunglasses, cooler timing, or skip when UV, glare, heat, medication, or symptoms require it."
     - "Log wake time, start time, minutes, weather, protection, activity, symptoms, and next-night sleep quality."
   tips:
-    - Hold evening light, caffeine, alcohol, exercise, bedtime, and wake time stable during the test.
-    - Overcast still counts — cloudy outdoor light is far brighter than typical indoor light.
-    - Window-only light? Log it as a backup variant, not full outdoor adherence.
-    - Same rough morning window each day so timing does not drift.
-    - Too bright? Use open shade or shorten the session rather than pushing through.
+    - Pick tomorrow’s spot before bed: porch, balcony, courtyard, park path, or shaded open-sky area.
+    - Go out in the first 30–60 minutes after waking; before 10 AM is the backup.
+    - Face open sky, not the sun; sit, stand, or walk gently without turning it into exercise.
+    - Cloudy mornings count; use open shade, hat, sunscreen, or sunglasses when glare or UV would otherwise shorten sessions.
+    - Do not add blue blockers, melatonin, sleep supplements, or a new wake-time target during the run.
+    - Log start time, minutes, weather, shade/sunglasses, activity, and next-night sleep; treat window light as backup.
   keepInMind:
     - The direct outdoor evidence is limited and mostly older-adult/institutional; this is a self-experiment, not a sleep, mood, or circadian-disorder treatment.
     - The 10-30 minute target is a practical Murph dose band, not a proven universal duration or lux threshold.

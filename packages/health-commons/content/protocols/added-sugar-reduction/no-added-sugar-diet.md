@@ -406,12 +406,12 @@ protocol:
     - "Keep regular meals, protein, fiber-rich carbs, fruit, dairy/alternatives, legumes, starches, and hydration in place."
     - "Daily, log added-sugar grams, biggest source avoided/consumed, replacements, cravings, symptoms, social friction, and exceptions."
   tips:
-  - Start with drinks if they are a major source — easier win than a full pantry overhaul.
-  - Say 'logged exception,' not 'failure' or 'cheat.'
-  - Keep a short default-meals list that requires no label debate.
-  - Log replacements; juice, sweeteners, starch, or bigger portions all change interpretation.
-  - Plan social meals in advance; a planned exception beats a vague lapse.
-  - Use weekly averages for weight or waist; single days are noise.
+  - Baseline normally for 7 days; log labels, drinks, sauces, desserts, and likely unlabeled added sugar.
+  - Choose the boundary before day 1: Added Sugars label only, or stricter free-sugar.
+  - Replace sweet drinks first: water, seltzer, unsweetened tea, coffee, milk, or plain yogurt.
+  - Keep meals normal: protein, fruit, dairy, legumes, starches, vegetables, and fluids stay in.
+  - Do not turn this into fasting, keto, calorie cutting, juice swaps, or sweetener-heavy snacking.
+  - Log planned exceptions and replacements; use weekly weight or waist averages, not single-day drops.
   keepInMind:
   - Added-sugar intake is the exposure check; the main downstream home signals are weight trend, waist trend, and morning blood pressure when those are safe to measure.
   - Many supporting studies use free-sugar, sugar-sweetened-beverage, pediatric, clinical, or substitution designs; these are adjacent to, not identical with, a strict adult no-added-sugar diet.
