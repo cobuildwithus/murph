@@ -33,7 +33,7 @@ env:
 jobs:
   device-connect:
     name: Device connect E2E
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -87,7 +87,7 @@ jobs:
 
   linq-delivery:
     name: Linq delivery E2E
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -141,7 +141,7 @@ jobs:
 
   telegram-delivery:
     name: Telegram delivery E2E
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:

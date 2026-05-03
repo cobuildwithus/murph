@@ -12,7 +12,7 @@ permissions:
 jobs:
   tracked-artifacts:
     name: Tracked private/build artifacts
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
