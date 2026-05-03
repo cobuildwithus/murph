@@ -2,6 +2,9 @@ import {
   startHostedWebhookNudgeWorkflow,
 } from "./webhook-workflow-start";
 import {
+  startHostedLinqTypingIndicator,
+} from "./linq";
+import {
   nudgeHostedRunnerUserBestEffortResult,
 } from "../hosted-runner/control";
 import {
@@ -14,6 +17,8 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
+
+const HOSTED_WEBHOOK_LINQ_DIRECT_TYPING_TIMEOUT_MS = 5_000;
 
 export type HostedWebhookWakeHandoffResult =
   | {
@@ -46,6 +51,7 @@ interface HostedWebhookDirectNudgeSummary {
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   eventId: string;
+  linqChatId?: string | null;
   mailboxItemId?: string;
   response: HostedWebhookServiceResponse;
   source: "linq" | "telegram";
@@ -80,6 +86,12 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
     const directNudge = await tryNudgeHostedWebhookRunnerDirect(input);
     if (directNudge.accepted) {
+      if (input.source === "linq") {
+        await startHostedLinqTypingIndicatorBestEffort({
+          chatId: input.linqChatId ?? null,
+          eventId: input.eventId,
+        });
+      }
       finishHostedOnboardingTiming(handoffTiming, "runner-nudged", {
         directNudgeAttempted: directNudge.attempted,
         directNudgeConfigured: directNudge.configured,
@@ -150,4 +162,43 @@ async function tryNudgeHostedWebhookRunnerDirect(input: {
     configured: result.configured,
     errorCode: result.errorCode,
   };
+}
+
+async function startHostedLinqTypingIndicatorBestEffort(input: {
+  chatId: string | null;
+  eventId: string;
+}): Promise<void> {
+  const chatId = input.chatId?.trim() ?? "";
+  const chatIdPresent = chatId.length > 0;
+  const timing = startHostedOnboardingTiming(
+    "hosted-onboarding.webhook.linq.direct-typing",
+    {
+      chatIdPresent,
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_TYPING_TIMEOUT_MS,
+    },
+  );
+
+  if (!chatIdPresent) {
+    finishHostedOnboardingTiming(timing, "skipped-missing-chat", {
+      chatIdPresent: false,
+    });
+    return;
+  }
+
+  try {
+    const result = await startHostedLinqTypingIndicator({
+      chatId,
+      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_TYPING_TIMEOUT_MS,
+    });
+    finishHostedOnboardingTiming(timing, result.ok ? "sent" : "failed", {
+      chatIdPresent: true,
+      httpStatus: result.status,
+    });
+  } catch (error) {
+    finishHostedOnboardingTiming(timing, "failed", {
+      chatIdPresent: true,
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+    });
+  }
 }

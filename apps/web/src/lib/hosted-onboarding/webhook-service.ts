@@ -121,6 +121,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     responseReason = plan.response.reason ?? null;
     const wakeHandoff = await maybeHandoffHostedExecutionWebhookWake({
       eventId: event.event_id,
+      linqChatId: plan.wakeLinqChatId,
       mailboxItemId: plan.wakeMailboxItemId,
       response: plan.response,
       source: "linq",
