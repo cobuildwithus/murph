@@ -802,6 +802,7 @@ describe('assistant turn shared plan', () => {
       requestedWorkingDirectory: '/tmp/turn-plan-vault',
     })
     expect(turnPlanMocks.resolveAssistantFirstContactStateDocIds).not.toHaveBeenCalled()
+    expect(turnPlanMocks.isAssistantOnboardingOpen).not.toHaveBeenCalled()
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
   })
 
