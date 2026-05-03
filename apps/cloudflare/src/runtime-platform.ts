@@ -765,6 +765,8 @@ async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
+  assertReplaySafeHostedWebControlRetryPath(input.path);
+
   let attempt = 0;
   let lastError: unknown;
 
@@ -786,6 +788,16 @@ async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   }
 
   throw lastError;
+}
+
+function assertReplaySafeHostedWebControlRetryPath(path: string): void {
+  const { pathname } = readHostedRunnerWebControlRoute(path);
+  if (
+    pathname !== HOSTED_RUNTIME_MAILBOX_FETCH_PATH
+    && pathname !== HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
+  ) {
+    throw new TypeError("Hosted web-control retry is only allowed for hosted mailbox reads.");
+  }
 }
 
 async function fetchHostedWebControlPlaneJson(input: {
@@ -1076,17 +1088,21 @@ function formatHostedResponseFetchCause(error: unknown): string {
 }
 
 function isRetryableHostedWebControlReadError(error: unknown): boolean {
+  if (isHostedWebControlAbortError(error)) {
+    return false;
+  }
+
   const status = readHostedWebControlErrorStatus(error);
   if (status !== null) {
     return status === 408 || status === 429 || status === 500 || status === 502
       || status === 503 || status === 504;
   }
 
-  if (!(error instanceof Error)) {
-    return false;
+  if (isHostedWebControlTimeoutError(error)) {
+    return true;
   }
 
-  if (error.name === "AbortError" || error.name === "TimeoutError") {
+  if (!(error instanceof Error)) {
     return false;
   }
 
@@ -1097,6 +1113,33 @@ function isRetryableHostedWebControlReadError(error: unknown): boolean {
     || message.includes("network")
     || message.includes("socket")
     || message.includes("connection reset");
+}
+
+function isHostedWebControlAbortError(error: unknown): boolean {
+  return hasHostedWebControlErrorName(error, "AbortError");
+}
+
+function isHostedWebControlTimeoutError(error: unknown): boolean {
+  return hasHostedWebControlErrorName(error, "TimeoutError");
+}
+
+function hasHostedWebControlErrorName(error: unknown, name: "AbortError" | "TimeoutError"): boolean {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+
+    if (current instanceof Error && current.name === name) {
+      return true;
+    }
+
+    current = "cause" in current
+      ? (current as { cause?: unknown }).cause
+      : null;
+  }
+
+  return false;
 }
 
 function readHostedWebControlErrorStatus(error: unknown): number | null {
