@@ -69,7 +69,7 @@ export async function startHostedLocalDevHarness(input: {
     ?? path.resolve(repoRoot, persistDirOverride ?? "");
   const nextDistDirSuffix = `e2e-${randomUUID()}`.toLowerCase();
   const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
-  const originalNextEnvContents = await readFile(nextEnvPath, "utf8");
+  const originalNextEnvContents = await readFile(nextEnvPath, "utf8").catch(() => null);
   let nextDistDir: string | null = null;
   let stack: HostedLocalDevStack | null = null;
 
@@ -296,7 +296,11 @@ export async function startHostedLocalDevHarness(input: {
   async function restoreNextArtifacts(): Promise<void> {
     const currentNextEnvContents = await readFile(nextEnvPath, "utf8").catch(() => null);
 
-    if (currentNextEnvContents !== originalNextEnvContents) {
+    if (originalNextEnvContents === null) {
+      if (currentNextEnvContents !== null) {
+        await rm(nextEnvPath, { force: true });
+      }
+    } else if (currentNextEnvContents !== originalNextEnvContents) {
       await writeFile(nextEnvPath, originalNextEnvContents, "utf8");
     }
 
