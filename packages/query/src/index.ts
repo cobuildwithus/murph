@@ -122,6 +122,7 @@ export type {
   SearchResult,
 } from "./search-shared.ts";
 export {
+  buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   listMetricDefinitions,

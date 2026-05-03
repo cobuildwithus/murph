@@ -38,6 +38,10 @@ export function listMetricPoints(input: ListMetricPointsInput): MetricPoint[] {
     .sort(compareMetricPointsAsc);
 }
 
+export function buildMetricSeries(input: ListMetricPointsInput): MetricPoint[] {
+  return listMetricPoints(input);
+}
+
 export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries {
   const definitionFromBiomarker = input.biomarkerKey ? resolveMetricDefinitionForBiomarker(input.biomarkerKey) : null;
   const requestedMetricKey = input.metricKey ? resolveMetricInputKey(input.metricKey) : definitionFromBiomarker?.key ?? null;
