@@ -701,8 +701,14 @@ test('sendAssistantMessageLocal journals provider request before provider execut
         providerContinuation: {
           kind: 'explicit-structured-history',
         },
+        providerSessionId: 'provider-thread-default',
         response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
         session,
+        threadInstructionsFingerprint:
+          `thread-instructions-v1:${'e'.repeat(64)}:${'f'.repeat(64)}`,
       },
     }
   })
@@ -742,8 +748,14 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
         providerContinuation: {
           kind: 'explicit-structured-history',
         },
+        providerSessionId: 'provider-thread-default',
         response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
         session,
+        threadInstructionsFingerprint:
+          `thread-instructions-v1:${'e'.repeat(64)}:${'f'.repeat(64)}`,
       },
     }
   })
@@ -3384,8 +3396,14 @@ async function loadLocalServiceModule(input?: {
         providerContinuation: {
           kind: 'explicit-structured-history',
         },
+        providerSessionId: 'provider-thread-default',
         response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
         session,
+        threadInstructionsFingerprint:
+          `thread-instructions-v1:${'e'.repeat(64)}:${'f'.repeat(64)}`,
       },
     }
   const deliveryOutcome =
