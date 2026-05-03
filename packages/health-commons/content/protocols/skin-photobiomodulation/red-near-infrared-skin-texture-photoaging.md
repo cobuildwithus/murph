@@ -260,10 +260,12 @@ protocol:
     - "After each session, log minutes, mode, treatment area, eye protection, heat, irritation, pigment changes, headache, eye symptoms, and skincare changes."
     - "Repeat standardized photos at week 4 and week 6; score only pre-specified regions."
   tips:
-  - Record manufacturer wavelength/irradiance, but know it is not independent radiometry.
-  - A mask on skin differs from a panel; treat a panel as a separate fork with distance and angle logged.
-  - Periocular or crow's-feet outcomes are region-specific — not proof of whole-face change.
-  - A real result survives repeated photos, adherence checks, and confounder review.
+  - "Baseline 14 days: lock lighting, camera, distance, expression, region, makeup, sunscreen, and scoring rules."
+  - "Use one red/NIR mask mode only; record device model, wavelengths, timer, treatment area, and eye protection."
+  - "Put shields on first; run labeled duration only. Do not increase closeness, frequency, minutes, or heat."
+  - "Keep retinoids, acids, exfoliation, peels, fillers, lasers, IPL, PDT, and sun exposure stable."
+  - "After each session, log minutes, mode, eye protection, heat, irritation, pigment changes, headache, and eye symptoms."
+  - "Do not score warmth or glow; score week-4 and week-6 photos with identical lighting."
   keepInMind:
   - Direct and near-direct home/facial red+NIR evidence is supportive but heterogeneous; this is a cautious self-test, not a promise of rejuvenation.
   - Outcome changes are slow and may be subtle; first-session warmth, glow, or satisfaction is not the endpoint.

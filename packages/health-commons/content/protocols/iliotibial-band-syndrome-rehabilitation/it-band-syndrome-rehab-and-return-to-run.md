@@ -191,11 +191,12 @@ protocol:
     - "Stop if pain sharpens, rises above ceiling, changes gait, appears at rest, rebounds next day, or comes with red flags."
     - "Progress 1 variable at a time; keep strength work until easy running is consistently tolerated."
   tips:
-  - Agree on a pain rule up front. Sharp pain, gait change, or next-day rebound stops progression regardless of the number.
-  - Flat routes, predictable surfaces, stable shoes, easy pace — keep the signal clean.
-  - No new shoe, aggressive rolling, NSAID masking, injection, shockwave, or separate knee protocol during the experiment.
-  - One good run is not recovery — look for repeated tolerance across sessions and the next morning.
-  - See a clinician or PT when symptoms are recurrent, worsening, unclear, or persistent after deload.
+  - "Baseline 7 days: log pain location, onset minute, stairs, walking, route, hills, shoes, pace, and mileage."
+  - "Set pain ceiling before running; sharp pain, limping, or next-morning rebound ends progression."
+  - "Start on flat, predictable routes in stable shoes; avoid hills, camber, speedwork, and long strides."
+  - "Do hip, glute, external-rotator, trunk, and single-leg control work before mileage jumps."
+  - "Do not stack new shoes, aggressive rolling, NSAID masking, injections, shockwave, or another knee protocol."
+  - "Judge recovery by repeated pain-free runs plus next-day tolerance, not one good run."
   keepInMind:
   - The evidence supports active conservative components more than it validates one exact dose schedule or one guaranteed return-to-run timeline.
   - Runner ITBS rehab is the core protocol. Cycling-specific bike-fit and return-to-cycling evidence is adjacent and should not be merged into this runner protocol.

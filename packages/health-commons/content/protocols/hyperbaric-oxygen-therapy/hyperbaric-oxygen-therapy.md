@@ -555,11 +555,12 @@ protocol:
     - "After each session, log pressure, minutes, air breaks, symptoms, adverse events, glucose/BP checks, vision/ear changes, and modifications."
     - "Keep mild chambers, topical oxygen, normobaric oxygen, EWOT, athletic oxygen, and wellness programs in separate logs."
   tips:
-    - "Replace defaults with the clinician’s actual pressure, O2 method, chamber type, duration, air breaks, frequency, and total sessions."
-    - "Use the facility’s pressure units (ATA, bar, kPa) — do not silently convert."
-    - "Diabetes or BP risk? Ask the care team what pre/post checks to record."
-    - "Missed or shortened sessions are dose-fidelity data, not failures."
-    - "Disease-specific outcomes stay outside Murph unless the clinician supplies a validated measure."
+    - "Bring the facility prescription: indication, ATA, oxygen method, duration, air breaks, frequency, total sessions."
+    - "Arrive with empty pockets: no electronics, lighters, batteries, oils, synthetics, heat packs, or unapproved devices."
+    - "Equalize early and often; tell staff before ear pressure becomes pain."
+    - "After each session, log actual ATA, minutes, air breaks, shortened time, staff interventions, and symptoms."
+    - "Skip hard training, sauna, flights, alcohol, and long travel around treatment days unless the care team approves."
+    - "Do not compare wellness chambers, topical oxygen, or EWOT against a prescribed systemic HBOT course."
   keepInMind:
     - "HBOT evidence is indication-specific: diabetic-foot ulcers, late radiation injury, sudden sensorineural hearing loss, acute carbon monoxide poisoning, decompression illness, trauma, healthy aging, and neurocognitive claims do not share one certainty level."
     - "Accepted, covered, cleared, advertised, and evidence-supported are different labels; do not turn an indication list or device clearance into a broad benefit claim."
