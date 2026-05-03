@@ -26,3 +26,6 @@ Keep an already persisted assistant CLI surface contract available when fresh `v
 
 - Status: implementation and scoped verification complete; commit pending.
 - Next: create scoped commit when safe with overlapping worktree edits.
+Status: completed
+Updated: 2026-05-04
+Completed: 2026-05-04
