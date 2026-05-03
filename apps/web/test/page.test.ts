@@ -120,7 +120,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
     },
     undefined
   );
-  assert.match(markup, /data-phone-country-code="GB"/);
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);

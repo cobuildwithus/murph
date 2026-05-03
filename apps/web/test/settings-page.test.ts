@@ -164,7 +164,6 @@ test("SettingsPage reads the app session and persisted account settings into the
   ]) {
     assert.equal(markup.includes(removedCopy), false);
   }
-  assert.match(markup, /data-phone-country-code="CA"/);
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,

@@ -57,6 +57,7 @@ import {
 } from './auto-reply-retry.js'
 import {
   describeAssistantAutoReplyFailure,
+  normalizeAssistantSafeFailureContext,
   type AssistantAutoReplyFailureSnapshot,
 } from './failure-observability.js'
 import {
@@ -158,7 +159,9 @@ type AssistantAutoReplyOutcomeEvent =
   | {
       details: string
       errorCode?: string
+      failureContext?: Record<string, boolean | number | string | null>
       safeDetails?: string
+      safeErrorMessage?: string
       type: 'input.reply-failed' | 'input.reply-skipped' | 'input.replied'
     }
   | null
@@ -731,6 +734,7 @@ function createFailedGroupOutcome(input: {
   stopScanning?: boolean
 }): AssistantAutoReplyGroupOutcome {
   const failure = describeAssistantAutoReplyFailure(input.error)
+  const failureContext = normalizeAssistantSafeFailureContext(failure.context)
 
   return {
     advanceCursor: input.advanceCursor,
@@ -742,7 +746,9 @@ function createFailedGroupOutcome(input: {
     event: {
       details: failure.message,
       errorCode: failure.code ?? undefined,
+      ...(failureContext ? { failureContext } : {}),
       safeDetails: failure.safeSummary,
+      safeErrorMessage: failure.message,
       type: 'input.reply-failed',
     },
     kind: 'failed',

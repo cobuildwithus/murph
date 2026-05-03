@@ -239,6 +239,8 @@ vi.mock('../src/assistant/service.ts', () => ({
 
 vi.mock('../src/assistant/automation/failure-observability.ts', () => ({
   describeAssistantAutoReplyFailure: replyMocks.describeAssistantAutoReplyFailure,
+  normalizeAssistantSafeFailureContext: (context: Record<string, unknown> | null) =>
+    context ?? undefined,
 }))
 
 vi.mock('../src/assistant/automation/provider-watchdog.ts', () => ({

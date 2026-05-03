@@ -8,6 +8,7 @@ export interface AssistantRunEvent {
   captureId?: string
   details?: string
   errorCode?: string
+  failureContext?: Record<string, boolean | number | string | null>
   inputId?: string
   providerKind?:
     | 'command'
@@ -20,6 +21,7 @@ export interface AssistantRunEvent {
     | 'tool'
   providerState?: 'completed' | 'running'
   safeDetails?: string
+  safeErrorMessage?: string
   tools?: string[]
   type:
     | 'capture.failed'

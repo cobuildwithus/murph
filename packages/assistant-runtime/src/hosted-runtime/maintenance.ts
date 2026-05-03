@@ -362,14 +362,31 @@ function buildHostedAssistantAutomationEventLogDetails(
 ): Record<string, boolean | number | string | null> {
   return {
     errorCode: event.errorCode ?? null,
+    ...prefixHostedAssistantAutomationFailureContext(event.failureContext),
     inputIdPresent: "inputId" in event ? event.inputId != null : false,
     providerKind: event.providerKind ?? null,
     providerState: event.providerState ?? null,
     requestId,
     safeDetails: event.safeDetails ?? null,
+    safeErrorMessage: event.safeErrorMessage ?? null,
     toolCount: event.tools?.length ?? null,
     type: event.type,
   };
+}
+
+function prefixHostedAssistantAutomationFailureContext(
+  context: AssistantRunEvent["failureContext"] | undefined,
+): Record<string, boolean | number | string | null> {
+  if (!context) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(context).map(([key, value]) => [
+      `failure${key.charAt(0).toUpperCase()}${key.slice(1)}`,
+      value,
+    ]),
+  );
 }
 
 function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {

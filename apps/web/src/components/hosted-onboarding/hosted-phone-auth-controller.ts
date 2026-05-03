@@ -157,11 +157,13 @@ export function useHostedPhoneAuthController({
       issue: authenticatedSessionIssue,
       showAuthenticatedLoadingState,
     }));
-  const authenticatedView = resolveHostedAuthenticatedPhoneAuthView({
-    showAuthenticatedLoadingState,
-    showAuthenticatedManualResumeState,
-    showAuthenticatedRestartState,
-  });
+  const authenticatedView = pendingAction === "verify-code"
+    ? null
+    : resolveHostedAuthenticatedPhoneAuthView({
+      showAuthenticatedLoadingState,
+      showAuthenticatedManualResumeState,
+      showAuthenticatedRestartState,
+    });
   const authenticatedLoadingTitle =
     intent === "link" ? "Saving your phone..." : "Finishing setup...";
   const authenticatedLoadingBody =

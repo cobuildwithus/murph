@@ -182,6 +182,62 @@ beforeEach(() => {
 });
 
 describe("runHostedAssistantAutomation", () => {
+  it("persists safe raw reply failure messages and structured failure context", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        errorCode: "ASSISTANT_CODEX_FAILED",
+        failureContext: {
+          codexExitCode: 1,
+          retryable: false,
+        },
+        safeDetails: "assistant provider failed (ASSISTANT_CODEX_FAILED)",
+        safeErrorMessage:
+          "Codex app-server failed. connection refused by local bridge.",
+        type: "input.reply-failed",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_failure_log",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_failure_log",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      createHostedAutomationRuntime(),
+    );
+
+    expect(result.redactedLogEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Hosted assistant automation event: input.reply-failed.",
+          redacted: expect.objectContaining({
+            errorCode: "ASSISTANT_CODEX_FAILED",
+            failureCodexExitCode: 1,
+            failureRetryable: false,
+            safeErrorMessage:
+              "Codex app-server failed. connection refused by local bridge.",
+            type: "input.reply-failed",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("wraps hosted mailbox refreshes through the assistant input source", async () => {
     const checkpointActiveTurnInput = vi.fn(async () => undefined);
     const refreshMailboxForActiveTurnInput = vi.fn(async () => ({

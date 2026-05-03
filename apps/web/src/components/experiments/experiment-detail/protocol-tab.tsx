@@ -914,7 +914,7 @@ function ProtocolShapeRail({
         })}
       </div>
       <div className="relative h-6 font-mono text-[9px]/3 tabular-nums text-muted-foreground sm:h-3">
-        {positionedTicks.map((tick, i, arr) => (
+        {positionedTicks.map((tick, i) => (
           <span
             key={`${tick.label}-${i}`}
             className={cn(

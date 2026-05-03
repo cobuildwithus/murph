@@ -17,7 +17,14 @@ const {
   };
 });
 
-vi.mock("@prisma/client", () => ({ PrismaClient }));
+vi.mock("@prisma/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@prisma/client")>();
+
+  return {
+    ...actual,
+    PrismaClient,
+  };
+});
 vi.mock("@prisma/adapter-pg", () => ({ PrismaPg }));
 
 const ORIGINAL_ENV = { ...process.env };

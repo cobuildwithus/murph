@@ -150,7 +150,8 @@ describe("json route helper factory", () => {
           : null,
       ],
     });
-    const handler = helpers.withJsonError(async (_request: Request) => {
+    const handler = helpers.withJsonError(async (request: Request) => {
+      void request;
       return Promise.reject("known");
     });
 

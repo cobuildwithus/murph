@@ -628,7 +628,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         redactedJson: {
           captureIdPresent: true,
           errorCodes: ["ffmpeg_unavailable", "provider_unavailable"],
-          errorMessages: [
+          errorSummaries: [
             "spawn <REDACTED_PATH> ENOENT",
             "No parser provider found for audio/mp4",
           ],
@@ -693,7 +693,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         redactedJson: {
           captureIdPresent: true,
           errorCodes: ["ffmpeg_unavailable"],
-          errorMessages: ["spawn <REDACTED_PATH> ENOENT"],
+          errorSummaries: ["spawn <REDACTED_PATH> ENOENT"],
           parserFailed: 1,
           parserObservedFailedJobs: 1,
           parserProcessed: 0,
