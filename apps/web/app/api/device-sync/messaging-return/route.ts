@@ -154,8 +154,8 @@ function buildMessagingReturnHtml(input: {
     <h1>${escapeHtml(title)}</h1>
     <p>Returning you to ${escapedService}. If it does not open automatically, use the button below.</p>
     <div class="actions">
-      <a href="${escapedDestination}" rel="noreferrer">Text Murph</a>
-      <a href="https://www.withmurph.ai" class="secondary">Go home</a>
+      <a href="/home">Go home</a>
+      <a href="${escapedDestination}" rel="noreferrer" class="secondary">Text Murph</a>
     </div>
   </main>
 </body>
