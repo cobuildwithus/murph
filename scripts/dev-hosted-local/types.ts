@@ -5,10 +5,6 @@ export interface HostedLocalDevConfig {
   linqWebhookTunnelConfigPath: string;
   linqWebhookTunnelMode: "auto" | "disabled" | "required";
   linqWebhookTunnelName: string;
-  localCodexBridge: boolean;
-  localCodexBridgeHost: string;
-  localCodexBridgePort: number;
-  localCodexCommand: string;
   skipHealthCommonsWatch: boolean;
   skipLinqWebhookRegister: boolean;
   skipRunnerSmoke: boolean;

@@ -25,13 +25,13 @@ Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 Profiles provide named defaults. Shell env still wins, so developers and CI can
 override any value explicitly.
 
-- `dev`: interactive hosted dev. Keeps the existing Vercel/Stripe/Codex bridge
-  behavior.
+- `dev`: interactive hosted dev. Uses the production-shaped Cloudflare
+  runner/container Codex app-server path with Vercel AI Gateway configuration.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.
-- `e2e:stub`: deterministic hosted-local E2E defaults. It disables the local
-  Codex bridge, skips Stripe listener startup, skips Vercel env pull, and forces
-  assistant-provider stub mode. It also disables live Linq webhook tunnel
-  registration unless a caller explicitly opts back in.
+- `e2e:stub`: deterministic hosted-local E2E defaults. It installs the
+  test-only Codex app-server stub, skips Stripe listener startup, skips Vercel
+  env pull, and forces assistant-provider stub mode. It also disables live Linq
+  webhook tunnel registration unless a caller explicitly opts back in.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
 
 ## State files

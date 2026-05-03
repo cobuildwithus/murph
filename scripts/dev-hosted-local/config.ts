@@ -12,9 +12,20 @@ import {
 } from "./constants.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
 
+export const DEPRECATED_HOSTED_LOCAL_CODEX_BRIDGE_ENV_NAMES = [
+  "MURPH_DEV_CODEX_BRIDGE",
+  "MURPH_DEV_CODEX_COMMAND",
+  "MURPH_DEV_CODEX_BRIDGE_HOST",
+  "MURPH_DEV_CODEX_BRIDGE_PORT",
+  "MURPH_DEV_CODEX_APP_SERVER_PROXY_URL",
+  "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN",
+] as const;
+
 export function resolveHostedLocalDevConfig(
   env: NodeJS.ProcessEnv,
 ): HostedLocalDevConfig {
+  assertNoDeprecatedHostedLocalCodexBridgeEnv(env);
+
   return {
     databaseUrlOverride: env.MURPH_DEV_DATABASE_URL?.trim() || null,
     forceResetLocalDatabase: env.MURPH_DEV_FORCE_RESET_LOCAL_DB === "1",
@@ -26,14 +37,6 @@ export function resolveHostedLocalDevConfig(
     linqWebhookTunnelName:
       env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME?.trim()
       || DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME,
-    localCodexBridge: env.MURPH_DEV_CODEX_BRIDGE !== "0",
-    localCodexBridgeHost: env.MURPH_DEV_CODEX_BRIDGE_HOST?.trim() || "127.0.0.1",
-    localCodexBridgePort: parseListenPort(
-      env.MURPH_DEV_CODEX_BRIDGE_PORT,
-      0,
-      "MURPH_DEV_CODEX_BRIDGE_PORT",
-    ),
-    localCodexCommand: env.MURPH_DEV_CODEX_COMMAND?.trim() || "codex",
     skipHealthCommonsWatch: env.MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH === "1",
     skipLinqWebhookRegister: env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER === "1",
     skipPrismaMigrate: env.MURPH_DEV_SKIP_PRISMA_MIGRATE === "1",
@@ -49,6 +52,25 @@ export function resolveHostedLocalDevConfig(
     workerPort: parsePort(env.MURPH_DEV_WORKER_PORT, DEFAULT_WORKER_PORT, "MURPH_DEV_WORKER_PORT"),
     workerProtocol: parseWorkerProtocol(env.MURPH_DEV_WORKER_PROTOCOL),
   };
+}
+
+export function assertNoDeprecatedHostedLocalCodexBridgeEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): void {
+  const configured = DEPRECATED_HOSTED_LOCAL_CODEX_BRIDGE_ENV_NAMES.filter(
+    (key) => Object.prototype.hasOwnProperty.call(env, key) && env[key] !== undefined,
+  );
+
+  if (configured.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      `Deprecated hosted-local Codex bridge env is no longer supported: ${configured.join(", ")}.`,
+      "Use HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway and VERCEL_AI_API_KEY for local hosted dev.",
+    ].join(" "),
+  );
 }
 
 export function parseLinqWebhookTunnelMode(
@@ -70,23 +92,6 @@ export function parseLinqWebhookTunnelMode(
   throw new Error(
     "MURPH_DEV_LINQ_WEBHOOK_TUNNEL must be auto, required, 1, or 0.",
   );
-}
-
-export function parseListenPort(
-  value: string | undefined,
-  fallback: number,
-  label: string,
-): number {
-  if (!value?.trim()) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65_535) {
-    throw new Error(`${label} must be a valid TCP listen port.`);
-  }
-
-  return parsed;
 }
 
 export function parsePort(value: string | undefined, fallback: number, label: string): number {
@@ -127,10 +132,8 @@ export function printHelp(): void {
       "Optional environment overrides:",
       "  MURPH_DEV_DATABASE_URL=...          Override the local hosted stack database URL",
       "  MURPH_DEV_FORCE_RESET_LOCAL_DB=1    Reset a local loopback Postgres database before `prisma db push` (used by hosted-local e2e)",
-      "  MURPH_DEV_CODEX_BRIDGE=0            Disable the local Codex app-server bridge and rely on hosted assistant provider env",
-      "  MURPH_DEV_CODEX_COMMAND=codex       Local Codex CLI command used by the bridge",
-      "  MURPH_DEV_CODEX_BRIDGE_HOST=127.0.0.1 Local Codex bridge listen host; set explicitly for Linux Docker bridge reachability",
-      "  MURPH_DEV_CODEX_BRIDGE_PORT=0       Local Codex bridge listen port (0 picks a free port)",
+      "  HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway  Required hosted assistant provider for local hosted dev",
+      "  VERCEL_AI_API_KEY=...               Required Vercel AI Gateway key for hosted runner Codex app-server access",
       "  MURPH_DEV_USE_VERCEL_DATABASE_URL=1 Use the pulled Vercel development DATABASE_URL instead of the default local database",
       "  MURPH_DEV_SKIP_VERCEL_PULL=1        Reuse the current shell env instead of pulling Vercel development env",
       `  ${USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV}=1 Use pulled development hosted crypto/KMS env instead of generated local-only keys`,

@@ -1,21 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
-import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
-  startHostedLocalCodexBridge,
-  type HostedLocalCodexBridge,
-} from "./codex-bridge.ts";
-import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
@@ -48,6 +41,7 @@ import {
   assertHostedWebPortAvailable,
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
+  redactHostedLocalDiagnosticText,
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
@@ -84,8 +78,7 @@ const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
   path.join(webDir, "src", "lib", "health-commons", "generated-experiment-artifacts.ts"),
   path.join(webDir, "src", "lib", "health-commons", "measurement-method-detail.ts"),
 ];
-const HOSTED_LOCAL_CODEX_PROVIDER_ID = "local-codex";
-const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
+const HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER = "vercel-ai-gateway";
 
 export interface HostedLocalDevStack {
   config: HostedLocalDevConfig;
@@ -93,7 +86,6 @@ export interface HostedLocalDevStack {
   oidcToken: string;
   processes: {
     cloudflare: BufferedNamedChildProcess | null;
-    codex: HostedLocalCodexBridge | null;
     healthCommons: BufferedNamedChildProcess | null;
     linqTunnel: BufferedNamedChildProcess | null;
     stripe: BufferedNamedChildProcess | null;
@@ -120,7 +112,7 @@ export async function startHostedLocalDevStack(input: {
   stdoutTarget?: NodeJS.WritableStream;
 }): Promise<HostedLocalDevStack> {
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
-  const initialProcessEnv = copyWithoutHostedLocalCodexBridgeProxyEnv(initialEnv);
+  const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = initialEnv.VERCEL_OIDC_TOKEN?.trim() || null;
@@ -154,15 +146,6 @@ export async function startHostedLocalDevStack(input: {
     port: config.workerPort,
     protocol: config.workerProtocol,
   });
-  if (config.localCodexBridge && workerPortMode !== "start") {
-    throw new Error(
-      [
-        `Local Cloudflare worker port ${config.workerPort} is already serving a Murph worker.`,
-        "Stop that worker before running `pnpm dev`, or set MURPH_DEV_CODEX_BRIDGE=0 to reuse it without the local Codex bridge.",
-      ].join(" "),
-    );
-  }
-
   const tempDir = tempDirOverride
     ? resolveHostedLocalTempDir(repoRoot, tempDirOverride)
     : await mkdtemp(path.join(os.tmpdir(), "murph-dev-env-"));
@@ -185,7 +168,6 @@ export async function startHostedLocalDevStack(input: {
   let hadExistingCloudflareDevVars = false;
   let stopped = false;
   let stopPromise: Promise<void> | null = null;
-  let codexBridge: HostedLocalCodexBridge | null = null;
   const children: BufferedNamedChildProcess[] = [];
   let healthCommonsWatcher: BufferedNamedChildProcess | null = null;
   let linqTunnelProcess: BufferedNamedChildProcess | null = null;
@@ -233,32 +215,13 @@ export async function startHostedLocalDevStack(input: {
       shellDatabaseUrl: initialEnv.DATABASE_URL,
       useVercelDatabaseUrl: config.useVercelDatabaseUrl,
     });
-    stripHostedLocalCodexBridgeProxyEnv(vercelEnv);
+    vercelEnv.NODE_ENV = "development";
+    requireHostedLocalAssistantProviderEnv(vercelEnv);
     linqWebhookSetup = await resolveHostedLocalLinqWebhookSetup({
       config,
       env: vercelEnv,
     });
     const localInternalProxyBaseUrl = resolveContainerReachableWorkerOrigin(config, vercelEnv);
-    const codexBridgeEnv: Record<string, string> = {};
-
-    if (config.localCodexBridge && workerPortMode === "start") {
-      codexBridge = await startHostedLocalCodexBridge({
-        codexCommand: config.localCodexCommand,
-        env: initialProcessEnv,
-        listenHost: resolveHostedLocalCodexBridgeListenHost({
-          config,
-          initialEnv,
-          localInternalProxyBaseUrl,
-        }),
-        listenPort: config.localCodexBridgePort,
-        stderrTarget: input.stderrTarget,
-      });
-      Object.assign(codexBridgeEnv, buildHostedLocalCodexBridgeWorkerEnv({
-        bridge: codexBridge,
-        initialEnv,
-        mergedEnv: vercelEnv,
-      }));
-    }
 
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
     const oidcIdentity = parseHostedExecutionOidcIdentity(oidcToken);
@@ -267,7 +230,6 @@ export async function startHostedLocalDevStack(input: {
       oidcIdentity,
       overrides: {
         ...vercelEnv,
-        ...codexBridgeEnv,
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: localInternalProxyBaseUrl,
       },
     });
@@ -278,22 +240,17 @@ export async function startHostedLocalDevStack(input: {
       TSX_TSCONFIG_PATH: tsxTsconfigPath,
       VERCEL_OIDC_TOKEN: oidcToken,
     };
-    const workerRuntimeBaseEnv = codexBridge === null
-      ? runtimeEnv
-      : stripHostedLocalCodexCredentialEnv(runtimeEnv);
-    const workerCloudflareDevVars = codexBridge === null
-      ? cloudflareDevVars
-      : stripHostedLocalCodexCredentialEnv(cloudflareDevVars);
+    const workerRuntimeSourceEnv = stripHostedLocalHostOnlyCodexEnv({
+      ...runtimeEnv,
+      ...cloudflareDevVars,
+    });
     workerRuntimeEnv = workerPortMode === "start"
       ? {
-        ...workerRuntimeBaseEnv,
-        ...workerCloudflareDevVars,
+        ...workerRuntimeSourceEnv,
         [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: hostedRunnerLocalBuildId,
       }
       : null;
-    workerProcessEnv = workerRuntimeEnv === null
-      ? null
-      : copyWithoutHostedLocalCodexBridgeProxyEnv(workerRuntimeEnv);
+    workerProcessEnv = workerRuntimeEnv === null ? null : { ...workerRuntimeEnv };
     if (workerRuntimeEnv !== null) {
       const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
       const hostedLocalStateEnvText = `${buildHostedLocalStateEnvFileText(cloudflareDevVars)}\n`;
@@ -578,10 +535,6 @@ export async function startHostedLocalDevStack(input: {
         if (stripeListener !== null) {
           await terminateChildProcessAndWait(stripeListener.child, { signal });
         }
-        if (codexBridge !== null) {
-          await codexBridge.stop();
-          codexBridge = null;
-        }
         if (keepAliveTimer !== null) {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
@@ -668,7 +621,6 @@ export async function startHostedLocalDevStack(input: {
       oidcToken,
       processes: {
         cloudflare: cloudflareProcess,
-        codex: codexBridge,
         healthCommons: healthCommonsWatcher,
         linqTunnel: linqTunnelProcess,
         stripe: stripeListener,
@@ -700,10 +652,6 @@ export async function startHostedLocalDevStack(input: {
     }
     if (stripeListener !== null) {
       await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
-    }
-    if (codexBridge !== null) {
-      await codexBridge.stop().catch(() => {});
-      codexBridge = null;
     }
     if (workerRuntimeEnv && workerPortMode === "start") {
       await cleanupHostedRunnerContainers({
@@ -835,32 +783,26 @@ function resolveRepoRelativeChildArg(filePath: string): string {
   return filePath;
 }
 
-function buildHostedLocalCodexBridgeWorkerEnv(input: {
-  bridge: HostedLocalCodexBridge;
-  initialEnv: NodeJS.ProcessEnv;
-  mergedEnv: NodeJS.ProcessEnv;
-}): Record<string, string> {
-  const shellProvider = input.initialEnv.HOSTED_ASSISTANT_PROVIDER?.trim();
-  if (shellProvider && shellProvider !== "vercel-ai-gateway") {
+function requireHostedLocalAssistantProviderEnv(env: NodeJS.ProcessEnv): void {
+  const provider = env.HOSTED_ASSISTANT_PROVIDER?.trim() || HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER;
+  if (provider !== HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER) {
     throw new Error(
       [
-        "MURPH_DEV_CODEX_BRIDGE requires HOSTED_ASSISTANT_PROVIDER to be unset or vercel-ai-gateway.",
-        "Set MURPH_DEV_CODEX_BRIDGE=0 to use a custom hosted assistant provider in local dev.",
+        "HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway is required for local hosted dev.",
+        "The host-side Codex bridge has been removed.",
       ].join(" "),
     );
   }
+  env.HOSTED_ASSISTANT_PROVIDER = HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER;
 
-  return {
-    HOSTED_ASSISTANT_MODEL:
-      input.mergedEnv.HOSTED_ASSISTANT_MODEL?.trim() || DEFAULT_HOSTED_CODEX_MODEL,
-    HOSTED_ASSISTANT_PROVIDER: HOSTED_LOCAL_CODEX_PROVIDER_ID,
-    [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: input.bridge.proxyToken,
-    [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: input.bridge.proxyUrl,
-    NODE_ENV: "development",
-  };
+  requireEnvValue(
+    "VERCEL_AI_API_KEY",
+    env.VERCEL_AI_API_KEY,
+    "Set VERCEL_AI_API_KEY for hosted runner Codex app-server access through Vercel AI Gateway.",
+  );
 }
 
-const HOSTED_LOCAL_CODEX_CREDENTIAL_ENV_NAMES = [
+const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "ANTHROPIC_API_KEY",
   "CODEX_AUTH_TOKEN",
   "CODEX_CI",
@@ -874,25 +816,17 @@ const HOSTED_LOCAL_CODEX_CREDENTIAL_ENV_NAMES = [
   "HF_TOKEN",
   "OPENAI_API_KEY",
   "VENICE_API_KEY",
-  "VERCEL_AI_API_KEY",
   "XAI_API_KEY",
 ] as const;
 
-function stripHostedLocalCodexCredentialEnv<TEnv extends Record<string, string | undefined>>(
+function stripHostedLocalHostOnlyCodexEnv<TEnv extends Record<string, string | undefined>>(
   env: TEnv,
 ): TEnv {
   const nextEnv = { ...env };
-
-  for (const key of HOSTED_LOCAL_CODEX_CREDENTIAL_ENV_NAMES) {
+  for (const key of HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES) {
     delete nextEnv[key];
   }
-
   return nextEnv;
-}
-
-function stripHostedLocalCodexBridgeProxyEnv(env: Record<string, string | undefined>): void {
-  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV];
-  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV];
 }
 
 function shouldUseRemoteHostedCryptoKeys(env: Record<string, string | undefined>): boolean {
@@ -917,125 +851,6 @@ function stripHostedCryptoMaterialEnv<TEnv extends Record<string, string | undef
     }
   }
   return nextEnv;
-}
-
-function copyWithoutHostedLocalCodexBridgeProxyEnv<TEnv extends Record<string, string | undefined>>(
-  env: TEnv,
-): TEnv {
-  const nextEnv = { ...env };
-  stripHostedLocalCodexBridgeProxyEnv(nextEnv);
-  return nextEnv;
-}
-
-function resolveHostedLocalCodexBridgeListenHost(input: {
-  config: HostedLocalDevConfig;
-  initialEnv: NodeJS.ProcessEnv;
-  localInternalProxyBaseUrl: string;
-}): string {
-  let proxyHost: string | null = null;
-  try {
-    proxyHost = new URL(input.localInternalProxyBaseUrl).hostname;
-  } catch {
-    proxyHost = null;
-  }
-  const normalizedProxyHost = normalizeBridgeHostname(proxyHost);
-
-  if (input.initialEnv.MURPH_DEV_CODEX_BRIDGE_HOST?.trim()) {
-    return requireHostedLocalCodexBridgeListenHost({
-      allowedPrivateHost: normalizedProxyHost,
-      hostname: input.config.localCodexBridgeHost,
-    });
-  }
-
-  if (
-    normalizedProxyHost
-    && normalizedProxyHost !== "host.docker.internal"
-    && !isLoopbackBridgeHostname(normalizedProxyHost)
-  ) {
-    return requireHostedLocalCodexBridgeListenHost({
-      allowedPrivateHost: normalizedProxyHost,
-      hostname: normalizedProxyHost,
-    });
-  }
-
-  return requireHostedLocalCodexBridgeListenHost({
-    allowedPrivateHost: normalizedProxyHost,
-    hostname: input.config.localCodexBridgeHost,
-  });
-}
-
-function normalizeBridgeHostname(hostname: string | null): string | null {
-  const normalized = hostname?.trim().toLowerCase().replace(/^\[/u, "").replace(/\]$/u, "");
-  return normalized ? normalized : null;
-}
-
-function isLoopbackBridgeHostname(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-}
-
-function requireHostedLocalCodexBridgeListenHost(input: {
-  allowedPrivateHost: string | null;
-  hostname: string;
-}): string {
-  const normalized = normalizeBridgeHostname(input.hostname);
-  if (!normalized || normalized === "0.0.0.0" || normalized === "::") {
-    throw new Error(
-      "MURPH_DEV_CODEX_BRIDGE_HOST must be loopback or the resolved local Docker bridge host.",
-    );
-  }
-
-  if (isLoopbackBridgeHostname(normalized)) {
-    return normalized;
-  }
-
-  const allowedPrivateHost = normalizeBridgeHostname(input.allowedPrivateHost);
-  if (
-    allowedPrivateHost
-    && normalized === allowedPrivateHost
-    && (isPrivateIpv4BridgeHostname(normalized) || isLocalIpv6BridgeHostname(normalized))
-  ) {
-    return normalized;
-  }
-
-  throw new Error(
-    "MURPH_DEV_CODEX_BRIDGE_HOST must be loopback or the resolved local Docker bridge host.",
-  );
-}
-
-function isPrivateIpv4BridgeHostname(hostname: string): boolean {
-  const parts = hostname.split(".");
-  if (parts.length !== 4) {
-    return false;
-  }
-
-  const octets = parts.map((part) => {
-    if (!/^[0-9]+$/u.test(part)) {
-      return Number.NaN;
-    }
-
-    const value = Number(part);
-    return Number.isInteger(value) && value >= 0 && value <= 255 ? value : Number.NaN;
-  });
-
-  if (octets.some((octet) => Number.isNaN(octet))) {
-    return false;
-  }
-
-  const [first, second] = octets;
-  return first === 10
-    || (first === 172 && second >= 16 && second <= 31)
-    || (first === 192 && second === 168)
-    || (first === 169 && second === 254);
-}
-
-function isLocalIpv6BridgeHostname(hostname: string): boolean {
-  if (isIP(hostname) !== 6) {
-    return false;
-  }
-
-  return hostname.startsWith("fc")
-    || hostname.startsWith("fd")
-    || hostname.startsWith("fe80:");
 }
 
 async function maybeRunRunnerContainerSmoke(input: {
@@ -1253,7 +1068,7 @@ function appendStartupDiagnostics(
     [
       message,
       output ? `process output tail:\n${tail(output)}` : null,
-      diagnostics,
+      redactHostedLocalDiagnosticText(diagnostics),
     ].filter((value): value is string => value !== null).join("\n"),
   );
 }

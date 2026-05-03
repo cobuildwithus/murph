@@ -724,7 +724,6 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      MURPH_DEV_CODEX_BRIDGE: "0",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
       ...additionalEnv,

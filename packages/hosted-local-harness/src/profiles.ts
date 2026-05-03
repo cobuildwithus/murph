@@ -16,7 +16,7 @@ export interface HostedLocalProfile {
 export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProfile> = {
   dev: {
     description:
-      "Interactive hosted local stack. Preserves existing Vercel, Stripe, and local Codex bridge behaviour.",
+      "Interactive hosted local stack using the production-shaped runner-container Codex app-server path.",
     envDefaults: {},
     mode: "dev",
     name: "dev",
@@ -32,9 +32,8 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
   },
   "e2e:stub": {
     description:
-      "Hosted-local E2E with deterministic local stubs and no live assistant provider, Stripe listener, Vercel pull, or Codex CLI bridge.",
+      "Hosted-local E2E with deterministic local stubs and no live assistant provider, Stripe listener, or Vercel pull.",
     envDefaults: {
-      MURPH_DEV_CODEX_BRIDGE: "0",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -50,7 +49,6 @@ export const hostedLocalProfiles: Record<HostedLocalProfileName, HostedLocalProf
     description:
       "Hosted-local E2E using explicit live/test provider credentials supplied by the caller.",
     envDefaults: {
-      MURPH_DEV_CODEX_BRIDGE: "0",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",

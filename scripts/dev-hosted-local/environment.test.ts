@@ -27,10 +27,6 @@ const localConfig: HostedLocalDevConfig = {
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "auto",
   linqWebhookTunnelName: "dev",
-  localCodexBridge: true,
-  localCodexBridgeHost: "127.0.0.1",
-  localCodexBridgePort: 0,
-  localCodexCommand: "codex",
   skipHealthCommonsWatch: false,
   skipLinqWebhookRegister: false,
   skipPrismaMigrate: false,
@@ -448,28 +444,44 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBeUndefined();
   });
 
-  it("drops stale local Codex bridge proxy values when the bridge is disabled", () => {
-    const merged = mergeCloudflareLocalEnv({
-      config: {
-        ...localConfig,
-        localCodexBridge: false,
-      },
-      existing: {
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
-      },
-      oidcIdentity,
-      overrides: {
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "override-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:9999",
-      },
-    });
-
-    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
-    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
+  it("rejects stale local Codex bridge proxy values from existing worker env", () => {
+    expect(() =>
+      mergeCloudflareLocalEnv({
+        config: localConfig,
+        existing: {
+          MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
+        },
+        oidcIdentity,
+      })
+    ).toThrow("MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN");
   });
 
-  it("drops test-only Codex app-server stub values when the bridge is enabled", () => {
+  it("rejects local Codex bridge proxy values from current overrides", () => {
+    expect(() =>
+      mergeCloudflareLocalEnv({
+        config: localConfig,
+        existing: {},
+        oidcIdentity,
+        overrides: {
+          MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:9999",
+        },
+      })
+    ).toThrow("MURPH_DEV_CODEX_APP_SERVER_PROXY_URL");
+  });
+
+  it("drops stale test-only Codex app-server stub values unless supplied by this run", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
+      },
+      oidcIdentity,
+    });
+
+    expect(merged.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBeUndefined();
+  });
+
+  it("preserves a current test-only Codex app-server stub override", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
@@ -477,15 +489,13 @@ describe("mergeCloudflareLocalEnv", () => {
       },
       oidcIdentity,
       overrides: {
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:5222/v1",
       },
     });
 
-    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBe("bridge-token");
-    expect(merged.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBe("tcp://127.0.0.1:4123");
-    expect(merged.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBeUndefined();
+    expect(merged.MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL).toBe(
+      "http://127.0.0.1:5222/v1",
+    );
   });
 
   it("drops stale local OIDC JWKS overrides inherited from existing dev vars", () => {
@@ -800,8 +810,6 @@ describe("buildWranglerVarArgs", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
         ALLOW_LOCAL_INTERNAL_PROXY: "true",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
@@ -883,8 +891,6 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
@@ -893,17 +899,10 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        VERCEL_AI_API_KEY: "local-vercel-key",
       }),
-    ).toContain('MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN="bridge-token"');
-    expect(
-      buildWranglerEnvFileText({
-        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
-      }),
-    ).toContain('MURPH_DEV_CODEX_APP_SERVER_PROXY_URL="tcp://127.0.0.1:4123"');
+    ).toContain('VERCEL_AI_API_KEY="local-vercel-key"');
   });
 
   it("keeps web-only hosted-local crypto state out of worker env files", () => {
@@ -1028,20 +1027,21 @@ describe("buildWranglerLocalDevConfig", () => {
     });
   });
 
-  it("declares local Codex app-server proxy env-file entries as local worker secrets", () => {
+  it("declares Vercel AI Gateway credentials as local worker secrets", () => {
     const config = buildWranglerLocalDevConfig({
-      MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "bridge-token",
-      MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:4123",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      VERCEL_AI_API_KEY: "local-vercel-key",
     });
 
     expect(config.secrets).toEqual({
       required: expect.arrayContaining([
-        "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN",
-        "MURPH_DEV_CODEX_APP_SERVER_PROXY_URL",
+        "VERCEL_AI_API_KEY",
       ]),
     });
-    expect(config.vars).not.toHaveProperty("MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN");
-    expect(config.vars).not.toHaveProperty("MURPH_DEV_CODEX_APP_SERVER_PROXY_URL");
+    expect(config.vars).toMatchObject({
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+    });
+    expect(config.vars).not.toHaveProperty("VERCEL_AI_API_KEY");
   });
 
   it("declares each local worker secret binding only once", () => {

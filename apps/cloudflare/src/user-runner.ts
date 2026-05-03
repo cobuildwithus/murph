@@ -18,10 +18,6 @@ import {
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
-import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { R2BucketLike } from "./bundle-store.js";
 import {
   hostedArtifactUserPrefix,
@@ -42,6 +38,10 @@ import {
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
 } from "./runner-env.ts";
+import {
+  hasHostedRunnerVercelAiGatewayCredential,
+  isHostedRunnerVercelAiGatewayProvider,
+} from "./hosted-env-policy.ts";
 import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
@@ -70,84 +70,6 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
-
-function summarizeHostedLocalCodexProxyUrl(
-  value: string | undefined,
-): {
-  hostKind: string | null;
-  portPresent: boolean;
-  scheme: string | null;
-} {
-  if (!value) {
-    return {
-      hostKind: null,
-      portPresent: false,
-      scheme: null,
-    };
-  }
-
-  try {
-    const url = new URL(value);
-    return {
-      hostKind: classifyHostedLocalCodexProxyHost(url.hostname),
-      portPresent: url.port.length > 0,
-      scheme: url.protocol.replace(/:$/u, "") || null,
-    };
-  } catch {
-    return {
-      hostKind: "invalid",
-      portPresent: false,
-      scheme: null,
-    };
-  }
-}
-
-function classifyHostedLocalCodexProxyHost(hostname: string): string {
-  const normalized = hostname.toLowerCase();
-
-  if (
-    normalized === "localhost"
-    || normalized === "127.0.0.1"
-    || normalized === "::1"
-  ) {
-    return "loopback";
-  }
-
-  if (
-    normalized === "host.docker.internal"
-    || normalized.endsWith(".docker.internal")
-  ) {
-    return "docker-host";
-  }
-
-  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(normalized)) {
-    return "private-ip";
-  }
-
-  if (/^192\.168\.\d{1,3}\.\d{1,3}$/u.test(normalized)) {
-    return "private-ip";
-  }
-
-  const private172Match = /^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/u.exec(
-    normalized,
-  );
-  if (private172Match) {
-    const secondOctet = Number(private172Match[1]);
-    if (secondOctet >= 16 && secondOctet <= 31) {
-      return "private-ip";
-    }
-  }
-
-  if (normalized.includes(":")) {
-    return "ipv6";
-  }
-
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/u.test(normalized)) {
-    return "public-ip";
-  }
-
-  return "hostname";
-}
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -851,9 +773,7 @@ export class HostedUserRunner {
       rewritePlatformUrlsForContainer: true,
       runnerSecrets,
     });
-    const localCodexProxyDiagnostics = summarizeHostedLocalCodexProxyUrl(
-      forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV],
-    );
+    const userEnv = runtimeConfig.userEnv ?? {};
     const job: HostedExecutionWorkspaceInvocationJobInput = {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
@@ -873,20 +793,13 @@ export class HostedUserRunner {
         hostedAssistantProviderConfigured:
           typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string"
           && forwardedEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
-        localCodexAppServerProxyConfigured:
-          typeof forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV] === "string"
-          && forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV].length > 0
-          && typeof forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV] === "string"
-          && forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV].length > 0,
-        localCodexAppServerProxyHostKind:
-          localCodexProxyDiagnostics.hostKind,
-        localCodexAppServerProxyPortPresent:
-          localCodexProxyDiagnostics.portPresent,
-        localCodexAppServerProxyScheme:
-          localCodexProxyDiagnostics.scheme,
+        hostedAssistantVercelAiGatewayConfigured:
+          isHostedRunnerVercelAiGatewayProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
         modelCredentialConfigured:
-          typeof forwardedEnv.VERCEL_AI_API_KEY === "string"
-          && forwardedEnv.VERCEL_AI_API_KEY.length > 0,
+          hasHostedRunnerVercelAiGatewayCredential({
+            forwardedEnv,
+            userEnv,
+          }),
         nodeEnvConfigured:
           typeof forwardedEnv.NODE_ENV === "string"
           && forwardedEnv.NODE_ENV.length > 0,

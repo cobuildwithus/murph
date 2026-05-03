@@ -1,5 +1,4 @@
 import { chmod, mkdir, writeFile } from "node:fs/promises";
-import { isIP } from "node:net";
 import path from "node:path";
 
 import {
@@ -28,9 +27,7 @@ import {
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
-const HOSTED_CODEX_PROXY_CONFIG_FILE_NAME = "app-server-proxy.json";
 const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
-const HOSTED_LOCAL_CODEX_PROVIDER_ID = "local-codex";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
@@ -78,41 +75,29 @@ export interface HostedCodexRuntimeEnvironmentInput {
 }
 
 export interface HostedCodexRuntimeEnvironmentResult {
-  codexConfigPath: string | null;
-  codexHome: string | null;
+  codexConfigPath: string;
+  codexHome: string;
   runtimeEnv: Record<string, string>;
 }
 
 export async function prepareHostedCodexRuntimeEnvironment(
   input: HostedCodexRuntimeEnvironmentInput,
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
-  const provider = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER);
-  const hasLocalCodexAppServerProxy = normalizeHostedCodexEnvString(
-    input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV],
-  ) !== null;
-  const usesLocalCodexProvider = provider === HOSTED_LOCAL_CODEX_PROVIDER_ID;
+  rejectDeprecatedHostedCodexAppServerProxyEnv(input.runtimeEnv);
 
-  if (
-    provider !== VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id
-    && !usesLocalCodexProvider
-  ) {
+  const provider = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER);
+
+  if (provider !== VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id) {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id}, or ${HOSTED_LOCAL_CODEX_PROVIDER_ID} with the local Codex app-server bridge.`,
+      `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id}.`,
     );
   }
 
   const providerConfig = VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
 
-  if (usesLocalCodexProvider && !hasLocalCodexAppServerProxy) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_REQUIRED",
-      `${HOSTED_LOCAL_CODEX_PROVIDER_ID} requires ${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV}.`,
-    );
-  }
-
-  if (!usesLocalCodexProvider && !apiKeyValue && !hasLocalCodexAppServerProxy) {
+  if (!apiKeyValue) {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_REQUIRED",
       `Hosted assistant provider ${providerConfig.id} requires ${providerConfig.envKey} in the isolated runtime environment.`,
@@ -145,23 +130,18 @@ export async function prepareHostedCodexRuntimeEnvironment(
   await chmod(codexHome, 0o700);
   await writeFile(
     codexConfigPath,
-    usesLocalCodexProvider
-      ? buildHostedLocalCodexConfigToml({
-          model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
-          reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
-        })
-      : buildHostedCodexConfigToml({
-          model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
-          provider: providerConfig,
-          reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
-        }),
+    buildHostedCodexConfigToml({
+      model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
+      provider: providerConfig,
+      reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+    }),
     {
       encoding: "utf8",
       mode: 0o600,
     },
   );
   await chmod(codexConfigPath, 0o600);
-  await maybeInstallHostedLocalCodexAppServerStub({
+  await maybeInstallHostedE2ECodexAppServerStub({
     codexHome,
     runtimeEnv,
   });
@@ -185,47 +165,42 @@ function stripHostedCodexRejectedSeedEnv(
   return nextEnv;
 }
 
-async function maybeInstallHostedLocalCodexAppServerStub(input: {
+function rejectDeprecatedHostedCodexAppServerProxyEnv(
+  runtimeEnv: Readonly<Record<string, string>>,
+): void {
+  const configuredProxyEnvKeys = [
+    HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
+    HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
+  ].filter((key) => normalizeHostedCodexEnvString(runtimeEnv[key]) !== null);
+
+  if (configuredProxyEnvKeys.length === 0) {
+    return;
+  }
+
+  throw new HostedAssistantConfigurationError(
+    "HOSTED_ASSISTANT_CONFIG_INVALID",
+    `${configuredProxyEnvKeys.join(", ")} are no longer supported by hosted Codex runtime; configure HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id} with ${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey}.`,
+  );
+}
+
+async function maybeInstallHostedE2ECodexAppServerStub(input: {
   codexHome: string;
   runtimeEnv: Record<string, string>;
 }): Promise<void> {
-  const appServerProxy = readHostedLocalCodexAppServerProxyConfig(input.runtimeEnv);
-  const assistantProviderBaseUrl = readHostedLocalCodexAppServerStubBaseUrl(input.runtimeEnv);
-
-  if (appServerProxy && assistantProviderBaseUrl) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV} cannot be combined with ${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV}.`,
-    );
-  }
-
-  if (appServerProxy) {
-    await writeHostedLocalCodexAppServerProxyConfig({
-      codexHome: input.codexHome,
-      config: appServerProxy,
-    });
-    await installHostedLocalCodexShim({
-      codexHome: input.codexHome,
-      runtimeEnv: input.runtimeEnv,
-      source: buildHostedLocalCodexAppServerProxySource(),
-    });
-    delete input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV];
-    delete input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV];
-    return;
-  }
+  const assistantProviderBaseUrl = readHostedE2ECodexAppServerStubBaseUrl(input.runtimeEnv);
 
   if (!assistantProviderBaseUrl) {
     return;
   }
 
-  await installHostedLocalCodexShim({
+  await installHostedE2ECodexShim({
     codexHome: input.codexHome,
     runtimeEnv: input.runtimeEnv,
-    source: buildHostedLocalCodexAppServerStubSource(assistantProviderBaseUrl),
+    source: buildHostedE2ECodexAppServerStubSource(assistantProviderBaseUrl),
   });
 }
 
-async function installHostedLocalCodexShim(input: {
+async function installHostedE2ECodexShim(input: {
   codexHome: string;
   runtimeEnv: Record<string, string>;
   source: string;
@@ -253,137 +228,7 @@ async function installHostedLocalCodexShim(input: {
   );
 }
 
-export interface HostedLocalCodexAppServerProxyConfig {
-  token: string;
-  url: string;
-}
-
-async function writeHostedLocalCodexAppServerProxyConfig(input: {
-  codexHome: string;
-  config: HostedLocalCodexAppServerProxyConfig;
-}): Promise<void> {
-  const proxyConfigPath = path.join(input.codexHome, HOSTED_CODEX_PROXY_CONFIG_FILE_NAME);
-  await writeFile(
-    proxyConfigPath,
-    `${JSON.stringify(input.config)}\n`,
-    {
-      encoding: "utf8",
-      mode: 0o600,
-    },
-  );
-  await chmod(proxyConfigPath, 0o600);
-}
-
-function readHostedLocalCodexAppServerProxyConfig(
-  runtimeEnv: Readonly<Record<string, string>>,
-): HostedLocalCodexAppServerProxyConfig | null {
-  const rawUrl = normalizeHostedCodexEnvString(
-    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV],
-  );
-
-  if (!rawUrl) {
-    return null;
-  }
-
-  const token = normalizeHostedCodexEnvString(
-    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV],
-  );
-  if (!token) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV} requires ${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV}.`,
-    );
-  }
-
-  const nodeEnv = normalizeHostedCodexEnvString(runtimeEnv.NODE_ENV);
-  if (nodeEnv !== "development" && nodeEnv !== "test") {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV} is only available when NODE_ENV=development or NODE_ENV=test.`,
-    );
-  }
-
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV} must be an absolute URL.`,
-    );
-  }
-
-  if (url.protocol !== "tcp:") {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV} must use tcp.`,
-    );
-  }
-
-  if (!url.port || !Number.isSafeInteger(Number(url.port))) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV} must include a TCP port.`,
-    );
-  }
-
-  if (!isHostedLocalCodexProxyHostname(normalizeHostedCodexUrlHostname(url.hostname))) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV} must point at a local dev host.`,
-    );
-  }
-
-  return {
-    token,
-    url: url.toString(),
-  };
-}
-
-export function buildHostedLocalCodexAppServerProxySource(): string {
-  return `#!/usr/bin/env node
-const fs = require("node:fs");
-const net = require("node:net");
-const path = require("node:path");
-
-const proxyConfigPath = path.join(__dirname, "..", ${JSON.stringify(HOSTED_CODEX_PROXY_CONFIG_FILE_NAME)});
-const proxyConfig = JSON.parse(fs.readFileSync(proxyConfigPath, "utf8"));
-if (typeof proxyConfig.url !== "string" || typeof proxyConfig.token !== "string") {
-  process.stderr.write("hosted local Codex proxy config is invalid\\n");
-  process.exit(78);
-}
-const proxyUrl = new URL(proxyConfig.url);
-const proxyToken = proxyConfig.token;
-const port = Number(proxyUrl.port);
-const host = proxyUrl.hostname.replace(/^\\[/u, "").replace(/\\]$/u, "");
-const proxyArgv = process.argv.slice(2);
-
-if (proxyArgv.length > 0 && proxyArgv.at(-1) !== "app-server") {
-  process.stderr.write("hosted local Codex proxy only supports app-server\\n");
-  process.exit(64);
-}
-
-const socket = net.connect({ host, port }, () => {
-  socket.write(JSON.stringify({
-    argv: proxyArgv.length > 0 ? proxyArgv : ["app-server"],
-    murphLocalCodexBridgeToken: proxyToken,
-  }) + "\\n");
-  process.stdin.pipe(socket);
-  socket.pipe(process.stdout);
-});
-
-socket.on("error", (error) => {
-  process.stderr.write("hosted local Codex proxy failed: " + error.message + "\\n");
-  process.exitCode = 1;
-});
-
-socket.on("close", () => {
-  process.exit(process.exitCode ?? 0);
-});
-`;
-}
-
-function readHostedLocalCodexAppServerStubBaseUrl(
+function readHostedE2ECodexAppServerStubBaseUrl(
   runtimeEnv: Readonly<Record<string, string>>,
 ): string | null {
   const rawBaseUrl = normalizeHostedCodexEnvString(
@@ -436,50 +281,6 @@ function isHostedLocalCodexStubHostname(hostname: string): boolean {
     || normalized === "host.docker.internal";
 }
 
-function isHostedLocalCodexProxyHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return isHostedLocalCodexStubHostname(normalized)
-    || isPrivateIpv4Hostname(normalized)
-    || isLocalIpv6Hostname(normalized);
-}
-
-function isPrivateIpv4Hostname(hostname: string): boolean {
-  const parts = hostname.split(".");
-  if (parts.length !== 4) {
-    return false;
-  }
-
-  const octets = parts.map((part) => {
-    if (!/^[0-9]+$/u.test(part)) {
-      return Number.NaN;
-    }
-
-    const value = Number(part);
-    return Number.isInteger(value) && value >= 0 && value <= 255 ? value : Number.NaN;
-  });
-
-  if (octets.some((octet) => Number.isNaN(octet))) {
-    return false;
-  }
-
-  const [first, second] = octets;
-  return first === 10
-    || (first === 172 && second >= 16 && second <= 31)
-    || (first === 192 && second === 168)
-    || (first === 169 && second === 254);
-}
-
-function isLocalIpv6Hostname(hostname: string): boolean {
-  if (isIP(hostname) !== 6) {
-    return false;
-  }
-
-  const normalized = hostname.toLowerCase();
-  return normalized.startsWith("fc")
-    || normalized.startsWith("fd")
-    || normalized.startsWith("fe80:");
-}
-
 function normalizeHostedCodexUrlHostname(hostname: string): string {
   return hostname.replace(/^\[/u, "").replace(/\]$/u, "");
 }
@@ -491,7 +292,7 @@ function prependHostedCodexPathSegment(segment: string, currentPath: string): st
     .join(path.delimiter);
 }
 
-export function buildHostedLocalCodexAppServerStubSource(
+export function buildHostedE2ECodexAppServerStubSource(
   assistantProviderBaseUrl: string,
 ): string {
   return `#!/usr/bin/env node
@@ -576,7 +377,7 @@ async function fetchAssistantResponse(prompt) {
   const response = await fetch(new URL("responses", assistantProviderBaseUrl.replace(/\\/+$/u, "") + "/"), {
     body: JSON.stringify({
       input: prompt,
-      model: "hosted-local-codex-shim",
+      model: "hosted-e2e-codex-shim",
     }),
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -713,7 +514,7 @@ async function handleRpc(message) {
 
   if (method === "turn/steer" && id !== null) {
     if (!activeTurn || activeTurn.completed) {
-      writeRpcError(id, "hosted local Codex shim does not have an active turn");
+    writeRpcError(id, "hosted E2E Codex shim does not have an active turn");
       return;
     }
     activeTurn.prompts.push(readTextInput(params));
@@ -749,7 +550,7 @@ async function handleRpc(message) {
   }
 
   if (id !== null) {
-    writeRpcError(id, "unsupported hosted local Codex shim method: " + (method ?? "unknown"));
+    writeRpcError(id, "unsupported hosted E2E Codex shim method: " + (method ?? "unknown"));
   }
 }
 
@@ -793,23 +594,6 @@ export function buildHostedCodexConfigToml(input: {
     `base_url = ${tomlString(input.provider.baseUrl)}`,
     `env_key = ${tomlString(input.provider.envKey)}`,
     `wire_api = ${tomlString(input.provider.wireApi)}`,
-    "",
-    "[shell_environment_policy]",
-    `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
-    `include_only = ${tomlStringArray(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
-    "",
-  ].join("\n");
-}
-
-export function buildHostedLocalCodexConfigToml(input: {
-  model: string | null;
-  reasoningEffort: string;
-}): string {
-  return [
-    ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
-    `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
-    `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
-    `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "",
     "[shell_environment_policy]",
     `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,

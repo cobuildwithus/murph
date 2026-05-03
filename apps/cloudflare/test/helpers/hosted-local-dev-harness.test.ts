@@ -9,10 +9,6 @@ const hostedLocalDevConfig: HostedLocalDevConfig = {
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "disabled",
   linqWebhookTunnelName: "dev",
-  localCodexBridge: true,
-  localCodexBridgeHost: "127.0.0.1",
-  localCodexBridgePort: 0,
-  localCodexCommand: "codex",
   skipHealthCommonsWatch: false,
   skipLinqWebhookRegister: false,
   skipPrismaMigrate: true,
@@ -40,7 +36,6 @@ const startHostedLocalDevStack = vi.fn(async () => ({
   oidcToken: "oidc-token",
   processes: {
     cloudflare: null,
-    codex: null,
     healthCommons: null,
     linqTunnel: null,
     stripe: null,

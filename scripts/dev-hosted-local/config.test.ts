@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   parseLinqWebhookTunnelMode,
   parsePort,
-  parseListenPort,
   parseWorkerProtocol,
   printHelp,
   resolveHostedLocalDevConfig,
@@ -18,10 +17,6 @@ describe("resolveHostedLocalDevConfig", () => {
       linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
       linqWebhookTunnelMode: "auto",
       linqWebhookTunnelName: "dev",
-      localCodexBridge: true,
-      localCodexBridgeHost: "127.0.0.1",
-      localCodexBridgePort: 0,
-      localCodexCommand: "codex",
       skipHealthCommonsWatch: false,
       skipLinqWebhookRegister: false,
       skipPrismaMigrate: false,
@@ -43,10 +38,6 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(
       resolveHostedLocalDevConfig({
         MURPH_DEV_FORCE_RESET_LOCAL_DB: "1",
-        MURPH_DEV_CODEX_BRIDGE: "0",
-        MURPH_DEV_CODEX_BRIDGE_HOST: "127.0.0.1",
-        MURPH_DEV_CODEX_BRIDGE_PORT: "4567",
-        MURPH_DEV_CODEX_COMMAND: "codex-dev",
         MURPH_DEV_DATABASE_URL: "postgresql://127.0.0.1:5432/custom",
         MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: "https://linq-webhook.example.test",
         MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
@@ -74,10 +65,6 @@ describe("resolveHostedLocalDevConfig", () => {
       linqWebhookTunnelConfigPath: ".tmp/custom-linq-cloudflared.yml",
       linqWebhookTunnelMode: "required",
       linqWebhookTunnelName: "linq-dev",
-      localCodexBridge: false,
-      localCodexBridgeHost: "127.0.0.1",
-      localCodexBridgePort: 4567,
-      localCodexCommand: "codex-dev",
       skipHealthCommonsWatch: true,
       skipLinqWebhookRegister: true,
       skipPrismaMigrate: true,
@@ -93,6 +80,23 @@ describe("resolveHostedLocalDevConfig", () => {
       workerPort: 8795,
       workerProtocol: "https",
     });
+  });
+
+  it.each([
+    "MURPH_DEV_CODEX_BRIDGE",
+    "MURPH_DEV_CODEX_COMMAND",
+    "MURPH_DEV_CODEX_BRIDGE_HOST",
+    "MURPH_DEV_CODEX_BRIDGE_PORT",
+    "MURPH_DEV_CODEX_APP_SERVER_PROXY_URL",
+    "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN",
+  ])("rejects deprecated hosted-local Codex bridge env %s", (name) => {
+    expect(() =>
+      resolveHostedLocalDevConfig({
+        [name]: "",
+      })
+    ).toThrow(
+      `Deprecated hosted-local Codex bridge env is no longer supported: ${name}.`,
+    );
   });
 });
 
@@ -114,9 +118,10 @@ describe("printHelp", () => {
     const output = writes.join("");
     expect(output).toContain("MURPH_DEV_DATABASE_URL=...");
     expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
-    expect(output).toContain("MURPH_DEV_CODEX_BRIDGE=0");
-    expect(output).toContain("MURPH_DEV_CODEX_BRIDGE_HOST=127.0.0.1");
-    expect(output).toContain("MURPH_DEV_CODEX_BRIDGE_PORT=0");
+    expect(output).toContain("HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway");
+    expect(output).toContain("VERCEL_AI_API_KEY=...");
+    expect(output).not.toContain("MURPH_DEV_CODEX_BRIDGE");
+    expect(output).not.toContain("MURPH_DEV_CODEX_COMMAND");
     expect(output).toContain("MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1");
     expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
@@ -143,21 +148,6 @@ describe("parseLinqWebhookTunnelMode", () => {
   it("rejects invalid values", () => {
     expect(() => parseLinqWebhookTunnelMode("maybe")).toThrow(
       "MURPH_DEV_LINQ_WEBHOOK_TUNNEL must be auto, required, 1, or 0.",
-    );
-  });
-});
-
-describe("parseListenPort", () => {
-  it("allows port 0 for dynamic local listeners", () => {
-    expect(parseListenPort("0", 1234, "PORT")).toBe(0);
-  });
-
-  it("rejects invalid TCP listen ports", () => {
-    expect(() => parseListenPort("-1", 3000, "PORT")).toThrow(
-      "PORT must be a valid TCP listen port.",
-    );
-    expect(() => parseListenPort("70000", 3000, "PORT")).toThrow(
-      "PORT must be a valid TCP listen port.",
     );
   });
 });

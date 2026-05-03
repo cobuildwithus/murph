@@ -4,10 +4,6 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "@murphai/assistant-runtime";
 import {
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -40,6 +36,11 @@ import {
 import {
   LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
 } from "./web-control-plane.js";
+import {
+  assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv,
+  hasHostedRunnerVercelAiGatewayCredential,
+  isHostedRunnerVercelAiGatewayProvider,
+} from "./hosted-env-policy.ts";
 
 interface HostedExecutionChildDependencies {
   emitLog?: typeof emitHostedExecutionStructuredLog;
@@ -93,6 +94,12 @@ export async function runHostedExecutionChild(
 
   try {
     const childRunDiagnostics = buildHostedRunnerChildRuntimeDiagnostics(input);
+    assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(
+      input.job.runtime?.forwardedEnv ?? {},
+    );
+    assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(
+      input.job.runtime?.userEnv ?? {},
+    );
     emitLog({
       component: "child",
       details: childRunDiagnostics,
@@ -272,9 +279,7 @@ function buildHostedRunnerChildRuntimeDiagnostics(
   input: HostedExecutionChildInput,
 ): Record<string, boolean | number | string | null> {
   const forwardedEnv = input.job.runtime?.forwardedEnv ?? {};
-  const localCodexProxyDiagnostics = summarizeHostedRunnerChildLocalCodexProxyEnv(
-    forwardedEnv,
-  );
+  const userEnv = input.job.runtime?.userEnv ?? {};
 
   return {
     forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
@@ -282,106 +287,20 @@ function buildHostedRunnerChildRuntimeDiagnostics(
       typeof forwardedEnv.HOSTED_ASSISTANT_MODEL === "string",
     hostedAssistantProviderConfigured:
       typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string",
+    hostedAssistantVercelAiGatewayConfigured:
+      isHostedRunnerVercelAiGatewayProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
     hasLocalInternalProxyBaseUrl: Boolean(input.localInternalProxyBaseUrl),
-    localCodexAppServerProxyConfigured:
-      localCodexProxyDiagnostics.configured,
-    localCodexAppServerProxyHostKind:
-      localCodexProxyDiagnostics.hostKind,
-    localCodexAppServerProxyPortPresent:
-      localCodexProxyDiagnostics.portPresent,
-    localCodexAppServerProxyScheme:
-      localCodexProxyDiagnostics.scheme,
-    localCodexAppServerProxyTokenPresent:
-      localCodexProxyDiagnostics.tokenPresent,
-    localCodexAppServerProxyUrlPresent:
-      localCodexProxyDiagnostics.urlPresent,
     linqApiConfigured:
       typeof forwardedEnv.LINQ_API_TOKEN === "string",
     modelCredentialConfigured:
-      typeof forwardedEnv.VERCEL_AI_API_KEY === "string"
-      && forwardedEnv.VERCEL_AI_API_KEY.length > 0,
+      hasHostedRunnerVercelAiGatewayCredential({
+        forwardedEnv,
+        userEnv,
+      }),
     nodeEnvConfigured:
       typeof forwardedEnv.NODE_ENV === "string"
       && forwardedEnv.NODE_ENV.length > 0,
   };
-}
-
-function summarizeHostedRunnerChildLocalCodexProxyEnv(
-  forwardedEnv: Readonly<Record<string, string>>,
-): {
-  configured: boolean;
-  hostKind: string | null;
-  portPresent: boolean;
-  scheme: string | null;
-  tokenPresent: boolean;
-  urlPresent: boolean;
-} {
-  const rawUrl = forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV];
-  const urlPresent = typeof rawUrl === "string" && rawUrl.length > 0;
-  const tokenPresent =
-    typeof forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV] === "string"
-    && forwardedEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV].length > 0;
-
-  if (!urlPresent) {
-    return {
-      configured: false,
-      hostKind: null,
-      portPresent: false,
-      scheme: null,
-      tokenPresent,
-      urlPresent: false,
-    };
-  }
-
-  try {
-    const url = new URL(rawUrl);
-    return {
-      configured: tokenPresent,
-      hostKind: classifyHostedRunnerChildLocalCodexProxyHost(url.hostname),
-      portPresent: url.port.length > 0,
-      scheme: url.protocol.replace(/:$/u, "") || null,
-      tokenPresent,
-      urlPresent: true,
-    };
-  } catch {
-    return {
-      configured: false,
-      hostKind: "invalid",
-      portPresent: false,
-      scheme: null,
-      tokenPresent,
-      urlPresent: true,
-    };
-  }
-}
-
-function classifyHostedRunnerChildLocalCodexProxyHost(hostname: string): string {
-  const normalized = hostname.toLowerCase();
-
-  if (
-    normalized === "localhost"
-    || normalized === "127.0.0.1"
-    || normalized === "::1"
-  ) {
-    return "loopback";
-  }
-
-  if (
-    normalized === "host.docker.internal"
-    || normalized.endsWith(".docker.internal")
-  ) {
-    return "docker-host";
-  }
-
-  if (
-    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(normalized)
-    || /^192\.168\.\d{1,3}\.\d{1,3}$/u.test(normalized)
-    || /^172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/u.test(normalized)
-  ) {
-    return "private-ip";
-  }
-
-  return "other";
 }
 
 function readNullableString(value: unknown, label: string): string | null {

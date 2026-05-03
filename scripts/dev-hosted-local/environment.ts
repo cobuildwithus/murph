@@ -7,8 +7,6 @@ import {
   DEFAULT_DATABASE_URL,
   DEFAULT_STRIPE_ENV_FILE,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
@@ -17,6 +15,7 @@ import {
   WRANGLER_VAR_ALLOWLIST,
   webDir,
 } from "./constants.ts";
+import { assertNoDeprecatedHostedLocalCodexBridgeEnv } from "./config.ts";
 import {
   HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
@@ -144,15 +143,16 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
+  assertNoDeprecatedHostedLocalCodexBridgeEnv(input.existing);
+  assertNoDeprecatedHostedLocalCodexBridgeEnv(normalizedOverrides);
   stripStaleHostedLocalOidcJwksOverride({
     env: resolvedExisting,
     overrides: normalizedOverrides,
   });
-  if (input.config.localCodexBridge) {
-    stripHostedLocalCodexAppServerStubEnv(resolvedExisting);
-  } else {
-    stripHostedLocalCodexBridgeProxyEnv(resolvedExisting);
-  }
+  stripStaleHostedLocalCodexAppServerStubEnv({
+    env: resolvedExisting,
+    overrides: normalizedOverrides,
+  });
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
@@ -432,13 +432,15 @@ function stripLegacyHostedCryptoAuthorityEnv(
   }
 }
 
-function stripHostedLocalCodexBridgeProxyEnv(env: Record<string, string | undefined>): void {
-  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV];
-  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV];
-}
+function stripStaleHostedLocalCodexAppServerStubEnv(input: {
+  env: Record<string, string | undefined>;
+  overrides: Record<string, string | undefined>;
+}): void {
+  if (input.overrides[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim()) {
+    return;
+  }
 
-function stripHostedLocalCodexAppServerStubEnv(env: Record<string, string | undefined>): void {
-  delete env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV];
+  delete input.env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV];
 }
 
 function stripStaleHostedLocalOidcJwksOverride(input: {
@@ -460,6 +462,7 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 function normalizeHostedLocalBaseEnvironment(
   input: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
+  assertNoDeprecatedHostedLocalCodexBridgeEnv(input);
   const environment = {
     ...input,
   };

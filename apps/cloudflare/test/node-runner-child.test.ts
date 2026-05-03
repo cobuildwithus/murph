@@ -106,7 +106,7 @@ describe("runHostedExecutionChild", () => {
     );
   });
 
-  it("routes workspace-invocation child payloads through the workspace runtime with proxy-only authority", async () => {
+  it("routes workspace-invocation child payloads through the workspace runtime without bridge proxy env", async () => {
     vi.stubEnv("MURPH_E2E_DEBUG_HOSTED_RUNNER", "1");
     const consoleErrorSpy = vi
       .spyOn(console, "error")
@@ -142,10 +142,6 @@ describe("runHostedExecutionChild", () => {
               HOSTED_ASSISTANT_MODEL: "gpt-test",
               HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
               LINQ_API_TOKEN: "linq-token",
-              MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN:
-                "fixture-local-code",
-              MURPH_DEV_CODEX_APP_SERVER_PROXY_URL:
-                "tcp://host.docker.internal:3456",
               NODE_ENV: "development",
               VERCEL_AI_API_KEY: "fixture-gateway-code",
             },
@@ -163,13 +159,8 @@ describe("runHostedExecutionChild", () => {
       expect.objectContaining({
         component: "child",
         details: expect.objectContaining({
-          forwardedEnvKeyCount: 7,
-          localCodexAppServerProxyConfigured: true,
-          localCodexAppServerProxyHostKind: "docker-host",
-          localCodexAppServerProxyPortPresent: true,
-          localCodexAppServerProxyScheme: "tcp",
-          localCodexAppServerProxyTokenPresent: true,
-          localCodexAppServerProxyUrlPresent: true,
+          forwardedEnvKeyCount: 5,
+          hostedAssistantVercelAiGatewayConfigured: true,
           modelCredentialConfigured: true,
           nodeEnvConfigured: true,
         }),
@@ -210,32 +201,80 @@ describe("runHostedExecutionChild", () => {
       .join("\n");
     expect(debugOutput).toContain('"hostedAssistantModelConfigured":true');
     expect(debugOutput).toContain('"hostedAssistantProviderConfigured":true');
-    expect(debugOutput).toContain('"localCodexAppServerProxyConfigured":true');
-    expect(debugOutput).toContain('"localCodexAppServerProxyHostKind":"docker-host"');
-    expect(debugOutput).toContain('"localCodexAppServerProxyPortPresent":true');
-    expect(debugOutput).toContain('"localCodexAppServerProxyScheme":"tcp"');
-    expect(debugOutput).toContain('"localCodexAppServerProxyTokenPresent":true');
-    expect(debugOutput).toContain('"localCodexAppServerProxyUrlPresent":true');
+    expect(debugOutput).toContain('"hostedAssistantVercelAiGatewayConfigured":true');
     expect(debugOutput).toContain('"linqApiConfigured":true');
     expect(debugOutput).toContain('"modelCredentialConfigured":true');
     expect(debugOutput).toContain('"nodeEnvConfigured":true');
     expect(debugOutput).not.toContain("gpt-test");
     expect(debugOutput).not.toContain("vercel-ai-gateway");
     expect(debugOutput).not.toContain("linq-token");
-    expect(debugOutput).not.toContain("fixture-local-code");
-    expect(debugOutput).not.toContain("host.docker.internal");
     expect(debugOutput).not.toContain("fixture-gateway-code");
+  });
+
+  it("rejects deprecated Codex app-server bridge env in the child runtime config", async () => {
+    const stdout = { write: vi.fn() };
+    const setExitCode = vi.fn();
+    const runWorkspaceInProcess = vi.fn(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        internalWorkerProxyToken: "bridge-token",
+        localInternalProxyBaseUrl: null,
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_child_deprecated_proxy",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {
+              HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+              MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "fixture-local-code",
+              MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://host.docker.internal:3456",
+              VERCEL_AI_API_KEY: "fixture-gateway-code",
+            },
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      stdout,
+    });
+
+    expect(runWorkspaceInProcess).not.toHaveBeenCalled();
+    expect(setExitCode).toHaveBeenCalledWith(1);
+
+    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.message).toContain(
+      "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN",
+    );
+    expect(payload.error?.message).toContain(
+      "MURPH_DEV_CODEX_APP_SERVER_PROXY_URL",
+    );
+    expect(payload.error?.message).not.toContain("fixture-local-code");
+    expect(payload.error?.message).not.toContain("fixture-gateway-code");
   });
 
   it("redacts runtime failure diagnostics before writing the child result payload", async () => {
     const stdout = { write: vi.fn() };
     const setExitCode = vi.fn();
     const runtimeError = new Error(
-      'failed for person@example.test +15555550123 with VERCEL_AI_API_KEY=secret-value base_url = "https://gateway.example.test/v1" /tmp/hosted-runner/private-file',
+      'failed for person@example.test +15555550123 with VERCEL_AI_API_KEY=fixture "MURPH_HOSTED_CLI_BRIDGE_TOKEN":"bridge-secret" VERCEL_AI_API_KEY: "colon-secret" base_url = "https://gateway.example.test/v1" /tmp/hosted-runner/private-file',
     ) as Error & { details?: Record<string, unknown> };
     runtimeError.details = {
       assistantProviderErrorMessage:
         "Bearer provider-token at /tmp/hosted-runner/provider-detail",
+      nested: {
+        MURPH_HOSTED_CLI_BRIDGE_TOKEN: "nested-bridge-secret",
+        VERCEL_AI_API_KEY: "nested-gateway-secret",
+      },
     };
     runtimeError.stack =
       "Error: failed\n    at run (/tmp/hosted-runner/private-file.ts:7:3)";
@@ -271,6 +310,8 @@ describe("runHostedExecutionChild", () => {
 
     expect(payload.ok).toBe(false);
     expect(payload.error?.message).toContain("VERCEL_AI_API_KEY=<redacted>");
+    expect(payload.error?.message).toContain('"MURPH_HOSTED_CLI_BRIDGE_TOKEN":<redacted>');
+    expect(payload.error?.message).toContain("VERCEL_AI_API_KEY: <redacted>");
     expect(payload.error?.message).toContain("base_url=<redacted>");
     expect(payload.error?.message).toContain("<redacted-path>");
     expect(payload.error?.message).toContain("<redacted-email>");
@@ -278,7 +319,9 @@ describe("runHostedExecutionChild", () => {
     expect(payload.error?.stack).toContain("<redacted-path>");
     expect(payload.error?.message).not.toContain("person@example.test");
     expect(payload.error?.message).not.toContain("+15555550123");
-    expect(payload.error?.message).not.toContain("secret-value");
+    expect(payload.error?.message).not.toContain("fixture");
+    expect(payload.error?.message).not.toContain("bridge-secret");
+    expect(payload.error?.message).not.toContain("colon-secret");
     expect(payload.error?.message).not.toContain("gateway.example.test");
     expect(payload.error?.message).not.toContain("/tmp/hosted-runner/private-file");
     expect(payload.error?.stack).not.toContain("/tmp/hosted-runner/private-file");
@@ -286,6 +329,8 @@ describe("runHostedExecutionChild", () => {
       "Bearer [redacted] at <redacted-path>",
     );
     expect(JSON.stringify(payload.error?.details)).not.toContain("provider-token");
+    expect(JSON.stringify(payload.error?.details)).not.toContain("nested-bridge-secret");
+    expect(JSON.stringify(payload.error?.details)).not.toContain("nested-gateway-secret");
     expect(JSON.stringify(payload.error?.details)).not.toContain(
       "/tmp/hosted-runner/provider-detail",
     );

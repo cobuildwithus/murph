@@ -24,6 +24,10 @@ export function redactHostedRuntimeDiagnosticText(value: string): string {
       "$1=<redacted>",
     )
     .replace(
+      /(["']?)([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)[A-Z0-9_]*)(\1\s*:\s*)(?:"[^"]*"|'[^']+'|[^\s,}\]]+)/giu,
+      "$1$2$3<redacted>",
+    )
+    .replace(
       /\b((?:HOSTED_ASSISTANT_)?(?:BASE_URL|PROVIDER|MODEL)|base_url|env_key|model_provider|wire_api)\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/giu,
       "$1=<redacted>",
     );
@@ -70,7 +74,13 @@ function redactHostedRuntimeDiagnosticValue(value: unknown, depth: number): unkn
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
       key,
-      redactHostedRuntimeDiagnosticValue(entry, depth + 1),
+      isSecretLikeHostedRuntimeDiagnosticKey(key)
+        ? "[redacted]"
+        : redactHostedRuntimeDiagnosticValue(entry, depth + 1),
     ]),
   );
+}
+
+function isSecretLikeHostedRuntimeDiagnosticKey(key: string): boolean {
+  return /(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)/iu.test(key);
 }
