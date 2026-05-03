@@ -6,6 +6,7 @@ import {
   requireHostedPrivyClientAppId,
   resolveHostedInstallScriptUrl,
   resolveHostedPrivyClientAppId,
+  resolveHostedPrivyResourceHintOrigins,
   resolveHostedSignupPhoneNumber,
 } from "@/src/lib/hosted-onboarding/landing";
 
@@ -62,6 +63,85 @@ describe("hosted onboarding landing helpers", () => {
         createProcessEnv({ VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai" }),
       ),
     ).toBe("https://www.withmurph.ai/install.sh");
+  });
+
+  it("derives Privy resource hint origins from hosted auth domains", () => {
+    expect(resolveHostedPrivyResourceHintOrigins(createProcessEnv({}))).toEqual([
+      "https://auth.privy.io",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({
+          PRIVY_CUSTOM_AUTH_DOMAIN: "privy.example.test/path",
+          PRIVY_BASE_DOMAIN: "withmurph.ai",
+        }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://privy.example.test",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({ PRIVY_BASE_DOMAIN: "https://www.withmurph.ai" }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://privy.withmurph.ai",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({ HOSTED_WEB_BASE_URL: "https://www.example.test" }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://privy.example.test",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({ HOSTED_WEB_BASE_URL: "https://app.example.test" }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://privy.app.example.test",
+      "https://privy.example.test",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "http://localhost:3000" }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "https://127.0.0.2:3000" }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "https://[::ffff:127.0.0.1]:3000" }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://challenges.cloudflare.com",
+    ]);
+    expect(
+      resolveHostedPrivyResourceHintOrigins(
+        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "https://privy.localhost:3000" }),
+      ),
+    ).toEqual([
+      "https://auth.privy.io",
+      "https://challenges.cloudflare.com",
+    ]);
   });
 });
 
