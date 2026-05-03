@@ -2382,6 +2382,109 @@ test("device sync service records unexpected job errors as dead jobs", async () 
   close();
 });
 
+test("device sync service preserves sanitized validation issue paths for unexpected job errors", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-validation-error");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          const error = new Error("Invalid input: expected nonoptional, received undefined") as Error & {
+            issues: Array<{ code: string; message: string; path: Array<number | string> }>;
+          };
+          error.name = "ZodError";
+          error.issues = [
+            {
+              code: "invalid_type",
+              message: "Invalid input: expected nonoptional, received undefined",
+              path: ["snapshot", "sleeps", 0, "score"],
+            },
+          ];
+          throw error;
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "validation-error",
+  });
+
+  await service.runWorkerOnce();
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobStatus = readJobsForAccountForTesting(store, connected.account.id)[0];
+  const expectedMessage =
+    "Invalid input: expected nonoptional, received undefined | validationIssues=$.snapshot.sleeps[0].score invalid_type Invalid input: expected nonoptional, received undefined";
+
+  assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
+  assert.equal(storedAccount?.lastErrorMessage, expectedMessage);
+  assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
+  assert.equal(jobStatus.last_error_message, expectedMessage);
+
+  close();
+});
+
+test("device sync service preserves sanitized vault validation details for unexpected job errors", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-vault-validation-error");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          const error = new Error("Vault metadata failed contract validation.") as Error & {
+            details: { errors: string[] };
+          };
+          error.name = "VaultError";
+          error.details = {
+            errors: [
+              "$.timezone: Invalid input: expected string, received undefined",
+              "$.unsafe.bad field.name: Invalid input: expected string, received undefined",
+            ],
+          };
+          throw error;
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "vault-validation-error",
+  });
+
+  await service.runWorkerOnce();
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobStatus = readJobsForAccountForTesting(store, connected.account.id)[0];
+  const expectedMessage =
+    "Vault metadata failed contract validation. | validationIssues=$.timezone: Invalid input: expected string, received undefined; $.unsafe.<field>: Invalid input: expected string, received undefined";
+
+  assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
+  assert.equal(storedAccount?.lastErrorMessage, expectedMessage);
+  assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
+  assert.equal(jobStatus.last_error_message, expectedMessage);
+
+  close();
+});
+
 test("device sync service string job failures still produce deterministic dead-job state", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-job-string-error");
   const { service, store, close } = createServiceFixture({

@@ -639,6 +639,7 @@ class DeviceSyncServiceController {
         accountId: storedAccount.id,
         jobId: job.id,
         code: failure.code,
+        failureSummary: failure.message,
         retryable: failure.retryable,
       });
       return job;
@@ -969,7 +970,7 @@ function normalizeExecutionError(error: unknown): {
   if (error instanceof Error) {
     return {
       code: "SYNC_JOB_FAILED",
-      message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
+      message: summarizeExecutionErrorMessage(error),
       retryable: false,
     };
   }
@@ -981,11 +982,153 @@ function normalizeExecutionError(error: unknown): {
   };
 }
 
+function summarizeExecutionErrorMessage(error: Error): string {
+  const baseMessage = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
+  const validationSummary = summarizeValidationIssues(error);
+
+  if (!validationSummary) {
+    return baseMessage;
+  }
+
+  return sanitizeHostedRuntimeErrorText(`${baseMessage} | ${validationSummary}`) ?? baseMessage;
+}
+
+function summarizeValidationIssues(error: Error): string | null {
+  const issueSummaries = [
+    ...readZodLikeIssueSummaries(error),
+    ...readVaultLikeErrorSummaries(error),
+  ];
+  const uniqueSummaries = [...new Set(issueSummaries)].slice(0, 3);
+
+  return uniqueSummaries.length > 0
+    ? `validationIssues=${uniqueSummaries.join("; ")}`
+    : null;
+}
+
+function readZodLikeIssueSummaries(error: Error): string[] {
+  const issues = readRecordArray((error as { issues?: unknown }).issues);
+
+  return issues.flatMap((issue) => {
+    const record = toPlainRecord(issue);
+
+    if (!record) {
+      return [];
+    }
+
+    const path = formatValidationPath(record.path);
+    const code = formatValidationToken(record.code) ?? "validation";
+    const message = sanitizeHostedRuntimeErrorText(String(record.message ?? "")) ?? "";
+    const parts = [path, code, message].filter(Boolean);
+
+    return parts.length > 0 ? [parts.join(" ")] : [];
+  });
+}
+
+function readVaultLikeErrorSummaries(error: Error): string[] {
+  const details = toPlainRecord((error as { details?: unknown }).details);
+  const errors = readStringArray(details?.errors);
+
+  return errors.flatMap((entry) => {
+    const sanitized = sanitizeHostedRuntimeErrorText(entry);
+
+    if (!sanitized) {
+      return [];
+    }
+
+    return [sanitizeValidationIssueText(sanitized)];
+  });
+}
+
+function readRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    const record = toPlainRecord(entry);
+    return record ? [record] : [];
+  });
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function toPlainRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function formatValidationPath(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "$";
+  }
+
+  return value.reduce<string>((path, segment) => {
+    if (typeof segment === "number" && Number.isInteger(segment) && segment >= 0) {
+      return `${path}[${segment}]`;
+    }
+
+    if (typeof segment !== "string") {
+      return `${path}.<field>`;
+    }
+
+    const token = formatValidationToken(segment);
+    return token ? `${path}.${token}` : `${path}.<field>`;
+  }, "$");
+}
+
+function formatValidationToken(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return /^[A-Za-z_][A-Za-z0-9_-]{0,80}$/u.test(trimmed) ? trimmed : null;
+}
+
+function sanitizeValidationIssueText(value: string): string {
+  const [path, ...rest] = value.split(":");
+
+  if (!path || !path.trim().startsWith("$")) {
+    return value;
+  }
+
+  const safePath = path
+    .split(".")
+    .reduce<string[]>((segments, segment, index) => {
+      if (index === 0) {
+        return ["$"];
+      }
+
+      const arrayMatch = /^([A-Za-z_][A-Za-z0-9_-]{0,80})((?:\[\d+\])*)$/u.exec(segment);
+      if (!arrayMatch) {
+        return [...segments, "<field>"];
+      }
+
+      if (segments.includes("<field>")) {
+        return segments;
+      }
+
+      return [...segments, `${arrayMatch[1]}${arrayMatch[2]}`];
+    }, [])
+    .join(".");
+
+  return [safePath, ...rest].join(":");
+}
+
 function summarizeError(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
     return {
       name: error.name,
-      message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
+      message: summarizeExecutionErrorMessage(error),
     };
   }
 

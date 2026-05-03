@@ -49,6 +49,7 @@ import {
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
+const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 512;
 
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
@@ -651,9 +652,9 @@ function sanitizeHostedDeviceSyncFailureSummary(value: string | null): string | 
     )
     .trim();
 
-  const bounded = redacted.length <= 128
+  const bounded = redacted.length <= HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH
     ? redacted
-    : `${redacted.slice(0, 125).trimEnd()}...`;
+    : `${redacted.slice(0, HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH - 3).trimEnd()}...`;
 
   return isHostedDeviceSyncSafeRuntimeLogSummary(bounded)
     ? bounded
@@ -662,7 +663,7 @@ function sanitizeHostedDeviceSyncFailureSummary(value: string | null): string | 
 
 function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
   return value.length > 0
-    && value.length <= 128
+    && value.length <= HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH
     && !(
       /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
       || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
