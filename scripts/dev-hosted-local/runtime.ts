@@ -52,6 +52,19 @@ const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
 
 export type HostedLocalWorkerPortMode = "start" | "reuse-existing";
 
+export function redactHostedLocalDiagnosticText(value: string): string {
+  return redactHostedLocalPaths(value)
+    .replace(
+      /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/giu,
+      "$1: Bearer <redacted>",
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer <redacted>")
+    .replace(
+      /(["']?)([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)[A-Z0-9_]*)(\1\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,}\]]+)/giu,
+      "$1$2$3<redacted>",
+    );
+}
+
 export async function assertHostedWebDevServerAvailable(env: NodeJS.ProcessEnv): Promise<void> {
   const lockPaths = resolveHostedWebDevLockPaths(env);
   const rawMetadata = await tryReadTextFile(lockPaths.metadataPath);
@@ -347,8 +360,8 @@ export function spawnChildProcess(
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const stdout = createOutputBuffer();
-  const stderr = createOutputBuffer();
+  const stdout = createRedactedOutputBuffer(redactHostedLocalDiagnosticText);
+  const stderr = createRedactedOutputBuffer(redactHostedLocalDiagnosticText);
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
   child.stdout?.on("data", (chunk: string | Buffer) => {
@@ -359,8 +372,12 @@ export function spawnChildProcess(
   });
 
   if (input.pipeOutput !== false) {
-    pipeWithPrefix(name, child.stdout, input.stdoutTarget ?? process.stdout);
-    pipeWithPrefix(name, child.stderr, input.stderrTarget ?? process.stderr);
+    pipeWithPrefix(name, child.stdout, input.stdoutTarget ?? process.stdout, {
+      redactor: redactHostedLocalDiagnosticText,
+    });
+    pipeWithPrefix(name, child.stderr, input.stderrTarget ?? process.stderr, {
+      redactor: redactHostedLocalDiagnosticText,
+    });
   }
 
   return {
@@ -585,8 +602,12 @@ export async function runCommand(
 
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
-  pipeWithPrefix(input.name, child.stdout, process.stdout);
-  pipeWithPrefix(input.name, child.stderr, process.stderr);
+  pipeWithPrefix(input.name, child.stdout, process.stdout, {
+    redactor: redactHostedLocalDiagnosticText,
+  });
+  pipeWithPrefix(input.name, child.stderr, process.stderr, {
+    redactor: redactHostedLocalDiagnosticText,
+  });
 
   await new Promise<void>((resolve, reject) => {
     child.once("error", reject);
@@ -614,7 +635,9 @@ export async function captureCommandOutput(
 
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
-  pipeWithPrefix(input.name, child.stderr, process.stderr);
+  pipeWithPrefix(input.name, child.stderr, process.stderr, {
+    redactor: redactHostedLocalDiagnosticText,
+  });
 
   let stdout = "";
   child.stdout?.on("data", (chunk: string | Buffer) => {
@@ -1023,8 +1046,8 @@ async function runBoundedCommand(input: BoundedCommandInput): Promise<BoundedCom
 
     return {
       exitCode,
-      stderr,
-      stdout,
+      stderr: redactHostedLocalDiagnosticText(stderr),
+      stdout: redactHostedLocalDiagnosticText(stdout),
       timedOut,
     };
   } finally {
@@ -1355,6 +1378,52 @@ function createOutputBuffer(): {
       return value;
     },
   };
+}
+
+function createRedactedOutputBuffer(
+  redactor: (value: string) => string,
+): {
+  append(chunk: string | Buffer): void;
+  read(): string;
+} {
+  const buffer = createOutputBuffer();
+
+  return {
+    append(chunk: string | Buffer): void {
+      buffer.append(chunk);
+    },
+    read(): string {
+      return redactor(buffer.read());
+    },
+  };
+}
+
+function redactHostedLocalPaths(value: string): string {
+  const pathCandidates = [
+    repoRoot,
+    process.env.HOME,
+  ].filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  let redacted = value;
+
+  for (const candidate of pathCandidates) {
+    redacted = replaceAll(redacted, candidate, "<redacted-path>");
+    redacted = replaceAll(redacted, candidate.replace(/\\/gu, "/"), "<redacted-path>");
+  }
+
+  return redacted
+    .replace(
+      /file:\/\/\/(?:Users|home|root|tmp|var|private\/var)\/[^\s)"']+/gu,
+      "file://<redacted-path>",
+    )
+    .replace(
+      /(?:\/Users|\/home|\/root|\/tmp|\/var|\/private\/var)\/[^\s)"']+/gu,
+      "<redacted-path>",
+    )
+    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<redacted-path>");
+}
+
+function replaceAll(value: string, search: string, replacement: string): string {
+  return search.length > 0 ? value.split(search).join(replacement) : value;
 }
 
 function createLineBufferedSecretRedactor(secret: string): {

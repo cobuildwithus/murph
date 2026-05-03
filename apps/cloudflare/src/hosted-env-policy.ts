@@ -55,6 +55,13 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
   RUNNER_SECRET_PROCESS_CONTROL_KEYS,
 );
 
+export const HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER = "vercel-ai-gateway";
+
+export const HOSTED_RUNNER_DEPRECATED_CODEX_APP_SERVER_PROXY_ENV_KEYS = [
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
+] as const;
+
 const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [
   ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
 ] as const;
@@ -156,6 +163,9 @@ export function isHostedRunnerProcessControlEnvKey(key: string): boolean {
 export function buildHostedRunnerContainerEnv(
   source: UnknownEnvSource,
 ): Record<string, string> {
+  assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(source);
+  assertHostedRunnerAssistantProvider(source);
+
   return buildHostedRuntimeForwardedEnv(source, {
     mapValue: ({ key, value }) =>
       rewriteHostedRunnerLoopbackUrlForContainer(key, value, source),
@@ -165,12 +175,14 @@ export function buildHostedRunnerContainerEnv(
 export function buildHostedRunnerAmbientEnv(
   source: UnknownEnvSource,
 ): Record<string, string> {
+  assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(source);
+  assertHostedRunnerAssistantProvider(source);
+
   return buildHostedRuntimeForwardedEnv(source);
 }
 
 const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
   "HOSTED_WEB_BASE_URL",
-  HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   "LINQ_ATTACHMENT_CDN_BASE_URL",
   "LINQ_API_BASE_URL",
@@ -245,6 +257,56 @@ export function summarizeHostedRunnerSecretLogCategories(
   source: Readonly<Record<string, string | undefined>>,
 ): Record<keyof typeof HOSTED_RUNNER_SECRET_LOG_CATEGORY_KEYS, boolean> {
   return summarizeHostedRunnerLogCategories(source, HOSTED_RUNNER_SECRET_LOG_CATEGORY_KEYS);
+}
+
+export function assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(
+  source: Readonly<Record<string, unknown>>,
+): void {
+  const configuredKeys = readConfiguredHostedRunnerDeprecatedCodexAppServerProxyEnvKeys(
+    source,
+  );
+  if (configuredKeys.length === 0) {
+    return;
+  }
+
+  throw new TypeError(
+    `${configuredKeys.join(", ")} are no longer supported for hosted runner config; configure HOSTED_ASSISTANT_PROVIDER=${HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER} with VERCEL_AI_API_KEY instead.`,
+  );
+}
+
+export function isHostedRunnerVercelAiGatewayProvider(
+  value: unknown,
+): boolean {
+  return normalizeStringEnvValue(value) === HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER;
+}
+
+export function hasHostedRunnerVercelAiGatewayCredential(input: {
+  forwardedEnv?: Readonly<Record<string, string>> | null;
+  userEnv?: Readonly<Record<string, string>> | null;
+}): boolean {
+  return normalizeStringEnvValue(input.forwardedEnv?.VERCEL_AI_API_KEY) !== null
+    || normalizeStringEnvValue(input.userEnv?.VERCEL_AI_API_KEY) !== null;
+}
+
+function assertHostedRunnerAssistantProvider(
+  source: Readonly<Record<string, unknown>>,
+): void {
+  const provider = normalizeStringEnvValue(source.HOSTED_ASSISTANT_PROVIDER);
+  if (!provider || provider === HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER) {
+    return;
+  }
+
+  throw new TypeError(
+    `HOSTED_ASSISTANT_PROVIDER must be ${HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER} for hosted runner execution.`,
+  );
+}
+
+function readConfiguredHostedRunnerDeprecatedCodexAppServerProxyEnvKeys(
+  source: Readonly<Record<string, unknown>>,
+): string[] {
+  return HOSTED_RUNNER_DEPRECATED_CODEX_APP_SERVER_PROXY_ENV_KEYS.filter((key) =>
+    normalizeStringEnvValue(source[key]) !== null
+  );
 }
 
 function summarizeHostedRunnerLogCategories<TCategoryMap extends Record<string, readonly string[]>>(

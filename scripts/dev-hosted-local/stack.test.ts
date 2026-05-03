@@ -46,10 +46,6 @@ const defaultConfig: HostedLocalDevConfig = {
   linqWebhookTunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
   linqWebhookTunnelMode: "disabled",
   linqWebhookTunnelName: "dev",
-  localCodexBridge: true,
-  localCodexBridgeHost: "127.0.0.1",
-  localCodexBridgePort: 0,
-  localCodexCommand: "codex",
   skipHealthCommonsWatch: true,
   skipLinqWebhookRegister: false,
   skipRunnerSmoke: false,
@@ -138,24 +134,6 @@ const spawnSync = vi.fn(() => ({
   status: 0,
   stdout: "",
 }));
-const stopHostedLocalCodexBridge = vi.fn(async () => {});
-const startHostedLocalCodexBridge = vi.fn<
-  (input: {
-    codexCommand: string;
-    env: NodeJS.ProcessEnv;
-    listenHost: string;
-    listenPort: number;
-    stderrTarget?: NodeJS.WritableStream;
-  }) => Promise<{
-    proxyToken: string;
-    proxyUrl: string;
-    stop: typeof stopHostedLocalCodexBridge;
-  }>
->(async () => ({
-  proxyToken: "local-codex-bridge-token",
-  proxyUrl: "tcp://127.0.0.1:41234",
-  stop: stopHostedLocalCodexBridge,
-}));
 const resolveHostedLocalLinqWebhookSetup = vi.fn<
   (input: {
     config: HostedLocalDevConfig;
@@ -188,10 +166,6 @@ vi.mock("node:child_process", () => ({
 
 vi.mock("./config.ts", () => ({
   resolveHostedLocalDevConfig: vi.fn(() => defaultConfig),
-}));
-
-vi.mock("./codex-bridge.ts", () => ({
-  startHostedLocalCodexBridge,
 }));
 
 vi.mock("./environment.ts", () => ({
@@ -234,7 +208,8 @@ vi.mock("./environment.ts", () => ({
   ),
   shouldSyncLocalDatabaseSchema: vi.fn(() => true),
   readOptionalSimpleEnvFile: vi.fn(async () => ({
-    HOSTED_ASSISTANT_PROVIDER: "venice",
+    HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+    VERCEL_AI_API_KEY: "local-vercel-key",
   })),
   readHostedLocalStripeEnvFile: vi.fn(async () => ({})),
   readSimpleEnvFile: vi.fn(async () => ({})),
@@ -243,6 +218,7 @@ vi.mock("./environment.ts", () => ({
     HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.5",
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "vercel-ai-gateway",
+    VERCEL_AI_API_KEY: input.overrides?.VERCEL_AI_API_KEY,
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       input.overrides?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL
       ?? "http://127.0.0.1:8787",
@@ -258,10 +234,6 @@ vi.mock("./environment.ts", () => ({
       y: "automation-y",
     }),
     HOSTED_CRYPTO_ENV: "development",
-    MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN:
-      input.overrides?.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN,
-    MURPH_DEV_CODEX_APP_SERVER_PROXY_URL:
-      input.overrides?.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL,
     NODE_ENV: input.overrides?.NODE_ENV,
   })),
   warnForMissingEnv: vi.fn(),
@@ -278,6 +250,7 @@ vi.mock("./runtime.ts", () => ({
   assertHostedWebPortAvailable: vi.fn(async () => {}),
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
+  redactHostedLocalDiagnosticText: (value: string) => value,
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
@@ -370,10 +343,11 @@ describe("hosted local dev stack", () => {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-        HOSTED_ASSISTANT_PROVIDER: "local-codex",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
         TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
+        VERCEL_AI_API_KEY: "local-vercel-key",
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
       expect.any(Object),
@@ -461,12 +435,6 @@ describe("hosted local dev stack", () => {
       expect.stringContaining("apps/cloudflare/.dev.vars"),
     );
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(2);
-    expect(startHostedLocalCodexBridge).toHaveBeenCalledWith(expect.objectContaining({
-      codexCommand: "codex",
-      listenHost: "127.0.0.1",
-      listenPort: 0,
-    }));
-    expect(stopHostedLocalCodexBridge).toHaveBeenCalledTimes(1);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
@@ -730,7 +698,7 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("does not copy local Codex/model credentials into bridge-mode worker env inputs", async () => {
+  it("passes hosted Vercel AI Gateway config to the worker but strips host-only Codex env", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
@@ -742,8 +710,7 @@ describe("hosted local dev stack", () => {
       env: {
         ...process.env,
         CODEX_HOME: "/tmp/local-codex-home",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:9999",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
         OPENAI_API_KEY: "local-openai-key",
         VERCEL_AI_API_KEY: "local-vercel-key",
       },
@@ -756,7 +723,8 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBeUndefined();
-    expect(cloudflareEnv.VERCEL_AI_API_KEY).toBeUndefined();
+    expect(cloudflareEnv.VERCEL_AI_API_KEY).toBe("local-vercel-key");
+    expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     for (const [, , options] of runCommand.mock.calls) {
@@ -767,64 +735,39 @@ describe("hosted local dev stack", () => {
       expect(cleanupInput.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
       expect(cleanupInput.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     }
-    expect(startHostedLocalCodexBridge).toHaveBeenCalledWith(expect.objectContaining({
-      env: expect.not.objectContaining({
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:9999",
-      }),
-    }));
-    const codexBridgeInput = startHostedLocalCodexBridge.mock.calls.at(-1)?.[0];
-    expect(codexBridgeInput?.env.CODEX_HOME).toBe("/tmp/local-codex-home");
-    expect(codexBridgeInput?.env.VERCEL_AI_API_KEY).toBe("local-vercel-key");
-    expect(codexBridgeInput?.env.OPENAI_API_KEY).toBe("local-openai-key");
-    expect(codexBridgeInput?.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
-    expect(codexBridgeInput?.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
 
     const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBeUndefined();
-    expect(envFileSource.VERCEL_AI_API_KEY).toBeUndefined();
-    expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("local-codex");
-    expect(envFileSource.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBe(
-      "local-codex-bridge-token",
-    );
+    expect(envFileSource.VERCEL_AI_API_KEY).toBe("local-vercel-key");
+    expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
   });
 
-  it("strips stale local Codex proxy env when the bridge is disabled", async () => {
+  it("defaults the hosted assistant provider to Vercel AI Gateway when only the key is configured", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 127 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 128 }));
 
-    const configModule = await import("./config.ts");
-    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
-      ...defaultConfig,
-      localCodexBridge: false,
-    });
     const environmentModule = await import("./environment.ts");
+    vi.mocked(environmentModule.readOptionalSimpleEnvFile).mockResolvedValue({});
     const { startHostedLocalDevStack } = await import("./stack.ts");
 
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "stale-token",
-        MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://127.0.0.1:9999",
+        HOSTED_ASSISTANT_PROVIDER: undefined,
+        VERCEL_AI_API_KEY: "local-vercel-key",
       },
     });
     await stack.ready;
     await stack.stop();
 
-    expect(startHostedLocalCodexBridge).not.toHaveBeenCalled();
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     expect(cloudflareCall).toBeDefined();
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
-    expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
-    expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
-
-    const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
-      .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
-    expect(envFileSource.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
-    expect(envFileSource.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
+    expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
+    expect(cloudflareEnv.VERCEL_AI_API_KEY).toBe("local-vercel-key");
   });
 
   it("generates a unique non-default local runner build id for each stack", async () => {
@@ -929,9 +872,6 @@ describe("hosted local dev stack", () => {
       }),
       expect.any(Object),
     );
-    expect(startHostedLocalCodexBridge).toHaveBeenCalledWith(expect.objectContaining({
-      listenHost: "172.17.0.1",
-    }));
     platformSpy.mockRestore();
   });
 
@@ -980,11 +920,6 @@ describe("hosted local dev stack", () => {
 
   it("reuses an already-running local worker when its health banner matches Murph", async () => {
     resolveHostedLocalWorkerPortMode.mockResolvedValueOnce("reuse-existing");
-    const configModule = await import("./config.ts");
-    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
-      ...defaultConfig,
-      localCodexBridge: false,
-    });
     const stderrTarget = new CapturingWritable();
     spawnChildProcess.mockReturnValueOnce(
       createBufferedChild({ exitCode: null, name: "web", pid: 460 }),
@@ -1028,62 +963,6 @@ describe("hosted local dev stack", () => {
     expect(vi.mocked(symlink)).not.toHaveBeenCalled();
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
-  });
-
-  it("fails closed instead of reusing an existing worker when the local Codex bridge is enabled", async () => {
-    resolveHostedLocalWorkerPortMode.mockResolvedValueOnce("reuse-existing");
-
-    const { startHostedLocalDevStack } = await import("./stack.ts");
-
-    await expect(startHostedLocalDevStack({
-      env: process.env,
-    })).rejects.toThrow(
-      "Stop that worker before running `pnpm dev`, or set MURPH_DEV_CODEX_BRIDGE=0",
-    );
-    expect(startHostedLocalCodexBridge).not.toHaveBeenCalled();
-    expect(spawnChildProcess).not.toHaveBeenCalled();
-  });
-
-  it("fails closed for wildcard local Codex bridge listen hosts", async () => {
-    const configModule = await import("./config.ts");
-    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
-      ...defaultConfig,
-      localCodexBridgeHost: "0.0.0.0",
-    });
-
-    const { startHostedLocalDevStack } = await import("./stack.ts");
-
-    await expect(startHostedLocalDevStack({
-      env: {
-        ...process.env,
-        MURPH_DEV_CODEX_BRIDGE_HOST: "0.0.0.0",
-      },
-    })).rejects.toThrow(
-      "MURPH_DEV_CODEX_BRIDGE_HOST must be loopback or the resolved local Docker bridge host.",
-    );
-    expect(startHostedLocalCodexBridge).not.toHaveBeenCalled();
-    expect(spawnChildProcess).not.toHaveBeenCalled();
-  });
-
-  it("fails closed for arbitrary private local Codex bridge listen hosts", async () => {
-    const configModule = await import("./config.ts");
-    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
-      ...defaultConfig,
-      localCodexBridgeHost: "192.168.1.10",
-    });
-
-    const { startHostedLocalDevStack } = await import("./stack.ts");
-
-    await expect(startHostedLocalDevStack({
-      env: {
-        ...process.env,
-        MURPH_DEV_CODEX_BRIDGE_HOST: "192.168.1.10",
-      },
-    })).rejects.toThrow(
-      "MURPH_DEV_CODEX_BRIDGE_HOST must be loopback or the resolved local Docker bridge host.",
-    );
-    expect(startHostedLocalCodexBridge).not.toHaveBeenCalled();
-    expect(spawnChildProcess).not.toHaveBeenCalled();
   });
 
   it("fails fast and cleans up when a dev child exits before readiness", async () => {
@@ -1180,7 +1059,7 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("fails closed when local Codex bridge is combined with a custom shell provider", async () => {
+  it("fails closed when local hosted dev is configured with a non-hosted assistant provider", async () => {
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
 
     const { startHostedLocalDevStack } = await import("./stack.ts");
@@ -1188,23 +1067,17 @@ describe("hosted local dev stack", () => {
     await expect(startHostedLocalDevStack({
       env: process.env,
     })).rejects.toThrow(
-      "MURPH_DEV_CODEX_BRIDGE requires HOSTED_ASSISTANT_PROVIDER to be unset or vercel-ai-gateway.",
+      "HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway is required for local hosted dev.",
     );
-    expect(stopHostedLocalCodexBridge).toHaveBeenCalledTimes(1);
     expect(spawnChildProcess).not.toHaveBeenCalled();
   });
 
-  it("lets explicit shell env override pulled Vercel env when the local Codex bridge is disabled", async () => {
+  it("lets explicit shell model env override pulled Vercel env on the hosted provider path", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 301 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
-    const configModule = await import("./config.ts");
-    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
-      ...defaultConfig,
-      localCodexBridge: false,
-    });
-    vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
+    vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "vercel-ai-gateway");
     vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-4.1-mini");
 
     const environmentModule = await import("./environment.ts");
@@ -1228,7 +1101,7 @@ describe("hosted local dev stack", () => {
       expect.any(Array),
       expect.objectContaining({
         HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       }),
       expect.any(Object),
     );

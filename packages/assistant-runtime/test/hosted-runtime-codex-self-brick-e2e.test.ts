@@ -73,7 +73,7 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
     operatorHomeRoot: restored.operatorHomeRoot,
     runtimeEnv: createHostedCodexRuntimeEnv(),
   });
-  const nextConfig = await readFile(nextCodex.codexConfigPath!, "utf8");
+  const nextConfig = await readFile(nextCodex.codexConfigPath, "utf8");
 
   assert.match(nextConfig, /model_provider = "vercel-ai-gateway"/u);
   assert.match(nextConfig, /wire_api = "responses"/u);

@@ -93,13 +93,9 @@ describe("buildHostedRunnerContainerEnv", () => {
         enumerable: false,
         value: "vercel-ai-gateway",
       },
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: {
+      HOSTED_ASSISTANT_MODEL: {
         enumerable: false,
-        value: "bridge-token",
-      },
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: {
-        enumerable: false,
-        value: "tcp://127.0.0.1:4222",
+        value: "gpt-test",
       },
       NODE_ENV: {
         enumerable: false,
@@ -109,34 +105,62 @@ describe("buildHostedRunnerContainerEnv", () => {
         enumerable: false,
         value: "not-forwarded",
       },
+      VERCEL_AI_API_KEY: {
+        enumerable: false,
+        value: "gateway-key",
+      },
     });
 
     expect(Object.keys(source)).toEqual([]);
     expect(buildHostedRunnerContainerEnv(source)).toEqual({
+      HOSTED_ASSISTANT_MODEL: "gpt-test",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
       NODE_ENV: "development",
+      VERCEL_AI_API_KEY: "gateway-key",
     });
   });
 
-  it("forwards local Codex app-server assistant config into local runner containers", () => {
+  it("rejects deprecated local Codex app-server bridge config", () => {
+    expect(() =>
+      buildHostedRunnerContainerEnv({
+        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
+        NODE_ENV: "development",
+        VERCEL_AI_API_KEY: "gateway-key",
+      })
+    ).toThrow(
+      "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN, MURPH_DEV_CODEX_APP_SERVER_PROXY_URL are no longer supported for hosted runner config",
+    );
+  });
+
+  it("rejects the removed local-codex hosted assistant provider", () => {
+    expect(() =>
+      buildHostedRunnerContainerEnv({
+        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        HOSTED_ASSISTANT_PROVIDER: "local-codex",
+        NODE_ENV: "development",
+        VERCEL_AI_API_KEY: "gateway-key",
+      })
+    ).toThrow(
+      "HOSTED_ASSISTANT_PROVIDER must be vercel-ai-gateway for hosted runner execution.",
+    );
+  });
+
+  it("forwards Vercel AI Gateway assistant config into runner containers", () => {
     expect(buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "local-codex",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       NODE_ENV: "development",
       VERCEL_AI_API_KEY: "gateway-key",
     })).toEqual({
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "local-codex",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
       NODE_ENV: "development",
       VERCEL_AI_API_KEY: "gateway-key",
     });
@@ -177,8 +201,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
@@ -190,9 +212,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]:
-        "tcp://host.docker.internal:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         "http://host.docker.internal:4111/v1",
       NODE_ENV: "production",
@@ -206,8 +225,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
@@ -218,8 +235,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
-      [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4222",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
@@ -235,12 +250,12 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       NODE_ENV: "production",
-      VERCEL_AI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "fixture-vercel-key",
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
-      VERCEL_AI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "fixture-vercel-key",
     });
   });
 
@@ -319,14 +334,14 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
-      VERCEL_AI_API_KEY: "sk-user",
+      VERCEL_AI_API_KEY: "fixture-user-key",
       TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-user",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
     })).toEqual({
-      VERCEL_AI_API_KEY: "sk-user",
+      VERCEL_AI_API_KEY: "fixture-user-key",
     });
   });
 
@@ -536,17 +551,17 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       },
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "fixture-worker-key",
       },
       runnerSecrets: {
         CUSTOM_API_KEY: "custom-user",
-        VERCEL_AI_API_KEY: "sk-user",
+        VERCEL_AI_API_KEY: "fixture-user-key",
         VENICE_API_KEY: "venice-user",
       },
     })).toMatchObject({
       commitTimeoutMs: 45_000,
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "fixture-worker-key",
       },
       resolvedConfig: {
         channelCapabilities: {
@@ -557,7 +572,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       },
       userEnv: {
         CUSTOM_API_KEY: "custom-user",
-        VERCEL_AI_API_KEY: "sk-user",
+        VERCEL_AI_API_KEY: "fixture-user-key",
       },
     });
   });
@@ -607,7 +622,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("treats explicit platform env as platform-owned and does not backfill missing keys from forwarded env", () => {
     expect(buildHostedRunnerJobRuntime({
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "fixture-worker-key",
         TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
         TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       },
@@ -619,7 +634,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toMatchObject({
       commitTimeoutMs: 30_000,
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "fixture-worker-key",
       },
       platformEnv: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
@@ -642,12 +657,12 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
-        VERCEL_AI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "fixture-worker-key",
       },
       runnerSecrets: {},
     })).toMatchObject({
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "fixture-worker-key",
       },
       platformEnv: {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
@@ -850,13 +865,13 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
     expect(buildHostedRunnerChildRuntimeEnv({
       ambientSource: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        VERCEL_AI_API_KEY: "sk-test",
+        VERCEL_AI_API_KEY: "fixture-vercel-key",
       },
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
-      VERCEL_AI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "fixture-vercel-key",
     });
   });
 
@@ -871,13 +886,13 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
         HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        VERCEL_AI_API_KEY: "sk-test",
+        VERCEL_AI_API_KEY: "fixture-vercel-key",
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
     })).toEqual({
-      VERCEL_AI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "fixture-vercel-key",
     });
   });
 });

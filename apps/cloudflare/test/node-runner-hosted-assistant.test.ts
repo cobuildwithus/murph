@@ -30,19 +30,19 @@ describe("hosted assistant runner env policy", () => {
     });
   });
 
-  it("does not forward unsupported hosted assistant seed vars", () => {
+  it("does not forward unsupported hosted assistant api key alias vars", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "PROVIDER_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "legacy",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       PROVIDER_API_KEY: "secret-value",
     });
 
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
-    expect(env.HOSTED_ASSISTANT_MODEL).toBeUndefined();
-    expect(env.HOSTED_ASSISTANT_PROVIDER).toBeUndefined();
-    expect(env.HOSTED_ASSISTANT_REASONING_EFFORT).toBeUndefined();
+    expect(env.HOSTED_ASSISTANT_MODEL).toBe("gpt-4.1-mini");
+    expect(env.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
+    expect(env.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(env.PROVIDER_API_KEY).toBeUndefined();
   });
 

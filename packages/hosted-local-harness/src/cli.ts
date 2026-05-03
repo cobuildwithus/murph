@@ -320,9 +320,6 @@ function redactHostedLocalDoctorConfig(
   return {
     ...config,
     databaseUrlOverride: config.databaseUrlOverride ? "[redacted]" : null,
-    localCodexCommand: config.localCodexCommand.includes("/")
-      ? "<configured-command>"
-      : config.localCodexCommand,
     workerPersistDir: config.workerPersistDir.startsWith("/")
       ? "<configured-path>"
       : config.workerPersistDir,
