@@ -1,6 +1,6 @@
 # Hosted mailbox fetch retry
 
-Status: active
+Status: completed
 Created: 2026-05-04
 Updated: 2026-05-04
 
@@ -47,3 +47,4 @@ Updated: 2026-05-04
 
 - Commands to run: focused `apps/cloudflare` test for `runner-platform`, plus routed typecheck/test lane as time permits.
 - Expected outcomes: retry tests pass; no sensitive data appears in redacted log assertions.
+Completed: 2026-05-04

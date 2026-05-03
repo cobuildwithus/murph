@@ -693,6 +693,173 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("retries replay-safe hosted mailbox fetch failures once on the signed direct web-control route", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw new Error("fetch failed");
+      }
+
+      return new Response(JSON.stringify({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const result = await platform.mailboxPort!.fetch({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_direct_retry",
+    });
+
+    expect(result.items).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retriedRequest = requireFetchRequest(
+      fetchMock.mock.calls[1],
+      "retried direct mailbox fetch",
+    );
+    expect(String(retriedRequest.url)).toBe(
+      "https://web.example.test/api/internal/hosted-mailbox/fetch",
+    );
+    expect(retriedRequest.method).toBe("POST");
+    expect(retriedRequest.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(retriedRequest.headers.get("x-hosted-execution-signing-key-id")).toBe("v1");
+    expect(retriedRequest.headers.get("x-hosted-execution-signature")).toMatch(
+      /^[A-Za-z0-9\-_]+$/u,
+    );
+  });
+
+  it("retries replay-safe hosted mailbox fetch TimeoutError failures once", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        const error = new Error("The operation timed out.");
+        error.name = "TimeoutError";
+        throw error;
+      }
+
+      return new Response(JSON.stringify({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.mailboxPort!.fetch({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_timeout_retry",
+    });
+
+    expect(result.items).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry replay-safe hosted mailbox fetch AbortError failures", async () => {
+    const fetchMock = vi.fn(async () => {
+      const error = new Error("The operation was aborted.");
+      error.name = "AbortError";
+      throw error;
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await expect(platform.mailboxPort!.fetch({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_abort",
+    })).rejects.toThrow("Hosted mailbox fetch request failed. The operation was aborted.");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries replay-safe hosted mailbox fetch HTTP 503 responses once", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response("try again", {
+          headers: {
+            "content-type": "text/plain; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+
+      return new Response(JSON.stringify({
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.mailboxPort!.fetch({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_http_retry",
+    });
+
+    expect(result.items).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("retries replay-safe hosted mailbox payload fetch transport failures once", async () => {
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
