@@ -207,18 +207,21 @@ export const assistantCodexModelTargetSchema = z
 export const assistantModelTargetSchema = assistantCodexModelTargetSchema
 const assistantThreadInstructionsFingerprintPattern =
   /^thread-instructions-v1:[a-f0-9]{64}:[a-f0-9]{64}$/u
-const assistantThreadInstructionsFingerprintSchema = z
-  .string()
-  .trim()
-  .max(160)
-  .regex(assistantThreadInstructionsFingerprintPattern)
+const assistantThreadInstructionsFingerprintSchema = z.preprocess(
+  (value) => normalizeAssistantThreadInstructionsFingerprint(value),
+  z
+    .string()
+    .max(160)
+    .regex(assistantThreadInstructionsFingerprintPattern)
+    .nullable(),
+)
 
 export const assistantSessionResumeStateSchema = z
   .object({
     providerSessionId: z.string().min(1).nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),
     threadInstructionsFingerprint:
-      assistantThreadInstructionsFingerprintSchema.nullable().optional(),
+      assistantThreadInstructionsFingerprintSchema.optional(),
   })
   .strict()
 
