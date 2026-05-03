@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
-  conversationCaptureRefFromCapture,
+  assistantInputConversationRefFromCapture,
   isSameAssistantConversationCapture,
 } from '../src/assistant/conversation-ref.ts'
 
@@ -32,7 +32,7 @@ function createCaptureSummary(
   }
 }
 
-describe('conversationCaptureRefFromCapture', () => {
+describe('assistantInputConversationRefFromCapture', () => {
   it('normalizes the capture-based conversation identity', () => {
     const capture = createCaptureSummary({
       source: 'email',
@@ -43,7 +43,7 @@ describe('conversationCaptureRefFromCapture', () => {
       threadIsDirect: false,
     })
 
-    expect(conversationCaptureRefFromCapture(capture)).toEqual({
+    expect(assistantInputConversationRefFromCapture(capture)).toEqual({
       accountId: 'inbox@example.com',
       actorId: 'sender@example.com',
       actorIsSelf: true,

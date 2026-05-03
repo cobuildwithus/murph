@@ -52,7 +52,7 @@ export interface ConversationLocatorResolution {
   explicitAlias: string | null
 }
 
-export interface AssistantConversationCaptureRef {
+export interface AssistantInputConversationRef {
   accountId: string | null
   actorId: string | null
   actorIsSelf: boolean
@@ -187,28 +187,34 @@ export function conversationRefFromCapture(input: {
   threadId?: string | null
   threadIsDirect?: boolean | null
 }): ConversationRef {
-  const captureRef = conversationCaptureRefFromCapture(input)
+  return conversationRefFromAssistantInputConversation(
+    assistantInputConversationRefFromCapture(input),
+  )
+}
 
+export function conversationRefFromAssistantInputConversation(
+  input: AssistantInputConversationRef,
+): ConversationRef {
   return normalizeConversationRef({
-    channel: captureRef.source,
+    channel: input.source,
     identityId:
-      captureRef.source === 'email' || captureRef.source === 'linq'
-        ? captureRef.accountId
+      input.source === 'email' || input.source === 'linq'
+        ? input.accountId
         : null,
-    participantId: captureRef.actorId,
-    threadId: captureRef.threadId,
-    directness: conversationDirectnessFromThreadIsDirect(captureRef.threadIsDirect),
+    participantId: input.actorId,
+    threadId: input.threadId,
+    directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
   })
 }
 
-export function conversationCaptureRefFromCapture(input: {
+export function assistantInputConversationRefFromCapture(input: {
   accountId?: string | null
   actorId?: string | null
   actorIsSelf?: boolean | null
   source?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
-}): AssistantConversationCaptureRef {
+}): AssistantInputConversationRef {
   return {
     accountId: normalizeNullableString(input.accountId),
     actorId: normalizeNullableString(input.actorId),
@@ -221,8 +227,8 @@ export function conversationCaptureRefFromCapture(input: {
 }
 
 export function isSameAssistantConversationRef(
-  left: AssistantConversationCaptureRef | null | undefined,
-  right: AssistantConversationCaptureRef | null | undefined,
+  left: AssistantInputConversationRef | null | undefined,
+  right: AssistantInputConversationRef | null | undefined,
 ): boolean {
   if (!left || !right) {
     return false
@@ -257,8 +263,8 @@ export function isSameAssistantConversationCapture(
   },
 ): boolean {
   return isSameAssistantConversationRef(
-    conversationCaptureRefFromCapture(left),
-    conversationCaptureRefFromCapture(right),
+    assistantInputConversationRefFromCapture(left),
+    assistantInputConversationRefFromCapture(right),
   )
 }
 

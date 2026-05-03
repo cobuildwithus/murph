@@ -1,8 +1,8 @@
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
-import type { AssistantConversationCaptureRef } from '../conversation-ref.js'
 import type {
   AssistantInputAttachmentDescriptor,
+  AssistantInputConversationRef,
   AssistantInputProjectionStatus,
   AssistantInputReplyTarget,
   AssistantInputSourceMetadata,
@@ -41,7 +41,7 @@ export interface AssistantAutoReplyPromptEnrichment {
 export interface AssistantAutoReplyPromptInput {
   actorIsSelf: boolean
   attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
-  conversation: AssistantConversationCaptureRef
+  conversation: AssistantInputConversationRef
   enrichment: AssistantAutoReplyPromptEnrichment | null
   inputId: string
   occurredAt: string

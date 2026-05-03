@@ -140,9 +140,9 @@ function createInputSummary(
   const capture = createListCapture(overrides)
   return {
     inputId: overrides.inputId ?? capture.captureId,
-    projectionCaptureId:
-      'projectionCaptureId' in overrides
-        ? overrides.projectionCaptureId ?? null
+    optionalInboxCaptureId:
+      'optionalInboxCaptureId' in overrides
+        ? overrides.optionalInboxCaptureId ?? null
         : capture.captureId,
     source: capture.source,
     conversation: overrides.conversation ?? {
@@ -574,7 +574,7 @@ describe('assistant auto-reply grouping', () => {
     })
 
     expect(result.endIndex).toBe(1)
-    expect(result.items.map((item) => item.summary.projectionCaptureId)).toEqual([
+    expect(result.items.map((item) => item.summary.optionalInboxCaptureId)).toEqual([
       'email-1',
       'email-2',
     ])
@@ -611,7 +611,7 @@ describe('assistant auto-reply grouping', () => {
     })
 
     expect(result.endIndex).toBe(1)
-    expect(result.items.map((item) => item.summary.projectionCaptureId)).toEqual([
+    expect(result.items.map((item) => item.summary.optionalInboxCaptureId)).toEqual([
       'linq-1',
       'linq-2',
     ])
@@ -640,7 +640,7 @@ describe('assistant auto-reply grouping', () => {
     })
 
     expect(result.endIndex).toBe(1)
-    expect(result.items.map((item) => item.summary.projectionCaptureId)).toEqual([
+    expect(result.items.map((item) => item.summary.optionalInboxCaptureId)).toEqual([
       'capture-1',
       'capture-2',
     ])

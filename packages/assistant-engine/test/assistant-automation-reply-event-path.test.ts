@@ -4,8 +4,8 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxServices } from '@murphai/inbox-services'
-import type { AssistantConversationCaptureRef } from '../src/assistant/conversation-ref.ts'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
+import type { AssistantInputConversationRef } from '../src/assistant/input-store.ts'
 import type {
   AssistantInputProjectionStatus,
   AssistantInputSourceMetadata,
@@ -64,7 +64,7 @@ describe('assistant auto-reply event-first path', () => {
     const onEvent = vi.fn()
     const staleProjectionCaptureId = 'capture_stale_projection'
     const candidate = createAssistantInputCandidate({
-      projectionCaptureId: staleProjectionCaptureId,
+      optionalInboxCaptureId: staleProjectionCaptureId,
       source: 'email',
       text: 'Received an email message.\nEmail subject - status check',
       threadIsDirect: true,
@@ -128,7 +128,7 @@ describe('assistant auto-reply event-first path', () => {
   it('rethrows AbortError from inbox projection enrichment', async () => {
     const vault = await createTempVault()
     const candidate = createAssistantInputCandidate({
-      projectionCaptureId: 'capture_abort_projection',
+      optionalInboxCaptureId: 'capture_abort_projection',
       source: 'email',
       text: 'Received an email message.',
       threadIsDirect: true,
@@ -154,7 +154,7 @@ describe('assistant auto-reply event-first path', () => {
   it('sends degraded email body-unavailable prompts to Codex', async () => {
     const vault = await createTempVault()
     const candidate = createAssistantInputCandidate({
-      projectionCaptureId: null,
+      optionalInboxCaptureId: null,
       source: 'email',
       sourceMetadata: {
         kind: 'email',
@@ -219,7 +219,7 @@ function createReplyContext(candidate: AssistantInputCandidate) {
 
 function createAssistantInputCandidate(input: {
   inputId?: string
-  projectionCaptureId: string | null
+  optionalInboxCaptureId: string | null
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus
   source: string
@@ -229,7 +229,7 @@ function createAssistantInputCandidate(input: {
 }): AssistantInputCandidate {
   const inputId = input.inputId ?? 'ain_11111111111111111111111111111111'
   const occurredAt = '2026-04-08T00:00:00.000Z'
-  const conversation: AssistantConversationCaptureRef = {
+  const conversation: AssistantInputConversationRef = {
     accountId: 'identity-1',
     actorId: 'actor-1',
     actorIsSelf: false,
@@ -240,7 +240,7 @@ function createAssistantInputCandidate(input: {
 
   return {
     acceptedInput: {
-      captureIds: input.projectionCaptureId ? [input.projectionCaptureId] : [],
+      captureIds: input.optionalInboxCaptureId ? [input.optionalInboxCaptureId] : [],
       contentRef: {
         kind: 'assistant-input-event',
         refId: inputId,
@@ -288,7 +288,7 @@ function createAssistantInputCandidate(input: {
       userMessageContent: null,
     },
     projection: {
-      captureId: input.projectionCaptureId,
+      captureId: input.optionalInboxCaptureId,
       reasonCode: input.projectionReasonCode ?? null,
       status: input.projectionStatus ?? 'succeeded',
     },

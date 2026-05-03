@@ -12,7 +12,7 @@ import type { AssistantStatePaths } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   isSameAssistantConversationCapture,
-  type AssistantConversationCaptureRef,
+  type AssistantInputConversationRef,
 } from './conversation-ref.js'
 import { isMissingFileError, resolveTimestamp } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
@@ -26,7 +26,7 @@ export const ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT = 32
 const ASSISTANT_INPUT_EVENT_REPLY_TARGET_MAX_LENGTH = 8_192
 const ASSISTANT_INPUT_EVENT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512
 
-export type AssistantInputConversationRef = AssistantConversationCaptureRef
+export type { AssistantInputConversationRef } from './conversation-ref.js'
 export type AssistantInputProjectionStatus =
   | 'not_attempted'
   | 'pending'
