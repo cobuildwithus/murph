@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import type {
   HostedInvitePhoneAuthTarget,
@@ -33,6 +33,11 @@ interface InvitePhoneCodePayload {
   sendAttemptId: string;
 }
 
+interface QueuedInvitePhoneCodeSend {
+  inviteCode: string;
+  phoneHint: string;
+}
+
 interface HostedInvitePhoneAuthProps {
   inviteCode: string;
   phoneAuthTarget?: HostedInvitePhoneAuthTarget | null;
@@ -51,11 +56,15 @@ export function HostedInvitePhoneAuth({
   onSignOut,
 }: HostedInvitePhoneAuthProps) {
   const [manualEntryVisible, setManualEntryVisible] = useState(false);
+  const [queuedInvitePhoneCodeSend, setQueuedInvitePhoneCodeSend] =
+    useState<QueuedInvitePhoneCodeSend | null>(null);
+  const invitePhoneCodeSendInFlightRef = useRef(false);
   const controller = useHostedPhoneAuthController({
     inviteCode,
     intent: "auth",
     onCompleted,
     onSignOut: async () => {
+      setQueuedInvitePhoneCodeSend(null);
       setManualEntryVisible(false);
       await onSignOut?.();
     },
@@ -83,6 +92,31 @@ export function HostedInvitePhoneAuth({
   async function handleInviteSendCode() {
     controller.setErrorMessage(null);
 
+    if (sendCodeGated) {
+      setQueuedInvitePhoneCodeSend(null);
+      return;
+    }
+
+    if (!controller.privyReady) {
+      if (savedPhoneHint) {
+        setQueuedInvitePhoneCodeSend({
+          inviteCode,
+          phoneHint: savedPhoneHint,
+        });
+      }
+      return;
+    }
+
+    await sendInvitePhoneCode();
+  }
+
+  async function sendInvitePhoneCode() {
+    if (invitePhoneCodeSendInFlightRef.current) {
+      return;
+    }
+
+    invitePhoneCodeSendInFlightRef.current = true;
+    setQueuedInvitePhoneCodeSend(null);
     controller.setPendingAction("send-code");
 
     try {
@@ -124,8 +158,45 @@ export function HostedInvitePhoneAuth({
       controller.setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
     } finally {
       controller.setPendingAction(null);
+      invitePhoneCodeSendInFlightRef.current = false;
     }
   }
+
+  const drainQueuedInvitePhoneCodeSendEffect = useEffectEvent(() => {
+    void sendInvitePhoneCode();
+  });
+
+  useEffect(() => {
+    if (!queuedInvitePhoneCodeSend) {
+      return;
+    }
+
+    if (
+      !inviteShortcutActive
+      || sendCodeGated
+      || controller.authenticatedView !== null
+      || queuedInvitePhoneCodeSend.inviteCode !== inviteCode
+      || queuedInvitePhoneCodeSend.phoneHint !== savedPhoneHint
+    ) {
+      setQueuedInvitePhoneCodeSend(null);
+      return;
+    }
+
+    if (!controller.privyReady || controller.pendingAction !== null) {
+      return;
+    }
+
+    drainQueuedInvitePhoneCodeSendEffect();
+  }, [
+    controller.pendingAction,
+    controller.privyReady,
+    controller.authenticatedView,
+    inviteShortcutActive,
+    inviteCode,
+    queuedInvitePhoneCodeSend,
+    savedPhoneHint,
+    sendCodeGated,
+  ]);
 
   async function handleResendCode() {
     if (inviteShortcutActive && controller.sharedFlowProps.activeAttempt) {
@@ -137,6 +208,7 @@ export function HostedInvitePhoneAuth({
   }
 
   function handleUseDifferentNumber() {
+    setQueuedInvitePhoneCodeSend(null);
     controller.resetPhoneAuthFlow();
     setManualEntryVisible(true);
   }

@@ -104,8 +104,10 @@ export function useHostedPhoneAuthController({
   const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneVerificationAttempt, setPhoneVerificationAttempt] =
     useState<HostedPhoneVerificationAttempt | null>(null);
+  const [queuedPhoneCodeSend, setQueuedPhoneCodeSend] = useState<string | null>(null);
   const lastAutoSubmittedCodeRef = useRef<string | null>(null);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
+  const phoneCodeSendInFlightRef = useRef(false);
 
   const selectedPhoneCountry = useMemo(
     () =>
@@ -137,7 +139,7 @@ export function useHostedPhoneAuthController({
   }, [suppressAuthenticatedSessionIssue, user]);
 
   const flowDisabled = !ready || pendingAction !== null;
-  const phoneEntrySendCodeDisabled = flowDisabled || !normalizedPhoneNumber;
+  const phoneEntrySendCodeDisabled = pendingAction !== null || !normalizedPhoneNumber;
   const showAuthenticatedLoadingState = authenticated && finalizationState !== "idle";
   const allowAuthenticatedSessionStateUi = !suppressAuthenticatedSessionIssue;
   const showAuthenticatedManualResumeState =
@@ -193,8 +195,14 @@ export function useHostedPhoneAuthController({
     onCodeChange: (value: string) => {
       setCode(normalizeHostedPhoneVerificationCode(value));
     },
-    onPhoneCountryChange: setPhoneCountryCode,
-    onPhoneNumberChange: setPhoneNumber,
+    onPhoneCountryChange: (code: string) => {
+      setQueuedPhoneCodeSend(null);
+      setPhoneCountryCode(code);
+    },
+    onPhoneNumberChange: (value: string) => {
+      setQueuedPhoneCodeSend(null);
+      setPhoneNumber(value);
+    },
     onResendCode: handleResendCode,
     onSubmitPhoneEntry: handleSendCode,
     onUseDifferentNumber: handleResetPhoneAuthFlow,
@@ -211,10 +219,16 @@ export function useHostedPhoneAuthController({
     setRequiresAuthenticatedSessionRestart(false);
     setCode("");
     setPhoneVerificationAttempt(null);
+    setQueuedPhoneCodeSend(null);
   }
 
   const submitVerificationCodeEffect = useEffectEvent((submittedCode: string) => {
     void handleVerifyCode(submittedCode);
+  });
+  const drainQueuedPhoneCodeSendEffect = useEffectEvent((queuedPhoneNumber: string) => {
+    void runPhoneCodeSend(queuedPhoneNumber, {
+      resetAuthenticatedSessionRestart: true,
+    });
   });
 
   useEffect(() => {
@@ -242,6 +256,23 @@ export function useHostedPhoneAuthController({
     submitVerificationCodeEffect(normalizedVerificationCode);
   }, [normalizedVerificationCode, pendingAction, phoneVerificationAttempt]);
 
+  useEffect(() => {
+    if (!queuedPhoneCodeSend || pendingAction !== null) {
+      return;
+    }
+
+    if (intent !== "link" && authenticated) {
+      setQueuedPhoneCodeSend(null);
+      return;
+    }
+
+    if (!ready) {
+      return;
+    }
+
+    drainQueuedPhoneCodeSendEffect(queuedPhoneCodeSend);
+  }, [authenticated, intent, pendingAction, queuedPhoneCodeSend, ready]);
+
   async function handleSendCode(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
@@ -264,20 +295,53 @@ export function useHostedPhoneAuthController({
       return;
     }
 
-    await runHostedPhonePendingAction({
-      action: "send-code",
-      onBeforeAction: () => {
-        setErrorMessage(null);
-        setRequiresAuthenticatedSessionRestart(false);
-      },
-      onError: (error) => {
-        setErrorMessage(
-          toErrorMessage(error, "We could not send a verification code."),
-        );
-      },
-      run: () => sendVerificationCode(nextPhoneNumber),
-      setPendingAction,
+    if (!ready) {
+      setErrorMessage(null);
+      setRequiresAuthenticatedSessionRestart(false);
+      setQueuedPhoneCodeSend(nextPhoneNumber);
+      return;
+    }
+
+    await runPhoneCodeSend(nextPhoneNumber, {
+      resetAuthenticatedSessionRestart: true,
     });
+  }
+
+  async function runPhoneCodeSend(
+    nextPhoneNumber: string,
+    {
+      resetAuthenticatedSessionRestart = false,
+    }: {
+      resetAuthenticatedSessionRestart?: boolean;
+    } = {},
+  ) {
+    if (phoneCodeSendInFlightRef.current) {
+      return;
+    }
+
+    phoneCodeSendInFlightRef.current = true;
+    setQueuedPhoneCodeSend(null);
+
+    try {
+      await runHostedPhonePendingAction({
+        action: "send-code",
+        onBeforeAction: () => {
+          setErrorMessage(null);
+          if (resetAuthenticatedSessionRestart) {
+            setRequiresAuthenticatedSessionRestart(false);
+          }
+        },
+        onError: (error) => {
+          setErrorMessage(
+            toErrorMessage(error, "We could not send a verification code."),
+          );
+        },
+        run: () => sendVerificationCode(nextPhoneNumber),
+        setPendingAction,
+      });
+    } finally {
+      phoneCodeSendInFlightRef.current = false;
+    }
   }
 
   async function sendVerificationCode(nextPhoneNumber: string) {
@@ -305,19 +369,13 @@ export function useHostedPhoneAuthController({
     });
 
     if (resendTarget.kind === "active-attempt") {
-      await runHostedPhonePendingAction({
-        action: "send-code",
-        onBeforeAction: () => {
-          setErrorMessage(null);
-        },
-        onError: (error) => {
-          setErrorMessage(
-            toErrorMessage(error, "We could not send a verification code."),
-          );
-        },
-        run: () => sendVerificationCode(resendTarget.phoneNumber),
-        setPendingAction,
-      });
+      if (!ready) {
+        setErrorMessage(null);
+        setQueuedPhoneCodeSend(resendTarget.phoneNumber);
+        return;
+      }
+
+      await runPhoneCodeSend(resendTarget.phoneNumber);
       return;
     }
 

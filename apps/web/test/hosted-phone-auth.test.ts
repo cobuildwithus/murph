@@ -419,6 +419,419 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
+  it("queues manual phone verification sends until Privy initializes", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: {
+        activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
+        onPhoneNumberChange: (value: string) => void;
+        pendingAction: string | null;
+        phoneNumber: string;
+        sendCodeDisabled: boolean;
+        onSubmitPhoneEntry: (event?: React.FormEvent<HTMLFormElement>) => void;
+      }) {
+        return React.createElement(
+          "div",
+          {
+            "data-active-attempt": props.activeAttempt?.maskedPhoneNumber ?? "",
+            "data-pending-action": props.pendingAction ?? "",
+            "data-phone-number": props.phoneNumber,
+            "data-send-disabled": props.sendCodeDisabled ? "yes" : "no",
+          },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-set-phone": "true",
+              onClick: () => props.onPhoneNumberChange("4155552671"),
+            },
+            "Set phone",
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-send-code": "true",
+              disabled: props.sendCodeDisabled,
+              onClick: () => props.onSubmitPhoneEntry(),
+            },
+            props.pendingAction === "send-code"
+              ? "Sending code..."
+              : "Send verification code",
+          ),
+        );
+      },
+      HostedPhoneAuthScaffold({
+        children,
+        errorMessage,
+      }: {
+        children: React.ReactNode;
+        errorMessage: string | null;
+      }) {
+        return React.createElement(
+          React.Fragment,
+          null,
+          errorMessage ? React.createElement("p", null, errorMessage) : null,
+          children,
+        );
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return React.createElement("div", { "data-privy-captcha": "mounted" });
+      },
+    }));
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const readyHarnessState: {
+      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
+    } = {
+      setPrivyReady: null,
+    };
+    function ReadyHarness() {
+      const [privyReady, setReady] = React.useState(false);
+      readyHarnessState.setPrivyReady = setReady;
+      mocks.usePrivy.mockReturnValue({
+        authenticated: false,
+        logout: mocks.logout,
+        ready: privyReady,
+      });
+      return React.createElement(HostedPhoneAuth, null);
+    }
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(ReadyHarness),
+    );
+
+    try {
+      const setPhoneButton = container.querySelector(
+        "[data-set-phone]",
+      ) as HTMLButtonElement | null;
+      assert.ok(setPhoneButton);
+
+      await act(async () => {
+        setPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      assert.equal(
+        container.querySelector("[data-phone-number]")?.getAttribute("data-phone-number"),
+        "4155552671",
+      );
+      assert.equal(
+        container.querySelector("[data-send-disabled]")?.getAttribute("data-send-disabled"),
+        "no",
+      );
+
+      const sendCodeButton = container.querySelector(
+        "[data-send-code]",
+      ) as HTMLButtonElement | null;
+      assert.ok(sendCodeButton);
+      assert.equal(sendCodeButton.disabled, false);
+
+      await act(async () => {
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects(2);
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.equal(
+        container.querySelector("[data-pending-action]")?.getAttribute("data-pending-action"),
+        "",
+      );
+      assert.doesNotMatch(container.textContent ?? "", /Sending code\.\.\./);
+
+      const updatePrivyReady = readyHarnessState.setPrivyReady;
+      assert.ok(updatePrivyReady);
+      await act(async () => {
+        updatePrivyReady(true);
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+14155552671",
+      });
+      assert.equal(
+        container.querySelector("[data-active-attempt]")?.getAttribute("data-active-attempt"),
+        "*** 2671",
+      );
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
+  it("drops queued manual auth sends when Privy resolves to an authenticated resume state", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: {
+        onPhoneNumberChange: (value: string) => void;
+        sendCodeDisabled: boolean;
+        onSubmitPhoneEntry: (event?: React.FormEvent<HTMLFormElement>) => void;
+      }) {
+        return React.createElement(
+          "div",
+          {
+            "data-send-disabled": props.sendCodeDisabled ? "yes" : "no",
+          },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-set-phone": "true",
+              onClick: () => props.onPhoneNumberChange("4155552671"),
+            },
+            "Set phone",
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-send-code": "true",
+              disabled: props.sendCodeDisabled,
+              onClick: () => props.onSubmitPhoneEntry(),
+            },
+            "Send verification code",
+          ),
+        );
+      },
+      HostedPhoneAuthScaffold({
+        children,
+        errorMessage,
+        view,
+      }: {
+        children: React.ReactNode;
+        errorMessage: string | null;
+        view: string | null;
+      }) {
+        if (view) {
+          return React.createElement("div", { "data-auth-view": view });
+        }
+
+        return React.createElement(
+          React.Fragment,
+          null,
+          errorMessage ? React.createElement("p", null, errorMessage) : null,
+          children,
+        );
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return React.createElement("div", { "data-privy-captcha": "mounted" });
+      },
+    }));
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const readyHarnessState: {
+      setAuthenticated: React.Dispatch<React.SetStateAction<boolean>> | null;
+      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
+    } = {
+      setAuthenticated: null,
+      setPrivyReady: null,
+    };
+    function ReadyHarness() {
+      const [authenticated, setAuthenticated] = React.useState(false);
+      const [privyReady, setReady] = React.useState(false);
+      readyHarnessState.setAuthenticated = setAuthenticated;
+      readyHarnessState.setPrivyReady = setReady;
+      mocks.usePrivy.mockReturnValue({
+        authenticated,
+        logout: mocks.logout,
+        ready: privyReady,
+      });
+      return React.createElement(HostedPhoneAuth, null);
+    }
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(ReadyHarness),
+    );
+
+    try {
+      const setPhoneButton = container.querySelector(
+        "[data-set-phone]",
+      ) as HTMLButtonElement | null;
+      const sendCodeButton = container.querySelector(
+        "[data-send-code]",
+      ) as HTMLButtonElement | null;
+      assert.ok(setPhoneButton);
+      assert.ok(sendCodeButton);
+
+      await act(async () => {
+        setPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      assert.equal(
+        container.querySelector("[data-send-disabled]")?.getAttribute("data-send-disabled"),
+        "no",
+      );
+
+      await act(async () => {
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects(2);
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      const updateAuthenticated = readyHarnessState.setAuthenticated;
+      const updatePrivyReady = readyHarnessState.setPrivyReady;
+      assert.ok(updateAuthenticated);
+      assert.ok(updatePrivyReady);
+      await act(async () => {
+        updateAuthenticated(true);
+        updatePrivyReady(true);
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.equal(
+        container.querySelector("[data-auth-view]")?.getAttribute("data-auth-view"),
+        "manual-resume",
+      );
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
+  it("drains queued manual link-phone sends when Privy initializes while authenticated", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: {
+        activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
+        onPhoneNumberChange: (value: string) => void;
+        sendCodeDisabled: boolean;
+        onSubmitPhoneEntry: (event?: React.FormEvent<HTMLFormElement>) => void;
+      }) {
+        return React.createElement(
+          "div",
+          {
+            "data-active-attempt": props.activeAttempt?.maskedPhoneNumber ?? "",
+            "data-send-disabled": props.sendCodeDisabled ? "yes" : "no",
+          },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-set-phone": "true",
+              onClick: () => props.onPhoneNumberChange("4155552671"),
+            },
+            "Set phone",
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-send-code": "true",
+              disabled: props.sendCodeDisabled,
+              onClick: () => props.onSubmitPhoneEntry(),
+            },
+            "Send verification code",
+          ),
+        );
+      },
+      HostedPhoneAuthScaffold({
+        children,
+        view,
+      }: {
+        children: React.ReactNode;
+        view: string | null;
+      }) {
+        if (view) {
+          return React.createElement("div", { "data-auth-view": view });
+        }
+
+        return React.createElement(React.Fragment, null, children);
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return React.createElement("div", { "data-privy-captcha": "mounted" });
+      },
+    }));
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const readyHarnessState: {
+      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
+    } = {
+      setPrivyReady: null,
+    };
+    function ReadyHarness() {
+      const [privyReady, setReady] = React.useState(false);
+      readyHarnessState.setPrivyReady = setReady;
+      mocks.usePrivy.mockReturnValue({
+        authenticated: true,
+        logout: mocks.logout,
+        ready: privyReady,
+      });
+      return React.createElement(HostedPhoneAuth, {
+        intent: "link",
+      });
+    }
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(ReadyHarness),
+    );
+
+    try {
+      const setPhoneButton = container.querySelector(
+        "[data-set-phone]",
+      ) as HTMLButtonElement | null;
+      const sendCodeButton = container.querySelector(
+        "[data-send-code]",
+      ) as HTMLButtonElement | null;
+      assert.ok(setPhoneButton);
+      assert.ok(sendCodeButton);
+      assert.equal(container.querySelector("[data-auth-view]"), null);
+
+      await act(async () => {
+        setPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      assert.equal(
+        container.querySelector("[data-send-disabled]")?.getAttribute("data-send-disabled"),
+        "no",
+      );
+
+      await act(async () => {
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects(2);
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      const updatePrivyReady = readyHarnessState.setPrivyReady;
+      assert.ok(updatePrivyReady);
+      await act(async () => {
+        updatePrivyReady(true);
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+14155552671",
+      });
+      assert.equal(
+        container.querySelector("[data-active-attempt]")?.getAttribute("data-active-attempt"),
+        "*** 2671",
+      );
+      assert.equal(container.querySelector("[data-auth-view]"), null);
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
   it("renders the explicit manual-resume banner for authenticated invite sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -745,7 +1158,7 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("lets saved invite phone verification send codes while Privy initializes", async () => {
+  it("queues saved invite phone verification sends until Privy initializes", async () => {
     vi.resetModules();
     vi.doMock("@/src/components/hosted-onboarding/hosted-verification-code-step", () => ({
       HostedVerificationCodeStep({ description }: { description: string }) {
@@ -757,11 +1170,6 @@ describe("HostedPhoneAuth", () => {
         );
       },
     }));
-    mocks.usePrivy.mockReturnValue({
-      authenticated: false,
-      logout: mocks.logout,
-      ready: false,
-    });
     const fetch = vi.fn(async (url: string | URL | Request) => {
       const requestUrl = typeof url === "string" ? url : url.toString();
 
@@ -793,30 +1201,55 @@ describe("HostedPhoneAuth", () => {
     mocks.sendCode.mockResolvedValue(undefined);
 
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
-    const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedInvitePhoneAuth, {
+    const readyHarnessState: {
+      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
+    } = {
+      setPrivyReady: null,
+    };
+    function ReadyHarness() {
+      const [privyReady, setReady] = React.useState(false);
+      readyHarnessState.setPrivyReady = setReady;
+      mocks.usePrivy.mockReturnValue({
+        authenticated: false,
+        logout: mocks.logout,
+        ready: privyReady,
+      });
+      return React.createElement(HostedInvitePhoneAuth, {
         inviteCode: "invite-code",
         phoneHint: "*** 0123",
-      }),
+      });
+    }
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(ReadyHarness),
     );
 
     try {
       assert.match(container.textContent ?? "", /\*\*\* 0123/);
-      const sendButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Send verification code") as
-          | HTMLButtonElement
-          | undefined;
-      assert.ok(sendButton);
+      const sendButton = findSendVerificationCodeButton(container);
       assert.equal(sendButton.disabled, false);
       assert.doesNotMatch(container.textContent ?? "", /Setting up\.\.\./);
       expect(fetch).not.toHaveBeenCalled();
 
       await act(async () => {
         sendButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await Promise.resolve();
-        await Promise.resolve();
+        sendButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects(2);
       });
 
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.equal(sendButton.disabled, false);
+      assert.doesNotMatch(container.textContent ?? "", /Sending code\.\.\./);
+
+      const updatePrivyReady = readyHarnessState.setPrivyReady;
+      assert.ok(updatePrivyReady);
+      await act(async () => {
+        updatePrivyReady(true);
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
       expect(mocks.sendCode).toHaveBeenCalledWith({
         phoneNumber: "+12025550123",
       });
@@ -830,6 +1263,159 @@ describe("HostedPhoneAuth", () => {
     } finally {
       await cleanup();
       vi.doUnmock("@/src/components/hosted-onboarding/hosted-verification-code-step");
+      vi.resetModules();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("drops queued saved invite sends when Privy resolves to an authenticated resume state", async () => {
+    vi.resetModules();
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = typeof url === "string" ? url : url.toString();
+
+      throw new Error(`Unexpected fetch ${requestUrl}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+    const readyHarnessState: {
+      setAuthenticated: React.Dispatch<React.SetStateAction<boolean>> | null;
+      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
+    } = {
+      setAuthenticated: null,
+      setPrivyReady: null,
+    };
+    function ReadyHarness() {
+      const [authenticated, setAuthenticated] = React.useState(false);
+      const [privyReady, setReady] = React.useState(false);
+      readyHarnessState.setAuthenticated = setAuthenticated;
+      readyHarnessState.setPrivyReady = setReady;
+      mocks.usePrivy.mockReturnValue({
+        authenticated,
+        logout: mocks.logout,
+        ready: privyReady,
+      });
+      return React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "*** 0123",
+      });
+    }
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(ReadyHarness),
+    );
+
+    try {
+      const sendButton = findSendVerificationCodeButton(container);
+      assert.equal(sendButton.disabled, false);
+
+      await act(async () => {
+        sendButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects(2);
+      });
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      const updateAuthenticated = readyHarnessState.setAuthenticated;
+      const updatePrivyReady = readyHarnessState.setPrivyReady;
+      assert.ok(updateAuthenticated);
+      assert.ok(updatePrivyReady);
+      await act(async () => {
+        updateAuthenticated(true);
+        updatePrivyReady(true);
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.match(container.textContent ?? "", /You already started logging in or signing up\./);
+      assert.doesNotMatch(container.textContent ?? "", /Verification code/);
+    } finally {
+      await cleanup();
+      vi.resetModules();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("drops queued saved invite sends when the invite target changes before Privy initializes", async () => {
+    vi.resetModules();
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = typeof url === "string" ? url : url.toString();
+
+      throw new Error(`Unexpected fetch ${requestUrl}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+    const readyHarnessState: {
+      setInviteTarget: React.Dispatch<React.SetStateAction<{
+        inviteCode: string;
+        phoneHint: string;
+      }>> | null;
+      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
+    } = {
+      setInviteTarget: null,
+      setPrivyReady: null,
+    };
+    function ReadyHarness() {
+      const [privyReady, setReady] = React.useState(false);
+      const [inviteTarget, setInviteTarget] = React.useState({
+        inviteCode: "invite-code",
+        phoneHint: "*** 0123",
+      });
+      readyHarnessState.setInviteTarget = setInviteTarget;
+      readyHarnessState.setPrivyReady = setReady;
+      mocks.usePrivy.mockReturnValue({
+        authenticated: false,
+        logout: mocks.logout,
+        ready: privyReady,
+      });
+      return React.createElement(HostedInvitePhoneAuth, inviteTarget);
+    }
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(ReadyHarness),
+    );
+
+    try {
+      const sendButton = findSendVerificationCodeButton(container);
+      assert.match(container.textContent ?? "", /\*\*\* 0123/);
+
+      await act(async () => {
+        sendButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await flushHostedPhoneAuthEffects(2);
+      });
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+
+      const updateInviteTarget = readyHarnessState.setInviteTarget;
+      const updatePrivyReady = readyHarnessState.setPrivyReady;
+      assert.ok(updateInviteTarget);
+      assert.ok(updatePrivyReady);
+      await act(async () => {
+        updateInviteTarget({
+          inviteCode: "next-invite-code",
+          phoneHint: "*** 9999",
+        });
+        await flushHostedPhoneAuthEffects(2);
+      });
+
+      assert.match(container.textContent ?? "", /\*\*\* 9999/);
+      assert.doesNotMatch(container.textContent ?? "", /\*\*\* 0123/);
+
+      await act(async () => {
+        updatePrivyReady(true);
+        await flushHostedPhoneAuthEffects();
+      });
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.match(container.textContent ?? "", /\*\*\* 9999/);
+      assert.doesNotMatch(container.textContent ?? "", /Verification code/);
+    } finally {
+      await cleanup();
       vi.resetModules();
       vi.unstubAllGlobals();
     }
@@ -2181,6 +2767,20 @@ describe("HostedPhoneAuth", () => {
     assert.equal(harness.controller.resetPhoneAuthFlow.mock.calls.length, 1);
   });
 });
+
+async function flushHostedPhoneAuthEffects(cycles = 4) {
+  for (let index = 0; index < cycles; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+function findSendVerificationCodeButton(container: HTMLElement): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")]
+    .find((candidate) => candidate.textContent === "Send verification code");
+
+  assert.ok(button);
+  return button;
+}
 
 async function loadHostedInvitePhoneAuthHarness(input?: {
   activeAttempt?: { maskedPhoneNumber: string; phoneNumber: string } | null;
