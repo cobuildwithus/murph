@@ -75,6 +75,31 @@ export async function sendHostedLinqReadReceipt(input: {
   };
 }
 
+export async function startHostedLinqTypingIndicator(input: {
+  chatId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<{
+  ok: boolean;
+  status: number;
+}> {
+  const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
+
+  const response = await fetchLinqApi({
+    apiBaseUrl,
+    apiToken,
+    method: "POST",
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/typing`,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+  };
+}
+
 export async function createHostedLinqChat(input: {
   from: string;
   idempotencyKey?: string | null;
