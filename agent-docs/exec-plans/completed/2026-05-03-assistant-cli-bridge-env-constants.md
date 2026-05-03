@@ -1,6 +1,6 @@
 # Align assistant CLI bridge env constants
 
-Status: active
+Status: completed
 Created: 2026-05-03
 Updated: 2026-05-03
 
@@ -40,19 +40,23 @@ Updated: 2026-05-03
 2. Risk: Importing the hosted bridge owner changes runtime behavior.
    Mitigation: Reuse only exported constants and keep the local env projection list unchanged.
 
-## Tasks
+## Outcome
 
-1. Register the plan/ledger row.
-2. Import shared constants and add the workspace dependency.
-3. Refresh the lockfile.
-4. Run focused verification plus dependency checks and audits.
-5. Close the plan and create a scoped commit.
+- `assistant-cli-access.ts` now imports the hosted bridge runtime marker, URL env, and token env constants from `@murphai/hosted-execution/cli-runtime-bridge`.
+- `HOSTED_RUNTIME_PROCESS_ENV_MARKER` remains exported as a compatibility alias.
+- `packages/assistant-engine` now declares the hosted-execution workspace dependency and project-reference edge.
+- The focused test now asserts the alias and uses the shared bridge constants when proving hosted env projection.
 
 ## Verification
 
-- Commands to run:
-  - `pnpm deps:guard`
-  - `pnpm deps:audit`
-  - `pnpm deps:ignored-builds`
-  - `pnpm typecheck`
-  - Focused assistant-engine test/coverage for `assistant-cli-access`.
+- `pnpm install --lockfile-only` passed.
+- `pnpm install` passed and materialized the new workspace link.
+- `pnpm deps:guard` passed.
+- `pnpm deps:ignored-builds` passed and reported the existing ignored build-script list.
+- `pnpm deps:audit` failed on existing unrelated workspace advisories for Playwright, Hono, Effect, lodash, defu, and Vite.
+- `pnpm --dir packages/assistant-engine typecheck` passed.
+- `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-cli-access.test.ts` passed.
+- `pnpm --dir packages/assistant-engine test:coverage` passed.
+- `pnpm typecheck` passed.
+- `pnpm --dir packages/cli verify:package-shape` failed before `pnpm install` because the new workspace symlink was not materialized, then passed after `pnpm install`.
+- Security/privacy review, coverage-write review, and final completion review returned no findings.
