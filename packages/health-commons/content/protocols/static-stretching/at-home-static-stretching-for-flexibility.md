@@ -538,12 +538,12 @@ protocol:
     - "Measure same time, side, warm-up state, footwear, and setup at least weekly."
     - "Log holds, seconds, intensity, symptoms, recent exercise, soreness, pain/injury changes, and measurement changes."
   tips:
-  - One target area at a time; too many areas blur attribution and raise burden.
-  - Same stretch position each session — do not mix techniques mid-run.
-  - Pre-measurement warm-up is fine only if repeated identically at baseline and follow-up.
-  - "Hamstrings: toe-touch or sit-and-reach. Ankle/calf: knee-to-wall. Shoulder: repeated reach if stretching that area."
-  - "High fall-risk, dizzy, frail, or floor-limited? Use seated or fully supported positions."
-  - Keep rehab, foam rolling, PNF, yoga, dynamic stretching, and strength-through-range separate from this run.
+  - "Choose one target and one measure: hamstring toe-touch, ankle knee-to-wall, or shoulder reach."
+  - "Use the same supported position each session: floor, wall, chair, doorway, or countertop."
+  - "Move to mild tension, hold 30 seconds, breathe normally, exit slowly, repeat 2–3 times."
+  - "Keep PNF, foam rolling, yoga, dynamic stretching, rehab, and loaded end-range work out of this run."
+  - "Measure the same side, time, footwear, warm-up state, and setup; change one and mark the log."
+  - "Do not chase deeper range; log stiffness and symptoms separately from centimeters."
   keepInMind:
   - The strongest evidence is for measured ROM/flexibility, not for preventing injuries, treating pain, correcting posture, improving performance, or producing permanent gains after stopping.
   - 'The starter dose is a conservative home translation from heterogeneous studies: 2–3 × 30-second holds on 5 days/week gives about 5–7.5 minutes per target area/week, while about 10 minutes per target muscle group per week is a group-level chronic dose plateau from a static-only meta-regression—not a guarantee or required minimum for every person.'

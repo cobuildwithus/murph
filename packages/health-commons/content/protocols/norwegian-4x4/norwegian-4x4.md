@@ -209,10 +209,12 @@ protocol:
     - Cool down for about 5 minutes.
     - Log the modality, completed intervals, peak heart rates, effort, symptoms, and next-day recovery.
   tips:
-    - 48+ hours between hard interval sessions.
-    - Use heart rate, exertion, and symptoms together — don't sprint to chase a number.
-    - Keep training, caffeine, alcohol, supplements, and sleep stable during the test.
-    - First session conservative — repeatable beats maximal.
+    - "Choose bike, rower, elliptical, treadmill, hill, or clear route. No traffic, obstacles, or sketchy footing."
+    - "First session sets pace: finish repeatable, not destroyed."
+    - "Warm up 10 minutes. Build the first rep; do not sprint from minute one."
+    - "Aim for 85–95% HRmax late in each rep. Later reps matter most."
+    - "Recover easy for three minutes. Do not turn recoveries into hidden intervals."
+    - "Leave 48+ hours between sessions. Skip if sleep, illness, soreness, or stress wrecked recovery."
   keepInMind:
     - Wearable VO2max is a proxy, not lab gas-exchange testing, and may update slowly or not at all during the experiment.
     - The 6-week window is intentional because the main target is cardiorespiratory fitness, not a next-day recovery score.

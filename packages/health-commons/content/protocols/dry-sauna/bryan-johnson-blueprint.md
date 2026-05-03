@@ -177,10 +177,12 @@ protocol:
     - Rehydrate after the session with water or electrolytes.
     - Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable.
   tips:
-    - Not heat-adapted? Blueprint beginner guidance suggests 15-20 min, 3-5x/week, 80-100 C.
-    - Keep humidity low to mirror the source routine.
-    - Core-temperature-threshold experiments are a higher-burden variant, not the default entry.
-    - Add a next-workout note — post-exercise sauna evidence is split on help vs. harm.
+    - "Choose the run first: exact daily 93 °C source routine, 3–5x/week beginner version, or Finnish sauna."
+    - "Use low humidity and log actual temperature; 80–100 °C adaptation is not the 93 °C source dose."
+    - "Pair only with planned workouts; do not add extra hard training to justify daily post-workout heat."
+    - "Set exactly 20 minutes; keep groin, face, or neck cooling consistent between sessions."
+    - "Rehydrate after every session with water or electrolytes; avoid alcohol and cold-plunge stacking that day."
+    - "Log next-workout soreness, sleep, HRV, and resting pulse; do not chase Bryan’s personal outcomes."
   keepInMind:
     - This is a higher-burden daily routine layered after workouts, so exercise load and dehydration can easily confound the result.
     - Groin cooling, face or neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics rather than general sauna rules.

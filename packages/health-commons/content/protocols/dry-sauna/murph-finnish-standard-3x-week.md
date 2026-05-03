@@ -96,16 +96,16 @@ protocol:
     - "Cool down gently before driving, exercise, hot showers, cold plunges, or bed; resume only fully alert and steady."
     - "Log dose, context, cooldown method, and symptoms the same day."
   tips:
-    - Same time of day when practical.
-    - No cold plunges, new supplements, diet changes, or alcohol changes during the test window.
-    - Post-workout sessions get labeled separately; skip if dehydrated or overheated.
-    - First session is a tolerance check — conservative beats heroic.
-    - Never stack missed sessions, extend duration, or raise temperature to catch up.
-    - Shared saunas — towel barrier, check ventilation and exit access, skip if questionable.
+    - "Start lower: 5–10 minutes, lower bench, easy exit. Add minutes only after easy sessions."
+    - "Keep modality clean: traditional dry sauna only. Log heavy steam from water on rocks, unusual humidity, or hotter rooms."
+    - "Arrive normally hydrated. Skip alcohol, recreational drugs, dehydration, fever, vomiting, diarrhea, or brutal training days."
+    - "No catch-up heat: never stack sessions, raise temperature, or extend duration to make up misses."
+    - "Cool down gently before driving, exercise, hot showers, cold plunges, or bed."
+    - "Shared sauna: towel barrier, clear exit, working ventilation. Leave if hygiene or setup feels off."
   keepInMind:
     - "This is a short self-experiment for practical recovery context and cardiovascular proxies, not a treatment plan or longevity proof."
     - "HRV and sleep-stage changes are exploratory and can be moved by illness, stress, alcohol, travel, and training load."
-    - "Traditional Finnish sauna can include water on rocks and changing humidity, so log heavy löyly or unusual humidity if it changes the feel of the session."
+    - "Traditional Finnish sauna can include water on rocks and changing humidity, so log unusually heavy steam or humidity if it changes the feel of the session."
     - "Infrared sauna, steam rooms, Waon therapy, hot-water immersion, cold plunges, and high-heat daily routines are related but separate protocols."
   logFields:
     - "session_date"
@@ -116,7 +116,7 @@ protocol:
     - "bench_level_or_position"
     - "standalone_or_postexercise"
     - "exercise_type_and_load_if_applicable"
-    - "humidity_or_loly_if_notable"
+    - "humidity_or_heavy_steam_if_notable"
     - "cool_down_method"
     - "time_until_fully_steady_and_alert"
     - "hydration_notes"
@@ -135,7 +135,7 @@ protocol:
     - "symptoms_during_or_after"
   stopConditions:
     - "Stop the session immediately for chest pain or pressure, faintness, severe dizziness, loss of balance, confusion, neurologic symptoms, palpitations, unusual shortness of breath, severe headache, vomiting, weakness, feeling unwell, panic-level distress, skin burning, heat-triggered itching, hives, rash flare, or feeling unsafe."
-    - "Leave and cool down gently if heat feels stronger than expected, humidity or löyly becomes overwhelming, or you cannot stay comfortable without forcing it."
+    - "Leave and cool down gently if heat feels stronger than expected, humidity or steam becomes overwhelming, or you cannot stay comfortable without forcing it."
     - "End the experiment and seek urgent care for loss of consciousness, chest pain, neurologic symptoms, severe shortness of breath, repeated vomiting, severe headache, heat-stroke-like symptoms, symptoms that do not resolve promptly after leaving, or any symptom pattern that repeats across sessions."
     - "Do not continue during fever, acute infection, vomiting, diarrhea, significant dehydration, recent heat illness, day-of alcohol or recreational drug use, or unusually impaired recovery after hard training."
 testPlans:
@@ -588,7 +588,7 @@ experimentOnboarding:
       - "bench_level_or_position"
       - "standalone_or_postexercise"
       - "exercise_type_and_load_if_applicable"
-      - "humidity_or_loly_if_notable"
+      - "humidity_or_heavy_steam_if_notable"
       - "cool_down_method"
       - "time_until_fully_steady_and_alert"
       - "hydration_notes"
@@ -1364,7 +1364,7 @@ The clearest downstream signals are morning blood pressure, when the user alread
 
 ## What to log
 
-Log the session dose, first-session tolerance duration when relevant, bench or position, time of day, whether it followed exercise, cool-down method, any notable humidity or heavy löyly, hydration context, alcohol or substance context, illness, travel, ambient heat, hard training, skin or safety symptoms, and any facility issue. Missing context does not erase the experiment, but it should make the interpretation more cautious.
+Log the session dose, first-session tolerance duration when relevant, bench or position, time of day, whether it followed exercise, cool-down method, any notable humidity or heavy steam, hydration context, alcohol or substance context, illness, travel, ambient heat, hard training, skin or safety symptoms, and any facility issue. Missing context does not erase the experiment, but it should make the interpretation more cautious.
 
 ## What this does not test
 
