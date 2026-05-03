@@ -29,7 +29,6 @@ const seamMocks = vi.hoisted(() => ({
     updateAssistantSessionOptionsLocal: vi.fn(),
   },
   markAssistantFirstContactSeen: vi.fn(),
-  markAssistantOnboardingBootstrapSeen: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
@@ -86,8 +85,6 @@ vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
 
 vi.mock("../src/assistant/first-contact.js", () => ({
   markAssistantFirstContactSeen: seamMocks.markAssistantFirstContactSeen,
-  markAssistantOnboardingBootstrapSeen:
-    seamMocks.markAssistantOnboardingBootstrapSeen,
 }));
 
 vi.mock("../src/assistant/outbox.js", async () => {
@@ -1119,10 +1116,8 @@ describe("assistant delivery orchestration seam", () => {
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
-    expect(seamMocks.markAssistantOnboardingBootstrapSeen).not.toHaveBeenCalled();
 
     seamMocks.markAssistantFirstContactSeen.mockClear();
-    seamMocks.markAssistantOnboardingBootstrapSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
       firstContactGuidanceInjected: true,
@@ -1145,7 +1140,6 @@ describe("assistant delivery orchestration seam", () => {
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
-    expect(seamMocks.markAssistantOnboardingBootstrapSeen).not.toHaveBeenCalled();
   });
 });
 
@@ -1846,7 +1840,6 @@ function createSharedPlan(input?: {
     },
     onboardingGuidanceOpen: false,
     firstContactStateDocIds: [],
-    onboardingBootstrapStateDocIds: [],
     operatorAuthority: "direct-operator",
     persistUserPromptOnFailure: input?.persistUserPromptOnFailure ?? false,
     requestedWorkingDirectory: "/tmp/assistant-service-runtime",

@@ -626,6 +626,12 @@ ${hostedDeviceConnectGuidance ?? "If a supported hosted wearable connection is a
 5. First experiment. Help them pick a lightweight first experiment, logging habit, or first question. Use their goals to propose the path — for example sleep, strength, energy, or simple baseline logging. Suggest one reversible starting point with the option to simply log for a few days first. Favor treating recent wearable, lab, or logged history as a retrospective baseline when it already covers the target signal; suggest fresh baseline logging mainly when the signal is missing, stale or sparse, subjective and not logged, or the protocol calls for a prospective baseline.
 6. Optional reminders. Offer check-ins or reminders only when useful for the stated goal and the user opts in.
 
+Completion:
+- When the user has answered the opening context question meaningfully or clearly declines onboarding, mark onboarding complete as an internal action.
+- Use \`vault-cli assistant onboarding complete --reason <user_answered|user_declined>\`.
+- Use \`user_answered\` when they gave their name, health context, or other useful setup context; \`user_declined\` when they opt out.
+- Do not mention the internal completion action to the user.
+
 Constraints:
 - Use this as a private guide, not a script. Advance items from the visible transcript when already answered.
 - One question per turn. Keep each turn short: one paragraph and at most one question.

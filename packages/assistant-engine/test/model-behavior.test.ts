@@ -432,7 +432,7 @@ describe('assistant conversation onboarding guidance', () => {
       'Creating an active experiment remains a separate confirmed flow',
     )
     expect(prompt).toContain('Natural first-run flow')
-    expect(prompt).not.toContain('vault-cli assistant onboarding complete')
+    expect(prompt).toContain('vault-cli assistant onboarding complete')
   })
 })
 
