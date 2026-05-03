@@ -257,6 +257,9 @@ test('device CLI contracts normalize provider keys and parse result payloads', (
     ],
   }).providers[0]?.callbackUrl, null)
   assert.equal(deviceConnectResultSchema.parse({
+    status: 'ok',
+    kind: 'device_connect_link',
+    backend: 'local-daemon',
     baseUrl,
     provider,
     state: 'state_123',

@@ -13,6 +13,9 @@ import {
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
+  startHostedCliRuntimeBridge,
+} from "./hosted-runtime/cli-runtime-bridge.ts";
+import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import {
@@ -322,72 +325,84 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     assertRuntimeLiveness();
-    const runtimeEnv = hostedCodexRuntime.runtimeEnv;
+    const hostedCliBridge = await startHostedCliRuntimeBridge({
+      deviceSyncPort: guardedRuntime.platform.deviceSyncPort,
+    });
+    const runtimeEnv = {
+      ...hostedCodexRuntime.runtimeEnv,
+      ...(hostedCliBridge?.env ?? {}),
+    };
 
     const result = await raceHostedRuntimeLiveness(
-      withHostedProcessEnvironment(
-        {
-          envOverrides: runtimeEnv,
-          operatorHomeRoot: restored.operatorHomeRoot,
-          vaultRoot: restored.vaultRoot,
-        },
-        async () =>
-          runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-              createSnapshot: createLivenessGuardedCheckpointSnapshot,
-              metadata: {
-                attemptId: input.request.attemptId,
-                expectedWorkspaceVersion: input.request.workspaceVersion,
-                leaseGeneration: input.request.leaseGeneration,
-                nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
-                nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
-              },
-            }),
-            expectedUserId: input.request.userId,
-            importItem: (item) =>
-              mailboxBudget.importItem(
-                item,
-                async (importItem, context) => {
-                  assertRuntimeLiveness();
-                  const outcome = await options.importItem(importItem, context);
-                  assertRuntimeLiveness();
-                  return outcome;
-                },
-                {
-                  signal: livenessAbortController.signal,
-                },
-              ),
-            limitPerLane: mailboxBudget.fetchLimitPerLane,
-            platform: {
-              ...guardedRuntime.platform,
-              mailboxPort: guardedMailboxPort,
-              workspacePort: guardedWorkspacePort,
+      (async () => {
+        try {
+          return await withHostedProcessEnvironment(
+            {
+              envOverrides: runtimeEnv,
+              operatorHomeRoot: restored.operatorHomeRoot,
+              vaultRoot: restored.vaultRoot,
             },
-            requestId,
-            runtimeLogContext: {
-              attemptId: input.request.attemptId,
-              leaseGeneration: input.request.leaseGeneration,
-              workspaceVersion: input.request.workspaceVersion,
-            },
-            prepareAssistantEnrichment: () =>
-              prepareHostedInboxEnrichmentRuntime({
-                rebuild: true,
+            async () =>
+              runHostedWorkspaceUntilIdleOrBudget({
+                checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+                  createSnapshot: createLivenessGuardedCheckpointSnapshot,
+                  metadata: {
+                    attemptId: input.request.attemptId,
+                    expectedWorkspaceVersion: input.request.workspaceVersion,
+                    leaseGeneration: input.request.leaseGeneration,
+                    nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
+                    nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
+                  },
+                }),
+                expectedUserId: input.request.userId,
+                importItem: (item) =>
+                  mailboxBudget.importItem(
+                    item,
+                    async (importItem, context) => {
+                      assertRuntimeLiveness();
+                      const outcome = await options.importItem(importItem, context);
+                      assertRuntimeLiveness();
+                      return outcome;
+                    },
+                    {
+                      signal: livenessAbortController.signal,
+                    },
+                  ),
+                limitPerLane: mailboxBudget.fetchLimitPerLane,
+                platform: {
+                  ...guardedRuntime.platform,
+                  mailboxPort: guardedMailboxPort,
+                  workspacePort: guardedWorkspacePort,
+                },
                 requestId,
+                runtimeLogContext: {
+                  attemptId: input.request.attemptId,
+                  leaseGeneration: input.request.leaseGeneration,
+                  workspaceVersion: input.request.workspaceVersion,
+                },
+                prepareAssistantEnrichment: () =>
+                  prepareHostedInboxEnrichmentRuntime({
+                    rebuild: true,
+                    requestId,
+                    vaultRoot: restored.vaultRoot,
+                  }),
+                runAssistantPhase: (phaseInput) =>
+                  (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                    ...phaseInput,
+                    request: input.request,
+                    restored,
+                    runtime: guardedRuntime,
+                    runtimeEnv,
+                    signal: livenessAbortController.signal,
+                  }),
                 vaultRoot: restored.vaultRoot,
+                workspace: workspaceRead.workspace,
               }),
-            runAssistantPhase: (phaseInput) =>
-              (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-                ...phaseInput,
-                request: input.request,
-                restored,
-                runtime: guardedRuntime,
-                runtimeEnv,
-                signal: livenessAbortController.signal,
-              }),
-            vaultRoot: restored.vaultRoot,
-            workspace: workspaceRead.workspace,
-          }),
-      ),
+          );
+        } finally {
+          await hostedCliBridge?.stop();
+        }
+      })(),
       livenessAbortController.signal,
     );
     assertRuntimeLiveness();

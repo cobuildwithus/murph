@@ -115,7 +115,7 @@ export function registerDeviceCommands(
 
   device.command('connect', {
     description:
-      'Start a browser-based OAuth connection for one device connect target through the Murph-managed device daemon.',
+      'Create a browser-based OAuth connection link for one supported device connect target using the current runtime.',
     args: z.object({
       provider: connectTargetNameSchema,
     }),

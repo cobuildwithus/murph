@@ -257,6 +257,31 @@ test("hosted runtime child env omits parser path env when no typed toolchain is 
   );
 });
 
+test("hosted runtime child env strips spoofed hosted CLI bridge and local daemon env", () => {
+  const childEnv = projectHostedRuntimeToChildEnv({
+    ambientEnv: {
+      PATH: "/usr/bin:/bin",
+    },
+    forwardedEnv: {
+      DEVICE_SYNC_BASE_URL: "http://127.0.0.1:8788",
+      DEVICE_SYNC_CONTROL_TOKEN: "device-control-token",
+      DEVICE_SYNC_SECRET: "device-secret",
+      DEVICE_SYNC_STATE_DB_PATH: "/tmp/device-sync.sqlite",
+      MURPH_HOSTED_CLI_BRIDGE_TOKEN: "spoofed-bridge-token",
+      MURPH_HOSTED_CLI_BRIDGE_URL: "http://127.0.0.1:4444/",
+      MURPH_HOSTED_RUNTIME_PROCESS: "1",
+      NODE_ENV: "production",
+      VERCEL_AI_API_KEY: "worker-vercel-secret",
+    },
+  });
+
+  assert.deepEqual(childEnv, {
+    NODE_ENV: "production",
+    PATH: "/usr/bin:/bin",
+    VERCEL_AI_API_KEY: "worker-vercel-secret",
+  });
+});
+
 test("hosted runtime launch spec derives platform env from forwarded env only when no explicit platform env is supplied", () => {
   const spec = buildHostedRuntimeLaunchSpec({
     forwardedEnv: {

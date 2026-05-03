@@ -133,14 +133,30 @@ export const deviceProviderListResultSchema = z.object({
   providers: z.array(deviceSyncProviderSchema),
 })
 
-export const deviceConnectResultSchema = z.object({
-  baseUrl: deviceSyncBaseUrlSchema,
+const deviceConnectResultBaseSchema = z.object({
+  status: z.literal('ok'),
+  kind: z.literal('device_connect_link'),
   provider: z.string().min(1),
-  state: z.string().min(1),
+  providerLabel: z.string().min(1).optional(),
   expiresAt: isoTimestampSchema,
   authorizationUrl: httpUrlSchema,
-  openedBrowser: z.boolean(),
 })
+
+const hostedDeviceConnectResultSchema = deviceConnectResultBaseSchema.extend({
+  backend: z.literal('hosted'),
+}).strict()
+
+const localDaemonDeviceConnectResultSchema = deviceConnectResultBaseSchema.extend({
+  backend: z.literal('local-daemon'),
+  baseUrl: deviceSyncBaseUrlSchema,
+  state: z.string().min(1),
+  openedBrowser: z.boolean(),
+}).strict()
+
+export const deviceConnectResultSchema = z.discriminatedUnion('backend', [
+  hostedDeviceConnectResultSchema,
+  localDaemonDeviceConnectResultSchema,
+])
 
 export const deviceAccountListResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema.optional(),

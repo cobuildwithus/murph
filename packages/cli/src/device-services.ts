@@ -10,6 +10,11 @@ import {
   DEVICE_SYNC_BASE_URL_ENV,
 } from '@murphai/operator-config/device-sync-client'
 import {
+  isHostedRuntimeProcessEnv,
+  readHostedCliBridgeEnv,
+  requestHostedCliDeviceConnectLink,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
   VaultCliError,
 } from '@murphai/operator-config/vault-cli-errors'
 import type {
@@ -85,6 +90,16 @@ export interface DeviceSyncServices {
 
 export interface CliVaultServices extends VaultServices {
   devices: DeviceSyncServices
+}
+
+interface DeviceConnectAuthority {
+  createConnectLink(input: {
+    vault?: string
+    provider: string
+    baseUrl?: string
+    returnTo?: string
+    open?: boolean
+  }): Promise<DeviceConnectResult>
 }
 
 export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
@@ -216,30 +231,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async connect(input) {
-      if (input.provider === 'junction') {
-        throw new VaultCliError(
-          'device_connect_target_unsupported',
-          'Expected a device connect target such as garmin, whoop, oura, or fitbit.',
-        )
-      }
-
-      const localTarget = resolveLocalConnectTarget(input.provider)
-      const client = await createControlPlaneClient(input)
-      const result = await client.beginConnection({
-        provider: localTarget.provider,
-        returnTo: input.returnTo,
-        open: input.open,
-        sourceProviderSlug: localTarget.sourceProviderSlug,
-      })
-
-      return {
-        baseUrl: client.baseUrl,
-        provider: result.provider,
-        state: result.state,
-        expiresAt: result.expiresAt,
-        authorizationUrl: result.authorizationUrl,
-        openedBrowser: result.openedBrowser,
-      }
+      return resolveDeviceConnectAuthority(input).createConnectLink(input)
     },
     async listAccounts(input) {
       if (hasExplicitControlPlaneTarget(input)) {
@@ -337,6 +329,129 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       })
     },
   } satisfies DeviceSyncServices
+
+  function resolveDeviceConnectAuthority(input: {
+    baseUrl?: string
+  }): DeviceConnectAuthority {
+    if (hasExplicitControlPlaneTarget(input)) {
+      return {
+        createConnectLink: connectViaLocalDaemon,
+      }
+    }
+
+    if (!isHostedRuntimeProcessEnv(process.env)) {
+      return {
+        createConnectLink: connectViaLocalDaemon,
+      }
+    }
+
+    let bridge
+    try {
+      bridge = readHostedCliBridgeEnv(process.env)
+    } catch (error) {
+      throw new VaultCliError(
+        'HOSTED_DEVICE_CONNECT_BRIDGE_INVALID',
+        error instanceof Error
+          ? error.message
+          : 'Hosted device-connect bridge configuration is invalid.',
+      )
+    }
+
+    if (!bridge) {
+      throw new VaultCliError(
+        'HOSTED_DEVICE_CONNECT_BRIDGE_UNAVAILABLE',
+        'Hosted device connect is unavailable in this runtime.',
+      )
+    }
+
+    return {
+      async createConnectLink(connectInput) {
+        return connectViaHostedBridge({
+          ...connectInput,
+          bridge,
+        })
+      },
+    }
+  }
+
+  async function connectViaHostedBridge(input: {
+    bridge: NonNullable<ReturnType<typeof readHostedCliBridgeEnv>>
+    provider: string
+    returnTo?: string
+  }): Promise<DeviceConnectResult> {
+    assertPublicConnectTarget(input.provider)
+
+    if (input.returnTo) {
+      throw new VaultCliError(
+        'HOSTED_DEVICE_CONNECT_RETURN_TO_UNSUPPORTED',
+        'Hosted device connect does not support --return-to yet.',
+      )
+    }
+
+    const result = await requestHostedCliDeviceConnectLink({
+      bridge: input.bridge,
+      connectTarget: input.provider,
+    }).catch((error) => {
+      throw new VaultCliError(
+        'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_FAILED',
+        error instanceof Error
+          ? error.message
+          : 'Hosted device-connect bridge request failed.',
+      )
+    })
+
+    return {
+      status: 'ok',
+      kind: 'device_connect_link',
+      backend: 'hosted',
+      provider: result.provider,
+      providerLabel: result.providerLabel,
+      expiresAt: result.expiresAt,
+      authorizationUrl: result.authorizationUrl,
+    }
+  }
+
+  async function connectViaLocalDaemon(input: {
+    vault?: string
+    provider: string
+    baseUrl?: string
+    returnTo?: string
+    open?: boolean
+  }): Promise<DeviceConnectResult> {
+    assertPublicConnectTarget(input.provider)
+
+    const localTarget = resolveLocalConnectTarget(input.provider)
+    const client = await createControlPlaneClient(input)
+    const result = await client.beginConnection({
+      provider: localTarget.provider,
+      returnTo: input.returnTo,
+      open: input.open,
+      sourceProviderSlug: localTarget.sourceProviderSlug,
+    })
+
+    return {
+      status: 'ok',
+      kind: 'device_connect_link',
+      backend: 'local-daemon',
+      baseUrl: client.baseUrl,
+      provider: result.provider,
+      state: result.state,
+      expiresAt: result.expiresAt,
+      authorizationUrl: result.authorizationUrl,
+      openedBrowser: result.openedBrowser,
+    }
+  }
+
+  function assertPublicConnectTarget(connectTarget: string): void {
+    if (connectTarget !== 'junction') {
+      return
+    }
+
+    throw new VaultCliError(
+      'device_connect_target_unsupported',
+      'Expected a device connect target such as garmin, whoop, oura, or fitbit.',
+    )
+  }
 
   function resolveLocalConnectTarget(connectTarget: string): {
     provider: string

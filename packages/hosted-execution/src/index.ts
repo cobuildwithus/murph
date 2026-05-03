@@ -3,6 +3,7 @@ export * from "./ai-usage-billing-mode.ts";
 export * from "./builders.ts";
 export * from "./bundles.ts";
 export * from "./contracts.ts";
+export * from "./cli-runtime-bridge.ts";
 export * from "./email-ingress.ts";
 export * from "./env.ts";
 export * from "./hosted-email.ts";

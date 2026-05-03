@@ -64,6 +64,10 @@ describe("prepareAssistantDirectCliEnv", () => {
       CODEX_HOME: "/tmp/murph-home/.codex-hosted",
       HOME: "/tmp/murph-home",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
+      MURPH_HOSTED_CLI_BRIDGE_TOKEN: "bridge-token",
+      MURPH_HOSTED_CLI_BRIDGE_URL: "http://127.0.0.1:43123/",
+      DEVICE_SYNC_BASE_URL: "http://127.0.0.1:8788",
+      DEVICE_SYNC_CONTROL_TOKEN: "device-token",
       LINQ_API_TOKEN: "linq-secret",
       NODE_ENV: "production",
       NODE_OPTIONS: "--require /tmp/injected.js",
@@ -79,6 +83,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.CODEX_HOME).toBe("/tmp/murph-home/.codex-hosted");
     expect(env.HOME).toBe("/tmp/murph-home");
     expect(env.VAULT).toBe("/tmp/murph-vault");
+    expect(env.MURPH_HOSTED_CLI_BRIDGE_TOKEN).toBe("bridge-token");
+    expect(env.MURPH_HOSTED_CLI_BRIDGE_URL).toBe("http://127.0.0.1:43123/");
     expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
     expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
     expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
@@ -90,6 +96,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     ).toBe(true);
     expect(env.AGENTMAIL_API_KEY).toBeUndefined();
     expect(env.AMBIENT_SECRET).toBeUndefined();
+    expect(env.DEVICE_SYNC_BASE_URL).toBeUndefined();
+    expect(env.DEVICE_SYNC_CONTROL_TOKEN).toBeUndefined();
     expect(env.HOSTED_EXECUTION_CONTROL_TOKEN).toBeUndefined();
     expect(env.LINQ_API_TOKEN).toBeUndefined();
     expect(env.NODE_OPTIONS).toBeUndefined();

@@ -270,7 +270,7 @@ function renderAssistantCliSurfaceContract(
   const groupedCommands = groupAssistantCliManifestCommands(commands)
   const lines = [
     'Murph CLI Contract:',
-    'Use `vault-cli` directly from the local process. Command names below are the tokens after `vault-cli`.',
+    'Use `vault-cli` directly from the current runtime process. Command names below are the tokens after `vault-cli`.',
     sourceDetail === 'full'
       ? 'This block is compiled automatically from `vault-cli --llms-full --format json` at session bootstrap.'
       : 'This block is compiled automatically from `vault-cli --llms --format json` at session bootstrap because the full manifest was unavailable.',
