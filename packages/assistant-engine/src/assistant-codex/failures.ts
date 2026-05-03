@@ -97,6 +97,7 @@ export function buildCodexTurnFailedError(input: {
   }
 
   return new VaultCliError('ASSISTANT_CODEX_FAILED', parts.join(' '), {
+    codexTurnStatus: input.status,
     providerActionCount: input.providerActionCount,
     providerSessionId: input.providerSessionId,
     retryable: false,
@@ -130,6 +131,8 @@ export function buildCodexFailure(input: {
         }),
     {
       connectionLost,
+      ...(typeof input.code === 'number' ? { codexExitCode: input.code } : {}),
+      ...(input.signal ? { codexSignalPresent: true } : {}),
       providerActionCount: input.providerActionCount,
       providerSessionId: connectionLost ? input.providerSessionId : null,
       recoverableConnectionLoss: connectionLost,

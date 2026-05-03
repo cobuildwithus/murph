@@ -122,18 +122,16 @@ export function AuthDialog({
       return;
     }
 
-    setLoadError(null);
-
     const loaded = readLoadedHostedAuthPanelIsland();
-    if (loaded) {
-      setAuthPanelIsland(() => loaded);
-      return;
-    }
-
     let cancelled = false;
-    loadHostedAuthPanelIsland()
+    const loadPanel = loaded
+      ? Promise.resolve(loaded)
+      : loadHostedAuthPanelIsland();
+
+    loadPanel
       .then((Component) => {
         if (!cancelled) {
+          setLoadError(null);
           setAuthPanelIsland(() => Component);
         }
       })

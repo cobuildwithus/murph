@@ -654,7 +654,8 @@ function buildHostedLocalLinqAttachmentDownloadUrl(
   attachmentDownloadBaseUrl: string,
   attachmentId: string,
 ): string {
-  return `${attachmentDownloadBaseUrl}/${encodeURIComponent(attachmentId)}.wav`;
+  const extension = attachmentId.startsWith("att_pdf_") ? "pdf" : "wav";
+  return `${attachmentDownloadBaseUrl}/${encodeURIComponent(attachmentId)}.${extension}`;
 }
 
 function resolveHostedLocalLinqAttachmentDownloadBaseUrl(

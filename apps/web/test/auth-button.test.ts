@@ -2,13 +2,31 @@ import {
   act,
   createElement,
 } from "react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 
 import { renderClientComponent } from "./render-client-component";
 
+const mocks = vi.hoisted(() => ({
+  openAuthDialog: vi.fn(),
+  useAuthDialog: vi.fn(),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuthDialog: mocks.useAuthDialog,
+}));
+
 let cleanupRender: (() => Promise<void>) | null = null;
+
+beforeEach(() => {
+  mocks.openAuthDialog.mockReset();
+  mocks.useAuthDialog.mockReset();
+  mocks.useAuthDialog.mockReturnValue({
+    authenticated: true,
+    openAuthDialog: mocks.openAuthDialog,
+  });
+});
 
 afterEach(async () => {
   if (cleanupRender) {
@@ -17,7 +35,38 @@ afterEach(async () => {
   }
 });
 
-test("AuthButton passes clicks through without loading Privy", async () => {
+test("AuthButton opens the auth dialog for unauthenticated clicks", async () => {
+  const onClick = vi.fn();
+  const onConnect = vi.fn();
+  const openAuthDialog = vi.fn();
+  mocks.useAuthDialog.mockReturnValue({
+    authenticated: false,
+    openAuthDialog,
+  });
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(
+      AuthButton,
+      {
+        connectLabel: "Log in to continue",
+        onClick,
+        onConnect,
+        variant: "outline",
+      },
+      "Continue",
+    ),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(openAuthDialog).toHaveBeenCalledTimes(1);
+  expect(onConnect).not.toHaveBeenCalled();
+  expect(onClick).not.toHaveBeenCalled();
+});
+
+test("AuthButton passes authenticated clicks through without loading Privy", async () => {
   const onClick = vi.fn();
   const onConnect = vi.fn();
   const { button, cleanup, window } = await renderClientComponent(
@@ -45,6 +94,7 @@ test("AuthButton passes clicks through without loading Privy", async () => {
 
   expect(onConnect).toHaveBeenCalledTimes(1);
   expect(onClick).toHaveBeenCalledTimes(1);
+  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
 });
 
 test("AuthButton can render a connect label when no children are supplied", async () => {

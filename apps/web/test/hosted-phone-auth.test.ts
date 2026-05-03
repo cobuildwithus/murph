@@ -745,7 +745,7 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("shows an explicit loading state for saved invite phones while Privy initializes", async () => {
+  it("keeps saved invite phone verification in setup state while Privy initializes", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: false,
       logout: mocks.logout,
@@ -764,7 +764,7 @@ describe("HostedPhoneAuth", () => {
 
     try {
       assert.match(container.textContent ?? "", /\*\*\* 2671/);
-      assert.match(container.textContent ?? "", /Preparing phone verification/);
+      assert.match(container.textContent ?? "", /Setting up\.\.\./);
       assert.doesNotMatch(container.textContent ?? "", /Send verification code/);
       expect(fetch).not.toHaveBeenCalled();
       expect(mocks.sendCode).not.toHaveBeenCalled();

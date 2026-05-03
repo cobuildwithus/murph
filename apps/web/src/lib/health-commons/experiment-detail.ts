@@ -946,6 +946,38 @@ function formatDurationValue(minutes: number): string {
   return `${minutes} minutes`;
 }
 
+function splitDurationValue(value: string): { amount: string; unit: string } | null {
+  const match = /^(.+) (minutes|hours?)$/u.exec(value);
+
+  if (!match) {
+    return null;
+  }
+
+  const amount = match[1];
+  const unit = match[2];
+  if (!amount || !unit) {
+    return null;
+  }
+
+  return {
+    amount,
+    unit: unit === "hour" ? "hours" : unit,
+  };
+}
+
+function formatDurationRangeValue(min: number, max: number): string {
+  const minValue = formatDurationValue(min);
+  const maxValue = formatDurationValue(max);
+  const minParts = splitDurationValue(minValue);
+  const maxParts = splitDurationValue(maxValue);
+
+  if (minParts && maxParts && minParts.unit === maxParts.unit) {
+    return `${minParts.amount}–${maxValue}`;
+  }
+
+  return `${minValue}–${maxValue}`;
+}
+
 function formatDuration(protocol: HealthCommonsProtocolSpec): string | null {
   const min = protocol.durationMinutes?.min;
   const max = protocol.durationMinutes?.max;
@@ -953,7 +985,7 @@ function formatDuration(protocol: HealthCommonsProtocolSpec): string | null {
   if (typeof min === "number" && typeof max === "number") {
     return min === max
       ? `${formatDurationValue(min)} per session.`
-      : `${formatDurationValue(min)}–${formatDurationValue(max)} per session.`;
+      : `${formatDurationRangeValue(min, max)} per session.`;
   }
 
   if (typeof min === "number") {

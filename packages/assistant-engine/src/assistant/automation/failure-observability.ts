@@ -19,6 +19,12 @@ export interface AssistantAutoReplyFailureSnapshot {
   safeSummary: string
 }
 
+export type AssistantSafeFailureContextValue =
+  | boolean
+  | number
+  | string
+  | null
+
 const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'assistantProviderAdapter',
   'assistantProviderErrorBodyCode',
@@ -34,6 +40,9 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'assistantProviderExecutionDriver',
   'assistantProviderModel',
   'connectionLost',
+  'codexExitCode',
+  'codexSignalPresent',
+  'codexTurnStatus',
   'errorCode',
   'interrupted',
   'providerSessionId',
@@ -52,6 +61,7 @@ export function describeAssistantAutoReplyFailure(
   const code = readFailureCode(error)
   const message = sanitizeFailureText(formatStructuredErrorMessage(error))
   const retryable = readFailureRetryable(error)
+  const context = readFailureContext(error)
   const kind = classifyFailureKind({
     code,
     message,
@@ -59,7 +69,7 @@ export function describeAssistantAutoReplyFailure(
 
   return {
     code,
-    context: readFailureContext(error),
+    context,
     kind,
     message,
     retryable,
@@ -99,6 +109,27 @@ function buildSafeSummary(input: {
   }
 
   return summarizeFailure('assistant reply failed', input.code)
+}
+
+export function normalizeAssistantSafeFailureContext(
+  context: Record<string, unknown> | null,
+): Record<string, AssistantSafeFailureContextValue> | undefined {
+  if (!context) {
+    return undefined
+  }
+
+  const values = Object.fromEntries(
+    Object.entries(context).flatMap(([key, value]) =>
+      typeof value === 'string' ||
+      typeof value === 'boolean' ||
+      typeof value === 'number' ||
+      value === null
+        ? [[key, value]]
+        : [],
+    ),
+  )
+
+  return Object.keys(values).length > 0 ? values : undefined
 }
 
 function summarizeFailure(summary: string, code: string | null): string {

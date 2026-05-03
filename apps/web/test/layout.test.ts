@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
-import { vi } from "vitest";
+const mocks = vi.hoisted(() => ({
+  getHostedSidebarAuthSnapshot: vi.fn(async () => ({
+    authenticated: false,
+    label: null,
+  })),
+}));
 
 vi.mock("next/font/google", () => ({
   Fraunces(input: { variable?: string }) {
@@ -24,19 +29,25 @@ vi.mock("next/font/google", () => ({
   },
 }));
 
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedSidebarAuthSnapshot: mocks.getHostedSidebarAuthSnapshot,
+}));
+
 vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
   PhoneCountryCodeProvider(input: {
-    children: React.ReactNode;
+    children: ReactNode;
   }) {
-    return createElement("div", null, input.children);
+    return createElement("div", { "data-phone-country-code": "" }, input.children);
   },
 }));
 
 import RootLayout, { metadata } from "../app/layout";
 
-test("RootLayout renders the site footer with legal and social links", () => {
+test("RootLayout renders the site footer with legal and social links", async () => {
   const markup = renderToStaticMarkup(
-    RootLayout({
+    await RootLayout({
       children: "hosted-shell",
     }),
   );

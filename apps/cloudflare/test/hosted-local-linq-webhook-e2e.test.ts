@@ -174,7 +174,7 @@ describe("hosted local Linq webhook e2e", () => {
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const attachmentId = `att_voice_${userId}`;
     const expectedAttachmentDownloadPath =
-      `/attachment-downloads/${encodeURIComponent(attachmentId)}.m4a`;
+      `/attachment-downloads/${encodeURIComponent(attachmentId)}.wav`;
     const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
       expectedMethod: "GET",
       expectedPath: expectedAttachmentDownloadPath,

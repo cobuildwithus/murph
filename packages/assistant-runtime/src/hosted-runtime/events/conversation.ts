@@ -160,7 +160,7 @@ async function drainHostedConversationParsers(input: {
             errorCodes: compactHostedRuntimeLogCodes(
               parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
             ),
-            errorMessages: compactHostedParserErrorMessages(
+            errorSummaries: compactHostedParserErrorMessages(
               parserFailures.map((failure) => failure.errorMessage ?? failure.errorCode ?? "Parser job failed."),
             ),
             parserFailed: parserFailures.length,
