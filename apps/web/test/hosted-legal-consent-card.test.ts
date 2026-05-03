@@ -309,6 +309,69 @@ test("HostedLegalConsentCard marks the accept action busy while consent is recor
   });
 });
 
+test("HostedLegalConsentCard can keep accepted consent visible during a route handoff", async () => {
+  const currentStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: false,
+  });
+  const legalAcceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchHealthDataGranted: false,
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: true,
+  });
+
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce(legalAcceptedStatus)
+    .mockResolvedValueOnce(acceptedStatus);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      acceptedPendingLabel: "Continuing...",
+      initialStatus: currentStatus,
+      keepVisibleAfterAccepted: true,
+      mode: "compact",
+      source: "join-invite-phone-verify",
+      onAccepted: mocks.onAccepted,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Terms of Service");
+    expect(container.textContent).toContain("Consumer Health Data Notice");
+  });
+
+  const checkboxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+  expect(checkboxes).toHaveLength(2);
+
+  for (const checkbox of checkboxes) {
+    await act(async () => {
+      setCheckboxChecked(window, checkbox, true);
+    });
+  }
+
+  const continueButton = findButtonByText(container, /Continue/);
+
+  await act(async () => {
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
+  });
+
+  expect(container.textContent).toContain("Terms of Service");
+  expect(container.textContent).toContain("Consumer Health Data Notice");
+  expect(container.textContent).toContain("Continuing...");
+  expect(continueButton.getAttribute("aria-busy")).toBe("true");
+  expect(continueButton.disabled).toBe(true);
+});
+
 test("HostedLegalConsentCard keeps a retryable error visible when consent status fails to load", async () => {
   const recoveredStatus = createConsentStatus({
     connectedHealthGranted: false,

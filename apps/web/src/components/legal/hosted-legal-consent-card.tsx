@@ -19,7 +19,9 @@ import type {
 type HostedLegalConsentCardMode = "compact" | "panel";
 
 interface HostedLegalConsentCardProps {
+  acceptedPendingLabel?: string;
   className?: string;
+  keepVisibleAfterAccepted?: boolean;
   initialStatus?: HostedConsentStatus | null;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
@@ -29,7 +31,9 @@ interface HostedLegalConsentCardProps {
 }
 
 export function HostedLegalConsentCard({
+  acceptedPendingLabel = "Continuing...",
   className,
+  keepVisibleAfterAccepted = false,
   initialStatus = null,
   mode = "panel",
   onAccepted,
@@ -39,6 +43,7 @@ export function HostedLegalConsentCard({
 }: HostedLegalConsentCardProps) {
   const [status, setStatus] = useState<HostedConsentStatus | null>(initialStatus);
   const [pending, setPending] = useState(false);
+  const [acceptedHandoffPending, setAcceptedHandoffPending] = useState(false);
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -60,6 +65,7 @@ export function HostedLegalConsentCard({
   useEffect(() => {
     if (initialStatus) {
       setStatus(initialStatus);
+      setAcceptedHandoffPending(false);
       setLoading(false);
       setErrorMessage(null);
       return;
@@ -108,11 +114,13 @@ export function HostedLegalConsentCard({
     : isFeatureFlow
       ? featureAccepted
       : false;
+  const actionPending = pending || acceptedHandoffPending;
 
   async function handleAccept() {
-    if (pending || !allChecked || !status) return;
+    if (actionPending || !allChecked || !status) return;
 
     setPending(true);
+    setAcceptedHandoffPending(false);
     setErrorMessage(null);
 
     try {
@@ -133,6 +141,11 @@ export function HostedLegalConsentCard({
           });
         }
       }
+      if (keepVisibleAfterAccepted && onAccepted) {
+        setAcceptedHandoffPending(true);
+        await onAccepted(latestStatus);
+        return;
+      }
       setStatus(latestStatus);
       setLegalAccepted(false);
       setHealthDataAccepted(false);
@@ -142,6 +155,7 @@ export function HostedLegalConsentCard({
         return;
       }
     } catch (error) {
+      setAcceptedHandoffPending(false);
       setErrorMessage(readConsentErrorMessage(error, "Could not record Murph legal consent right now."));
     } finally {
       setPending(false);
@@ -215,14 +229,14 @@ export function HostedLegalConsentCard({
 
   const continueButton = (
     <Button
-      aria-busy={pending}
+      aria-busy={actionPending}
       className={mode === "compact" ? "w-full" : undefined}
       type="button"
       onClick={handleAccept}
-      disabled={!allChecked || pending}
+      disabled={!allChecked || actionPending}
       size={mode === "compact" ? "xl" : "lg"}
     >
-      {pending ? "Saving..." : "Continue"}
+      {acceptedHandoffPending ? acceptedPendingLabel : pending ? "Saving..." : "Continue"}
     </Button>
   );
 
