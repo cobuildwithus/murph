@@ -249,6 +249,7 @@ describe("hosted execution coverage gaps", () => {
       "./auth",
       "./browser-vault",
       "./bundles",
+      "./cli-runtime-bridge",
       "./contracts",
       "./env",
       "./hosted-email",

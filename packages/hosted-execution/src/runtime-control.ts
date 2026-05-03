@@ -360,6 +360,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.linq_attachment_download_finished",
   "mailbox.parser_drain_failed",
   "mailbox.parser_jobs_failed",
+  "mailbox.post_checkpoint_effects_finished",
   "mailbox.system_processed",
   "mailbox.quarantined",
   "mailbox.retryable_payload_missing",

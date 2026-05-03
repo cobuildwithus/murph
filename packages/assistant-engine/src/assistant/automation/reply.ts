@@ -334,7 +334,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
   executionContext?: AssistantExecutionContext | null
-  inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onAcceptedContext?: (context: AssistantAutoReplyGroupContext) => void
@@ -353,7 +352,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     allowSelfAuthored: input.allowSelfAuthored,
     enabledChannels: input.enabledChannels,
     group: context,
-    inboxServices: input.inboxServices,
     onEvent: input.onEvent,
     requestId: input.requestId,
     signal: input.signal,
@@ -384,7 +382,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   const activeTurnHooks = input.inputSource
     ? createAssistantAutoReplyActiveTurnInputHooks({
         context,
-        inboxServices: input.inboxServices,
         onAcceptedContext(nextContext) {
           acceptedContext = nextContext
           input.onAcceptedContext?.(nextContext)
@@ -752,7 +749,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
   allowSelfAuthored: boolean
   enabledChannels: readonly string[]
   group: AssistantAutoReplyGroupContext
-  inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
   requestId: string | null
   signal?: AbortSignal
@@ -825,11 +821,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   const promptInputs = await loadAssistantAutoReplyPromptInputs({
     group: input.group,
-    inboxServices: input.inboxServices,
-    onEvent: input.onEvent,
-    requestId: input.requestId,
-    signal: input.signal,
-    vault: input.vault,
   })
   const primaryInput = promptInputs[0]
   if (!primaryInput) {
@@ -905,30 +896,9 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
 async function loadAssistantAutoReplyPromptInputs(input: {
   group: AssistantAutoReplyGroupContext
-  inboxServices: InboxServices
-  onEvent?: (event: AssistantRunEvent) => void
-  requestId: string | null
-  signal?: AbortSignal
-  vault: string
 }): Promise<AssistantAutoReplyPromptInput[]> {
-  return Promise.all(
-    input.group.items.map(async (item) => {
-      const base = createAssistantAutoReplyPromptInputFromEvent(item)
-      const enrichment = await tryLoadInboxProjectionEnrichment({
-        inboxCaptureId: base.projection?.inboxCaptureId ?? null,
-        inboxServices: input.inboxServices,
-        inputId: base.inputId,
-        onEvent: input.onEvent,
-        requestId: input.requestId,
-        signal: input.signal,
-        vault: input.vault,
-      })
-
-      return {
-        ...base,
-        enrichment,
-      }
-    }),
+  return input.group.items.map((item) =>
+    createAssistantAutoReplyPromptInputFromEvent(item),
   )
 }
 
@@ -945,12 +915,12 @@ function createAssistantAutoReplyPromptInputFromEvent(
   return {
     actorIsSelf: conversation.actorIsSelf,
     attachmentDescriptors: event.attachmentDescriptors,
+    attachmentEvidence: event.attachmentEvidence,
     conversation,
-    enrichment: null,
     inputId: event.inputId,
     occurredAt: event.occurredAt,
     projection: {
-      inboxCaptureId: candidate.projection.captureId,
+      optionalInboxCaptureId: candidate.projection.captureId,
       reasonCode: candidate.projection.reasonCode,
       status: candidate.projection.status,
     },
@@ -968,45 +938,6 @@ function createAssistantAutoReplyPromptInputFromEvent(
       event.transcriptText ??
       event.text ??
       item.summary.text,
-  }
-}
-
-async function tryLoadInboxProjectionEnrichment(input: {
-  inboxCaptureId: string | null
-  inboxServices: InboxServices
-  inputId: string
-  onEvent?: (event: AssistantRunEvent) => void
-  requestId: string | null
-  signal?: AbortSignal
-  vault: string
-}): Promise<AssistantAutoReplyPromptInput['enrichment']> {
-  if (!input.inboxCaptureId) {
-    return null
-  }
-
-  try {
-    const result = await input.inboxServices.show({
-      vault: input.vault,
-      requestId: input.requestId,
-      captureId: input.inboxCaptureId,
-    })
-    return {
-      attachments: result.capture.attachments,
-      inboxCaptureId: input.inboxCaptureId,
-    }
-  } catch (error) {
-    if (shouldRethrowAssistantAutoReplyAbort(error, input.signal)) {
-      throw error
-    }
-    input.onEvent?.({
-      type: 'input.reply-progress',
-      inputId: input.inputId,
-      details: 'nonblocking inbox projection enrichment failed',
-      safeDetails: 'inbox_projection_enrichment_failed_nonblocking',
-      providerKind: 'status',
-      providerState: 'completed',
-    })
-    return null
   }
 }
 
@@ -1116,7 +1047,6 @@ interface AssistantAutoReplyActiveTurnPendingAcceptance {
 
 function createAssistantAutoReplyActiveTurnInputHooks(input: {
   context: AssistantAutoReplyGroupContext
-  inboxServices: InboxServices
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
   onEvent?: (event: AssistantRunEvent) => void
   inputSource: AssistantActiveTurnInputSource
@@ -1224,11 +1154,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     }
     const shownAcceptedInput = await loadAssistantAutoReplyPromptInputs({
       group: acceptedInputContext,
-      inboxServices: input.inboxServices,
-      onEvent: input.onEvent,
-      requestId: input.requestId,
-      signal: admissionInput.signal,
-      vault: input.vault,
     })
     const preparedInput = await (
       input.onEvent
@@ -1245,11 +1170,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 
     const shownFinalGroup = await loadAssistantAutoReplyPromptInputs({
       group: nextContext,
-      inboxServices: input.inboxServices,
-      onEvent: input.onEvent,
-      requestId: input.requestId,
-      signal: admissionInput.signal,
-      vault: input.vault,
     })
 
     const captureAcceptedInputs = buildAutoReplyAcceptedTurnInputItems({

@@ -56,24 +56,24 @@ const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
 } satisfies AssistantInputCandidate['event']['attachmentEvidence']
 
 const promptBuilderMocks = vi.hoisted(() => ({
-  buildInboxModelAttachmentBundles: vi.fn(),
-  hasInboxMultimodalAttachmentEvidenceCandidate: vi.fn(),
-  prepareInboxMultimodalUserMessageContent: vi.fn(),
+  buildAssistantInputAttachmentModelBundles: vi.fn(),
+  hasAssistantInputAttachmentEvidenceCandidate: vi.fn(),
+  prepareAssistantInputMultimodalUserMessageContent: vi.fn(),
 }))
 
-vi.mock('../src/inbox-multimodal.js', async () => {
+vi.mock('../src/assistant/attachment-evidence-model.js', async () => {
   const actual = await vi.importActual<
-    typeof import('../src/inbox-multimodal.ts')
-  >('../src/inbox-multimodal.ts')
+    typeof import('../src/assistant/attachment-evidence-model.ts')
+  >('../src/assistant/attachment-evidence-model.ts')
 
   return {
     ...actual,
-    buildInboxModelAttachmentBundles:
-      promptBuilderMocks.buildInboxModelAttachmentBundles,
-    hasInboxMultimodalAttachmentEvidenceCandidate:
-      promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate,
-    prepareInboxMultimodalUserMessageContent:
-      promptBuilderMocks.prepareInboxMultimodalUserMessageContent,
+    buildAssistantInputAttachmentModelBundles:
+      promptBuilderMocks.buildAssistantInputAttachmentModelBundles,
+    hasAssistantInputAttachmentEvidenceCandidate:
+      promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate,
+    prepareAssistantInputMultimodalUserMessageContent:
+      promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent,
   }
 })
 
@@ -94,11 +94,11 @@ afterEach(async () => {
 })
 
 beforeEach(() => {
-  promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([])
-  promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(
+  promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([])
+  promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
     false,
   )
-  promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
+  promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
     fallbackError: null,
     inputMode: 'text-only',
     userMessageContent: null,
@@ -335,6 +335,10 @@ function createPromptInput(input: {
   return {
     actorIsSelf: parsedCapture.actorIsSelf,
     attachmentDescriptors: [],
+    attachmentEvidence: createSupportAttachmentEvidence({
+      attachments: parsedCapture.attachments,
+      captureId: parsedCapture.captureId,
+    }),
     conversation: {
       accountId: parsedCapture.accountId,
       actorId: parsedCapture.actorId,
@@ -343,17 +347,11 @@ function createPromptInput(input: {
       threadId: parsedCapture.threadId,
       threadIsDirect: parsedCapture.threadIsDirect,
     },
-    enrichment: parsedCapture.attachments.length > 0
-      ? {
-          attachments: parsedCapture.attachments,
-          inboxCaptureId: parsedCapture.captureId,
-        }
-      : null,
     inputId: parsedCapture.eventId,
     occurredAt: parsedCapture.occurredAt,
     projection: parsedCapture.attachments.length > 0
       ? {
-          inboxCaptureId: parsedCapture.captureId,
+          optionalInboxCaptureId: parsedCapture.captureId,
           reasonCode: null,
           status: 'succeeded',
         }
@@ -364,6 +362,89 @@ function createPromptInput(input: {
     sourceMetadata: null,
     telegramMetadata: input.telegramMetadata ?? null,
     text: parsedCapture.text,
+  }
+}
+
+function createSupportAttachmentEvidence(input: {
+  attachments: readonly InboxShowResult['capture']['attachments'][number][]
+  captureId: string
+}): AssistantInputCandidate['event']['attachmentEvidence'] {
+  if (input.attachments.length === 0) {
+    return DEFAULT_TEST_ATTACHMENT_EVIDENCE
+  }
+
+  return {
+    attachments: input.attachments.map((attachment) => {
+      const inlineFragments: AssistantInputCandidate['event']['attachmentEvidence']['attachments'][number]['inlineFragments'] = []
+      if (attachment.transcriptText) {
+        inlineFragments.push({
+          kind: 'attachment_transcript',
+          label: `attachment-${attachment.ordinal}-transcript`,
+          text: attachment.transcriptText,
+          truncated: false,
+        })
+      }
+      if (attachment.extractedText) {
+        inlineFragments.push({
+          kind: 'attachment_extracted_text',
+          label: `attachment-${attachment.ordinal}-extracted-text`,
+          text: attachment.extractedText,
+          truncated: false,
+        })
+      }
+
+      return {
+        byteSize: attachment.byteSize ?? null,
+        derived: null,
+        descriptorAttachmentId:
+          attachment.attachmentId ?? `attachment-${attachment.ordinal}`,
+        fileName: attachment.fileName ?? null,
+        inlineFragments,
+        kind: normalizeSupportAttachmentEvidenceKind(attachment.kind),
+        mime: attachment.mime ?? null,
+        ordinal: attachment.ordinal,
+        parseState: normalizeSupportAttachmentEvidenceParseState(
+          attachment.parseState,
+        ),
+        raw: null,
+        sourceAttachmentId:
+          attachment.attachmentId ?? `attachment-${attachment.ordinal}`,
+      }
+    }),
+    optionalInboxCaptureId: input.captureId,
+    reasonCode: null,
+    source: 'manual',
+    status: 'available',
+    updatedAt: '2026-04-08T00:00:01.000Z',
+  }
+}
+
+function normalizeSupportAttachmentEvidenceKind(
+  value: InboxShowResult['capture']['attachments'][number]['kind'],
+): AssistantInputCandidate['event']['attachmentEvidence']['attachments'][number]['kind'] {
+  switch (value) {
+    case 'image':
+    case 'audio':
+    case 'video':
+    case 'document':
+    case 'other':
+      return value
+    default:
+      return 'other'
+  }
+}
+
+function normalizeSupportAttachmentEvidenceParseState(
+  value: InboxShowResult['capture']['attachments'][number]['parseState'],
+): AssistantInputCandidate['event']['attachmentEvidence']['attachments'][number]['parseState'] {
+  switch (value) {
+    case 'pending':
+    case 'running':
+    case 'succeeded':
+    case 'failed':
+      return value
+    default:
+      return null
   }
 }
 
@@ -423,10 +504,12 @@ describe('assistant automation artifacts', () => {
 })
 
 describe('assistant auto-reply failure observability', () => {
+  const syntheticHomePath = `/${'Users'}/example-user`
+
   it('classifies usage-limit provider failures and redacts secrets and home paths', () => {
     const error = Object.assign(
       new Error(
-        'Codex CLI failed: usage limit reached. Authorization: Bearer super-secret-token /Users/example-user/project',
+        `Codex CLI failed: usage limit reached. Authorization: Bearer super-secret-token ${syntheticHomePath}/project`,
       ),
       {
         code: 'ASSISTANT_CODEX_FAILED',
@@ -469,7 +552,7 @@ describe('assistant auto-reply failure observability', () => {
     expect(snapshot.message).toContain('[REDACTED]')
     expect(snapshot.message).toContain('<HOME_DIR>')
     expect(snapshot.message).not.toContain('super-secret-token')
-    expect(snapshot.message).not.toContain('/Users/example-user')
+    expect(snapshot.message).not.toContain(syntheticHomePath)
   })
 
   it('classifies delivery failures and sanitizes allowed array context values', () => {
@@ -480,7 +563,7 @@ describe('assistant auto-reply failure observability', () => {
         context: {
           providerStalled: true,
           retryAfterSeconds: 30,
-          status: [' waiting ', 500, '/Users/example-user/tmp'],
+          status: [' waiting ', 500, `${syntheticHomePath}/tmp`],
         },
       },
     )
@@ -531,7 +614,7 @@ describe('assistant auto-reply failure observability', () => {
         new Error('Assistant provider timed out while syncing state.'),
         {
           context: {
-            providerSessionId: [' /Users/example-user/tmp ', 123, ''],
+            providerSessionId: [` ${syntheticHomePath}/tmp `, 123, ''],
             retryable: 'yes',
           },
         },
@@ -1097,7 +1180,7 @@ describe('assistant auto-reply prompt builder support', () => {
   })
 
   it('skips prepared multimodal input when no textual or rich evidence is available', async () => {
-    promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       {
         attachmentId: 'bundle-1',
         ordinal: 1,
@@ -1141,7 +1224,7 @@ describe('assistant auto-reply prompt builder support', () => {
   })
 
   it('prepares rich multimodal input when only attachment evidence remains', async () => {
-    promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
+    promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       {
         attachmentId: 'bundle-1',
         ordinal: 1,
@@ -1168,10 +1251,10 @@ describe('assistant auto-reply prompt builder support', () => {
         combinedText: '[metadata]\nmime: image/png',
       },
     ])
-    promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockReturnValue(
       true,
     )
-    promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
       inputMode: 'multimodal',
       userMessageContent: [

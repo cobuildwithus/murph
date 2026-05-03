@@ -121,7 +121,7 @@ Keep `inboxd`. It still provides real value:
 - list/show/search surfaces for operators and debugging
 - attachment job coordination
 - parser handoff and derived inbox artifacts
-- optional prompt enrichment when projection succeeds
+- producer-side attachment evidence refresh for accepted assistant input events
 - deterministic promotion flows from inbox evidence into canonical vault records
 
 Do not keep `inboxd` as:
@@ -200,14 +200,40 @@ type AssistantInputEvent = {
     lastAttemptedAt?: string | null;
   };
 
+  attachmentEvidence: {
+    status: "not_attempted" | "available" | "partial" | "failed";
+    source: "local-inbox-import" | "local-parser-drain" | "hosted-inbox-projection" | "manual" | null;
+    optionalInboxCaptureId: string | null;
+    reasonCode: string | null;
+    attachments: Array<{
+      ordinal: number;
+      kind: "image" | "audio" | "video" | "document" | "other";
+      mime: string | null;
+      fileName: string | null;
+      raw?: {
+        kind: "vault-relative-file";
+        path: string;
+      } | null;
+      derived?: {
+        kind: "parser-manifest";
+        manifestPath: string;
+        allowedRoot: string;
+      } | null;
+    }>;
+  };
+
   occurredAt: string;
   storedAt: string;
 };
 ```
 
 The content section is stable prompt-ready input. Projection status can change.
-Raw email bodies, attachment text extraction, filenames, local paths, signed
-URLs, provider payloads, and attachment bytes are not part of this record.
+`attachmentEvidence` is mutable materialization state and is not part of
+immutable replay identity. It may hold sanitized vault-relative artifact refs
+under `raw/inbox/**`, `raw/assistant-input/**`, `derived/inbox/**`, and
+`derived/assistant-input/**`, plus bounded safe text fragments. It must not
+hold absolute paths, signed URLs, raw hosted payloads, auth headers, provider
+request bodies, cookies, or attachment bytes.
 
 `replyTarget` is the one narrow exception to the no-provider-id rule. It may
 carry the private provider thread/message id needed to send a reply, but it is
@@ -459,7 +485,10 @@ Changes:
 - Replace direct `inboxServices.list` candidate enumeration.
 - Replace `listNewConversationCaptures` with input-event listing.
 - Build prompts from `AssistantInputEvent.content` first.
-- Enrich from `inboxServices.show` only when projection has a capture id.
+- Build prompts from event-owned `attachmentEvidence`; prompt construction must
+  not call `inboxServices.show`.
+- Use `inboxServices.show` only in producer/update paths that refresh
+  `attachmentEvidence` after capture import or parser drain.
 - Include projection failure context in prompts without leaking raw payloads.
 - Attach accepted input event ids to provider requests and receipts.
 - Admit capture-less hosted late input into in-flight Codex turns.
@@ -473,7 +502,8 @@ Required tests:
   `AssistantInputSource` contract
 - scanner still handles inbox-backed events through the input store
 - prompt can be built from hosted input text without inbox capture
-- prompt enriches from inbox capture when projection succeeds
+- prompt uses event-owned `attachmentEvidence` after producer-side refresh,
+  without prompt-time inbox service calls
 - projection failure does not hide the candidate
 - terminal evidence prevents duplicate processing by input id
 - late hosted input with no capture is steered into an active Codex turn
@@ -527,9 +557,10 @@ Suggested worker split after Batch 1:
 
 - Do not delete `inboxd`.
 - Do not make Cloudflare the durable assistant-input owner.
-- Do not store raw hosted payloads, raw EML, signed URLs, local paths, auth
-  headers, provider request bodies, cookies, or attachment bytes in assistant
-  input events.
+- Do not store raw hosted payloads, raw EML, signed URLs, absolute/local paths,
+  auth headers, provider request bodies, cookies, or attachment bytes in
+  assistant input events. The only path exception is sanitized vault-relative
+  attachment-evidence refs under the approved `raw/**` and `derived/**` roots.
 - Do not add a hosted-runtime-input journal beside `AssistantInputEvent`.
 - Do not add a projection queue beside the input store.
 - Do not reintroduce runtime-only inbox rows as assistant state.
@@ -600,7 +631,8 @@ This hard cut is complete when:
 - hosted code has no transient inbox staging dependency
 - production code has no dependency on `listNewConversationCaptures`
 - no mailbox or assistant cursor advances because of runtime-only projection
-- inbox capture remains usable as enrichment when projection succeeds
+- inbox capture remains usable as producer-side evidence when projection
+  succeeds, but prompt construction reads the assistant input event only
 
 ## Final Stress Checklist
 

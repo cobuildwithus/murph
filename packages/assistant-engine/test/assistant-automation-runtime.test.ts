@@ -1,4 +1,5 @@
-import { rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -145,6 +146,16 @@ vi.mock('../src/assistant/automation/grouping.ts', async (importOriginal) => {
     collectAssistantAutoReplyGroup: groupingMocks.collectAssistantAutoReplyGroup,
   }
 })
+
+async function writeVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  bytes: Buffer,
+): Promise<void> {
+  const absolutePath = path.join(vaultRoot, relativePath)
+  await mkdir(path.dirname(absolutePath), { recursive: true })
+  await writeFile(absolutePath, bytes)
+}
 
 vi.mock('../src/assistant/automation/scanner.ts', () => ({
   scanAssistantAutomationOnce: runLoopMocks.scanAssistantAutomationOnce,
@@ -2968,10 +2979,10 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.prepareAssistantAutoReplyInput.mockImplementation(
       async (inputs: readonly {
         inputId: string
-        projection: { inboxCaptureId: string | null } | null
+        projection: { optionalInboxCaptureId: string | null } | null
       }[]) => {
         const captureIds = inputs.map(
-          (entry) => entry.projection?.inboxCaptureId ?? entry.inputId,
+          (entry) => entry.projection?.optionalInboxCaptureId ?? entry.inputId,
         )
         return {
           kind: 'ready',
@@ -3200,7 +3211,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
       1,
       [expect.objectContaining({
-        projection: expect.objectContaining({ inboxCaptureId: 'capture-1' }),
+        projection: expect.objectContaining({ optionalInboxCaptureId: 'capture-1' }),
       })],
       '/tmp/assistant-automation-vault',
       { onEvent: expect.any(Function) },
@@ -3208,7 +3219,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
       2,
       [expect.objectContaining({
-        projection: expect.objectContaining({ inboxCaptureId: 'capture-late' }),
+        projection: expect.objectContaining({ optionalInboxCaptureId: 'capture-late' }),
       })],
       '/tmp/assistant-automation-vault',
       { onEvent: expect.any(Function) },
@@ -4650,11 +4661,7 @@ describe('assistant auto-reply runtime', () => {
       skipped: 0,
       stopScanning: false,
     })
-    expect(inboxServices.show).toHaveBeenCalledWith({
-      captureId: 'capture-1',
-      requestId: null,
-      vault: '/tmp/assistant-automation-vault',
-    })
+    expect(inboxServices.show).not.toHaveBeenCalled()
   })
 
   it('sends rich content when any configured route supports multimodal input', async () => {
@@ -5015,11 +5022,7 @@ describe('assistant auto-reply runtime', () => {
         acceptedInputIds: [hostedInput.event.inputId],
       }),
     )
-    expect(inboxServices.show).toHaveBeenCalledWith({
-      captureId: 'capture-projected-initial',
-      requestId: null,
-      vault: '/tmp/assistant-automation-vault',
-    })
+    expect(inboxServices.show).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5078,7 +5081,7 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('loads projected capture attachments for hosted assistant input prompts', async () => {
+  it('uses event-owned attachment evidence for hosted assistant input prompts', async () => {
     const optionalInboxCaptureId = 'cap_projected_attachment'
     const baseHostedInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_projected',
@@ -5111,6 +5114,34 @@ describe('assistant auto-reply runtime', () => {
             sizeBytes: 128,
           },
         ],
+        attachmentEvidence: {
+          attachments: [
+            {
+              byteSize: 128,
+              derived: null,
+              descriptorAttachmentId: 'safe_attachment_descriptor',
+              fileName: 'lab-results.pdf',
+              inlineFragments: [],
+              kind: 'document',
+              mime: 'application/pdf',
+              ordinal: 1,
+              parseState: 'succeeded',
+              raw: {
+                byteSize: 128,
+                kind: 'vault-relative-file',
+                mediaType: 'application/pdf',
+                path: 'raw/inbox/linq/cap_projected_attachment/attachments/lab-results.pdf',
+                sha256: null,
+              },
+              sourceAttachmentId: 'attachment-1',
+            },
+          ],
+          optionalInboxCaptureId,
+          reasonCode: null,
+          source: 'hosted-inbox-projection',
+          status: 'available',
+          updatedAt: '2026-04-08T00:04:02.000Z',
+        },
       },
       projection: {
         captureId: optionalInboxCaptureId,
@@ -5118,40 +5149,7 @@ describe('assistant auto-reply runtime', () => {
         status: 'succeeded',
       },
     }
-    const projectedCapture = createCaptureDetail({
-      captureId: optionalInboxCaptureId,
-      source: 'linq',
-      accountId: 'safe_acct_1',
-      actorId: 'safe_actor_1',
-      actorIsSelf: false,
-      attachmentCount: 1,
-      attachments: [
-        {
-          attachmentId: 'attachment-1',
-          ordinal: 1,
-          externalId: null,
-          kind: 'document',
-          mime: 'application/pdf',
-          originalPath: null,
-          storedPath: 'raw/inbox/linq/cap_projected_attachment/attachments/lab-results.pdf',
-          fileName: 'lab-results.pdf',
-          byteSize: 128,
-          sha256: null,
-          extractedText: null,
-          transcriptText: null,
-          derivedPath: null,
-          parseState: 'succeeded',
-        },
-      ],
-      externalId: 'linq:real_msg_projected',
-      text: 'Received a Linq message with 1 attachment.',
-      threadId: 'real_thread_projected',
-      threadIsDirect: true,
-    })
-    const show = vi.fn(async () => ({
-      capture: projectedCapture,
-      vault: '/tmp/assistant-automation-vault',
-    }))
+    const show = vi.fn()
     const inboxServices = createInboxServices({
       show,
     })
@@ -5184,21 +5182,17 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(show).toHaveBeenCalledWith({
-      captureId: optionalInboxCaptureId,
-      requestId: null,
-      vault: '/tmp/assistant-automation-vault',
-    })
+    expect(show).not.toHaveBeenCalled()
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledWith(
       [
         expect.objectContaining({
           attachmentDescriptors: hostedInput.event.attachmentDescriptors,
-          enrichment: expect.objectContaining({
-            attachments: projectedCapture.attachments,
-            inboxCaptureId: optionalInboxCaptureId,
+          attachmentEvidence: expect.objectContaining({
+            attachments: hostedInput.event.attachmentEvidence.attachments,
+            optionalInboxCaptureId,
           }),
           projection: expect.objectContaining({
-            inboxCaptureId: optionalInboxCaptureId,
+            optionalInboxCaptureId,
             reasonCode: null,
             status: 'succeeded',
           }),
@@ -7102,6 +7096,22 @@ describe('assistant automation run loop', () => {
         sizeBytes: 2048,
       },
     ])
+    expect(stagedInputs[0]?.event.attachmentEvidence).toMatchObject({
+      optionalInboxCaptureId: 'capture-local',
+      reasonCode: 'attachment.evidence_partial',
+      source: 'local-inbox-import',
+      status: 'partial',
+    })
+    expect(stagedInputs[0]?.event.attachmentEvidence.attachments).toEqual([
+      expect.objectContaining({
+        descriptorAttachmentId: expect.stringMatching(/^lid_[0-9a-f]{32}$/u),
+        fileName: null,
+        kind: 'image',
+        mime: 'image/jpeg',
+        raw: null,
+        sourceAttachmentId: 'attachment-1',
+      }),
+    ])
     expect(stagedInputs[0]?.event.replyTarget).toEqual({
       channel: 'telegram',
       messageId: '101',
@@ -7113,7 +7123,7 @@ describe('assistant automation run loop', () => {
       replyContext: 'Replying to: earlier Telegram message',
     })
     expect(JSON.stringify(stagedInputs[0]?.event)).not.toContain(
-      'private-photo.jpg',
+      'photo-local',
     )
     expect(JSON.stringify(stagedInputs[0]?.event)).not.toContain(
       'group-local-1',
@@ -7370,6 +7380,294 @@ describe('assistant automation run loop', () => {
     expect(result.reason).toBe('signal')
     expect(scanStartedAt).toHaveLength(2)
     expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
+  })
+
+  it('refreshes staged attachment evidence after parser jobs drain', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const context = await createTempVaultContext('assistant-local-input-refresh-')
+    tempRoots.push(context.parentRoot)
+    await writeVaultFile(
+      context.vaultRoot,
+      'raw/inbox/telegram/capture-refresh/attachments/01__photo.png',
+      Buffer.from('image-bytes'),
+    )
+    await stageInboxCaptureAssistantInputEvent({
+      capture: createCaptureDetail({
+        attachmentCount: 1,
+        captureId: 'capture-refresh',
+        source: 'telegram',
+        text: 'input before parser drain',
+      }),
+      vault: context.vaultRoot,
+    })
+    const externalAbort = new AbortController()
+    const stagedInputs: AssistantInputCandidate[] = []
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            attachmentCount: 1,
+            captureId: 'capture-refresh',
+            source: 'telegram',
+            text: 'input before parser drain',
+            attachments: [
+              {
+                attachmentId: 'att_image_1',
+                byteSize: 128,
+                derivedPath:
+                  'derived/inbox/capture-refresh/attachments/att_image_1/manifest.json',
+                externalId: null,
+                extractedText: 'Parsed image label.',
+                fileName: 'photo.png',
+                kind: 'image',
+                mime: 'image/png',
+                ordinal: 1,
+                originalPath: null,
+                parseState: 'succeeded',
+                parserProviderId: null,
+                sha256: null,
+                storedPath:
+                  'raw/inbox/telegram/capture-refresh/attachments/01__photo.png',
+                transcriptText: null,
+              },
+            ],
+          }),
+        ),
+      ),
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          setTimeout(() => {
+            options.onEvent?.({
+              connectorId: 'parser',
+              parser: {
+                captureIds: ['capture-refresh', 'capture-refresh'],
+                failed: 0,
+                processed: 1,
+                succeeded: 1,
+              },
+              source: 'parser',
+              type: 'parser.jobs.drained',
+            })
+          }, 10)
+
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async (input) => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        const batch = await input.inputSource.listInputCandidates({
+          afterCursor: null,
+          limit: 10,
+        })
+        stagedInputs.push(...batch.inputs)
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: context.vaultRoot,
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(10)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(inboxServices.show).toHaveBeenCalledTimes(1)
+    expect(inboxServices.show).toHaveBeenCalledWith({
+      captureId: 'capture-refresh',
+      requestId: null,
+      vault: context.vaultRoot,
+    })
+    expect(stagedInputs[0]?.event.attachmentEvidence).toMatchObject({
+      optionalInboxCaptureId: 'capture-refresh',
+      reasonCode: null,
+      source: 'local-parser-drain',
+      status: 'available',
+    })
+    expect(stagedInputs[0]?.event.attachmentEvidence.attachments).toEqual([
+      expect.objectContaining({
+        derived: {
+          allowedRoot: 'derived/inbox/capture-refresh/attachments/att_image_1',
+          kind: 'parser-manifest',
+          manifestPath:
+            'derived/inbox/capture-refresh/attachments/att_image_1/manifest.json',
+        },
+        inlineFragments: [
+          {
+            kind: 'attachment_extracted_text',
+            label: 'attachment-1-extracted-text',
+            text: 'Parsed image label.',
+            truncated: false,
+          },
+        ],
+        raw: {
+          byteSize: 128,
+          kind: 'vault-relative-file',
+          mediaType: 'image/png',
+          path: `raw/assistant-input/${stagedInputs[0]!.event.inputId}/attachments/001.png`,
+          sha256: null,
+        },
+        sourceAttachmentId: 'att_image_1',
+      }),
+    ])
+  })
+
+  it('keeps parser drain evidence refresh failures nonblocking', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const context = await createTempVaultContext('assistant-local-input-refresh-failed-')
+    tempRoots.push(context.parentRoot)
+    const stored = await stageInboxCaptureAssistantInputEvent({
+      capture: createCaptureDetail({
+        attachmentCount: 1,
+        captureId: 'capture-refresh-failed',
+        source: 'telegram',
+        text: 'input before failed parser drain',
+      }),
+      vault: context.vaultRoot,
+    })
+    const externalAbort = new AbortController()
+    const events: Record<string, unknown>[] = []
+    const scanStartedAt: number[] = []
+    const error = new Error('projection unavailable')
+    Object.defineProperty(error, 'code', {
+      value: 'E_ATTACHMENT_REFRESH',
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockRejectedValue(error),
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          setTimeout(() => {
+            options.onEvent?.({
+              connectorId: 'parser',
+              parser: {
+                captureIds: ['capture-refresh-failed'],
+                failed: 1,
+                processed: 1,
+                succeeded: 0,
+              },
+              source: 'parser',
+              type: 'parser.jobs.drained',
+            })
+          }, 10)
+
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      onEvent: (event) => {
+        events.push(toSnapshotRecord(event))
+      },
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: context.vaultRoot,
+    })
+
+    await vi.advanceTimersByTimeAsync(10)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(inboxServices.show).toHaveBeenCalledWith({
+      captureId: 'capture-refresh-failed',
+      requestId: null,
+      vault: context.vaultRoot,
+    })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        captureId: 'capture-refresh-failed',
+        errorCode: 'E_ATTACHMENT_REFRESH',
+        inputId: stored.inputId,
+        providerKind: 'status',
+        providerState: 'completed',
+        safeDetails: 'attachment_evidence_refresh_failed_nonblocking',
+        type: 'input.reply-progress',
+      }),
+    )
   })
 
   it('waits for the receipt recovery retry deadline instead of rescanning immediately on failures', async () => {

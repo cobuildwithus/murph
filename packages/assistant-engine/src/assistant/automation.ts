@@ -22,9 +22,12 @@ export {
   createAssistantInputEventId,
   listAssistantInputEvents,
   readAssistantInputEvent,
+  updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
+  type AssistantInputAttachmentEvidence,
   type AssistantInputAttachmentDescriptor,
+  type AssistantInputAttachmentEvidenceItem,
   type AssistantInputContent,
   type AssistantInputEventRecord,
   type AssistantInputEventRecordParseFailure,
@@ -56,3 +59,8 @@ export {
   type AssistantTurnInputRefreshPhase,
   type AssistantTurnInputRefreshResult,
 } from './turn-input.js'
+export {
+  createAssistantInputAttachmentEvidenceFromInboxCapture,
+  materializeAssistantInputAttachmentRawArtifactRefs,
+  type InboxCaptureAttachmentLike,
+} from './inbox-attachment-evidence.js'

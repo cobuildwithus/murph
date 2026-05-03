@@ -68,13 +68,36 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       [HOSTED_OPERATOR_HOME_ROOT_KEY]: restored.operatorHomeRoot,
       vault: restored.vaultRoot,
     },
-    shouldRestoreArtifact: () => false,
+    shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
   });
 
   return {
     ...restored,
     mode: "snapshot",
   };
+}
+
+function shouldRestoreHostedAssistantInputEvidenceArtifact(input: {
+  path: string;
+  root: string;
+}): boolean {
+  if (input.root !== "vault") {
+    return false;
+  }
+
+  return (
+    hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "raw/inbox")
+    || hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "raw/assistant-input")
+    || hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "derived/inbox")
+    || hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "derived/assistant-input")
+  );
+}
+
+function hasHostedAssistantInputEvidenceArtifactPrefix(
+  relativePath: string,
+  prefix: string,
+): boolean {
+  return relativePath === prefix || relativePath.startsWith(`${prefix}/`);
 }
 
 async function createHostedWorkspaceRuntimeLocalRoots(

@@ -62,7 +62,8 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('keeps PDF raw artifact refs as inspectable local filesystem metadata without forcing multimodal input', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const pdfPath = 'raw/inbox/capture-1/attachments/01__scan.pdf'
+    const pdfPath =
+      'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001.pdf'
     const bundle = await buildAssistantInputAttachmentModelBundle({
       attachment: createAttachmentEvidence({
         kind: 'document',
