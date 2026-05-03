@@ -70,6 +70,7 @@ export default async function HomePage() {
         <StickyNav
           authenticated={authenticated}
           githubStarCount={githubStarCount}
+          preloadAuthPanel
           splitUnauthenticatedAuth
         />
         <HeroSection authenticated={authenticated} />

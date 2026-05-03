@@ -6,10 +6,12 @@ const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
 export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
+export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 
 export interface HostedRetentionCleanupResult {
   expiredMailboxItemsDeleted: number;
   oldRuntimeLogsDeleted: number;
+  staleWebSessionsDeleted: number;
 }
 
 export async function runHostedRetentionCleanup(input: {
@@ -26,10 +28,15 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
+  const staleWebSessionsDeleted = await deleteStaleHostedWebSessions({
+    now,
+    prisma,
+  });
 
   return {
     expiredMailboxItemsDeleted,
     oldRuntimeLogsDeleted,
+    staleWebSessionsDeleted,
   };
 }
 
@@ -68,6 +75,31 @@ async function deleteOldHostedRuntimeLogs(input: {
       at: {
         lt: cutoff,
       },
+    },
+  });
+
+  return result.count;
+}
+
+async function deleteStaleHostedWebSessions(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS);
+  const result = await input.prisma.hostedWebSession.deleteMany({
+    where: {
+      OR: [
+        {
+          expiresAt: {
+            lt: cutoff,
+          },
+        },
+        {
+          revokedAt: {
+            lt: cutoff,
+          },
+        },
+      ],
     },
   });
 

@@ -644,6 +644,39 @@ test("builds chronological metric series and formats display values", () => {
   assert.equal(formatMetricDisplayValue(newer), "81.6");
 });
 
+test("does not emit misleading aggregates for canonical metrics with unnormalized units", () => {
+  const mixed = selectMetricSeries({
+    aggregation: "mean",
+    metricKey: "body-weight",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:body-weight:2026-04-29:stone:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "weight_stone",
+        sourceKind: "measurement",
+        unit: "stone",
+        value: 12,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:body-weight:2026-04-29:kg:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-29T08:00:00.000Z",
+        recordId: "weight_kg",
+        sourceKind: "measurement",
+        unit: "kg",
+        value: 81,
+      }),
+    ],
+  });
+
+  assert.equal(mixed.status, "no_data");
+  assert.deepEqual(mixed.rows, []);
+  assert.equal(mixed.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"), true);
+});
+
 test("selects metric window comparisons and trends through shared selectors", () => {
   const rows = [
     seriesPoint("2026-04-01", 60),
@@ -800,6 +833,177 @@ test("goal progress reports neutral not_met for unscheduled selected-value targe
   assert.equal(progress.currentValue, 45);
 });
 
+test("goal progress normalizes target units before comparing", () => {
+  const target: GoalMetricTarget = {
+    comparator: "<",
+    evaluation: { kind: "selected-value" },
+    kind: "metric",
+    metricKey: "body-weight",
+    targetId: "weight-under-180-lb",
+    unit: "lb",
+    value: 180,
+  };
+
+  const point = metricPoint({
+    effectiveDate: "2026-04-29",
+    id: "metric-point:body-weight:2026-04-29:measurement:0",
+    metricKey: "body-weight",
+    observedAt: "2026-04-29T07:00:00.000Z",
+    recordId: "weight_kg",
+    sourceKind: "measurement",
+    unit: "kg",
+    value: 82,
+  });
+  const progress = selectMetricGoalProgress({
+    goalId: "goal_weight",
+    now: "2026-04-30T00:00:00.000Z",
+    points: [point],
+    target,
+  });
+
+  assert.equal(progress.status, "not_met");
+  assert.equal(Number(progress.deltaToTarget?.toFixed(4)), 0.3534);
+
+  const supportedRange = selectMetricGoalProgress({
+    goalId: "goal_weight",
+    points: [point],
+    target: {
+      ...target,
+      comparator: "between",
+      highValue: 190,
+      targetId: "weight-180-to-190-lb",
+    },
+  });
+  assert.equal(supportedRange.status, "met");
+
+  const normalizedRange = selectMetricGoalProgress({
+    goalId: "goal_weight",
+    points: [{
+      ...point,
+      canonicalUnit: "kg",
+      canonicalValue: 82,
+      unit: "kg",
+      value: 82,
+    }],
+    target: {
+      comparator: "between",
+      evaluation: { kind: "selected-value" },
+      highValue: 190,
+      kind: "metric",
+      metricKey: "body-weight",
+      targetId: "weight-between-180-and-190-lb",
+      unit: "lb",
+      value: 180,
+    },
+  });
+  assert.equal(normalizedRange.status, "met");
+  assert.equal(normalizedRange.currentValue, 82);
+  assert.equal(normalizedRange.deltaToTarget, 0);
+
+  const unsupported = selectMetricGoalProgress({
+    goalId: "goal_weight",
+    points: [point],
+    target: { ...target, unit: "stone" },
+  });
+
+  assert.equal(unsupported.status, "unsupported");
+  assert.equal(unsupported.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"), true);
+
+  const unsupportedCurrent = selectMetricGoalProgress({
+    goalId: "goal_weight",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:body-weight:2026-04-29:unsupported-unit:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "weight_stone",
+        sourceKind: "measurement",
+        unit: "stone",
+        value: 12,
+      }),
+    ],
+    target: { ...target, unit: "kg", value: 80 },
+  });
+  assert.equal(unsupportedCurrent.status, "unsupported");
+  assert.equal(unsupportedCurrent.deltaToTarget, null);
+  assert.equal(unsupportedCurrent.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"), true);
+});
+
+test("goal progress honors daily-aggregate selection policy overrides", () => {
+  const target: GoalMetricTarget = {
+    comparator: "<=",
+    evaluation: { kind: "selected-value" },
+    kind: "metric",
+    metricKey: "resting-heart-rate",
+    selectionPolicyOverride: {
+      kind: "daily-aggregate",
+      latestWindowDays: 3,
+      minimumPoints: 3,
+      statistic: "median",
+    },
+    targetId: "rhr-daily-median-under-52",
+    unit: "bpm",
+    value: 52,
+  };
+
+  const progress = selectMetricGoalProgress({
+    goalId: "goal_rhr",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-27",
+        id: "metric-point:resting-heart-rate:2026-04-27:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-04-27T07:00:00.000Z",
+        recordId: "wearable_rhr_0",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 200,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-28",
+        id: "metric-point:resting-heart-rate:2026-04-28:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-04-28T07:00:00.000Z",
+        recordId: "wearable_rhr_1",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 60,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:resting-heart-rate:2026-04-29:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "wearable_rhr_2",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 50,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-30",
+        id: "metric-point:resting-heart-rate:2026-04-30:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-04-30T07:00:00.000Z",
+        recordId: "wearable_rhr_3",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 52,
+      }),
+    ],
+    target,
+  });
+
+  assert.equal(progress.status, "met");
+  assert.equal(progress.currentValue, 52);
+  assert.deepEqual(progress.selectedPointIds, [
+    "metric-point:resting-heart-rate:2026-04-28:wearable:0",
+    "metric-point:resting-heart-rate:2026-04-29:wearable:0",
+    "metric-point:resting-heart-rate:2026-04-30:wearable:0",
+  ]);
+  assert.equal(progress.targetValueLabel, "<=52 bpm");
+});
+
 test("goal progress covers latest-lab, policy overrides, open ranges, and no-data", () => {
   const lab = metricPoint({
     effectiveDate: "2026-04-29",
@@ -909,8 +1113,9 @@ test("goal progress covers latest-lab, policy overrides, open ranges, and no-dat
     target: openRange,
   });
   assert.equal(formatTargetValue(openRange), "60-? bpm");
-  assert.equal(openRangeProgress.status, "not_met");
+  assert.equal(openRangeProgress.status, "unsupported");
   assert.equal(openRangeProgress.deltaToTarget, null);
+  assert.equal(openRangeProgress.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"), true);
 });
 
 test("goal progress keeps behind for scheduled rolling-window targets that miss target", () => {
@@ -944,6 +1149,54 @@ test("goal progress keeps behind for scheduled rolling-window targets that miss 
 
   assert.equal(progress.status, "behind");
   assert.equal(progress.currentValue, 45);
+});
+
+test("goal progress rejects rolling windows with unnormalized canonical metric points", () => {
+  const target: GoalMetricTarget = {
+    comparator: "<",
+    evaluation: { kind: "rolling-window", statistic: "mean", windowDays: 2 },
+    kind: "metric",
+    metricKey: "body-weight",
+    targetId: "weight-under-80",
+    unit: "kg",
+    value: 80,
+  };
+
+  const progress = selectMetricGoalProgress({
+    goalId: "goal_weight",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-28",
+        id: "metric-point:body-weight:2026-04-28:stone:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-28T07:00:00.000Z",
+        recordId: "weight_stone",
+        sourceKind: "measurement",
+        unit: "stone",
+        value: 12,
+      }),
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:body-weight:2026-04-29:kg:0",
+        metricKey: "body-weight",
+        observedAt: "2026-04-29T07:00:00.000Z",
+        recordId: "weight_kg",
+        sourceKind: "measurement",
+        unit: "kg",
+        value: 81,
+      }),
+    ],
+    target,
+  });
+
+  assert.equal(progress.status, "unsupported");
+  assert.equal(progress.currentValue, null);
+  assert.equal(progress.deltaToTarget, null);
+  assert.equal(progress.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"), true);
+  assert.deepEqual(progress.selectedPointIds.sort(), [
+    "metric-point:body-weight:2026-04-28:stone:0",
+    "metric-point:body-weight:2026-04-29:kg:0",
+  ]);
 });
 
 test("goal progress surfaces rolling-window stale and low-sample warnings", () => {

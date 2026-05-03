@@ -172,10 +172,10 @@ function metricPointFromSampleSummary(summary: SampleSummaryMetricEvidence): Met
 }
 
 function metricPointFromMetricRow(row: MetricRowEvidence): MetricPoint[] {
-  const definition = resolveMetricDefinition(row.metricKey);
-  if (!definition || typeof row.value !== "number" || !Number.isFinite(row.value)) {
+  if (typeof row.value !== "number" || !Number.isFinite(row.value)) {
     return [];
   }
+  const definition = resolveMetricDefinition(row.metricKey) ?? createCustomMetricDefinition(row.metricKey, row.unit);
 
   const observedAt = row.date.includes("T") ? row.date : `${row.date}T00:00:00.000Z`;
   const normalized = normalizeMetricValue({ metricKey: definition.key, unit: row.unit ?? definition.displayUnit, value: row.value });
@@ -248,7 +248,8 @@ function metricSampleMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const normalized = normalizeMetricValue({ metricKey: definition.key, unit: unit ?? definition.displayUnit, value });
   const quality = readString(entity.attributes.quality) ?? entity.status ?? null;
   const source = readString(entity.attributes.source);
-  if (!isDisplayGradeMetricSample(source, quality)) return [];
+  const qualifiers = readQualifiers(entity.attributes.qualifiers);
+  if (!isDisplayGradeMetricSample(source, quality, qualifiers)) return [];
   const provider = providerForMetricSample(entity);
 
   return [createMetricPoint({
@@ -258,7 +259,7 @@ function metricSampleMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     comparator: null,
     confidence: metricSampleConfidence(quality),
     context: compactContext({
-      qualifiers: readQualifiers(entity.attributes.qualifiers),
+      qualifiers,
       quality: quality ?? undefined,
       source: source ?? undefined,
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
@@ -297,16 +298,23 @@ function metricSampleConfidence(quality: string | null): MetricConfidence {
   return "medium";
 }
 
-export function isDisplayGradeMetricSample(source: string | null, quality: string | null): boolean {
+export function isDisplayGradeMetricSample(
+  source: string | null,
+  quality: string | null,
+  qualifiers: Record<string, string | number | boolean> | undefined = undefined,
+): boolean {
   if (source === "manual" || source === "derived") return true;
-  return quality === "normalized" || quality === "derived";
+  if (quality === "derived") return true;
+  if (quality === "raw") return false;
+  return qualifiers?.summary === true || qualifiers?.["display-grade"] === true || qualifiers?.displayGrade === true;
 }
 
 export function isDisplayGradeMetricSampleEntity(entity: CanonicalEntity): boolean {
   if (entity.family !== "sample" || entity.kind !== "metric_sample") return false;
   const quality = readString(entity.attributes.quality) ?? entity.status ?? null;
   const source = readString(entity.attributes.source);
-  return isDisplayGradeMetricSample(source, quality);
+  const qualifiers = readQualifiers(entity.attributes.qualifiers);
+  return isDisplayGradeMetricSample(source, quality, qualifiers);
 }
 
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {

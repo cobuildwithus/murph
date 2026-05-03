@@ -70,6 +70,25 @@ function readSelectionPolicyOverride(value: unknown): MetricSelectionPolicy | nu
       staleAfterDays,
     };
   }
+  if (kind === "daily-aggregate") {
+    const statistic = readString(record.statistic);
+    if (
+      statistic === "mean" ||
+      statistic === "median" ||
+      statistic === "min" ||
+      statistic === "max" ||
+      statistic === "sum" ||
+      statistic === "count"
+    ) {
+      return {
+        kind,
+        latestWindowDays: readNumber(record.latestWindowDays) ?? undefined,
+        minimumPoints: readNumber(record.minimumPoints) ?? undefined,
+        staleAfterDays,
+        statistic,
+      };
+    }
+  }
   if (kind === "qualified-latest") {
     const requiredQualifiers = readQualifierMap(record.requiredQualifiers);
     if (requiredQualifiers) return { kind, requiredQualifiers, staleAfterDays };

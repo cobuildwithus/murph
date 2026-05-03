@@ -1,5 +1,6 @@
 import { createCustomMetricDefinition, resolveMetricDefinition, resolveMetricInputKey } from "./catalog.ts";
 import { formatNumber, formatTargetValue } from "./format.ts";
+import { normalizeMetricValue } from "./normalize.ts";
 import { listMetricPoints } from "./series.ts";
 import { selectMetricValue } from "./selectors.ts";
 import type {
@@ -39,7 +40,7 @@ export function selectMetricGoalProgress(input: {
       deltaToTarget: null,
       goalId: input.goalId,
       metricKey,
-      selectedPointIds: [],
+      selectedPointIds: current.selectedPointIds,
       status: current.status,
       targetId: input.target.targetId,
       targetValueLabel,
@@ -48,19 +49,47 @@ export function selectMetricGoalProgress(input: {
     };
   }
 
-  const met = targetMet(current.value, input.target);
+  const comparableCurrent = normalizeGoalMetricCurrentForComparison({
+    current,
+    definition,
+    metricKey,
+  });
+  const comparableTarget = normalizeGoalMetricTargetForComparison({
+    definition,
+    metricKey,
+    target: input.target,
+  });
+  const warnings = [...current.warnings, ...comparableCurrent.warnings, ...comparableTarget.warnings];
+
+  if (!comparableCurrent.supported || !comparableTarget.supported) {
+    return {
+      currentValue: comparableCurrent.value,
+      currentValueLabel: comparableCurrent.value === current.value ? current.valueLabel : formatNumber(comparableCurrent.value, definition.valuePrecision),
+      deltaToTarget: null,
+      goalId: input.goalId,
+      metricKey,
+      selectedPointIds: current.selectedPointIds,
+      status: "unsupported",
+      targetId: input.target.targetId,
+      targetValueLabel,
+      unit: current.unit ?? comparableTarget.target.unit,
+      warnings,
+    };
+  }
+
+  const met = targetMet(comparableCurrent.value, comparableTarget.target);
   return {
-    currentValue: current.value,
-    currentValueLabel: current.valueLabel,
-    deltaToTarget: deltaForTarget(current.value, input.target),
+    currentValue: comparableCurrent.value,
+    currentValueLabel: comparableCurrent.value === current.value ? current.valueLabel : formatNumber(comparableCurrent.value, definition.valuePrecision),
+    deltaToTarget: deltaForTarget(comparableCurrent.value, comparableTarget.target),
     goalId: input.goalId,
     metricKey,
     selectedPointIds: current.selectedPointIds,
     status: current.status === "stale" ? "stale" : met ? "met" : unmetGoalStatus(input.target),
     targetId: input.target.targetId,
     targetValueLabel,
-    unit: current.unit ?? input.target.unit,
-    warnings: current.warnings,
+    unit: current.unit ?? comparableTarget.target.unit,
+    warnings,
   };
 }
 
@@ -147,20 +176,28 @@ function selectRollingWindowGoalMetricValue(input: {
   target: RollingWindowGoalMetricTarget;
 }): GoalMetricTargetValueSelection {
   const evaluation = input.target.evaluation;
+  const requiresCanonicalUnit = input.definition.canonicalUnit !== null;
 
-  const candidates = listMetricPoints({
+  const listedPoints = listMetricPoints({
     biomarkerKey: input.target.biomarkerKey,
     metricKey: input.metricKey,
     points: input.points,
-  }).filter((point) => {
-    const value = point.canonicalValue ?? point.value;
+  });
+  const candidates = listedPoints.filter((point) => {
+    const value = requiresCanonicalUnit ? point.canonicalValue : point.canonicalValue ?? point.value;
     if (value === null || !Number.isFinite(value)) return false;
     if (input.target.startAt && point.effectiveDate < input.target.startAt) return false;
     if (input.target.targetAt && point.effectiveDate > input.target.targetAt) return false;
     return true;
   });
 
-  const requestedAnchorDate = input.now ? input.now.slice(0, 10) : candidates.at(-1)?.effectiveDate ?? null;
+  const rawCandidates = listedPoints.filter((point) => {
+    if (point.value === null || !Number.isFinite(point.value)) return false;
+    if (input.target.startAt && point.effectiveDate < input.target.startAt) return false;
+    if (input.target.targetAt && point.effectiveDate > input.target.targetAt) return false;
+    return true;
+  });
+  const requestedAnchorDate = input.now ? input.now.slice(0, 10) : candidates.at(-1)?.effectiveDate ?? rawCandidates.at(-1)?.effectiveDate ?? null;
   const anchorDate = requestedAnchorDate && input.target.targetAt && requestedAnchorDate > input.target.targetAt
     ? input.target.targetAt
     : requestedAnchorDate;
@@ -170,12 +207,32 @@ function selectRollingWindowGoalMetricValue(input: {
 
   const windowStart = subtractIsoDays(anchorDate, evaluation.windowDays - 1);
   const windowPoints = candidates.filter((point) => point.effectiveDate >= windowStart && point.effectiveDate <= anchorDate);
+  const rawWindowPoints = rawCandidates.filter((point) =>
+    point.effectiveDate >= windowStart &&
+    point.effectiveDate <= anchorDate
+  );
+  const unnormalizedWindowPoints = requiresCanonicalUnit
+    ? rawWindowPoints.filter((point) => point.value !== null && point.canonicalValue === null)
+    : [];
   if (windowPoints.length === 0) {
+    if (unnormalizedWindowPoints.length > 0) {
+      return {
+        selectedPointIds: unnormalizedWindowPoints.map((point) => point.id),
+        status: "unsupported",
+        unit: input.definition.canonicalUnit ?? input.target.unit,
+        value: null,
+        valueLabel: null,
+        warnings: [{
+          code: "UNIT_NOT_NORMALIZED",
+          message: `${input.definition.displayName} rolling window includes values that could not be normalized to ${input.definition.canonicalUnit}.`,
+        }],
+      };
+    }
     return { selectedPointIds: [], status: "no_data", unit: input.target.unit, value: null, valueLabel: null, warnings: [] };
   }
 
   const values = windowPoints.flatMap((point) => {
-    const value = point.canonicalValue ?? point.value;
+    const value = requiresCanonicalUnit ? point.canonicalValue : point.canonicalValue ?? point.value;
     return value === null || !Number.isFinite(value) ? [] : [value];
   });
   const value = evaluation.statistic === "median" ? median(values) : mean(values);
@@ -192,10 +249,24 @@ function selectRollingWindowGoalMetricValue(input: {
     windowDays: evaluation.windowDays,
     windowPoints,
   });
+  if (unnormalizedWindowPoints.length > 0) {
+    warnings.push({
+      code: "UNIT_NOT_NORMALIZED",
+      message: `${input.definition.displayName} rolling window includes values that could not be normalized to ${input.definition.canonicalUnit}.`,
+    });
+    return {
+      selectedPointIds: [...windowPoints, ...unnormalizedWindowPoints].map((point) => point.id),
+      status: "unsupported",
+      unit: input.definition.canonicalUnit ?? input.target.unit,
+      value: null,
+      valueLabel: null,
+      warnings,
+    };
+  }
   return {
     selectedPointIds: windowPoints.map((point) => point.id),
     status: warnings.some((warning) => warning.code === "SOURCE_STALE") ? "stale" : "behind",
-    unit: windowPoints.at(-1)?.canonicalUnit ?? windowPoints.at(-1)?.unit ?? input.target.unit,
+    unit: requiresCanonicalUnit ? input.definition.canonicalUnit : windowPoints.at(-1)?.canonicalUnit ?? windowPoints.at(-1)?.unit ?? input.target.unit,
     value,
     valueLabel: formatNumber(value, precision),
     warnings,
@@ -240,7 +311,95 @@ function median(values: readonly number[]): number {
   return ((sorted[midpoint - 1] ?? 0) + (sorted[midpoint] ?? 0)) / 2;
 }
 
-function targetMet(value: number, target: GoalMetricTarget): boolean {
+interface ComparableGoalMetricTarget {
+  comparator: GoalMetricTarget["comparator"];
+  highValue?: number;
+  unit: string;
+  value: number;
+}
+
+interface NormalizedGoalMetricTargetForComparison {
+  supported: boolean;
+  target: ComparableGoalMetricTarget;
+  warnings: MetricSelectionWarning[];
+}
+
+interface NormalizedGoalMetricCurrentForComparison {
+  supported: boolean;
+  unit: string | null;
+  value: number;
+  warnings: MetricSelectionWarning[];
+}
+
+function normalizeGoalMetricCurrentForComparison(input: {
+  current: GoalMetricTargetValueSelection;
+  definition: MetricDefinition;
+  metricKey: string;
+}): NormalizedGoalMetricCurrentForComparison {
+  const normalizedValue = normalizeMetricValue({
+    metricKey: input.metricKey,
+    unit: input.current.unit,
+    value: input.current.value,
+  });
+  const requiresCanonicalUnit = input.definition.canonicalUnit !== null;
+  return {
+    supported: !requiresCanonicalUnit || normalizedValue.canonicalValue !== null,
+    unit: normalizedValue.canonicalUnit ?? normalizedValue.unit ?? input.current.unit,
+    value: normalizedValue.canonicalValue ?? input.current.value ?? 0,
+    warnings: normalizedValue.warnings,
+  };
+}
+
+function normalizeGoalMetricTargetForComparison(input: {
+  definition: MetricDefinition;
+  metricKey: string;
+  target: GoalMetricTarget;
+}): NormalizedGoalMetricTargetForComparison {
+  const warnings: MetricSelectionWarning[] = [];
+  const normalizedValue = normalizeMetricValue({
+    metricKey: input.metricKey,
+    unit: input.target.unit,
+    value: input.target.value,
+  });
+  warnings.push(...normalizedValue.warnings);
+
+  const requiresCanonicalUnit = input.definition.canonicalUnit !== null;
+  let supported = !requiresCanonicalUnit || normalizedValue.canonicalValue !== null;
+  const comparableTarget: ComparableGoalMetricTarget = {
+    comparator: input.target.comparator,
+    unit: normalizedValue.canonicalUnit ?? normalizedValue.unit ?? input.target.unit,
+    value: normalizedValue.canonicalValue ?? input.target.value,
+  };
+
+  if (input.target.comparator === "between") {
+    if (input.target.highValue === undefined) {
+      supported = false;
+      warnings.push({
+        code: "UNIT_NOT_NORMALIZED",
+        message: `${input.definition.displayName} target range is missing highValue.`,
+      });
+    } else {
+      const normalizedHighValue = normalizeMetricValue({
+        metricKey: input.metricKey,
+        unit: input.target.unit,
+        value: input.target.highValue,
+      });
+      warnings.push(...normalizedHighValue.warnings);
+      if (requiresCanonicalUnit && normalizedHighValue.canonicalValue === null) {
+        supported = false;
+      }
+      comparableTarget.highValue = normalizedHighValue.canonicalValue ?? input.target.highValue;
+    }
+  }
+
+  return {
+    supported,
+    target: comparableTarget,
+    warnings,
+  };
+}
+
+function targetMet(value: number, target: ComparableGoalMetricTarget): boolean {
   switch (target.comparator) {
     case "<": return value < target.value;
     case "<=": return value <= target.value;
@@ -250,7 +409,7 @@ function targetMet(value: number, target: GoalMetricTarget): boolean {
   }
 }
 
-function deltaForTarget(value: number, target: GoalMetricTarget): number | null {
+function deltaForTarget(value: number, target: ComparableGoalMetricTarget): number | null {
   switch (target.comparator) {
     case "<":
     case "<=":

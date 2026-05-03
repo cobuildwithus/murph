@@ -314,6 +314,46 @@
                 "properties": {
                   "kind": {
                     "type": "string",
+                    "const": "daily-aggregate"
+                  },
+                  "statistic": {
+                    "type": "string",
+                    "enum": [
+                      "mean",
+                      "median",
+                      "min",
+                      "max",
+                      "sum",
+                      "count"
+                    ]
+                  },
+                  "latestWindowDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  },
+                  "minimumPoints": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000
+                  },
+                  "staleAfterDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
+                  }
+                },
+                "required": [
+                  "kind",
+                  "statistic"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
                     "const": "latest-device-estimate"
                   },
                   "staleAfterDays": {

@@ -25,13 +25,9 @@ relations:
 - type: parent_family
   target: experiment_family:prolonged-fasting
 - type: primary_biomarker
-  target: biomarker:fasting-tolerance-symptom-log
-- type: secondary_biomarker
-  target: biomarker:refeed-tolerance-symptom-log
+  target: biomarker:blood-ketones-beta-hydroxybutyrate
 - type: secondary_biomarker
   target: biomarker:continuous-glucose
-- type: secondary_biomarker
-  target: biomarker:blood-ketones-beta-hydroxybutyrate
 - type: secondary_biomarker
   target: biomarker:body-weight
 - type: secondary_biomarker
@@ -40,8 +36,6 @@ relations:
   target: biomarker:resting-heart-rate
 - type: secondary_biomarker
   target: biomarker:hrv-rmssd
-- type: safety_outcome
-  target: biomarker:refeed-tolerance-symptom-log
 lineage:
   relationship: root
   rationale: Default Murph 24–72 hour hydrated fasting variant, kept separate from dry fasting, fasting-mimicking diets, very-low-calorie diets, TRE, ADF, Ramadan fasting, fasted exercise, and supervised disease-treatment fasting programs.
@@ -158,18 +152,14 @@ testPlans:
   durationDays: 14
   baselineDays: 7
   interventionDays: 7
-  primaryBiomarkerKey: biomarker:fasting-tolerance-symptom-log
+  primaryBiomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
   secondaryBiomarkerKeys:
-  - biomarker:refeed-tolerance-symptom-log
-  - biomarker:blood-ketones-beta-hydroxybutyrate
   - biomarker:continuous-glucose
   - biomarker:body-weight
   - biomarker:resting-heart-rate
   - biomarker:hrv-rmssd
   - biomarker:morning-blood-pressure
-  safetyOutcomeKeys:
-  - biomarker:fasting-tolerance-symptom-log
-  - biomarker:refeed-tolerance-symptom-log
+  safetyOutcomeKeys: []
   minimumAdherenceSessions: 1
   targetAdherenceSessions: 1
   notes:
@@ -178,24 +168,6 @@ testPlans:
   - Ketones, CGM/glucose, body weight, HR/HRV, and blood pressure are optional or risk-driven context, not required for every user.
   - Do not compare a 24-hour run directly with a 72-hour run as if they were the same dose.
 expectedSignalDescriptions:
-- biomarkerKey: biomarker:fasting-tolerance-symptom-log
-  expected: Safety signal
-  protocolProminence: focus
-  description: "Fasting stresses glucose supply, fluid balance, caffeine routine, and stress hormones; symptoms reveal whether the chosen duration is tolerable."
-  estimatedChange:
-    kind: mixed_or_contextual
-    window: During the fast through the planned end
-    confidence: low
-    basis: "Direct 24–72 h sources support tracking hunger, dizziness, presyncope, palpitations, stress, and performance, but symptom scores are safety triggers rather than an expected improvement target."
-- biomarkerKey: biomarker:refeed-tolerance-symptom-log
-  expected: Safety signal after first meal
-  protocolProminence: focus
-  description: "Refeeding restarts insulin, gut load, and fluid-electrolyte shifts; severe neurologic, breathing, swelling, chest, or palpitation symptoms signal danger."
-  estimatedChange:
-    kind: mixed_or_contextual
-    window: First hours after the planned refeed
-    confidence: low
-    basis: "Refeeding-risk sources support symptom watch and routing for severe neurologic, cardiovascular, respiratory, swelling, or weakness symptoms, but not a home score-change estimate for low-risk 24–72 h fasts."
 - biomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
   expected: Fuel-switch marker
   protocolProminence: focus
@@ -555,10 +527,8 @@ experimentOnboarding:
     measurementPlan:
       testPlanId: acute-fast-tolerance-14d
       requiredSignals:
-      - biomarker:fasting-tolerance-symptom-log
-      - biomarker:refeed-tolerance-symptom-log
-      optionalSignals:
       - biomarker:blood-ketones-beta-hydroxybutyrate
+      optionalSignals:
       - biomarker:continuous-glucose
       - biomarker:body-weight
       - biomarker:resting-heart-rate

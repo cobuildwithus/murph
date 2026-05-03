@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
       authLabel: string;
       signupLabel?: string;
       splitUnauthenticated?: boolean;
+      preloadAuthPanel?: boolean;
     }) =>
       createElement(
         "div",
@@ -93,6 +94,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "nav",
       authLabel: "Dashboard",
+      preloadAuthPanel: true,
       splitUnauthenticated: true,
     },
     undefined
@@ -103,6 +105,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "hero",
       authLabel: "See what works for your body",
+      preloadAuthPanel: true,
     },
     undefined
   );
@@ -112,6 +115,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "footer",
       authLabel: "Get started",
+      preloadAuthPanel: true,
       signupLabel: "Get started",
     },
     undefined
@@ -120,11 +124,14 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
-  assert.match(markup, /font-serif text-\[clamp\(2\.5rem,5\.2vw,4\.5rem\)\][^"]* lg:text-balance/);
+  assert.match(
+    markup,
+    /font-serif text-\[clamp\(2\.25rem,5\.2vw,4\.5rem\)\][^"]* text-balance/,
+  );
   assert.match(markup, /class="block lg:whitespace-nowrap">You measure your health\./);
   assert.match(
     markup,
-    /class="block text-\[#d4b87a\] lg:whitespace-nowrap">Now let(?:'|&#x27;)s experiment with it\./
+    /class="block text-\[#d4b87a\] lg:whitespace-nowrap">Now let(?:'|&#x27;)s experiment with(?: | )it\./,
   );
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
@@ -177,7 +184,7 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
 
   expect(metadata.title).toBe("Murph — Discover what actually makes you healthier");
   expect(metadata.description).toBe(
-    "Your personal health assistant. Sync your signals, pick a protocol, see what actually makes you healthier.",
+    "Your personal health assistant. Sync your biomarkers, pick a protocol, see what actually makes you healthier.",
   );
   expect(metadata.alternates?.canonical).toBe("/");
   expect(metadata.openGraph?.images).toEqual([
@@ -213,6 +220,7 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
       authenticated: true,
       context: "footer",
       authLabel: "Go to dashboard",
+      preloadAuthPanel: true,
       signupLabel: "Go to dashboard",
     },
     undefined

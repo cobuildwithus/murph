@@ -588,6 +588,13 @@ const goalMetricSelectionPolicySchema = z.union([
     staleAfterDays: integerSchema(1, 3650).optional(),
   }).strict(),
   z.object({
+    kind: z.literal("daily-aggregate"),
+    statistic: z.enum(["mean", "median", "min", "max", "sum", "count"]),
+    latestWindowDays: integerSchema(1, 365).optional(),
+    minimumPoints: integerSchema(1, 100_000).optional(),
+    staleAfterDays: integerSchema(1, 3650).optional(),
+  }).strict(),
+  z.object({
     kind: z.literal("latest-device-estimate"),
     staleAfterDays: integerSchema(1, 3650).optional(),
   }).strict(),

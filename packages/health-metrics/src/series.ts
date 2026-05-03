@@ -107,8 +107,13 @@ function aggregateMetricSeriesPoints(
   aggregation: MetricSeriesAggregation,
 ): MetricSeriesPoint[] {
   return groupMetricPointsByDate(points).flatMap((datePoints) => {
+    const useCanonicalValues = aggregation !== "count" && definition.canonicalUnit !== null;
+    if (useCanonicalValues && datePoints.some((point) => point.value !== null && point.canonicalValue === null)) {
+      return [];
+    }
+
     const values = datePoints
-      .map(pointNumericValue)
+      .map((point) => useCanonicalValues ? point.canonicalValue : pointNumericValue(point))
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
 
     if (values.length === 0 && aggregation !== "count") {
@@ -128,7 +133,11 @@ function aggregateMetricSeriesPoints(
     const sourceKinds = uniqueStrings(datePoints.map((point) => point.source.kind));
     const recordIds = uniqueStrings(datePoints.flatMap(metricPointRecordIds));
     const pointIds = uniqueStrings(datePoints.map((point) => point.id));
-    const unit = first.canonicalUnit ?? first.unit ?? definition.displayUnit;
+    const unit = aggregation === "count"
+      ? "count"
+      : useCanonicalValues
+        ? definition.canonicalUnit
+        : first.canonicalUnit ?? first.unit ?? definition.displayUnit;
     const statistic: MetricStatistic = aggregation;
 
     return [{

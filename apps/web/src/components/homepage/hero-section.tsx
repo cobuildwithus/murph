@@ -38,6 +38,7 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
               authLabel="See what works for your body"
               authenticated={authenticated}
               context="hero"
+              preloadAuthPanel
             />
           </div>
 

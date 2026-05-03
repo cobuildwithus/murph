@@ -189,10 +189,9 @@ function AccountMenu({
   const hasAccount = initialAuth.authenticated;
   const userKey = hasAccount ? initialAuth.label ?? "app-session" : null;
 
-  const primaryLabel =
-    initialAuth.label ?? "Account";
+  const primaryLabel = initialAuth.label;
   const initials =
-    primaryLabel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
+    primaryLabel?.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
   const deviceSyncStatus =
     deviceSyncStatusState?.userKey === userKey ? deviceSyncStatusState.status : null;
 
@@ -254,6 +253,7 @@ function AccountMenu({
             render={
               <SidebarMenuButton
                 size="lg"
+                aria-label="Open settings menu"
                 className="h-auto py-3 text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5 md:py-2"
               />
             }
@@ -263,22 +263,31 @@ function AccountMenu({
                 {initials}
               </AvatarFallback>
             </Avatar>
-            <div className="grid flex-1 text-left leading-tight">
-              <span className="truncate text-sm font-medium text-white/90 md:text-xs">
-                {primaryLabel}
-              </span>
-              {deviceSyncStatus ? (
-                <span className="mt-0.5 flex items-center gap-1.5 text-[0.6875rem] text-white/50">
+            {primaryLabel || deviceSyncStatus ? (
+              <div className="grid flex-1 text-left leading-tight">
+                {primaryLabel ? (
+                  <span className="truncate text-sm font-medium text-white/90 md:text-xs">
+                    {primaryLabel}
+                  </span>
+                ) : null}
+                {deviceSyncStatus ? (
                   <span
                     className={cn(
-                      "size-1.5 shrink-0 rounded-full",
-                      accountStatusDotClass(deviceSyncStatus.tone),
+                      "flex items-center gap-1.5 text-[0.6875rem] text-white/50",
+                      primaryLabel ? "mt-0.5" : null,
                     )}
-                  />
-                  <span className="truncate">{deviceSyncStatus.message}</span>
-                </span>
-              ) : null}
-            </div>
+                  >
+                    <span
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full",
+                        accountStatusDotClass(deviceSyncStatus.tone),
+                      )}
+                    />
+                    <span className="truncate">{deviceSyncStatus.message}</span>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" className="min-w-56">

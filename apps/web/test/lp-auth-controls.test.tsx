@@ -12,25 +12,36 @@ import { LandingAuthActions } from "@/app/auth-controls";
 
 import { renderClientComponent } from "./render-client-component";
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => ({
-  HostedAuthPanelIsland(props: {
-    authMode?: "login" | "signup";
-    requireLaunchConsentOnCompletion?: boolean;
-    showPassiveLegalNotice?: boolean;
-  }) {
-    return createElement(
-      "div",
-      {
-        "data-hosted-auth-mode": props.authMode ?? "signup",
-        "data-hosted-auth-launch-consent":
-          props.requireLaunchConsentOnCompletion ? "required" : "not-required",
-        "data-hosted-auth-passive-legal-notice":
-          props.showPassiveLegalNotice ? "shown" : "hidden",
-      },
-      "Hosted auth panel",
-    );
-  },
+const mocks = vi.hoisted(() => ({
+  hostedAuthPanelIslandModuleLoad: vi.fn(),
+  hostedAuthPanelIslandRender: vi.fn(),
 }));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
+  mocks.hostedAuthPanelIslandModuleLoad();
+
+  return {
+    HostedAuthPanelIsland(props: {
+      authMode?: "login" | "signup";
+      requireLaunchConsentOnCompletion?: boolean;
+      showPassiveLegalNotice?: boolean;
+    }) {
+      mocks.hostedAuthPanelIslandRender(props);
+
+      return createElement(
+        "div",
+        {
+          "data-hosted-auth-mode": props.authMode ?? "signup",
+          "data-hosted-auth-launch-consent":
+            props.requireLaunchConsentOnCompletion ? "required" : "not-required",
+          "data-hosted-auth-passive-legal-notice":
+            props.showPassiveLegalNotice ? "shown" : "hidden",
+        },
+        "Hosted auth panel",
+      );
+    },
+  };
+});
 
 async function flushHostedAuthPanelIsland() {
   await act(async () => {
@@ -73,6 +84,37 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+});
+
+test("LandingAuthActions preloads the auth panel on CTA intent and reuses the cached island on click", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "hero",
+      authLabel: "See what works for your body",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(mocks.hostedAuthPanelIslandModuleLoad).toHaveBeenCalledTimes(0);
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  expect(mocks.hostedAuthPanelIslandModuleLoad).toHaveBeenCalledTimes(1);
+  expect(mocks.hostedAuthPanelIslandRender).not.toHaveBeenCalled();
+  expect(container.querySelector("[data-dialog-content='shown']")).toBeNull();
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  expect(mocks.hostedAuthPanelIslandModuleLoad).toHaveBeenCalledTimes(1);
+  expect(mocks.hostedAuthPanelIslandRender).toHaveBeenCalledTimes(1);
+  expect(container.querySelector("[data-dialog-content='shown']")).toBeTruthy();
 });
 
 test("LandingAuthActions opens the unified homepage auth flow", async () => {

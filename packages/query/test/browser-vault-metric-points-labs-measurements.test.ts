@@ -114,6 +114,7 @@ test("browser-vault metric points project manual measurements, metric samples, a
             dayKey: "2026-05-04",
             source: "device",
             quality: "raw",
+            qualifiers: { summary: true },
             value: 40,
             unit: "bpm",
           },
@@ -147,6 +148,10 @@ test("browser-vault metric points project manual measurements, metric samples, a
   assert.deepEqual(
     client.entities.list({ families: ["sample"], kinds: ["metric_sample"] }).map((entity) => entity.id),
     ["smp_metric_rhr_manual"],
+  );
+  assert.equal(
+    client.entities.list({ families: ["sample"], kinds: ["metric_sample"] }).some((entity) => entity.id === "smp_metric_rhr_raw_device"),
+    false,
   );
   assert.deepEqual(
     client.replica.weeklySampleSummaries
@@ -655,6 +660,7 @@ async function createMetricPointProjectionVault(): Promise<string> {
         dayKey: "2026-05-02",
         source: "import",
         quality: "normalized",
+        qualifiers: { summary: true },
         value: 56,
         unit: "bpm",
       }),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   Dialog,
@@ -17,11 +17,84 @@ type HostedAuthPanelIslandComponent = typeof import(
   "@/src/components/hosted-onboarding/hosted-auth-panel-island"
 )["HostedAuthPanelIsland"];
 
-async function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
-  const mod = await import(
-    "@/src/components/hosted-onboarding/hosted-auth-panel-island"
-  );
-  return mod.HostedAuthPanelIsland;
+type WindowWithIdleCallback = typeof window & {
+  cancelIdleCallback?: (handle: number) => void;
+  requestIdleCallback?: (
+    callback: () => void,
+    options?: { timeout?: number },
+  ) => number;
+};
+
+let hostedAuthPanelIslandComponent: HostedAuthPanelIslandComponent | null = null;
+let hostedAuthPanelIslandLoadPromise: Promise<HostedAuthPanelIslandComponent> | null =
+  null;
+
+function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
+  if (hostedAuthPanelIslandComponent) {
+    return Promise.resolve(hostedAuthPanelIslandComponent);
+  }
+
+  if (!hostedAuthPanelIslandLoadPromise) {
+    hostedAuthPanelIslandLoadPromise = import(
+      "@/src/components/hosted-onboarding/hosted-auth-panel-island"
+    )
+      .then((mod) => {
+        hostedAuthPanelIslandComponent = mod.HostedAuthPanelIsland;
+        return mod.HostedAuthPanelIsland;
+      })
+      .catch((error: unknown) => {
+        hostedAuthPanelIslandLoadPromise = null;
+        throw error;
+      });
+  }
+
+  return hostedAuthPanelIslandLoadPromise;
+}
+
+function readLoadedHostedAuthPanelIsland(): HostedAuthPanelIslandComponent | null {
+  return hostedAuthPanelIslandComponent;
+}
+
+function preloadHostedAuthPanelIsland() {
+  if (hostedAuthPanelIslandComponent) {
+    return;
+  }
+
+  void loadHostedAuthPanelIsland().catch(() => {
+    // The click path retries and shows the user-facing load error if needed.
+  });
+}
+
+function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined" || hostedAuthPanelIslandComponent) {
+      return;
+    }
+
+    let cancelled = false;
+    const preload = () => {
+      if (!cancelled) {
+        preloadHostedAuthPanelIsland();
+      }
+    };
+    const idleWindow = window as WindowWithIdleCallback;
+
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(preload, { timeout: 2500 });
+
+      return () => {
+        cancelled = true;
+        idleWindow.cancelIdleCallback?.(handle);
+      };
+    }
+
+    const handle = window.setTimeout(preload, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [enabled]);
 }
 
 function getLandingAuthDialogCopy(mode: LandingAuthMode) {
@@ -61,7 +134,9 @@ function LandingAuthDialogButton({
 }) {
   const [open, setOpen] = useState(false);
   const [AuthPanelIsland, setAuthPanelIsland] =
-    useState<HostedAuthPanelIslandComponent | null>(null);
+    useState<HostedAuthPanelIslandComponent | null>(() =>
+      readLoadedHostedAuthPanelIsland(),
+    );
   const [authPanelLoadError, setAuthPanelLoadError] = useState<string | null>(null);
   const defaultCopy = getLandingAuthDialogCopy(authMode);
 
@@ -71,6 +146,12 @@ function LandingAuthDialogButton({
     }
 
     setAuthPanelLoadError(null);
+
+    const loadedAuthPanelIsland = readLoadedHostedAuthPanelIsland();
+    if (loadedAuthPanelIsland) {
+      setAuthPanelIsland(() => loadedAuthPanelIsland);
+      return;
+    }
 
     try {
       const Component = await loadHostedAuthPanelIsland();
@@ -85,6 +166,9 @@ function LandingAuthDialogButton({
       <button
         type="button"
         className={buttonClassName}
+        onFocus={preloadHostedAuthPanelIsland}
+        onPointerDown={preloadHostedAuthPanelIsland}
+        onPointerEnter={preloadHostedAuthPanelIsland}
         onClick={() => {
           setOpen(true);
           void loadAuthPanelIsland();
@@ -201,6 +285,7 @@ export function LandingAuthActions({
   authenticated,
   context,
   loginLabel = "Log in",
+  preloadAuthPanel = false,
   splitUnauthenticated = false,
   signupLabel = "Signup",
 }: {
@@ -208,10 +293,13 @@ export function LandingAuthActions({
   authenticated: boolean;
   context: LandingAuthContext;
   loginLabel?: string;
+  preloadAuthPanel?: boolean;
   splitUnauthenticated?: boolean;
   signupLabel?: string;
 }) {
   const styles = getLandingAuthClasses(context);
+
+  useHostedAuthPanelIslandIdlePreload(preloadAuthPanel && !authenticated);
 
   if (authenticated) {
     return (

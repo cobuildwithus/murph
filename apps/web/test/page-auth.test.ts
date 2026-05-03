@@ -71,7 +71,7 @@ describe("hosted sidebar auth", () => {
     });
   });
 
-  it("returns a minimal browser-safe sidebar label for a verified app session", async () => {
+  it("returns no visible account label for a verified app session", async () => {
     mocks.getHostedAppSession.mockResolvedValue({
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member: createHostedMember(),
@@ -82,7 +82,7 @@ describe("hosted sidebar auth", () => {
 
     await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
       authenticated: true,
-      label: "Account",
+      label: null,
     });
   });
 });

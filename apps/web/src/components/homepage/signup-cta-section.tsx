@@ -48,6 +48,7 @@ export function SignupCtaSection({
             authLabel={signupCta.signupLabel}
             authenticated={authenticated}
             context="footer"
+            preloadAuthPanel
             signupLabel={signupCta.signupLabel}
           />
         </div>

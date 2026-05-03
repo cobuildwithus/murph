@@ -143,8 +143,8 @@ function isBrowserVaultIncludedFamily(family: string): boolean {
 }
 
 function isBrowserVaultIncludedEntity(entity: CanonicalEntity): boolean {
-  if (entity.family === "sample" && entity.kind === "metric_sample") {
-    return isDisplayGradeMetricSampleEntity(entity);
+  if (entity.family === "sample") {
+    return entity.kind === "metric_sample" && isDisplayGradeMetricSampleEntity(entity);
   }
 
   return true;
