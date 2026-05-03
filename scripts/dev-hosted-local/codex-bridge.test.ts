@@ -34,6 +34,7 @@ describe("startHostedLocalCodexBridge", () => {
 
     try {
       const response = await runBridgeRoundTrip({
+        argv: ["-a", "never", "app-server"],
         proxyToken: bridge.proxyToken,
         proxyUrl: bridge.proxyUrl,
       });
@@ -41,7 +42,7 @@ describe("startHostedLocalCodexBridge", () => {
       expect(response).toEqual({
         id: 7,
         result: {
-          argv: ["app-server"],
+          argv: ["-a", "never", "app-server"],
           ok: true,
         },
       });
@@ -228,6 +229,7 @@ async function sendInvalidBridgeHandshake(input: {
 }
 
 async function runBridgeRoundTrip(input: {
+  argv?: readonly string[];
   proxyToken: string;
   proxyUrl: string;
 }): Promise<Record<string, unknown>> {
@@ -277,7 +279,10 @@ async function runBridgeRoundTrip(input: {
       socket.once("error", onError);
       socket.once("close", onClose);
       socket.once("connect", () => {
-        socket.write(JSON.stringify({ murphLocalCodexBridgeToken: input.proxyToken }) + "\n");
+        socket.write(JSON.stringify({
+          ...(input.argv ? { argv: input.argv } : {}),
+          murphLocalCodexBridgeToken: input.proxyToken,
+        }) + "\n");
         socket.write(JSON.stringify({ id: 7, method: "initialize", params: {} }) + "\n");
       });
     });

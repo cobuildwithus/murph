@@ -308,7 +308,7 @@ test("hosted Codex runtime local dev app-server proxy bridges JSON-RPC without p
       true,
     );
 
-    const child = spawn(shimPath, ["app-server"], {
+    const child = spawn(shimPath, ["-a", "never", "app-server"], {
       env: {
         ...process.env,
         PATH: result.runtimeEnv.PATH,
@@ -748,6 +748,7 @@ async function startCodexProxyServer(input: {
         if (!authenticated) {
           authenticated = true;
           assert.deepEqual(JSON.parse(trimmed), {
+            argv: ["-a", "never", "app-server"],
             murphLocalCodexBridgeToken: input.proxyToken,
           });
           continue;

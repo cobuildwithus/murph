@@ -187,6 +187,26 @@ const HOSTED_ASSISTANT_PROVIDER_NUMBER_DETAIL_KEYS = [
   "assistantProviderGatewayOnlyProviderCount",
 ] as const;
 
+const HOSTED_ASSISTANT_NOTIFICATION_CODEX_STRING_DETAIL_KEYS = {
+  codexFailureStage: "assistantNotificationCodexFailureStage",
+  codexTurnStatus: "assistantNotificationCodexTurnStatus",
+} as const;
+
+const HOSTED_ASSISTANT_NOTIFICATION_CODEX_BOOLEAN_DETAIL_KEYS = {
+  codexFailureDetailPresent: "assistantNotificationCodexFailureDetailPresent",
+  codexSignalPresent: "assistantNotificationCodexSignalPresent",
+  codexStderrPresent: "assistantNotificationCodexStderrPresent",
+  connectionLost: "assistantNotificationCodexConnectionLost",
+  interrupted: "assistantNotificationCodexInterrupted",
+  recoverableConnectionLoss: "assistantNotificationCodexRecoverableConnectionLoss",
+  retryable: "assistantNotificationCodexRetryable",
+} as const;
+
+const HOSTED_ASSISTANT_NOTIFICATION_CODEX_NUMBER_DETAIL_KEYS = {
+  codexExitCode: "assistantNotificationCodexExitCode",
+  providerActionCount: "assistantNotificationProviderActionCount",
+} as const;
+
 const HOSTED_ASSISTANT_NOTIFICATION_BOOLEAN_DETAIL_KEYS = [
   "assistantNotificationExplicitTargetPresent",
   "assistantNotificationIdentityIdPresent",
@@ -578,6 +598,39 @@ export function extractHostedAssistantNotificationRedactedDetails(
     if (typeof value === "number" || value === null) {
       details[key] = value;
     }
+  }
+
+  for (const [sourceKey, targetKey] of Object.entries(
+    HOSTED_ASSISTANT_NOTIFICATION_CODEX_STRING_DETAIL_KEYS,
+  )) {
+    const value = mergedDetails?.[sourceKey];
+    if (typeof value === "string" || value === null) {
+      details[targetKey] = value;
+    }
+  }
+
+  for (const [sourceKey, targetKey] of Object.entries(
+    HOSTED_ASSISTANT_NOTIFICATION_CODEX_BOOLEAN_DETAIL_KEYS,
+  )) {
+    const value = mergedDetails?.[sourceKey];
+    if (typeof value === "boolean" || value === null) {
+      details[targetKey] = value;
+    }
+  }
+
+  for (const [sourceKey, targetKey] of Object.entries(
+    HOSTED_ASSISTANT_NOTIFICATION_CODEX_NUMBER_DETAIL_KEYS,
+  )) {
+    const value = mergedDetails?.[sourceKey];
+    if (typeof value === "number" || value === null) {
+      details[targetKey] = value;
+    }
+  }
+
+  if (mergedDetails && "providerSessionId" in mergedDetails) {
+    details.assistantNotificationProviderSessionIdPresent =
+      typeof mergedDetails.providerSessionId === "string"
+      && mergedDetails.providerSessionId.length > 0;
   }
 
   const notificationErrorDiagnostics = buildHostedExecutionPrefixedSafeErrorDiagnostics({

@@ -12,6 +12,7 @@ const CODEX_BRIDGE_HANDSHAKE_MAX_BYTES = 4096;
 const CODEX_BRIDGE_HANDSHAKE_TIMEOUT_MS = 5_000;
 const CODEX_BRIDGE_CHILD_TERM_TIMEOUT_MS = 2_000;
 const CODEX_BRIDGE_CHILD_KILL_TIMEOUT_MS = 1_000;
+const CODEX_BRIDGE_DEFAULT_APP_SERVER_ARGS = ["app-server"] as const;
 
 export interface HostedLocalCodexBridge {
   proxyToken: string;
@@ -97,12 +98,16 @@ function acceptCodexBridgeConnection(input: {
     const handshakeLine = buffered.subarray(0, newlineIndex).toString("utf8").trim();
     const remainder = buffered.subarray(newlineIndex + 1);
 
-    if (!isValidBridgeHandshake(handshakeLine, input.proxyToken)) {
+    const bridgeHandshake = parseBridgeHandshake(handshakeLine, input.proxyToken);
+    if (!bridgeHandshake) {
       input.socket.destroy();
       return;
     }
 
-    const child = spawnLocalCodexAppServer(input);
+    const child = spawnLocalCodexAppServer({
+      ...input,
+      argv: bridgeHandshake.argv,
+    });
     input.activeChildren.add(child);
     child.stderr.resume();
     child.once("close", (code, signal) => {
@@ -177,11 +182,12 @@ async function waitForChildClose(
 }
 
 function spawnLocalCodexAppServer(input: {
+  argv: readonly string[];
   codexCommand: string;
   env: NodeJS.ProcessEnv;
   stderrTarget?: NodeJS.WritableStream;
 }): ChildProcessWithoutNullStreams {
-  return spawn(input.codexCommand, ["app-server"], {
+  return spawn(input.codexCommand, [...input.argv], {
     cwd: repoRoot,
     detached: false,
     env: input.env,
@@ -189,20 +195,49 @@ function spawnLocalCodexAppServer(input: {
   });
 }
 
-function isValidBridgeHandshake(line: string, token: string): boolean {
+function parseBridgeHandshake(
+  line: string,
+  token: string,
+): { argv: readonly string[] } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
-    return false;
+    return null;
   }
 
   if (typeof parsed !== "object" || parsed === null) {
-    return false;
+    return null;
   }
 
   const record = parsed as Record<string, unknown>;
-  return record.murphLocalCodexBridgeToken === token;
+  if (record.murphLocalCodexBridgeToken !== token) {
+    return null;
+  }
+
+  const argv = normalizeBridgeCodexArgv(record.argv);
+  return argv ? { argv } : null;
+}
+
+function normalizeBridgeCodexArgv(value: unknown): readonly string[] | null {
+  if (value === undefined) {
+    return CODEX_BRIDGE_DEFAULT_APP_SERVER_ARGS;
+  }
+
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || value.length > 32
+    || value.some((entry) => typeof entry !== "string" || entry.length > 512)
+  ) {
+    return null;
+  }
+
+  if (value.at(-1) !== "app-server") {
+    return null;
+  }
+
+  return value;
 }
 
 function writeCodexBridgeDiagnosticText(

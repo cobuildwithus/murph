@@ -1,5 +1,6 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
+
+import { BrandMark } from "@/src/components/ui/brand-mark";
 
 function JoinInviteSidebar() {
   return (
@@ -13,10 +14,7 @@ function JoinInviteSidebar() {
             backgroundSize: "24px 24px",
           }}
         />
-        <Link href="/" aria-label="Murph home" className="relative inline-flex items-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-dark.svg" alt="Murph" width={107} height={24} className="h-6 w-auto" />
-        </Link>
+        <BrandMark href="/" className="relative inline-flex items-center px-0 py-0" />
 
         <div className="relative mt-auto flex flex-col gap-3">
           <h2 className="font-serif text-[18px] leading-[1.3] font-light tracking-[-0.01em] text-white/90 lg:text-[20px]">
@@ -39,10 +37,7 @@ function JoinInviteSidebar() {
       </aside>
 
       <header className="flex items-center bg-gradient-to-br from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-6 py-5 md:hidden">
-        <Link href="/" aria-label="Murph home" className="inline-flex items-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-dark.svg" alt="Murph" width={107} height={24} className="h-6 w-auto" />
-        </Link>
+        <BrandMark href="/" className="inline-flex items-center px-0 py-0" />
       </header>
     </>
   );

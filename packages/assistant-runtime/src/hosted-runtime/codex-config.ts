@@ -348,14 +348,18 @@ const proxyUrl = new URL(proxyConfig.url);
 const proxyToken = proxyConfig.token;
 const port = Number(proxyUrl.port);
 const host = proxyUrl.hostname.replace(/^\\[/u, "").replace(/\\]$/u, "");
+const proxyArgv = process.argv.slice(2);
 
-if (process.argv[2] && process.argv[2] !== "app-server") {
+if (proxyArgv.length > 0 && proxyArgv.at(-1) !== "app-server") {
   process.stderr.write("hosted local Codex proxy only supports app-server\\n");
   process.exit(64);
 }
 
 const socket = net.connect({ host, port }, () => {
-  socket.write(JSON.stringify({ murphLocalCodexBridgeToken: proxyToken }) + "\\n");
+  socket.write(JSON.stringify({
+    argv: proxyArgv.length > 0 ? proxyArgv : ["app-server"],
+    murphLocalCodexBridgeToken: proxyToken,
+  }) + "\\n");
   process.stdin.pipe(socket);
   socket.pipe(process.stdout);
 });
