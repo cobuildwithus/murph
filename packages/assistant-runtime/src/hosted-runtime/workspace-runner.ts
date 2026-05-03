@@ -1,3 +1,6 @@
+import {
+  buildHostedExecutionSafeErrorDiagnostics,
+} from "@murphai/hosted-execution";
 import type {
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointReason,
@@ -140,6 +143,9 @@ type HostedMailboxPostCheckpointEffect = () => Promise<void>;
 interface HostedMailboxPostCheckpointEffectsResult {
   attempted: boolean;
   errorCodes: readonly string[];
+  failureCodeDetails: readonly string[];
+  failureNames: readonly string[];
+  failureSummaries: readonly string[];
   failed: number;
   succeeded: number;
 }
@@ -781,25 +787,100 @@ async function runHostedMailboxPostCheckpointEffectsBestEffort(
   effects: readonly HostedMailboxPostCheckpointEffect[],
 ): Promise<HostedMailboxPostCheckpointEffectsResult> {
   const errorCodes: string[] = [];
+  const failureCodeDetails: string[] = [];
+  const failureNames: string[] = [];
+  const failureSummaries: string[] = [];
   let failed = 0;
   let succeeded = 0;
   for (const effect of effects) {
     try {
       await effect();
       succeeded += 1;
-    } catch {
+    } catch (error) {
       // Mailbox post-checkpoint effects are enrichment only. They must not roll
       // back durable mailbox or assistant checkpoints.
       failed += 1;
       errorCodes.push("post_checkpoint_effect_failed");
+      const failure = buildHostedMailboxPostCheckpointEffectFailureLog(error);
+      errorCodes.push(failure.errorCode);
+      if (failure.codeDetail) {
+        failureCodeDetails.push(failure.codeDetail);
+      }
+      if (failure.name) {
+        failureNames.push(failure.name);
+      }
+      if (failure.summary) {
+        failureSummaries.push(failure.summary);
+      }
     }
   }
   return {
     attempted: effects.length > 0,
     errorCodes,
+    failureCodeDetails: compactHostedMailboxPostCheckpointFailureValues(failureCodeDetails),
+    failureNames: compactHostedMailboxPostCheckpointFailureValues(failureNames),
+    failureSummaries: compactHostedMailboxPostCheckpointFailureValues(failureSummaries),
     failed,
     succeeded,
   };
+}
+
+function buildHostedMailboxPostCheckpointEffectFailureLog(error: unknown): {
+  codeDetail: string | null;
+  errorCode: string;
+  name: string | null;
+  summary: string | null;
+} {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  return {
+    codeDetail: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorCodeDetail),
+    errorCode: typeof diagnostics?.errorCode === "string" ? diagnostics.errorCode : "runtime_error",
+    name: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorName),
+    summary: normalizeHostedMailboxPostCheckpointFailureValue(
+      typeof diagnostics?.errorDetail === "string"
+        ? diagnostics.errorDetail
+        : diagnostics?.errorMessage,
+    ),
+  };
+}
+
+function compactHostedMailboxPostCheckpointFailureValues(values: readonly string[]): string[] {
+  return Array.from(new Set(values)).slice(0, 16);
+}
+
+function normalizeHostedMailboxPostCheckpointFailureValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const bounded = normalized.length > 128
+    ? `${normalized.slice(0, 125).trimEnd()}...`
+    : normalized;
+  return isHostedMailboxPostCheckpointRedactedStringSafe(bounded) ? bounded : null;
+}
+
+function isHostedMailboxPostCheckpointRedactedStringSafe(value: string): boolean {
+  if (/\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)) {
+    return false;
+  }
+  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)) {
+    return false;
+  }
+  if (/\+\d[\d().\s-]{7,}\d/u.test(value)) {
+    return false;
+  }
+  return !(
+    /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
+      .test(value)
+    || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
+    || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
+    || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
+  );
 }
 
 async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(input: {
@@ -827,6 +908,13 @@ async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(inpu
       redactedJson: {
         attemptedCount: effects.length,
         errorCodes: compactHostedRuntimeLogCodes(result.errorCodes),
+        ...(result.failureCodeDetails.length > 0
+          ? { failureCodeDetails: [...result.failureCodeDetails] }
+          : {}),
+        ...(result.failureNames.length > 0 ? { failureNames: [...result.failureNames] } : {}),
+        ...(result.failureSummaries.length > 0
+          ? { failureSummaries: [...result.failureSummaries] }
+          : {}),
         failedCount: result.failed,
         succeededCount: result.succeeded,
       },
