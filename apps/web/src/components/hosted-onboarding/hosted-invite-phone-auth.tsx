@@ -21,7 +21,6 @@ import {
   HostedPhoneAuthScaffold,
 } from "./hosted-phone-auth-views";
 import {
-  HostedInviteMaskedPhoneLoadingStep,
   HostedInviteMaskedPhoneStep,
 } from "./hosted-phone-auth-step-views";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
@@ -162,20 +161,14 @@ export function HostedInvitePhoneAuth({
     >
       <HostedPrivyCaptcha />
       {showMaskedPhoneHint && savedPhoneHint ? (
-        controller.privyReady ? (
           <HostedInviteMaskedPhoneStep
             disabled={controller.flowDisabled || sendCodeGated}
             pendingAction={controller.pendingAction}
+            privyReady={controller.privyReady}
             phoneHint={savedPhoneHint}
             onSendCode={handleInviteSendCode}
             onUseDifferentNumber={handleUseDifferentNumber}
           />
-        ) : (
-          <HostedInviteMaskedPhoneLoadingStep
-            phoneHint={savedPhoneHint}
-            onUseDifferentNumber={handleUseDifferentNumber}
-          />
-        )
       ) : (
         <HostedPhoneAuthFlow
           {...controller.sharedFlowProps}

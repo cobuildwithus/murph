@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState, type FormEvent } from "react";
-import { CheckIcon, ChevronDownIcon, LoaderCircleIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
 
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
@@ -34,12 +34,14 @@ export function HostedInviteMaskedPhoneStep({
   disabled,
   pendingAction,
   phoneHint,
+  privyReady = true,
   onSendCode,
   onUseDifferentNumber,
 }: {
   disabled: boolean;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneHint: string;
+  privyReady?: boolean;
   onSendCode: () => void;
   onUseDifferentNumber: () => void;
 }) {
@@ -53,7 +55,11 @@ export function HostedInviteMaskedPhoneStep({
         className="w-full"
         onClick={onSendCode}
       >
-        {pendingAction === "send-code" ? "Sending code..." : "Send verification code"}
+        {!privyReady
+          ? "Setting up..."
+          : pendingAction === "send-code"
+            ? "Sending code..."
+            : "Send verification code"}
       </Button>
       <HostedUseDifferentNumberButton
         disabled={disabled}
@@ -65,34 +71,6 @@ export function HostedInviteMaskedPhoneStep({
   );
 }
 
-export function HostedInviteMaskedPhoneLoadingStep({
-  phoneHint,
-  onUseDifferentNumber,
-}: {
-  phoneHint: string;
-  onUseDifferentNumber: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <HostedInviteMaskedPhoneSummary phoneHint={phoneHint} />
-      <div className="flex items-start gap-3 rounded-xl border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
-        <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
-        <div>
-          <p className="font-medium text-foreground">
-            Preparing phone verification...
-          </p>
-          <p>Keep this tab open for a moment.</p>
-        </div>
-      </div>
-      <HostedUseDifferentNumberButton
-        disabled={false}
-        pendingAction={null}
-        size="sm"
-        onClick={onUseDifferentNumber}
-      />
-    </div>
-  );
-}
 
 function HostedInviteMaskedPhoneSummary({
   phoneHint,
