@@ -1448,6 +1448,11 @@ describe("assistant turn finalizer seam", () => {
     );
 
     const session = createAssistantSession({
+      providerOptions: createProviderOptions({
+        model: "gpt-5.5",
+        modelProvider: "vercel-ai-gateway",
+        reasoningEffort: "medium",
+      }),
       resumeState: {
         providerSessionId: "provider-session-stale",
         resumeRouteId: "route-existing",
@@ -1457,7 +1462,9 @@ describe("assistant turn finalizer seam", () => {
 
     const saved = await persistAssistantTurnAndSession({
       input: {
+        model: "gpt-5.5-mini",
         prompt: "Reply to the inbound message.",
+        reasoningEffort: "low",
         turnTrigger: "automation-auto-reply",
         vault: "/vault",
       },
@@ -1479,16 +1486,20 @@ describe("assistant turn finalizer seam", () => {
     expect(runtimeState.sessions.save).toHaveBeenCalledWith(
       expect.objectContaining({
         lastTurnAt: "2026-04-08T15:45:00.000Z",
+        providerOptions: session.providerOptions,
         resumeState: {
           providerSessionId: "provider-session-stale",
           resumeRouteId: "route-existing",
         },
+        target: session.target,
         turnCount: 3,
         updatedAt: "2026-04-08T15:45:00.000Z",
       })
     );
     expect(saved.resumeState?.providerSessionId).toBe("provider-session-stale");
     expect(saved.resumeState?.resumeRouteId).toBe("route-existing");
+    expect(saved.providerOptions.model).toBe("gpt-5.5");
+    expect(saved.target.model).toBe("gpt-5.5");
   });
 
   it("does not persist provider resume state after explicit active-turn continuation history", async () => {
