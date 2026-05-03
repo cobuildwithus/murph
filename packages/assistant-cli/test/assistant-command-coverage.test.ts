@@ -8,6 +8,7 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assistantOnboardingCompletionReasonValues,
   assistantOnboardingResultSchema,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -327,6 +328,12 @@ test('assistant onboarding commands read and write the shared lifecycle state', 
   const status = readCommand(onboarding.commands, 'status')
   const complete = readCommand(onboarding.commands, 'complete')
   const reopen = readCommand(onboarding.commands, 'reopen')
+
+  assert.deepEqual([...assistantOnboardingCompletionReasonValues], [
+    'user_answered',
+    'user_declined',
+    'manual',
+  ])
 
   commandMocks.readAssistantOnboardingState.mockResolvedValueOnce(TEST_ONBOARDING_STATE)
   commandMocks.completeAssistantOnboarding.mockResolvedValueOnce({
