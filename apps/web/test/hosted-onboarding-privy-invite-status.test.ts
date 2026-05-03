@@ -2,13 +2,6 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createHostedPhoneLookupKey,
-  createHostedPrivyUserLookupKey,
-  createHostedPrivyUserLookupKeyReadCandidates,
-  createHostedWalletAddressLookupKey,
-  createHostedWalletAddressLookupKeyReadCandidates,
-} from "@/src/lib/hosted-onboarding/contact-privacy";
-import {
   buildHostedMemberIdentityPrivateColumns,
   buildHostedMemberRoutingPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
@@ -125,13 +118,13 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("treats a matching verified Privy session as enough to authenticate", async () => {
+  it("does not authenticate a stored Privy binding without an app-session member", async () => {
     const prisma = {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
             identity: await createIdentity({
-              privyUserLookupKey: createHostedPrivyUserLookupKey("did:privy:user_123"),
+              privyUserId: "did:privy:user_123",
             }),
           }),
         })),
@@ -140,22 +133,20 @@ describe("getHostedInviteStatus", () => {
 
     await expect(
       getHostedInviteStatus({
-        authenticatedSessionIdentity: createSessionIdentity({
-          userId: "did:privy:user_123",
-        }),
         inviteCode: "invite-code",
         now: NOW,
         prisma,
       }),
     ).resolves.toMatchObject({
       session: {
-        authenticated: true,
-        matchesInvite: true,
+        authenticated: false,
+        matchesInvite: false,
       },
+      stage: "verify",
     });
   });
 
-  it("keeps a resolved app member match active even when the raw Privy identity has no matching lookup key", async () => {
+  it("keeps a resolved app member match active regardless of stored identity lookup keys", async () => {
     const prisma = {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
@@ -174,9 +165,6 @@ describe("getHostedInviteStatus", () => {
     await expect(
       getHostedInviteStatus({
         authenticatedMember: createAuthenticatedMember(),
-        authenticatedSessionIdentity: createSessionIdentity({
-          userId: "did:privy:unmatched",
-        }),
         inviteCode: "invite-code",
         now: NOW,
         prisma,
@@ -441,146 +429,6 @@ describe("getHostedInviteStatus", () => {
     expect(JSON.stringify(status)).not.toContain("+12025550123");
   });
 
-  it("matches invite access by a rotated Privy user lookup key", async () => {
-    const rotatedLookupKey =
-      createHostedPrivyUserLookupKeyReadCandidates("did:privy:user_123")[1];
-
-    expect(rotatedLookupKey).toBeTruthy();
-
-    const prisma = {
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(createInvite({
-          member: createMember({
-            identity: await createIdentity({
-              privyUserLookupKey: rotatedLookupKey,
-            }),
-          }),
-        })),
-      },
-    } as never;
-
-    await expect(
-      getHostedInviteStatus({
-        authenticatedSessionIdentity: createSessionIdentity({
-          userId: "did:privy:user_123",
-        }),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      session: {
-        authenticated: true,
-        matchesInvite: true,
-      },
-    });
-  });
-
-  it("matches invite access by verified phone identity", async () => {
-    const prisma = {
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(createInvite({
-          member: createMember({
-            identity: await createIdentity({
-              phoneLookupKey: createHostedPhoneLookupKey("+1 415 555 2671"),
-            }),
-          }),
-        })),
-      },
-    } as never;
-
-    await expect(
-      getHostedInviteStatus({
-        authenticatedSessionIdentity: createSessionIdentity({
-          phone: {
-            number: "+1 415 555 2671",
-          },
-        }),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      session: {
-        authenticated: true,
-        matchesInvite: true,
-      },
-    });
-  });
-
-  it("matches invite access by verified wallet identity", async () => {
-    const prisma = {
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(createInvite({
-          member: createMember({
-            identity: await createIdentity({
-              walletAddressLookupKey: createHostedWalletAddressLookupKey(
-                "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-              ),
-            }),
-          }),
-        })),
-      },
-    } as never;
-
-    await expect(
-      getHostedInviteStatus({
-        authenticatedSessionIdentity: createSessionIdentity({
-          wallet: {
-            address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          },
-        }),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      session: {
-        authenticated: true,
-        matchesInvite: true,
-      },
-    });
-  });
-
-  it("matches invite access by a rotated wallet lookup key", async () => {
-    const rotatedLookupKey =
-      createHostedWalletAddressLookupKeyReadCandidates(
-        "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-      )[1];
-
-    expect(rotatedLookupKey).toBeTruthy();
-
-    const prisma = {
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(createInvite({
-          member: createMember({
-            identity: await createIdentity({
-              walletAddressLookupKey: rotatedLookupKey,
-            }),
-          }),
-        })),
-      },
-    } as never;
-
-    await expect(
-      getHostedInviteStatus({
-        authenticatedSessionIdentity: createSessionIdentity({
-          wallet: {
-            address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          },
-        }),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      session: {
-        authenticated: true,
-        matchesInvite: true,
-      },
-    });
-  });
-
   it("returns the assigned Murph phone number only for matched active sessions", async () => {
     const prisma = {
       hostedInvite: {
@@ -776,15 +624,5 @@ function createAuthenticatedMember() {
     pendingActivationTimeZone: null,
     suspendedAt: null,
     updatedAt: NOW,
-  };
-}
-
-function createSessionIdentity(overrides: Record<string, unknown> = {}) {
-  return {
-    phone: null,
-    telegram: null,
-    userId: "did:privy:user_123",
-    wallet: null,
-    ...overrides,
   };
 }

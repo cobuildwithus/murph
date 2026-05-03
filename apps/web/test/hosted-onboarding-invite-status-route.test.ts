@@ -1,16 +1,16 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getHostedAppSessionFromRequest: vi.fn(),
   getHostedInviteStatus: vi.fn(),
-  getPrivyMemberAuth: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  getHostedAppSessionFromRequest: mocks.getHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   getHostedInviteStatus: mocks.getHostedInviteStatus,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  getPrivyMemberAuth: mocks.getPrivyMemberAuth,
 }));
 
 type HostedOnboardingInviteStatusRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/status/route");
@@ -24,21 +24,7 @@ describe("hosted onboarding invite-status route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getPrivyMemberAuth.mockResolvedValue({
-      identity: {
-        phone: {
-          number: "+14155552671",
-          verifiedAt: 1741194420,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
-      linkedAccounts: [],
+    mocks.getHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         billingStatus: "active",
         createdAt: new Date("2026-04-19T12:00:00.000Z"),
@@ -47,10 +33,7 @@ describe("hosted onboarding invite-status route", () => {
         suspendedAt: null,
         updatedAt: new Date("2026-04-19T12:00:00.000Z"),
       },
-      memberLookup: null,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
+      sessionId: "hws_123",
     });
     mocks.getHostedInviteStatus.mockResolvedValue({
       billing: {
@@ -81,7 +64,7 @@ describe("hosted onboarding invite-status route", () => {
     });
   });
 
-  it("uses the resolved Privy member auth snapshot for invite status", async () => {
+  it("uses the hosted app-session member for invite status", async () => {
     const response = await hostedOnboardingInviteStatusRoute.GET(
       new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/status"),
       {
@@ -92,16 +75,10 @@ describe("hosted onboarding invite-status route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getPrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.getHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
       authenticatedMember: expect.objectContaining({
         id: "member_123",
-      }),
-      authenticatedSessionIdentity: expect.objectContaining({
-        phone: expect.objectContaining({
-          number: "+14155552671",
-        }),
-        userId: "did:privy:user_123",
       }),
       inviteCode: "invite-code",
     });
@@ -131,6 +108,25 @@ describe("hosted onboarding invite-status route", () => {
         matchesInvite: true,
       },
       stage: "verify",
+    });
+  });
+
+  it("treats a missing app session as unauthenticated", async () => {
+    mocks.getHostedAppSessionFromRequest.mockResolvedValueOnce(null);
+
+    const response = await hostedOnboardingInviteStatusRoute.GET(
+      new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/status"),
+      {
+        params: Promise.resolve({
+          inviteCode: "invite-code",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      authenticatedMember: null,
+      inviteCode: "invite-code",
     });
   });
 });

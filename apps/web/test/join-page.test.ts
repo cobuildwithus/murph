@@ -142,7 +142,7 @@ beforeEach(() => {
   }));
 });
 
-test("JoinInvitePage builds a server model with the verified session identity", async () => {
+test("JoinInvitePage builds a server model with the app-session member", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
   const legacyShareSearchParams = { preview: undefined, share: "share-code" };
 
@@ -161,14 +161,6 @@ test("JoinInvitePage builds a server model with the verified session identity", 
       suspendedAt: null,
       updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     },
-    authenticatedSessionIdentity: {
-      phone: {
-        number: "+15550100271",
-        verifiedAt: 1741194420,
-      },
-      userId: "test-privy-user",
-      wallet: null,
-    },
     inviteCode: "invite code",
   });
   expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
@@ -184,6 +176,51 @@ test("JoinInvitePage builds a server model with the verified session identity", 
   assert.match(markup, /data-hosted-privy-boundary="true"/);
   assert.match(markup, /data-invite-code="invite code"/);
   assert.doesNotMatch(markup, /data-share-code/);
+});
+
+test("JoinInvitePage keeps Privy-only sessions out of invite and legal gates", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    session: {
+      authenticated: false,
+      expiresAt: null,
+      matchesInvite: false,
+    },
+    stage: "verify",
+  }));
+
+  const markup = renderToStaticMarkup(
+    await JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "invite-code" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    }),
+  );
+
+  expect(mocks.getHostedPrivySession).toHaveBeenCalled();
+  expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+    authenticatedMember: null,
+    inviteCode: "invite-code",
+  });
+  expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
+  expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
+    launchConsent: {
+      gateActive: false,
+      status: "not_required",
+    },
+    status: {
+      session: {
+        authenticated: false,
+        matchesInvite: false,
+      },
+      stage: "verify",
+    },
+  });
+  assert.match(markup, /data-consent-status="not_required"/);
 });
 
 test("JoinInvitePage gates checkout on server-read launch consent", async () => {
