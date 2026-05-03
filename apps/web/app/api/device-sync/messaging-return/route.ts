@@ -126,7 +126,7 @@ function resolveDeviceSyncStatus(value: string | null): "connected" | "error" | 
 }
 
 function buildMessagingReturnMessageBody(providerLabel: string | null): string {
-  return providerLabel ? `Just connected ${providerLabel}` : "Just connected my device";
+  return providerLabel ? `Just connected my ${providerLabel}` : "Just connected my device";
 }
 
 function buildMessagingReturnHtml(input: {
