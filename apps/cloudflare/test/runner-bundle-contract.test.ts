@@ -66,7 +66,7 @@ describe("runner bundle package closure", () => {
     ]);
   });
 
-  it("can resolve a hosted-local bundle closure without the bundled murph shell", () => {
+  it("can still resolve an explicit reduced bundle closure without the bundled murph shell", () => {
     expect(
       resolveHostedRunnerWorkspacePackageNames({
         includeBundleOnlyDependencies: false,

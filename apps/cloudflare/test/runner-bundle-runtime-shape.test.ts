@@ -98,7 +98,10 @@ describe("runner bundle runtime manifest rewriting", () => {
     await writeFile(
       path.join(bundleDir, "node_modules", "@murphai", "murph", "package.json"),
       JSON.stringify({
-        bin: "./dist/bin.js",
+        bin: {
+          murph: "./dist/bin.js",
+          "vault-cli": "./dist/bin.js",
+        },
         name: "@murphai/murph",
       }),
       "utf8",
@@ -113,6 +116,9 @@ describe("runner bundle runtime manifest rewriting", () => {
 
     expect(
       await readFile(path.join(bundleDir, "node_modules", ".bin", "murph"), "utf8"),
+    ).toContain("../@murphai/murph/dist/bin.js");
+    expect(
+      await readFile(path.join(bundleDir, "node_modules", ".bin", "vault-cli"), "utf8"),
     ).toContain("../@murphai/murph/dist/bin.js");
   });
 });
