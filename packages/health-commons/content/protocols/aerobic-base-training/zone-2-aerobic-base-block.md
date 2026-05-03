@@ -97,9 +97,12 @@ protocol:
     - "Slow down or shorten when speech feels forced, RPE climbs, or heart rate feels out of proportion."
     - "Stop for symptoms, unsafe heat, glucose concerns, pain, or equipment/route risk; log the reason."
   tips:
-    - Wearable Zone 2 labels are optional context — talk test and symptoms are the anchor.
-    - Other modalities fit only when the setup is safe and pain-free for that mode.
-    - Hot or humid? Move indoors, shorten, or skip — planned duration is not mandatory.
+    - "Before week 1, choose one repeatable setup: outdoor walk, treadmill, bike, rower, elliptical, or incline walk."
+    - "Schedule three sessions weekly; start at 35 minutes and use the same days when practical."
+    - "Hold conversational pace: full sentences stay possible; slow down when speech becomes forced."
+    - "Skip intervals, tempo runs, races, hard leg finishers, and heat-stacked sessions during the block."
+    - "Cool down until breathing feels normal; log minutes, modality, talk-test pass, RPE, heat, and pain."
+    - "Do not chase lower resting heart rate if sleep, soreness, HRV, or enjoyment worsens."
   keepInMind:
     - The exact 4-week, 3x/week, 35-60 minute conversational protocol is evidence-adjacent; nearby evidence often uses longer programs, broader guidelines, or different populations.
     - Modality options are logistics substitutions, not proof of identical physiology or injury load; keep the talk test, symptoms, and pain response primary when switching modes.

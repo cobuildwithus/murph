@@ -463,12 +463,12 @@ protocol:
   - Pregnancy, gestational diabetes, type 1 diabetes, recurrent hypoglycemia, frailty, falls, meal-related dizziness, suspected postprandial hypotension, neuropathy or foot ulcers, and unstable cardiac or respiratory symptoms are clinician-guidance contexts rather than routine Murph self-experiment contexts.
   - Keep the walk gentle if reflux, nausea, bloating, or heavy-meal discomfort is present; do not use vigorous post-meal exercise as a digestive or reflux treatment.
   tips:
-  - 'Indoor walking counts: hallway laps, treadmill, office loops, or pacing a phone call.'
-  - Attach the walk to an existing cue — clearing dishes, taking out recycling, walking the dog.
-  - Hold meals, caffeine, alcohol, sleep timing, supplements, and other exercise stable during the test.
-  - Well-lit routes, safe footing — footwear and visibility matter more than a perfect start minute.
-  - Reflux-prone? Stay upright and gentle; avoid bending, lifting, or intensity right after eating.
-  - A 20-30 min walk is an escalation — log it as a longer-dose variation, not the default test.
+  - "Before day 1, pick fallback routes: hallway laps, treadmill, office loop, driveway, or phone-call pacing."
+  - "Start after each main meal when practical; keep the delay consistent, usually within the first hour."
+  - "Walk 10-15 minutes at talkable pace; skip jogging, stairs, errands with lifting, and bending-heavy chores."
+  - "With CGM, mark meal and walk start; compare matched meals, not best-looking single curves."
+  - "For reflux-prone meals, stay upright and gentle; avoid bending, lifting, or brisk pace right after eating."
+  - "Treat 20-30 minute walks as longer-dose days; mark them separately from the default test."
   keepInMind:
   - The best direct evidence is for post-meal glucose excursions, especially in adults with type 2 diabetes or impaired-glucose-tolerance risk; general adult and long-term outcome evidence is less certain.
   - CGM meal windows, post-meal peaks, and meal-level iAUC are better test targets than a vague all-day average, but all CGM interpretation depends on meal content, timing, medication context, sensor behavior, sleep, stress, and other activity.

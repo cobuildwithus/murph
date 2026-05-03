@@ -901,11 +901,12 @@ protocol:
     - "Days 1–7, watch for withdrawal-like symptoms: tremor, sweats, nausea, severe anxiety, racing heart, confusion, hallucinations, seizure, or unsafe feelings."
     - "End by reviewing adherence, symptoms, sleep, wearables, BP/labs if collected, cravings, social burden, replacement behaviors, and next-week plan."
   tips:
-  - 'Goal is “observe what changes,” not “prove discipline.”'
-  - Plan the first high-friction situation before it arrives.
-  - Replacement drinks or rituals only if they do not trigger cravings or substitution.
-  - Keep caffeine, bedtime, exercise, cannabis, nicotine, and supplements stable during the test.
-  - A missed day is data, not failure. Log it and decide next step.
+  - “Before day 1, clear easy-access alcohol: fridge, desk, car, gym bag, nightstand, and saved delivery defaults.”
+  - “Choose one window: 7, 14, or 30 calendar days. Set start and end dates.”
+  - “Pre-plan your first drink cue: dinner out, game night, airport, date, or stressful evening.”
+  - “Do not replace alcohol with nightly NA beers, late sugar, cannabis, nicotine, sedatives, or extra caffeine.”
+  - “If drinking happens, log amount, trigger, company, time, and next-step rule before restarting.”
+  - “At the end, choose next-week rule before drinking: continue, limit occasions, or return with awareness.”
   keepInMind:
   - This is a wellness self-experiment for appropriately screened adults, not detoxification, AUD treatment, medication advice, pregnancy counseling, or liver-disease care.
   - Thirty days has the strongest direct challenge fit; seven days is mainly a starter/early-signal check; fourteen days is pragmatic but has sparse direct wellness evidence.
@@ -2054,22 +2055,14 @@ safety:
   - malnutrition_or_wernicke_risk
   - under_18
   stopIf:
-  - seizure
-  - confusion_or_delirium
-  - hallucinations
-  - fainting
-  - chest_pain_or_severe_shortness_of_breath
+  - seizure_delirium_hallucinations_or_neurologic_symptoms
+  - fainting_chest_pain_or_cardiac_symptoms
   - repeated_vomiting_or_dehydration
-  - severe_or_worsening_tremor_sweats_agitation_or_anxiety
-  - suicidal_thoughts_or_marked_mood_instability
-  - unable_to_sleep_for_multiple_nights_with_escalating_symptoms
-  - unsafe_substitution_with_sedatives_cannabis_nicotine_or_other_substances
-  - new_or_escalating_withdrawal_symptoms_even_if_not_severe_initially
-  - strong_craving_loss_of_control_or_drinking_to_prevent_or_relieve_symptoms
-  - irregular_heartbeat_or_marked_blood_pressure_concern_if_measured
-  - new_trouble_walking_poor_coordination_or_vision_changes
-  - self_harm_urges_mania_psychosis_or_unable_to_stay_safe
-  - medication_change_to_manage_withdrawal_craving_or_sleep_without_clinician
+  - severe_tremor_sweats_agitation_or_anxiety
+  - new_or_escalating_withdrawal_symptoms
+  - suicidal_thoughts_self_harm_mania_or_psychosis
+  - strong_craving_or_drinking_to_relieve_symptoms
+  - unsafe_substitution_or_medication_change_without_clinician
   notes:
   - Safety overrides the experiment — unclear risk means clinician-guided care, not self-guided.
   - No adverse-event report proves abrupt cessation is safe for dependent drinkers.
