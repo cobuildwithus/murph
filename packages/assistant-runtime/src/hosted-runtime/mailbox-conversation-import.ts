@@ -493,7 +493,17 @@ function createHostedEmailConversationAssistantInputText(
     wake.message.textPreview ?? "",
   );
   if (!bodyPreview) {
-    return "Received an email message.";
+    const lines = [
+      "Received an email message.",
+      renderHostedEmailPromptLine("Sender summary", wake.message.from),
+      renderHostedEmailPromptListLine("Recipient summary", wake.message.to),
+      renderHostedEmailPromptListLine("Cc summary", wake.message.cc),
+      renderHostedEmailPromptLine("Email subject", wake.message.subject),
+      "Email body unavailable.",
+    ];
+    return sanitizeHostedAssistantInputText(
+      lines.filter((line): line is string => line !== null).join("\n"),
+    ) ?? "Received an email message.\nEmail body unavailable.";
   }
 
   const lines = [
@@ -567,7 +577,7 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         wake.message.telegramMessage.threadId,
       ),
-      threadIsDirect: null,
+      threadIsDirect: true,
     };
   }
 

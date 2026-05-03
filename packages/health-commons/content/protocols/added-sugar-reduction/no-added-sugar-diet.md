@@ -453,13 +453,11 @@ protocol:
   - weight_tracking_distress_or_food_rule_rigidity
   - training_fuel_recovery_or_performance_change
   stopConditions:
-  - Stop the rule immediately to treat hypoglycemia if symptoms or glucose readings require rapid carbohydrate; medically indicated sugar or glucose is not a protocol failure.
-  - Stop and do not resume the strict version without clinician guidance if there are repeated low glucose readings, any severe low, medication changes, or uncertainty about insulin, sulfonylurea, SGLT2 inhibitor, blood-pressure medication, or diuretic management.
-  - Stop or loosen the protocol if dizziness, faintness, confusion, shakiness, persistent headache, unusual irritability, low energy, dehydration, vomiting, diarrhea, acute illness, or inability to maintain regular meals interferes with daily function.
-  - Stop or switch to a sugar-source-awareness version if the rule causes skipped meals, deliberate fasting, ketogenic or very-low-carbohydrate drift, calorie restriction, avoidance of fruit, dairy or alternatives, legumes, starchy foods, or inability to maintain adequate protein, fiber-rich carbohydrate, or hydration.
-  - Stop and seek appropriate support if food rules become rigid, guilt-driven, compulsive, distressing, socially impairing, or eating-disorder-relevant, regardless of body size.
-  - Stop or adapt if there is unintentional weight loss, inadequate intake, food-access or budget pressure, frailty, dehydration risk, or athletic underfueling or recovery decline.
-  - Do not continue a strict version during pregnancy, breastfeeding, pediatric use, acute illness, hospitalization or long-term care, medical nutrition therapy, diabetes-medication changes, or medical nutrition uncertainty without clinician-aligned guidance.
+  - Stop to treat hypoglycemia; do not resume the strict version without clinician guidance after repeated lows, severe lows, or medication uncertainty.
+  - Stop or loosen if dizziness, confusion, illness, dehydration, or inability to maintain regular meals interferes with daily function.
+  - Stop or switch to the lighter variant if the rule causes skipped meals, food-group avoidance, ketogenic drift, unintentional weight loss, or underfueling.
+  - Stop and seek support if food rules become rigid, compulsive, distressing, or eating-disorder-relevant.
+  - Do not continue a strict version during pregnancy, breastfeeding, pediatric use, or medical nutrition therapy without clinician guidance.
 testPlans:
 -
   planId: added-sugar-intake-28d
@@ -1599,16 +1597,12 @@ safety:
   - nafld_or_medical_nutrition_therapy
   - concurrent_fasting_keto_or_low_carb
   stopIf:
-  - hypoglycemia_symptoms_or_low_glucose_reading_that_needs_rapid_carbohydrate
-  - repeated_low_glucose_severe_low_or_uncertain_medication_adjustment
-  - dizziness_faintness_confusion_shakiness_or_symptoms_affecting_daily_function
-  - acute_illness_vomiting_diarrhea_dehydration_or_inability_to_maintain_regular_meals
-  - protocol_drift_into_fasting_ketogenic_very_low_carb_or_deliberate_calorie_restriction
-  - avoidance_of_fruit_dairy_legumes_starchy_foods_or_all_carbohydrates
-  - food_rules_become_rigid_compulsive_guilt_driven_distressing_or_socially_impairing
-  - unintentional_weight_loss_inadequate_food_intake_food_access_pressure_or_malnutrition_risk
-  - training_performance_recovery_or_fueling_declines_in_a_way_suggesting_underfueling
-  - pregnancy_breastfeeding_pediatric_medical_diet_or_clinician_advised_reason_to_stop
+  - hypoglycemia_or_glucose_medication_concern
+  - dizziness_confusion_illness_or_unable_to_maintain_meals
+  - drift_into_fasting_keto_restriction_or_food_group_avoidance
+  - rigid_compulsive_or_distressing_food_rules
+  - unintentional_weight_loss_underfueling_or_malnutrition_risk
+  - pregnancy_breastfeeding_pediatric_or_clinician_advised_stop
   notes:
   - Wellness experiment — not treatment for diabetes, weight loss, dental disease, or eating disorders.
   - Preserve adequate calories, carbs, fiber, protein, fruit, dairy, and regular meals.

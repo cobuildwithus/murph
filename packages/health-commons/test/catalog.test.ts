@@ -92,7 +92,7 @@ describe("health commons catalog", () => {
     }
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:1f3f0454cf88e6a784ef6e42c739db2631ee1bea03d09cea532f4de8aaefd9d7",
+      "sha256:9e0132d352b6e4020386bf2110962364a43e781675b40597fa0325faf997a725",
     );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];

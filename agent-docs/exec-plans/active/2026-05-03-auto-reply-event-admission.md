@@ -9,16 +9,19 @@ Constraints/Assumptions:
 - Keep the fix narrow to assistant auto-reply admission, prompt preparation, hosted Telegram input semantics if required, and directly coupled tests.
 
 Key decisions:
-- UNCONFIRMED until code inspection: prefer removing the synthetic capture bridge if the change stays contained; otherwise repair it and add tests that fence the bridge bugs.
+- Removed the synthetic `InboxShowResult['capture']` bridge from the reply decision path; channel eligibility and self-echo checks now read event-native primary input data.
+- Hosted Telegram mailbox conversation input is treated as direct because the hosted Telegram path represents direct bot chats.
 
 State:
 - Active.
 
 Done:
 - Loaded required repo routing, architecture, product, security, reliability, and verification docs.
+- Removed the pre-Codex email body-unavailable skip and late-input defer gate.
+- Added degraded email body-unavailable prompt notes and hosted email metadata fallback text.
 
 Now:
-- Inspect current auto-reply implementation and tests.
+- Add focused integration/regression tests.
 
 Next:
 - Patch event-first policy and add focused integration coverage.
@@ -29,5 +32,9 @@ Open questions (UNCONFIRMED if needed):
 Working set (files/ids/commands):
 - `packages/assistant-engine/src/assistant/automation/reply.ts`
 - `packages/assistant-engine/src/assistant/automation/prompt-builder.ts`
+- `packages/assistant-engine/src/assistant/automation/input-summary.ts`
+- `packages/assistant-engine/src/assistant/channels/types.ts`
 - `packages/assistant-engine/test/assistant-automation-runtime.test.ts`
-- Directly coupled assistant-runtime hosted Telegram ingestion tests if required.
+- `packages/assistant-engine/test/assistant-automation-reply-event-path.test.ts`
+- `packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts`
+- `packages/assistant-runtime/test/hosted-runtime-mailbox-conversation-import.test.ts`

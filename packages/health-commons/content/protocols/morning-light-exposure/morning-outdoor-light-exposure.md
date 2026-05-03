@@ -341,7 +341,7 @@ expectedSignalDescriptions:
       kind: absolute
       low: 0.5
       high: 1.5
-      unit: points on a 1-10 sleep-quality scale
+      unit: points out of 10
       window: 1-3 weeks
       confidence: low
       basis: Direct older-adult outdoor and natural-light studies reported better sleep-quality questionnaire scores, and an adult daily-diary study linked morning sunlight with better next-night sleep quality. The estimate is a practical same-scale daily-rating range, not a pooled effect size.
