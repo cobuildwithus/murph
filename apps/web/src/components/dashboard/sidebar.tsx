@@ -187,11 +187,8 @@ function AccountMenu({
     useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
   const [signOutPending, setSignOutPending] = useState(false);
   const hasAccount = initialAuth.authenticated;
-  const userKey = hasAccount ? initialAuth.label ?? "app-session" : null;
+  const userKey = hasAccount ? "app-session" : null;
 
-  const primaryLabel = initialAuth.label;
-  const initials =
-    primaryLabel?.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
   const deviceSyncStatus =
     deviceSyncStatusState?.userKey === userKey ? deviceSyncStatusState.status : null;
 
@@ -253,39 +250,27 @@ function AccountMenu({
             render={
               <SidebarMenuButton
                 size="lg"
-                aria-label="Open settings menu"
+                aria-label="Open user menu"
                 className="h-auto py-3 text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5 md:py-2"
               />
             }
           >
             <Avatar className="size-10 border border-white/15 md:size-8">
               <AvatarFallback className="bg-white/5 text-[0.6875rem] font-medium text-white/80">
-                {initials}
+                M
               </AvatarFallback>
             </Avatar>
-            {primaryLabel || deviceSyncStatus ? (
+            {deviceSyncStatus ? (
               <div className="grid flex-1 text-left leading-tight">
-                {primaryLabel ? (
-                  <span className="truncate text-sm font-medium text-white/90 md:text-xs">
-                    {primaryLabel}
-                  </span>
-                ) : null}
-                {deviceSyncStatus ? (
+                <span className="flex items-center gap-1.5 text-[0.6875rem] text-white/50">
                   <span
                     className={cn(
-                      "flex items-center gap-1.5 text-[0.6875rem] text-white/50",
-                      primaryLabel ? "mt-0.5" : null,
+                      "size-1.5 shrink-0 rounded-full",
+                      accountStatusDotClass(deviceSyncStatus.tone),
                     )}
-                  >
-                    <span
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        accountStatusDotClass(deviceSyncStatus.tone),
-                      )}
-                    />
-                    <span className="truncate">{deviceSyncStatus.message}</span>
-                  </span>
-                ) : null}
+                  />
+                  <span className="truncate">{deviceSyncStatus.message}</span>
+                </span>
               </div>
             ) : null}
             <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
