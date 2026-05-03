@@ -1,6 +1,6 @@
 # Get e2e tests green
 
-Status: active
+Status: completed
 Created: 2026-05-03
 Updated: 2026-05-03
 
@@ -37,7 +37,7 @@ Updated: 2026-05-03
 2. Inspect the responsible code/tests and ledger overlap before editing.
 3. Apply the smallest safe fix for attributable failures. (done)
 4. Re-run focused failing scenarios, then the aggregate e2e command. (done)
-5. Run required follow-up checks and complete the repo handoff workflow.
+5. Run required follow-up checks and complete the repo handoff workflow. (done)
 
 ## Decisions
 
@@ -52,3 +52,6 @@ Updated: 2026-05-03
 - Focused proof: `pnpm hosted-local e2e linq-webhook` passed after rebuilding the runner bundle.
 - Focused first-contact proof: `pnpm hosted-local e2e linq-first-contact --no-bundle` passed after an aggregate timeout did not reproduce in isolation.
 - Aggregate hosted-local proof: `pnpm test:e2e:hosted-local` passed with 5 files / 16 tests.
+- Cloudflare local e2e proof: `pnpm --dir apps/cloudflare test:e2e:local` passed; hosted-local reran with 5 files / 16 tests and workers e2e exited 0 with no matching worker test files.
+- Follow-up proof: `pnpm --dir packages/assistant-runtime test -- hosted-runtime-conversation-event.test.ts`, `pnpm typecheck`, `pnpm test:diff`, and `git diff --check` passed.
+Completed: 2026-05-03
