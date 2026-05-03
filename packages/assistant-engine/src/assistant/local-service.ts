@@ -622,7 +622,7 @@ export async function sendAssistantMessageLocal(
         })
 
         await finalizeDeliveredAssistantTurn({
-          onboardingGuidanceInjected:
+          firstContactGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: deliveryOutcome,
