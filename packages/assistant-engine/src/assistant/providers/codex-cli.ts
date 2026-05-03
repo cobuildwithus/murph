@@ -119,7 +119,14 @@ export async function executeCodexAssistantTurnAttempt(
   try {
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
-      prompt: resolveAssistantProviderPrompt(input),
+      prompt: resolveAssistantProviderPrompt(
+        input.resumeProviderSessionId
+          ? {
+              ...input,
+              activeTurnMessages: undefined,
+            }
+          : input,
+      ),
       resumeSessionId: input.resumeProviderSessionId,
     })
   } catch (error) {

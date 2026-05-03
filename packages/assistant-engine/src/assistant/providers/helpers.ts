@@ -254,6 +254,7 @@ export function extractCodexAssistantProviderUsage(input: {
     completionParams,
     completionRecord,
     completionTurn,
+    rawEvents: input.rawEvents,
   })
   const usageRecord = usageSource?.record ?? null
   const sanitizedRawUsageJson = sanitizeAssistantProviderRawUsageJson(
@@ -312,6 +313,7 @@ export function extractCodexAssistantProviderUsage(input: {
       usageRecord ?? completionRecord,
       'reasoningTokens',
       'reasoning_tokens',
+      'reasoningOutputTokens',
     ) ?? readAssistantProviderNestedInteger(
       usageRecord ?? completionRecord,
       'output_tokens_details',
@@ -340,6 +342,7 @@ function resolveAssistantProviderUsageSource(input: {
   completionParams: Record<string, unknown> | null
   completionRecord: Record<string, unknown> | null
   completionTurn: Record<string, unknown> | null
+  rawEvents: readonly unknown[]
 }): { record: Record<string, unknown>; sourcePath: string } | null {
   const candidates = [
     {
@@ -366,6 +369,39 @@ function resolveAssistantProviderUsageSource(input: {
         record: candidate.record,
         sourcePath: candidate.sourcePath,
       }
+    }
+  }
+
+  const tokenUsageRecord = findAssistantCodexThreadTokenUsageRecord(input.rawEvents)
+  return tokenUsageRecord
+    ? {
+        record: tokenUsageRecord,
+        sourcePath: 'thread.tokenUsage.last',
+      }
+    : null
+}
+
+function findAssistantCodexThreadTokenUsageRecord(
+  rawEvents: readonly unknown[],
+): Record<string, unknown> | null {
+  for (let index = rawEvents.length - 1; index >= 0; index -= 1) {
+    const record = readAssistantProviderRecord(rawEvents[index])
+    const eventType = readAssistantProviderString(
+      record?.type,
+      record?.event,
+      record?.method,
+    )
+
+    if (eventType !== 'thread/tokenUsage/updated') {
+      continue
+    }
+
+    const params = readAssistantProviderRecord(record?.params)
+    const tokenUsage = readAssistantProviderRecord(params?.tokenUsage)
+    const last = readAssistantProviderRecord(tokenUsage?.last)
+
+    if (last) {
+      return last
     }
   }
 
@@ -475,6 +511,7 @@ function sanitizeAssistantProviderRawUsageJson(
     'prompt_tokens',
     'reasoningTokens',
     'reasoning_tokens',
+    'reasoningOutputTokens',
     'totalTokens',
     'total_tokens',
   ])
