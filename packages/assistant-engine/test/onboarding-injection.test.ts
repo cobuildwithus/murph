@@ -3,14 +3,26 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../src/assistant/system-prompt.js', () => ({
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata: () => ({
+    cacheMetadata: null,
+    prompt: '',
+  }),
+  buildAssistantSystemPromptWithCacheMetadata: () => ({
+    cacheMetadata: null,
+    prompt: '',
+  }),
+}))
 
 import {
   markAssistantFirstContactSeen,
-  markAssistantOnboardingBootstrapSeen,
-  resolveAssistantOnboardingBootstrapStateDocIds,
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.js'
+import {
+  completeAssistantOnboarding,
+} from '../src/assistant/onboarding-state.js'
 import {
   resolveAssistantSession,
   saveAssistantSession,
@@ -19,7 +31,6 @@ import {
   resolveAssistantProviderThreadPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
-  resolveAssistantOnboardingGuidanceOpen,
   resolveAssistantTurnSharedPlan,
 } from '../src/assistant/turn-plan.js'
 import type {
@@ -40,7 +51,7 @@ afterEach(async () => {
 })
 
 describe('assistant onboarding prompt injection', () => {
-  it('does not keep onboarding eligible past the first assistant turn when the bootstrap marker is missing', async () => {
+  it('keeps onboarding eligible after first-contact dedupe while onboarding stays open', async () => {
     const vault = await createTempVault()
     const route = {
       actorId: 'actor-first',
@@ -56,7 +67,6 @@ describe('assistant onboarding prompt injection', () => {
       now: new Date('2026-04-21T12:00:00.000Z'),
     })
     const stateDocIds = resolveAssistantFirstContactStateDocIds(route)
-    const bootstrapDocIds = resolveAssistantOnboardingBootstrapStateDocIds(route)
     await markAssistantFirstContactSeen({
       docIds: stateDocIds,
       seenAt: '2026-04-21T12:00:01.000Z',
@@ -78,29 +88,20 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.firstContactStateDocIds).toEqual(stateDocIds)
-    expect(plan.onboardingBootstrapStateDocIds).toEqual(bootstrapDocIds)
-    expect(plan.onboardingGuidanceOpen).toBe(false)
+    expect(plan.onboardingGuidanceOpen).toBe(true)
   })
 
-  it('stops onboarding eligibility for later routes once the vault bootstrap marker exists', async () => {
+  it('keeps onboarding eligible for a later session in the same vault until it is completed', async () => {
     const vault = await createTempVault()
-    const firstRoute = {
+    await resolveAssistantSession({
+      vault,
+      target,
       actorId: 'actor-first',
       channel: 'linq',
       identityId: 'member-first',
       threadId: 'thread-first',
       threadIsDirect: true,
-    } as const
-    await resolveAssistantSession({
-      vault,
-      target,
-      ...firstRoute,
       now: new Date('2026-04-21T12:00:00.000Z'),
-    })
-    await markAssistantOnboardingBootstrapSeen({
-      docIds: resolveAssistantOnboardingBootstrapStateDocIds(firstRoute),
-      seenAt: '2026-04-21T12:00:01.000Z',
-      vault,
     })
     const laterRoute = {
       actorId: 'actor-later',
@@ -122,11 +123,10 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.firstContactStateDocIds.length).toBeGreaterThan(0)
-    expect(plan.onboardingBootstrapStateDocIds.length).toBeGreaterThan(0)
-    expect(plan.onboardingGuidanceOpen).toBe(false)
+    expect(plan.onboardingGuidanceOpen).toBe(true)
   })
 
-  it('stops onboarding eligibility once the vault bootstrap marker is recorded', async () => {
+  it('stops onboarding eligibility once the shared onboarding state is completed', async () => {
     const vault = await createTempVault()
     const route = {
       actorId: 'actor-first',
@@ -142,9 +142,8 @@ describe('assistant onboarding prompt injection', () => {
       now: new Date('2026-04-21T12:00:00.000Z'),
     })
 
-    await markAssistantOnboardingBootstrapSeen({
-      docIds: resolveAssistantOnboardingBootstrapStateDocIds(route),
-      seenAt: '2026-04-21T12:00:01.000Z',
+    await completeAssistantOnboarding({
+      reason: 'user_answered',
       vault,
     })
 
@@ -154,33 +153,6 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.onboardingGuidanceOpen).toBe(false)
-  })
-
-  it('uses one committed assistant turn as the onboarding fallback window', () => {
-    expect(
-      resolveAssistantOnboardingGuidanceOpen({
-        includeOnboardingGuidance: true,
-        onboardingBootstrapMarkerResolvable: false,
-        onboardingBootstrapSeen: false,
-        sessionTurnCount: 0,
-      }),
-    ).toBe(true)
-    expect(
-      resolveAssistantOnboardingGuidanceOpen({
-        includeOnboardingGuidance: true,
-        onboardingBootstrapMarkerResolvable: false,
-        onboardingBootstrapSeen: false,
-        sessionTurnCount: 1,
-      }),
-    ).toBe(false)
-    expect(
-      resolveAssistantOnboardingGuidanceOpen({
-        includeOnboardingGuidance: true,
-        onboardingBootstrapMarkerResolvable: true,
-        onboardingBootstrapSeen: false,
-        sessionTurnCount: 10,
-      }),
-    ).toBe(false)
   })
 
   it('preserves native resume while keeping onboarding guidance open on conversation turns', () => {

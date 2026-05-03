@@ -319,68 +319,6 @@ test('sendAssistantMessageLocal emits a hosted context trace after session resol
   expect(JSON.stringify(rawEvent)).not.toContain('session-message-trace')
 })
 
-test('sendAssistantMessageLocal marks onboarding bootstrap after committing the turn', async () => {
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-fallback',
-  })
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
-    session,
-    providerOutcome: {
-      kind: 'succeeded',
-      providerTurn: {
-        onboardingGuidanceInjected: true,
-        providerContinuation: {
-          kind: 'explicit-structured-history',
-        },
-        response: 'Thanks, that helps.',
-        session,
-      },
-    },
-  })
-
-  await sendAssistantMessageLocal({
-    deliverResponse: true,
-    prompt: "Call me Sam. I've been dealing with low energy lately.",
-    vault: '/vaults/test',
-  })
-
-  expect(mocks.markAssistantOnboardingBootstrapInjected.mock.calls[0]?.[0]).toEqual({
-    docIds: ['bootstrap-1'],
-    injectedAt: expect.any(String),
-    vault: '/vaults/test',
-  })
-  assert.ok(
-    mocks.finalizeAssistantTurnArtifacts.mock.invocationCallOrder[0]
-      < mocks.markAssistantOnboardingBootstrapInjected.mock.invocationCallOrder[0],
-  )
-  assert.ok(
-    mocks.markAssistantOnboardingBootstrapInjected.mock.invocationCallOrder[0]
-      < mocks.dispatchAssistantReply.mock.invocationCallOrder[0],
-  )
-
-  assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
-  const [firstFinalizationCall] = mocks.finalizeDeliveredAssistantTurn.mock.calls
-  const [finalizationInput] = firstFinalizationCall ?? []
-  assert.deepEqual(finalizationInput, {
-    firstContactGuidanceInjected: true,
-    firstContactStateDocIds: ['doc-1'],
-    outcome: {
-      delivery: {
-        channel: 'telegram',
-        sentAt: '2026-04-08T12:00:05.000Z',
-        target: 'thread-1',
-        targetKind: 'thread',
-      },
-      intentId: 'intent-1',
-      kind: 'sent',
-      session,
-    },
-    response: 'Thanks, that helps.',
-    turnId: 'turn-1',
-    vault: '/vaults/test',
-  })
-})
-
 test('sendAssistantMessageLocal preserves resume state when active-turn fallback uses a provider fork', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
     plan: {
@@ -3488,13 +3426,6 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
-    markAssistantOnboardingBootstrapInjected: vi.fn(
-      async (
-        _input: Parameters<
-          typeof import('../src/assistant/first-contact.js').markAssistantOnboardingBootstrapInjected
-        >[0],
-      ) => undefined,
-    ),
     persistPendingAssistantUsageEvent: vi.fn(
       async (_input: { providerRequestOrdinal?: number }) => undefined,
     ),
@@ -3744,10 +3675,6 @@ async function loadLocalServiceModule(input?: {
   vi.doMock('../src/assistant/prompt-attempts.js', () => ({
     persistFailedAssistantPromptAttempt: mocks.persistFailedAssistantPromptAttempt,
   }))
-  vi.doMock('../src/assistant/first-contact.js', () => ({
-    markAssistantOnboardingBootstrapInjected:
-      mocks.markAssistantOnboardingBootstrapInjected,
-  }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
@@ -3924,7 +3851,6 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     },
     onboardingGuidanceOpen: false,
     firstContactStateDocIds: ['doc-1'],
-    onboardingBootstrapStateDocIds: ['bootstrap-1'],
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: true,
     requestedWorkingDirectory: '/workspace',

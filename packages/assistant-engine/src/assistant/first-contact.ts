@@ -25,20 +25,6 @@ export async function hasAssistantSeenFirstContact(input: {
   return hasAssistantSeenStateDocs(input)
 }
 
-export async function hasAssistantSeenOnboardingBootstrap(input: {
-  docIds: readonly string[]
-  vault: string
-}): Promise<boolean> {
-  return hasAssistantSeenStateDocs(input)
-}
-
-export async function hasAssistantOnboardingBootstrapInjected(input: {
-  docIds: readonly string[]
-  vault: string
-}): Promise<boolean> {
-  return hasAssistantSeenOnboardingBootstrap(input)
-}
-
 export async function markAssistantFirstContactSeen(input: {
   docIds: readonly string[]
   seenAt: string
@@ -47,29 +33,6 @@ export async function markAssistantFirstContactSeen(input: {
   await markAssistantStateDocsSeen({
     ...input,
     schemaVersion: 'murph.assistant-first-contact.v1',
-  })
-}
-
-export async function markAssistantOnboardingBootstrapSeen(input: {
-  docIds: readonly string[]
-  seenAt: string
-  vault: string
-}): Promise<void> {
-  await markAssistantStateDocsSeen({
-    ...input,
-    schemaVersion: 'murph.assistant-onboarding-bootstrap.v1',
-  })
-}
-
-export async function markAssistantOnboardingBootstrapInjected(input: {
-  docIds: readonly string[]
-  injectedAt: string
-  vault: string
-}): Promise<void> {
-  await markAssistantOnboardingBootstrapSeen({
-    docIds: input.docIds,
-    seenAt: input.injectedAt,
-    vault: input.vault,
   })
 }
 
@@ -103,16 +66,9 @@ export function resolveAssistantFirstContactStateDocIds(
   })
 }
 
-export function resolveAssistantOnboardingBootstrapStateDocIds(
-  input: AssistantFirstContactLocator,
-): string[] {
-  void input
-  return ['onboarding/bootstrap/vault']
-}
-
 function resolveAssistantScopedOnboardingStateDocIds(input: {
   input: AssistantFirstContactLocator
-  scopeName: 'bootstrap' | 'first-contact'
+  scopeName: 'first-contact'
 }): string[] {
   const channel = normalizeNullableString(input.input.channel)
   const identityId = normalizeNullableString(input.input.identityId)
@@ -148,7 +104,7 @@ function resolveAssistantScopedOnboardingStateDocIds(input: {
 function buildAssistantFirstContactStateDocId(input: {
   channel: string
   identityId: string | null
-  scopeName: 'bootstrap' | 'first-contact'
+  scopeName: 'first-contact'
   scope: ['actor' | 'thread', string]
 }): string {
   const key = [

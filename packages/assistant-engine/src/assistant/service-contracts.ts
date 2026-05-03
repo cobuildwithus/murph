@@ -108,7 +108,6 @@ export interface AssistantTurnSharedPlan {
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
   onboardingGuidanceOpen: boolean
   firstContactStateDocIds: string[]
-  onboardingBootstrapStateDocIds: string[]
   operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
   requestedWorkingDirectory: string

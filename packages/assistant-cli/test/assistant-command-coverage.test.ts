@@ -4,7 +4,11 @@ import { Cli } from 'incur'
 import { beforeEach, test as baseTest, vi } from 'vitest'
 
 import type {
+  AssistantOnboardingState,
   AssistantSession,
+} from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantOnboardingResultSchema,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { InboxServices } from '@murphai/inbox-services'
@@ -16,17 +20,23 @@ const commandMocks = vi.hoisted(() => ({
   assertAssistantInkInteractiveInputAvailable: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   clearAssistantSelfDeliveryTargets: vi.fn(),
+  completeAssistantOnboarding: vi.fn(),
   deliverAssistantMessage: vi.fn(),
   getAssistantSession: vi.fn(),
   getAssistantStatus: vi.fn(),
   listAssistantSelfDeliveryTargets: vi.fn(),
   listAssistantSessions: vi.fn(),
+  readAssistantOnboardingState: vi.fn(),
   redactAssistantDisplayPath: vi.fn((value: string) => `redacted:${value}`),
   redactAssistantSessionForDisplay: vi.fn((value) => value),
   redactAssistantSessionsForDisplay: vi.fn((value) => value),
   resolveAssistantSelfDeliveryTarget: vi.fn(),
+  reopenAssistantOnboarding: vi.fn(),
   resolveAssistantConversationAudience: vi.fn(),
   resolveAssistantConversationPolicy: vi.fn(),
+  resolveAssistantOnboardingStatePath: vi.fn((vault: string) =>
+    `${vault}/.runtime/operations/assistant/state/onboarding/conversation.json`
+  ),
   resolveAssistantStatePaths: vi.fn((vault: string) => ({
     assistantStateRoot: `${vault}/.runtime/operations/assistant`,
   })),
@@ -93,9 +103,14 @@ vi.mock(
 )
 
 vi.mock('@murphai/assistant-engine/assistant-state', () => ({
+  completeAssistantOnboarding: commandMocks.completeAssistantOnboarding,
+  readAssistantOnboardingState: commandMocks.readAssistantOnboardingState,
   redactAssistantDisplayPath: commandMocks.redactAssistantDisplayPath,
   getAssistantSession: commandMocks.getAssistantSession,
   listAssistantSessions: commandMocks.listAssistantSessions,
+  reopenAssistantOnboarding: commandMocks.reopenAssistantOnboarding,
+  resolveAssistantOnboardingStatePath:
+    commandMocks.resolveAssistantOnboardingStatePath,
   resolveAssistantStatePaths: commandMocks.resolveAssistantStatePaths,
 }))
 
@@ -155,6 +170,15 @@ const TEST_SESSION: AssistantSession = {
   updatedAt: '2026-03-28T00:00:00.000Z',
   lastTurnAt: null,
   turnCount: 0,
+}
+
+const TEST_ONBOARDING_STATE: AssistantOnboardingState = {
+  schemaVersion: 'murph.assistant-onboarding.v1',
+  status: 'completed',
+  createdAt: '2026-04-23T00:00:00.000Z',
+  updatedAt: '2026-04-23T00:05:00.000Z',
+  completedAt: '2026-04-23T00:05:00.000Z',
+  completedReason: 'user_answered',
 }
 
 const TEST_ASK_RESULT = {
@@ -253,6 +277,10 @@ beforeEach(() => {
   commandMocks.resolveAssistantStatePaths.mockImplementation((vault: string) => ({
     assistantStateRoot: `${vault}/.runtime/operations/assistant`,
   }))
+  commandMocks.resolveAssistantOnboardingStatePath.mockImplementation(
+    (vault: string) =>
+      `${vault}/.runtime/operations/assistant/state/onboarding/conversation.json`,
+  )
   commandMocks.resolveOperatorConfigPath.mockReturnValue('/tmp/operator-config.json')
 })
 
@@ -274,6 +302,7 @@ test('assistant command registration exposes the owned subcommands and root alia
     'status',
     'doctor',
     'stop',
+    'onboarding',
     'session',
   ])
   assert.deepEqual([...selfTarget.commands.keys()], ['list', 'show', 'set', 'clear'])
@@ -289,6 +318,77 @@ test('assistant command registration exposes the owned subcommands and root alia
   assert.equal(readCommand(commands, 'status').description?.includes('assistant status'), true)
   assert.equal(readCommand(commands, 'doctor').description?.includes('assistant doctor'), true)
   assert.equal(readCommand(commands, 'stop').description?.includes('assistant stop'), true)
+})
+
+test('assistant onboarding commands read and write the shared lifecycle state', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const onboarding = readCommandGroup(assistant.commands, 'onboarding')
+  const status = readCommand(onboarding.commands, 'status')
+  const complete = readCommand(onboarding.commands, 'complete')
+  const reopen = readCommand(onboarding.commands, 'reopen')
+
+  assert.equal(
+    Object.hasOwn(complete.options?.shape ?? {}, 'concrete_request'),
+    false,
+  )
+
+  commandMocks.readAssistantOnboardingState.mockResolvedValueOnce(TEST_ONBOARDING_STATE)
+  commandMocks.completeAssistantOnboarding.mockResolvedValueOnce({
+    ...TEST_ONBOARDING_STATE,
+    completedReason: 'user_declined',
+  })
+  commandMocks.reopenAssistantOnboarding.mockResolvedValueOnce({
+    ...TEST_ONBOARDING_STATE,
+    status: 'open',
+    updatedAt: '2026-04-23T00:10:00.000Z',
+    completedAt: null,
+    completedReason: null,
+  })
+
+  const statusResult = assistantOnboardingResultSchema.parse(
+    await status.run({
+      args: {},
+      options: {
+        vault: '/tmp/vault',
+      },
+    }),
+  )
+  assert.equal(
+    statusResult.statePath,
+    'redacted:/tmp/vault/.runtime/operations/assistant/state/onboarding/conversation.json',
+  )
+  assert.equal(statusResult.onboarding.status, 'completed')
+
+  const completeResult = assistantOnboardingResultSchema.parse(
+    await complete.run({
+      args: {},
+      options: {
+        reason: 'user_declined',
+        vault: '/tmp/vault',
+      },
+    }),
+  )
+  assert.equal(commandMocks.completeAssistantOnboarding.mock.calls.length, 1)
+  assert.deepEqual(commandMocks.completeAssistantOnboarding.mock.calls[0]?.[0], {
+    reason: 'user_declined',
+    vault: '/tmp/vault',
+  })
+  assert.equal(completeResult.onboarding.completedReason, 'user_declined')
+
+  const reopenResult = assistantOnboardingResultSchema.parse(
+    await reopen.run({
+      args: {},
+      options: {
+        vault: '/tmp/vault',
+      },
+    }),
+  )
+  assert.equal(commandMocks.reopenAssistantOnboarding.mock.calls.length, 1)
+  assert.deepEqual(commandMocks.reopenAssistantOnboarding.mock.calls[0]?.[0], {
+    vault: '/tmp/vault',
+  })
+  assert.equal(reopenResult.onboarding.status, 'open')
 })
 
 test('assistant ask resolves saved delivery defaults and forwards Codex overrides', async () => {
