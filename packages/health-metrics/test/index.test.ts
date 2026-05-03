@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
@@ -466,6 +467,12 @@ test("sorts source priorities and custom metrics through selection and series he
   assert.deepEqual(listMetricPoints({
     from: "2026-04-29",
     metricKey: "body-fat-percentage",
+    points: [custom, sameDayDevice, latestMeasurement],
+    to: "2026-04-29",
+  }).map((point) => point.id), [latestMeasurement.id, sameDayDevice.id]);
+  assert.deepEqual(buildMetricSeries({
+    from: "2026-04-29",
+    metricKey: "bodyFatPercentage",
     points: [custom, sameDayDevice, latestMeasurement],
     to: "2026-04-29",
   }).map((point) => point.id), [latestMeasurement.id, sameDayDevice.id]);

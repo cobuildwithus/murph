@@ -43,6 +43,7 @@ export type {
 export {
   METRIC_POINT_SCHEMA_VERSION,
   METRIC_SELECTION_SCHEMA_VERSION,
+  buildMetricSeries,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   listMetricPoints,
