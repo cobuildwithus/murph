@@ -4,7 +4,6 @@ import {
   Baby,
   Bone,
   Brain,
-
   CircleAlert,
   Droplet,
   Eye,
@@ -19,9 +18,12 @@ import {
   ShieldAlert,
   Stethoscope,
   Sun,
+  Syringe,
   Thermometer,
   Utensils,
+  Wind,
   Wine,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 
@@ -177,24 +179,28 @@ function CautionThermometer({ level }: { level: number }) {
 
 function whoIcon(text: string): LucideIcon {
   const lower = text.toLowerCase();
-  if (/heart|cardiac|angina|infarction|arrhythmia|failure|stenosis/.test(lower)) {
+  if (/heart|cardiac|angina|infarction|arrhythmia|failure|stenosis|cardiovascular|cardiometab|cardiopulmonary|palpitation|chest.pain/.test(lower)) {
     return HeartPulse;
   }
-  if (/hypertension|blood pressure/.test(lower)) return Activity;
-  if (/stroke|brain/.test(lower)) return Brain;
+  if (/hypertension|blood pressure|exertion|exercise/.test(lower)) return Activity;
+  if (/stroke|brain|migraine|headache|neurologic|neurodegen|cognitive|dementia|neuropathy/.test(lower)) return Brain;
   if (/pregnan|breastfeed|lactation|postpartum|conceiv/.test(lower)) return Baby;
   if (/fever|illness|infection/.test(lower)) return Thermometer;
   if (/dehydr|fainting|faint/.test(lower)) return Droplet;
   if (/heat/.test(lower)) return Flame;
   if (/diabetes|insulin|sglt2|hypoglycemia|medication|anticoagulant|diuretic|lithium|benzodiazepine|sedative|opioid|warfarin/.test(lower)) return Pill;
-  if (/child|adolescent|under.?18|pediatric|minor/.test(lower)) return PersonStanding;
+  if (/child|adolescent|under.?18|pediatric|minor|mobility|balance|fall.risk|gait|wheelchair/.test(lower)) return PersonStanding;
   if (/eating.disorder|orthorexia|binge|purging|anorex|underweight|malnutrition|frailty|cachexia|underfueling/.test(lower)) return Utensils;
-  if (/kidney|renal|liver|egfr|creatinine|electrolyte|dialysis|transplant/.test(lower)) return FlaskConical;
-  if (/fracture|surgery|osteopor|bone|joint|arthritis|tendon|ligament|injury/.test(lower)) return Bone;
+  if (/kidney|renal|liver|egfr|creatinine|electrolyte|dialysis|transplant|metabolic/.test(lower)) return FlaskConical;
+  if (/fracture|surgery|osteopor|bone|joint|arthritis|tendon|ligament|injury|musculoskeletal/.test(lower)) return Bone;
 
   if (/eye|visual|retinal|glaucoma|macular|optic/.test(lower)) return Eye;
   if (/photosensitiz|sun.sensitive|phototoxic|photosensitiv|sun.allergy|skin.condition|skin.cancer|wound|rash|sunburn/.test(lower)) return Sun;
   if (/shift.work|jet.lag|insomnia|sleep|circadian/.test(lower)) return Moon;
+  if (/seizure|epilep|convulsion/.test(lower)) return Zap;
+  if (/asthma|respiratory|breathing|lung|copd|pneumothorax|wheeze|dyspnea|pulmonary/.test(lower)) return Wind;
+  if (/allergy|allergic|anaphylaxis|shellfish|urticaria|angioedema|hypersensitiv/.test(lower)) return Syringe;
+  if (/clinician/.test(lower)) return Stethoscope;
   return CircleAlert;
 }
 
