@@ -2,16 +2,25 @@ import {
   Activity,
   AlertOctagon,
   Baby,
+  Bone,
   Brain,
+
   CircleAlert,
   Droplet,
+  Eye,
   Flame,
+  FlaskConical,
   HeartPulse,
   Info,
   LogOut,
+  Moon,
+  PersonStanding,
+  Pill,
   ShieldAlert,
   Stethoscope,
+  Sun,
   Thermometer,
+  Utensils,
   Wine,
   type LucideIcon,
 } from "lucide-react";
@@ -173,10 +182,19 @@ function whoIcon(text: string): LucideIcon {
   }
   if (/hypertension|blood pressure/.test(lower)) return Activity;
   if (/stroke|brain/.test(lower)) return Brain;
-  if (/pregnan/.test(lower)) return Baby;
+  if (/pregnan|breastfeed|lactation|postpartum|conceiv/.test(lower)) return Baby;
   if (/fever|illness|infection/.test(lower)) return Thermometer;
   if (/dehydr|fainting|faint/.test(lower)) return Droplet;
   if (/heat/.test(lower)) return Flame;
+  if (/diabetes|insulin|sglt2|hypoglycemia|medication|anticoagulant|diuretic|lithium|benzodiazepine|sedative|opioid|warfarin/.test(lower)) return Pill;
+  if (/child|adolescent|under.?18|pediatric|minor/.test(lower)) return PersonStanding;
+  if (/eating.disorder|orthorexia|binge|purging|anorex|underweight|malnutrition|frailty|cachexia|underfueling/.test(lower)) return Utensils;
+  if (/kidney|renal|liver|egfr|creatinine|electrolyte|dialysis|transplant/.test(lower)) return FlaskConical;
+  if (/fracture|surgery|osteopor|bone|joint|arthritis|tendon|ligament|injury/.test(lower)) return Bone;
+
+  if (/eye|visual|retinal|glaucoma|macular|optic/.test(lower)) return Eye;
+  if (/photosensitiz|sun.sensitive|phototoxic|photosensitiv|sun.allergy|skin.condition|skin.cancer|wound|rash|sunburn/.test(lower)) return Sun;
+  if (/shift.work|jet.lag|insomnia|sleep|circadian/.test(lower)) return Moon;
   return CircleAlert;
 }
 

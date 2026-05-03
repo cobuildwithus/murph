@@ -232,6 +232,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.conversation?.source, "telegram");
+    assert.equal(event.conversation?.threadIsDirect, true);
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
     const replyTarget = event.replyTarget;
@@ -868,9 +869,12 @@ describe("hosted mailbox conversation import adapter", () => {
     const decodedWake = createConversationWake({
       message: {
         channel: "email",
+        from: "Sender <sender@example.test>",
         identityId: "identity_synthetic",
         rawMessageKey: "raw_email_missing",
         selfAddress: "assistant@example.test",
+        subject: "Question about sauna",
+        to: ["assistant@example.test"],
       },
     });
 
@@ -906,7 +910,16 @@ describe("hosted mailbox conversation import adapter", () => {
       vault: vaultRoot,
     });
     assert.equal(listed.events.length, 1);
-    assert.equal(listed.events[0]?.content.text, "Received an email message.");
+    assert.equal(
+      listed.events[0]?.content.text,
+      [
+        "Received an email message.",
+        "Sender summary - Sender <sender@example.test>",
+        "Recipient summary - assistant@example.test",
+        "Email subject - Question about sauna",
+        "Email body unavailable.",
+      ].join("\n"),
+    );
     assert.deepEqual(listed.events[0]?.sourceMetadata, {
       kind: "email",
       promptReady: false,

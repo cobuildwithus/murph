@@ -3191,6 +3191,7 @@ describe('assistant auto-reply runtime', () => {
         projection: expect.objectContaining({ inboxCaptureId: 'capture-1' }),
       })],
       '/tmp/assistant-automation-vault',
+      { onEvent: expect.any(Function) },
     )
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
       2,
@@ -3198,6 +3199,7 @@ describe('assistant auto-reply runtime', () => {
         projection: expect.objectContaining({ inboxCaptureId: 'capture-late' }),
       })],
       '/tmp/assistant-automation-vault',
+      { onEvent: expect.any(Function) },
     )
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5373,7 +5375,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('suppresses captureless hosted email auto-reply when prompt-ready body text is unavailable', async () => {
+  it('sends degraded captureless hosted email auto-reply when body text is unavailable', async () => {
     const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-placeholder@example.test>',
       references: ['<real-email-msg-root@example.test>'],
@@ -5425,22 +5427,21 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
-      replied: 0,
-      skipped: 1,
+      replied: 1,
+      skipped: 0,
       stopScanning: false,
     })
     expect(inboxServices.show).not.toHaveBeenCalled()
-    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'reply prompt',
+      }),
+    )
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
-      .toHaveBeenCalledWith(
-        expect.objectContaining({
-          inputIds: [hostedInput.event.inputId],
-          reason: 'email.body_unavailable',
-        }),
-      )
+      .not.toHaveBeenCalled()
   })
 
-  it('rejects prompt-not-ready hosted email from active-turn late input admission', async () => {
+  it('admits degraded hosted email from active-turn late input admission', async () => {
     const initialThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-initial@example.test>',
       references: ['<real-email-msg-root@example.test>'],
@@ -5510,21 +5511,26 @@ describe('assistant auto-reply runtime', () => {
         vault: string
       }) => Promise<unknown>
     }) => {
-      let activeTurnError: unknown
-      try {
-        await input.activeTurnInput?.({
-          phase: 'request_boundary',
+      await input.activeTurnInput?.({
+        phase: 'request_boundary',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'email',
+          target: 'target-1',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: null,
+        response: 'response text',
+        session: {
           sessionId: 'session-1',
-          turnId: 'turn-1',
-          vault: '/tmp/assistant-automation-vault',
-        })
-      } catch (error) {
-        activeTurnError = error
+        },
       }
-      if (!(activeTurnError instanceof Error)) {
-        throw new Error('expected active-turn admission to reject prompt-not-ready email')
-      }
-      throw activeTurnError
     })
     const inboxServices = createInboxServices({
       show: vi.fn(),
@@ -5552,11 +5558,11 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toMatchObject({
-      advanceCursor: false,
+      advanceCursor: true,
       failed: 0,
-      replied: 0,
-      skipped: 1,
-      stopScanning: true,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
     })
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0])
       .toEqual(expect.objectContaining({
@@ -5566,7 +5572,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
-  it('suppresses prompt-not-ready hosted email from mixed retry groups before prompt construction', async () => {
+  it('keeps degraded hosted email in mixed retry groups before prompt construction', async () => {
     const promptReadyThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-ready@example.test>',
       references: ['<real-email-msg-root@example.test>'],
@@ -5654,23 +5660,24 @@ describe('assistant auto-reply runtime', () => {
             expect.objectContaining({
               id: promptReadyInput.event.inputId,
             }),
+            expect.objectContaining({
+              id: unavailableInput.event.inputId,
+            }),
           ],
         },
       }),
     )
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0].acceptedTurnInput.initialInputs)
-      .toHaveLength(1)
+      .toHaveLength(2)
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
-      .toHaveBeenCalledWith(
-        expect.objectContaining({
-          inputIds: [unavailableInput.event.inputId],
-          reason: 'email.body_unavailable',
-        }),
-      )
+      .not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(
         expect.objectContaining({
-          inputIds: [promptReadyInput.event.inputId],
+          inputIds: [
+            promptReadyInput.event.inputId,
+            unavailableInput.event.inputId,
+          ],
           outcome: 'result',
         }),
       )

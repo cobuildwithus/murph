@@ -12,6 +12,7 @@ import type { AssistantUserMessageContentPart } from '../src/assistant/content-t
 import type {
   AssistantInputAttachmentDescriptor,
   AssistantInputProjectionStatus,
+  AssistantInputSourceMetadata,
 } from '../src/assistant/input-store.ts'
 
 const promptBuilderMocks = vi.hoisted(() => ({
@@ -111,6 +112,7 @@ function createPromptInput(input: {
   captureOverrides?: Partial<InboxShowResult['capture']>
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
+  sourceMetadata?: AssistantInputSourceMetadata | null
   telegramMetadata?: TelegramAutoReplyMetadata | null
 } = {}): AssistantAutoReplyPromptInput {
   const attachments = [...(input.attachments ?? [])]
@@ -180,6 +182,7 @@ function createPromptInput(input: {
     receivedAt: parsedCapture.receivedAt,
     replyTarget: null,
     source: parsedCapture.source,
+    sourceMetadata: input.sourceMetadata ?? null,
     telegramMetadata: input.telegramMetadata ?? null,
     text: parsedCapture.text,
   }
@@ -501,6 +504,39 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Telegram media group: present')
     expect(result.prompt).not.toContain('media-group-7')
   })
+
+  it('renders degraded email body-unavailable instructions instead of skipping', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: {
+          source: 'email',
+          text: [
+            'Received an email message.',
+            'Sender summary - sender@example.invalid',
+            'Email subject - follow up',
+            'Email body unavailable.',
+          ].join('\n'),
+        },
+        sourceMetadata: {
+          kind: 'email',
+          promptReady: false,
+          promptUnavailableReason: 'email.body_unavailable',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Message availability:')
+    expect(result.prompt).toContain('Email body unavailable.')
+    expect(result.prompt).toContain(
+      'Use only the available sender, recipient, subject, and thread metadata.',
+    )
+    expect(result.prompt).toContain('Do not assume missing body content.')
+    expect(result.prompt).toContain('Message text:\nReceived an email message.')
+  })
 })
 
 describe('prepareAssistantAutoReplyInput', () => {
@@ -607,6 +643,40 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(
       promptBuilderMocks.prepareInboxMultimodalUserMessageContent,
     ).toHaveBeenCalled()
+  })
+
+  it('emits a safe nonblocking event when attachment bundle preparation fails', async () => {
+    const onEvent = vi.fn()
+    promptBuilderMocks.buildInboxModelAttachmentBundles.mockRejectedValueOnce(
+      new Error('parser bundle failed for private input'),
+    )
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [createAttachment()],
+          captureOverrides: {
+            text: 'Please review the attachment.',
+          },
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+      { onEvent },
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('Message text:\nPlease review the attachment.')
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'input.reply-progress',
+      inputId: 'event-1',
+      details: 'nonblocking inbox attachment bundle preparation failed',
+      safeDetails: 'inbox_attachment_bundle_preparation_failed_nonblocking',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
   })
 
   it('skips when neither text nor rich evidence can be prepared', async () => {

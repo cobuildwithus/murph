@@ -7,6 +7,7 @@ import type {
   AssistantInputReplyTarget,
   AssistantInputSourceMetadata,
 } from '../input-store.js'
+import type { AssistantRunEvent } from './shared.js'
 import {
   buildInboxModelAttachmentBundles,
   hasInboxMultimodalAttachmentEvidenceCandidate,
@@ -48,6 +49,7 @@ export interface AssistantAutoReplyPromptInput {
   receivedAt: string | null
   replyTarget: AssistantInputReplyTarget | null
   source: string
+  sourceMetadata?: AssistantInputSourceMetadata | null
   telegramMetadata: TelegramAutoReplyMetadata | null
   text: string | null
 }
@@ -86,6 +88,7 @@ export function buildAssistantAutoReplyPrompt(
         enrichmentAvailable: entry.enrichment !== null,
         inputText: normalizeNullableString(entry.text),
         index,
+        promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
@@ -110,12 +113,16 @@ export function buildAssistantAutoReplyPrompt(
 export async function prepareAssistantAutoReplyInput(
   inputs: readonly AssistantAutoReplyPromptInput[],
   vaultRoot: string,
+  options: {
+    onEvent?: (event: AssistantRunEvent) => void
+  } = {},
 ): Promise<AssistantAutoReplyPreparedInput> {
   const preparedInputs = await Promise.all(
     inputs.map(async (entry) => ({
       ...entry,
       attachmentBundles: await buildPromptAttachmentBundlesBestEffort({
         entry,
+        onEvent: options.onEvent,
         vaultRoot,
       }),
     })),
@@ -137,6 +144,7 @@ export async function prepareAssistantAutoReplyInput(
         enrichmentAvailable: entry.enrichment !== null,
         inputText: normalizeNullableString(entry.text),
         index,
+        promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
@@ -254,6 +262,7 @@ function renderAssistantAutoReplyInputSection(input: {
   enrichmentAvailable: boolean
   inputText: string | null
   index: number
+  promptUnavailableNote: string | null
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
   replyContext: string | null
@@ -272,6 +281,9 @@ function renderAssistantAutoReplyInputSection(input: {
     : null
   if (projectionNote) {
     sections.push(`Message enrichment:\n${projectionNote}`)
+  }
+  if (input.promptUnavailableNote) {
+    sections.push(`Message availability:\n${input.promptUnavailableNote}`)
   }
   if (input.inputText) {
     sections.push(`Message text:\n${input.inputText}`)
@@ -443,6 +455,7 @@ function renderPreparedAttachmentPromptSection(
 
 async function buildPromptAttachmentBundlesBestEffort(input: {
   entry: AssistantAutoReplyPromptInput
+  onEvent?: (event: AssistantRunEvent) => void
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle[]> {
   if (!input.entry.enrichment) {
@@ -456,6 +469,14 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
       vaultRoot: input.vaultRoot,
     })
   } catch {
+    input.onEvent?.({
+      type: 'input.reply-progress',
+      inputId: input.entry.inputId,
+      details: 'nonblocking inbox attachment bundle preparation failed',
+      safeDetails: 'inbox_attachment_bundle_preparation_failed_nonblocking',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
     return []
   }
 }
@@ -530,6 +551,26 @@ function renderAssistantInputProjectionPromptNote(input: {
 
   if (input.status === 'pending') {
     return 'inbox/parser enrichment is pending; use the staged message text and available metadata only.'
+  }
+
+  return null
+}
+
+function renderAssistantInputPromptUnavailableNote(
+  input: AssistantAutoReplyPromptInput,
+): string | null {
+  const metadata = input.sourceMetadata
+  if (
+    input.source === 'email' &&
+    metadata?.kind === 'email' &&
+    metadata.promptReady === false &&
+    metadata.promptUnavailableReason === 'email.body_unavailable'
+  ) {
+    return [
+      'Email body unavailable.',
+      'Use only the available sender, recipient, subject, and thread metadata.',
+      'Do not assume missing body content.',
+    ].join('\n')
   }
 
   return null

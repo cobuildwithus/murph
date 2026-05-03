@@ -286,6 +286,10 @@ export async function processAssistantAutoReplyGroup(input: {
       vault: input.vault,
     })
   } catch (error) {
+    if (shouldRethrowAssistantAutoReplyAbort(error, input.signal)) {
+      throw error
+    }
+
     if (isAssistantActiveTurnInputCheckpointRejectedError(error)) {
       throw error
     }
@@ -555,37 +559,6 @@ function buildAutoReplyReceiptInputIds(input: {
     ...input.context.inputIds,
     ...(input.acceptedInputs ?? []).map((item) => item.id),
   ])]
-}
-
-async function suppressEmailBodyUnavailableItemsFromMixedGroup(input: {
-  context: AssistantAutoReplyGroupContext
-  vault: string
-}): Promise<AssistantAutoReplyGroupContext | null> {
-  const unavailableItems = input.context.items.filter((item) =>
-    item.inputCandidate
-      ? isEmailBodyUnavailableAutoReplyCandidate(item.inputCandidate)
-      : false
-  )
-  if (
-    unavailableItems.length === 0 ||
-    unavailableItems.length === input.context.items.length
-  ) {
-    return null
-  }
-
-  await writeAssistantAutoReplySuppressionEvidence({
-    captureIds: unavailableItems
-      .map((item) => item.summary.projectionCaptureId)
-      .filter((captureId): captureId is string => captureId !== null),
-    inputIds: unavailableItems.map((item) => item.summary.inputId),
-    linqMessageIds: [],
-    reason: 'email.body_unavailable',
-    vault: input.vault,
-  })
-
-  return createAssistantAutoReplyGroupContext(
-    input.context.items.filter((item) => !unavailableItems.includes(item)),
-  )
 }
 
 function createIgnoredGroupOutcome(): AssistantAutoReplyGroupOutcome {
@@ -890,10 +863,11 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return createAdvancingSkipDecision(autoReplySkipReason)
   }
 
-  const preparedInput = await prepareAssistantAutoReplyInput(
-    promptInputs,
-    input.vault,
-  )
+  const preparedInput = await prepareAssistantAutoReplyInputWithEvents({
+    inputs: promptInputs,
+    onEvent: input.onEvent,
+    vault: input.vault,
+  })
   if (preparedInput.kind === 'defer') {
     return createDeferredSkipDecision(preparedInput.reason)
   }
@@ -980,6 +954,7 @@ function createAssistantAutoReplyPromptInputFromEvent(
     },
     receivedAt: event.receivedAt,
     replyTarget: event.replyTarget,
+    sourceMetadata: event.sourceMetadata,
     source: event.source,
     telegramMetadata:
       item.telegramMetadata ??
@@ -1018,7 +993,7 @@ async function tryLoadInboxProjectionEnrichment(input: {
       inboxCaptureId: input.inboxCaptureId,
     }
   } catch (error) {
-    if (shouldRethrowInboxProjectionEnrichmentError(error, input.signal)) {
+    if (shouldRethrowAssistantAutoReplyAbort(error, input.signal)) {
       throw error
     }
     input.onEvent?.({
@@ -1033,7 +1008,7 @@ async function tryLoadInboxProjectionEnrichment(input: {
   }
 }
 
-function shouldRethrowInboxProjectionEnrichmentError(
+function shouldRethrowAssistantAutoReplyAbort(
   error: unknown,
   signal?: AbortSignal,
 ): boolean {
@@ -1043,35 +1018,31 @@ function shouldRethrowInboxProjectionEnrichmentError(
   )
 }
 
-function createSyntheticAutoReplyCapture(
+function createAssistantAutoReplyPrimaryInput(
   input: AssistantAutoReplyPromptInput,
-): InboxShowResult['capture'] {
-  const captureId =
-    input.enrichment?.inboxCaptureId ??
-    input.projection?.inboxCaptureId ??
-    input.inputId
-  const attachments = [...(input.enrichment?.attachments ?? [])]
+): AssistantAutoReplyPrimaryInput {
   return {
-    accountId: input.conversation.accountId,
-    actorId: input.conversation.actorId,
     actorIsSelf: input.actorIsSelf,
-    actorName: null,
-    attachmentCount: attachments.length || input.attachmentDescriptors.length,
-    attachments,
-    captureId,
-    createdAt: input.receivedAt ?? input.occurredAt,
-    envelopePath: `assistant-input-events/${input.inputId}.json`,
-    eventId: input.inputId,
-    externalId: input.replyTarget?.messageId ?? input.inputId,
+    conversation: input.conversation,
+    inputId: input.inputId,
     occurredAt: input.occurredAt,
-    promotions: [],
     receivedAt: input.receivedAt,
+    replyTarget: input.replyTarget,
     source: input.source,
     text: input.text,
-    threadId: input.conversation.threadId ?? input.inputId,
-    threadIsDirect: input.conversation.threadIsDirect ?? false,
-    threadTitle: null,
   }
+}
+
+function prepareAssistantAutoReplyInputWithEvents(input: {
+  inputs: readonly AssistantAutoReplyPromptInput[]
+  onEvent?: (event: AssistantRunEvent) => void
+  vault: string
+}): Promise<Awaited<ReturnType<typeof prepareAssistantAutoReplyInput>>> {
+  return input.onEvent
+    ? prepareAssistantAutoReplyInput(input.inputs, input.vault, {
+        onEvent: input.onEvent,
+      })
+    : prepareAssistantAutoReplyInput(input.inputs, input.vault)
 }
 
 async function executeAssistantAutoReply(input: {
@@ -1093,17 +1064,14 @@ async function executeAssistantAutoReply(input: {
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority: AssistantOperatorAuthority
-  conversationCaptureRef?: AssistantConversationCaptureRef | null
-  primaryCapture: InboxShowResult['capture']
+  conversationCaptureRef: AssistantConversationCaptureRef
   prompt: string
   replyInputId: string
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
   const watchdog = createAssistantProviderWatchdog(input)
-  const conversation = conversationRefFromCapture(
-    input.conversationCaptureRef ?? input.primaryCapture,
-  )
+  const conversation = conversationRefFromCapture(input.conversationCaptureRef)
 
   try {
     const result = await sendAssistantMessage({
@@ -1205,12 +1173,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         kind: 'no-new-input',
       }
     }
-    if (lateInputs.inputs.some(isEmailBodyUnavailableAutoReplyCandidate)) {
-      throw new AssistantActiveTurnInputBudgetExceededError(
-        'email.body_unavailable',
-      )
-    }
-
     const lateCaptureCandidates = lateInputs.inputs.filter(
       (candidate) => candidate.projection.captureId !== null,
     )
@@ -1276,10 +1238,11 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       signal: admissionInput.signal,
       vault: input.vault,
     })
-    const preparedInput = await prepareAssistantAutoReplyInput(
-      shownAcceptedInput,
-      input.vault,
-    )
+    const preparedInput = await prepareAssistantAutoReplyInputWithEvents({
+      inputs: shownAcceptedInput,
+      onEvent: input.onEvent,
+      vault: input.vault,
+    })
     if (preparedInput.kind !== 'ready') {
       throw new AssistantActiveTurnInputBudgetExceededError(
         preparedInput.reason,
@@ -2338,34 +2301,6 @@ async function resolveAssistantAutoReplyHandledTurnReceipt(
   return null
 }
 
-function isEmailBodyUnavailableAutoReplyGroup(
-  group: AssistantAutoReplyGroupContext,
-): boolean {
-  return group.items.length > 0 &&
-    group.items.every((item) =>
-      item.inputCandidate
-        ? isEmailBodyUnavailableAutoReplyCandidate(item.inputCandidate)
-        : false
-    )
-}
-
-function isEmailBodyUnavailableAutoReplyCandidate(
-  candidate: AssistantInputCandidate,
-): boolean {
-  if (candidate.event.source !== 'email') {
-    return false
-  }
-  if (candidate.event.sourceMetadata?.kind === 'email') {
-    return (
-      candidate.event.sourceMetadata.promptReady === false &&
-      candidate.event.sourceMetadata.promptUnavailableReason ===
-        'email.body_unavailable'
-    )
-  }
-  return normalizeNullableString(candidate.event.text) ===
-    'Received an email message.'
-}
-
 function createDeferredSkipDecision(
   reason: string,
   input?: {
@@ -2388,11 +2323,11 @@ function createDeferredSkipDecision(
 }
 
 async function isRecentSelfAuthoredAssistantEcho(input: {
-  capture: InboxShowResult['capture']
+  input: AssistantAutoReplyPrimaryInput
   vault: string
 }): Promise<boolean> {
-  const captureText = normalizeNullableString(input.capture.text)
-  if (!captureText) {
+  const inputText = normalizeNullableString(input.input.text)
+  if (!inputText) {
     return false
   }
 
@@ -2401,7 +2336,7 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
     resolved = await resolveAssistantSession({
       vault: input.vault,
       createIfMissing: false,
-      conversation: conversationRefFromCapture(input.capture),
+      conversation: conversationRefFromCapture(input.input.conversation),
     })
   } catch (error) {
     const code =
@@ -2426,14 +2361,14 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   }
 
   const referenceTime = Date.parse(referenceTimestamp)
-  const captureTime = Date.parse(input.capture.occurredAt)
-  if (!Number.isFinite(referenceTime) || !Number.isFinite(captureTime)) {
+  const inputTime = Date.parse(input.input.occurredAt)
+  if (!Number.isFinite(referenceTime) || !Number.isFinite(inputTime)) {
     return false
   }
 
   if (
-    captureTime < referenceTime ||
-    captureTime - referenceTime > SELF_AUTHORED_ECHO_WINDOW_MS
+    inputTime < referenceTime ||
+    inputTime - referenceTime > SELF_AUTHORED_ECHO_WINDOW_MS
   ) {
     return false
   }
@@ -2451,7 +2386,7 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
 
   return (
     normalizeComparableText(lastAssistantEntry.text) ===
-    normalizeComparableText(captureText)
+    normalizeComparableText(inputText)
   )
 }
 

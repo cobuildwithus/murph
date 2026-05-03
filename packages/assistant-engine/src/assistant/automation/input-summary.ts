@@ -24,7 +24,7 @@ export function assistantAutomationInputSummaryFromCandidate(
     actorIsSelf: false,
     source: input.event.source,
     threadId: input.event.inputId,
-    threadIsDirect: false,
+    threadIsDirect: null,
   }
 
   return {
