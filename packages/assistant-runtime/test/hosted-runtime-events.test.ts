@@ -188,6 +188,23 @@ describe("executeHostedMailboxEvent", () => {
         },
         updates: [],
       });
+      input.onTraceEvent?.({
+        providerSessionId: null,
+        rawEvent: {
+          schema: "murph.assistant-provider-plan-diagnostics.v1",
+          type: "assistant.provider.plan",
+          activeTurnHistoryCount: 3,
+          activeTurnHistoryPresent: true,
+          providerContinuation: "provider-state-optimization",
+          providerRequestOrdinal: 1,
+          refreshThreadInstructions: false,
+          resumeProviderSessionIdPresent: true,
+          storedThreadInstructionsFingerprintPresent: true,
+          threadInstructionsFingerprintPresent: true,
+          workingDirectoryKind: "hosted-stable-proc-cwd",
+        },
+        updates: [],
+      });
     });
 
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
@@ -304,6 +321,25 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
+        component: "runtime.provider",
+        details: expect.objectContaining({
+          activeTurnHistoryPresent: true,
+          providerContinuation: "provider-state-optimization",
+          providerPlanKind: "provider.plan",
+          refreshThreadInstructions: false,
+          resumeProviderSessionIdPresent: true,
+          storedThreadInstructionsFingerprintPresent: true,
+          threadInstructionsFingerprintPresent: true,
+          workingDirectoryKind: "hosted-stable-proc-cwd",
+        }),
+        message: "Hosted assistant provider plan captured.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
           notificationRouteChannel: "linq",
@@ -356,6 +392,23 @@ describe("executeHostedMailboxEvent", () => {
             sessionFingerprint: "h1_444444444444444444444444",
             sessionResolutionCreated: true,
             stage: "assistant-session-resolved",
+          }),
+        },
+        {
+          component: "runtime.provider",
+          eventId: "evt_notification",
+          level: "info",
+          message: "Hosted assistant provider plan captured.",
+          phase: "wake.running",
+          redacted: expect.objectContaining({
+            activeTurnHistoryPresent: true,
+            providerContinuation: "provider-state-optimization",
+            providerPlanKind: "provider.plan",
+            refreshThreadInstructions: false,
+            resumeProviderSessionIdPresent: true,
+            storedThreadInstructionsFingerprintPresent: true,
+            threadInstructionsFingerprintPresent: true,
+            workingDirectoryKind: "hosted-stable-proc-cwd",
           }),
         },
         {

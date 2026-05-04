@@ -22,6 +22,7 @@ describe("createHostedWorkspaceInvocationRunner", () => {
   });
 
   it("routes workspace-invocation jobs through the workspace runtime without run authority", async () => {
+    vi.stubEnv("VAULT", "/tmp/hosted-workspace-in-process-vault");
     const request = createWorkspaceRequest("member_workspace_node");
     const result = createWorkspaceResult();
     const buildRuntime = vi.fn((runtime: HostedAssistantRuntimeConfig) => ({
@@ -71,6 +72,7 @@ describe("createHostedWorkspaceInvocationRunner", () => {
           artifactStore: expect.any(Object),
           effectsPort: expect.any(Object),
         }),
+        vaultRoot: "/tmp/hosted-workspace-in-process-vault",
       }),
     );
   });

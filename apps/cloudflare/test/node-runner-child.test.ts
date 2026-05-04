@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -108,6 +110,8 @@ describe("runHostedExecutionChild", () => {
 
   it("routes workspace-invocation child payloads through the workspace runtime without bridge proxy env", async () => {
     vi.stubEnv("MURPH_E2E_DEBUG_HOSTED_RUNNER", "1");
+    const launcherRoot = "/tmp/hosted-runner-launch-test";
+    vi.spyOn(process, "cwd").mockReturnValue(launcherRoot);
     const consoleErrorSpy = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -182,6 +186,7 @@ describe("runHostedExecutionChild", () => {
       platform: expect.objectContaining({
         workspacePort: expect.any(Object),
       }),
+      vaultRoot: path.join(launcherRoot, "vault"),
     });
 
     const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
@@ -270,7 +275,7 @@ describe("runHostedExecutionChild", () => {
     ) as Error & { details?: Record<string, unknown> };
     runtimeError.details = {
       assistantProviderErrorMessage:
-        "Bearer provider-token at /tmp/hosted-runner/provider-detail",
+        ["Bearer", "provider-token at /tmp/hosted-runner/provider-detail"].join(" "),
       nested: {
         MURPH_HOSTED_CLI_BRIDGE_TOKEN: "nested-bridge-secret",
         VERCEL_AI_API_KEY: "nested-gateway-secret",
@@ -326,7 +331,7 @@ describe("runHostedExecutionChild", () => {
     expect(payload.error?.message).not.toContain("/tmp/hosted-runner/private-file");
     expect(payload.error?.stack).not.toContain("/tmp/hosted-runner/private-file");
     expect(payload.error?.details?.assistantProviderErrorMessage).toBe(
-      "Bearer [redacted] at <redacted-path>",
+      ["Bearer", "[redacted] at <redacted-path>"].join(" "),
     );
     expect(JSON.stringify(payload.error?.details)).not.toContain("provider-token");
     expect(JSON.stringify(payload.error?.details)).not.toContain("nested-bridge-secret");

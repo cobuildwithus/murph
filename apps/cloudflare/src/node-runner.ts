@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import {
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedAssistantRuntimeConfig,
@@ -147,43 +149,44 @@ export function createHostedWorkspaceInvocationRunner(
     const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
     const runtime = buildRuntime(input.runtime ?? {});
     const boundUserId = readHostedExecutionRunnerJobUserId(input);
-    const workspaceCheckpointBridge = createHostedWorkspaceCheckpointBridgeAuthority({
-      input,
-      readWorkspaceBridgeLease: dependencies.readWorkspaceBridgeLease,
-    });
-    const runtimePlatform = buildRuntimePlatform({
-      boundUserId,
-      commitTimeoutMs: runtime.commitTimeoutMs,
-      internalWorkerProxyToken,
-      localInternalProxyBaseUrl,
-      workspaceCheckpointBridge,
-    });
-    const webControlFetch = internalWorkerProxyToken && localInternalProxyBaseUrl
-      ? createCloudflareHostedRuntimeFetch(
-          boundUserId,
-          internalWorkerProxyToken,
-          localInternalProxyBaseUrl,
-          fetch,
-        )
-      : undefined;
-    const runtimeBridgeJobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
-      platform: runtimePlatform,
-      readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-      request: input.request,
-      runtime,
-      ...(webControlFetch
-        ? {
-            webControlAllowHttpHosts: [
-              CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
-              ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-            ],
-            webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
-            webControlFetch,
-          }
-        : {}),
-    });
-
     if (runMode === "in-process") {
+      const workspaceCheckpointBridge = createHostedWorkspaceCheckpointBridgeAuthority({
+        input,
+        readWorkspaceBridgeLease: dependencies.readWorkspaceBridgeLease,
+      });
+      const runtimePlatform = buildRuntimePlatform({
+        boundUserId,
+        commitTimeoutMs: runtime.commitTimeoutMs,
+        internalWorkerProxyToken,
+        localInternalProxyBaseUrl,
+        workspaceCheckpointBridge,
+      });
+      const webControlFetch = internalWorkerProxyToken && localInternalProxyBaseUrl
+        ? createCloudflareHostedRuntimeFetch(
+            boundUserId,
+            internalWorkerProxyToken,
+            localInternalProxyBaseUrl,
+            fetch,
+          )
+        : undefined;
+      const runtimeBridgeJobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+        platform: runtimePlatform,
+        readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
+        request: input.request,
+        runtime,
+        vaultRoot: resolveHostedWorkspaceInProcessVaultRoot(),
+        ...(webControlFetch
+          ? {
+              webControlAllowHttpHosts: [
+                CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+                ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+              ],
+              webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+              webControlFetch,
+            }
+          : {}),
+      });
+
       return await runWorkspaceInProcess({
         request: input.request,
         runtime,
@@ -203,6 +206,19 @@ export function createHostedWorkspaceInvocationRunner(
 }
 
 export const runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner();
+
+function resolveHostedWorkspaceInProcessVaultRoot(): string {
+  const vaultRoot = process.env.VAULT?.trim();
+  if (!vaultRoot) {
+    throw new TypeError("Hosted workspace in-process runner requires an explicit VAULT path.");
+  }
+
+  if (!path.isAbsolute(vaultRoot)) {
+    throw new TypeError("Hosted workspace in-process runner VAULT path must be absolute.");
+  }
+
+  return vaultRoot;
+}
 
 function createHostedWorkspaceCheckpointBridgeAuthority(input: {
   input: HostedExecutionWorkspaceInvocationJobInput;

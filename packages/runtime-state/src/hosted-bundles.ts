@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { lstat, mkdir, readdir } from "node:fs/promises";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -30,6 +30,15 @@ const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
   "vault",
 ]);
 const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
+const HOSTED_CODEX_HOME_INCLUDED_HASH_LIMIT = 16;
+const HOSTED_CODEX_HOME_EXCLUDED_SUMMARY_LIMIT = 16;
+
+export interface HostedCodexHomeSnapshotDiagnostics {
+  codexHomeIncludedRelHashes: string[];
+  codexHomeSnapshotCandidateCount: number;
+  codexHomeSnapshotExcludedClassSummary: string[];
+  codexHomeSnapshotIncludedCount: number;
+}
 
 export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
   ref: HostedBundleArtifactRef;
@@ -41,16 +50,25 @@ export type HostedWorkspaceArtifactResolver = (
 
 export async function snapshotHostedExecutionContext(input: {
   artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
+  codexHomeSnapshotHashSecret?: string | null;
   materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot?: string | null;
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
 }): Promise<{
   bundle: Uint8Array;
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
 }> {
   const vaultRoot = path.resolve(input.vaultRoot);
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
   const artifactSink = input.artifactSink;
+  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
+  const codexHomeSnapshotDiagnostics = operatorHomeRoot
+    ? await collectHostedCodexHomeSnapshotDiagnostics({
+        hashSecret: input.codexHomeSnapshotHashSecret ?? null,
+        operatorHomeRoot,
+      })
+    : null;
   const vaultBundle = await snapshotHostedBundleRoots({
     externalizeFile: artifactSink
       ? (() => {
@@ -88,7 +106,7 @@ export async function snapshotHostedExecutionContext(input: {
         ? [
             {
               optional: true,
-              root: path.resolve(input.operatorHomeRoot),
+              root: operatorHomeRoot!,
               rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
               shouldIncludeRelativePath(relativePath: string) {
                 return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
@@ -108,6 +126,7 @@ export async function snapshotHostedExecutionContext(input: {
 
   return {
     bundle: vaultBundle,
+    codexHomeSnapshotDiagnostics,
   };
 }
 
@@ -392,13 +411,37 @@ function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): bool
 }
 
 function shouldIncludeHostedCodexHomeRelativePath(relativePath: string): boolean {
+  return classifyHostedCodexHomeRelativePath(relativePath).include;
+}
+
+type HostedCodexHomeSnapshotExclusionClass =
+  | "environment"
+  | "root-history"
+  | "sensitive-basename"
+  | "unsafe-container";
+
+type HostedCodexHomeSnapshotDecision =
+  | {
+      include: true;
+    }
+  | {
+      exclusionClass: HostedCodexHomeSnapshotExclusionClass;
+      include: false;
+    };
+
+function classifyHostedCodexHomeRelativePath(relativePath: string): HostedCodexHomeSnapshotDecision {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
   if (normalizedRelativePath.length === 0) {
-    return true;
+    return {
+      include: true,
+    };
   }
 
   if (isEnvironmentRelativePath(normalizedRelativePath)) {
-    return false;
+    return {
+      exclusionClass: "environment",
+      include: false,
+    };
   }
 
   const segments = normalizedRelativePath
@@ -450,24 +493,129 @@ function shouldIncludeHostedCodexHomeRelativePath(relativePath: string): boolean
       || segment === ".tokens"
     )
   ) {
-    return false;
+    return {
+      exclusionClass: "unsafe-container",
+      include: false,
+    };
   }
 
   if (isHostedCodexHomeRootHistoryPath(normalizedRelativePath)) {
-    return false;
+    return {
+      exclusionClass: "root-history",
+      include: false,
+    };
   }
 
   const basename = path.posix.basename(normalizedRelativePath).toLowerCase();
   if (isHostedCodexHomeSensitiveBasename(basename)) {
-    return false;
+    return {
+      exclusionClass: "sensitive-basename",
+      include: false,
+    };
   }
 
-  return (
-    normalizedRelativePath === "config.toml"
-    || normalizedRelativePath === "session_index.jsonl"
-    || normalizedRelativePath === "sessions"
-    || normalizedRelativePath.startsWith(`sessions${path.posix.sep}`)
-  );
+  return {
+    include: true,
+  };
+}
+
+async function collectHostedCodexHomeSnapshotDiagnostics(input: {
+  hashSecret?: string | null;
+  operatorHomeRoot: string;
+}): Promise<HostedCodexHomeSnapshotDiagnostics | null> {
+  const codexHomeRoot = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH);
+  try {
+    const entry = await lstat(codexHomeRoot);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  const includedRelHashes: string[] = [];
+  const excludedClassCounts = new Map<HostedCodexHomeSnapshotExclusionClass, number>();
+  const hashSecret = normalizeHostedCodexHomeSnapshotHashSecret(input.hashSecret);
+  let candidateCount = 0;
+  let includedCount = 0;
+
+  async function visit(relativeDirectory: string): Promise<void> {
+    const absoluteDirectory = relativeDirectory
+      ? path.join(codexHomeRoot, relativeDirectory)
+      : codexHomeRoot;
+    const entries = await readdir(absoluteDirectory, { withFileTypes: true });
+
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      const relativePath = relativeDirectory
+        ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
+        : entry.name;
+      const decision = classifyHostedCodexHomeRelativePath(relativePath);
+
+      if (!decision.include) {
+        candidateCount += 1;
+        excludedClassCounts.set(
+          decision.exclusionClass,
+          (excludedClassCounts.get(decision.exclusionClass) ?? 0) + 1,
+        );
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        await visit(path.join(relativeDirectory, entry.name));
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      candidateCount += 1;
+      includedCount += 1;
+      if (hashSecret && includedRelHashes.length < HOSTED_CODEX_HOME_INCLUDED_HASH_LIMIT) {
+        includedRelHashes.push(fingerprintHostedCodexHomeRelativePath({
+          hashSecret,
+          relativePath,
+        }));
+      }
+    }
+  }
+
+  await visit("");
+
+  return {
+    codexHomeIncludedRelHashes: includedRelHashes,
+    codexHomeSnapshotCandidateCount: candidateCount,
+    codexHomeSnapshotExcludedClassSummary:
+      summarizeHostedCodexHomeSnapshotExclusionClasses(excludedClassCounts),
+    codexHomeSnapshotIncludedCount: includedCount,
+  };
+}
+
+function summarizeHostedCodexHomeSnapshotExclusionClasses(
+  counts: ReadonlyMap<HostedCodexHomeSnapshotExclusionClass, number>,
+): string[] {
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, HOSTED_CODEX_HOME_EXCLUDED_SUMMARY_LIMIT)
+    .map(([exclusionClass, count]) => `${exclusionClass}:${count}`);
+}
+
+function fingerprintHostedCodexHomeRelativePath(input: {
+  hashSecret: string;
+  relativePath: string;
+}): string {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.relativePath);
+  const hash = createHmac("sha256", input.hashSecret)
+    .update(`codex_home_rel:${normalizedRelativePath}`, "utf8")
+    .digest("hex");
+  return `h1_${hash.slice(0, 24)}`;
+}
+
+function normalizeHostedCodexHomeSnapshotHashSecret(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function isHostedCodexHomeRootHistoryPath(relativePath: string): boolean {

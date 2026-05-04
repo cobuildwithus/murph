@@ -48,7 +48,12 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
   assert.ok(firstCodex.codexHome);
   assert.ok(firstCodex.codexConfigPath);
   await writeFile(firstCodex.codexConfigPath, "not valid hosted codex config\n", "utf8");
-  await writeFile(path.join(firstCodex.codexHome, "poisoned-self-brick-marker"), "bad edit\n", "utf8");
+  await mkdir(path.join(firstCodex.codexHome, "tmp"), { recursive: true });
+  await writeFile(
+    path.join(firstCodex.codexHome, "tmp", "poisoned-self-brick-marker"),
+    "bad edit\n",
+    "utf8",
+  );
 
   const snapshot = await snapshotHostedExecutionContext({
     operatorHomeRoot: firstOperatorHomeRoot,
@@ -61,7 +66,7 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
   });
 
   await assert.rejects(
-    () => access(path.join(restored.operatorHomeRoot, ".codex-hosted", "poisoned-self-brick-marker")),
+    () => access(path.join(restored.operatorHomeRoot, ".codex-hosted", "tmp", "poisoned-self-brick-marker")),
     { code: "ENOENT" },
   );
   assert.equal(

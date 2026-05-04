@@ -1,3 +1,4 @@
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -181,6 +182,7 @@ async function runWorkspaceChildJob(input: {
       platform,
       request: input.job.request,
       runtime: input.job.runtime ?? {},
+      vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
       ...(webControlFetch
         ? {
             webControlAllowHttpHosts: [
@@ -193,6 +195,10 @@ async function runWorkspaceChildJob(input: {
         : {}),
     }),
   );
+}
+
+function resolveHostedWorkspaceChildVaultRoot(): string {
+  return path.join(process.cwd(), "vault");
 }
 
 async function readStandardInput(): Promise<string> {

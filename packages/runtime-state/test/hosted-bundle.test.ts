@@ -812,6 +812,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(assistantRuntimeRoot, "usage", "pending"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "logs"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "secrets"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "auth"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "certs"), { recursive: true });
@@ -819,6 +820,8 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "keys"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "log"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "state"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "threads", "thread_1"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "tmp"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "device-sync"), { recursive: true });
@@ -912,10 +915,14 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, ".tmp"), "tmp\n");
     await writeFile(path.join(assistantRuntimeRoot, "secrets", "sessions", "session_1.json"), "{\"secret\":true}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "config.toml"), "model = \"gpt-test\"\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "rollout_index.jsonl"), "{\"rollout\":\"rollout_1\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1", "state.json"), "{\"rollout\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "{\"thread\":\"thread_1\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl"), "{\"turn\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "{\"thread\":\"thread_1\"}\n");
-    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", ".env"), "CODEX_SECRET=1\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "state", "lookup.json"), "{\"lookup\":\"kept\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "threads", "thread_1", "state.json"), "{\"thread\":\"kept\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", ".env"), "SHOULD_NOT_APPEAR=1\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", ".netrc"), "machine example.test login token\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "auth.json"), "{\"token\":\"secret\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "credentials.json"), "{\"token\":\"secret\"}\n");
@@ -942,16 +949,30 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
     await writeFile(
       path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"),
-      "{\"schema\":\"murph.hosted-user-env.v1\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
+      "{\"schema\":\"murph.hosted-user-env.v1\",\"env\":{\"OPENAI_API_KEY\":\"fixture-key\"}}\n",
     );
 
     const snapshot = await snapshotHostedExecutionContext({
       artifactSink: async (artifact) => {
         artifacts.set(artifact.ref.sha256, artifact.bytes);
       },
+      codexHomeSnapshotHashSecret: "test-diagnostic-secret",
       operatorHomeRoot,
       vaultRoot,
     });
+
+    expect(snapshot.codexHomeSnapshotDiagnostics).toEqual({
+      codexHomeIncludedRelHashes: expect.arrayContaining([
+        expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
+      ]),
+      codexHomeSnapshotCandidateCount: expect.any(Number),
+      codexHomeSnapshotExcludedClassSummary: expect.arrayContaining([
+        expect.stringMatching(/^(environment|root-history|sensitive-basename|unsafe-container):[0-9]+$/u),
+      ]),
+      codexHomeSnapshotIncludedCount: expect.any(Number),
+    });
+    assert.ok(snapshot.codexHomeSnapshotDiagnostics?.codexHomeSnapshotIncludedCount ?? 0 >= 7);
+    assert.ok(JSON.stringify(snapshot.codexHomeSnapshotDiagnostics).includes(".codex-hosted") === false);
 
     assertHostedBundleTextEntries(snapshot.bundle, [
       { expected: "{\"schema\":\"vault\"}\n", path: "vault.json", root: "vault" },
@@ -1049,6 +1070,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: "{\"schema\":\"cfg\"}\n", path: ".murph/config.json", root: "operator-home" },
       { expected: null, path: ".murph/hosted/user-env.json", root: "operator-home" },
       { expected: "model = \"gpt-test\"\n", path: ".codex-hosted/config.toml", root: "operator-home" },
+      { expected: "{\"rollout\":\"rollout_1\"}\n", path: ".codex-hosted/rollout_index.jsonl", root: "operator-home" },
+      {
+        expected: "{\"rollout\":\"kept\"}\n",
+        path: ".codex-hosted/rollouts/rollout_1/state.json",
+        root: "operator-home",
+      },
       { expected: "{\"thread\":\"thread_1\"}\n", path: ".codex-hosted/session_index.jsonl", root: "operator-home" },
       {
         expected: "{\"turn\":\"kept\"}\n",
@@ -1058,6 +1085,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       {
         expected: "{\"thread\":\"thread_1\"}\n",
         path: ".codex-hosted/sessions/thread_1/rollout.json",
+        root: "operator-home",
+      },
+      { expected: "{\"lookup\":\"kept\"}\n", path: ".codex-hosted/state/lookup.json", root: "operator-home" },
+      {
+        expected: "{\"thread\":\"kept\"}\n",
+        path: ".codex-hosted/threads/thread_1/state.json",
         root: "operator-home",
       },
       { expected: null, path: ".codex-hosted/.env", root: "operator-home" },
@@ -1267,6 +1300,17 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "model = \"gpt-test\"\n",
     );
     assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "rollout_index.jsonl"), "utf8"),
+      "{\"rollout\":\"rollout_1\"}\n",
+    );
+    assert.equal(
+      await readFile(
+        path.join(restored.operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1", "state.json"),
+        "utf8",
+      ),
+      "{\"rollout\":\"kept\"}\n",
+    );
+    assert.equal(
       await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "utf8"),
       "{\"thread\":\"thread_1\"}\n",
     );
@@ -1277,6 +1321,17 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     assert.equal(
       await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "utf8"),
       "{\"thread\":\"thread_1\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "state", "lookup.json"), "utf8"),
+      "{\"lookup\":\"kept\"}\n",
+    );
+    assert.equal(
+      await readFile(
+        path.join(restored.operatorHomeRoot, ".codex-hosted", "threads", "thread_1", "state.json"),
+        "utf8",
+      ),
+      "{\"thread\":\"kept\"}\n",
     );
     assert.equal(
       (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted"))).mode & 0o777,
@@ -1454,6 +1509,37 @@ test("hosted execution snapshots collapse into one workspace bundle and external
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted Codex home diagnostics omit relative-path hashes without a hash secret", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-"));
+
+  try {
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "state"), { recursive: true });
+    await mkdir(vaultRoot, { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "state", "lookup.json"),
+      "{\"lookup\":\"kept\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n", "utf8");
+
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    expect(snapshot.codexHomeSnapshotDiagnostics).toEqual({
+      codexHomeIncludedRelHashes: [],
+      codexHomeSnapshotCandidateCount: 1,
+      codexHomeSnapshotExcludedClassSummary: [],
+      codexHomeSnapshotIncludedCount: 1,
+    });
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
