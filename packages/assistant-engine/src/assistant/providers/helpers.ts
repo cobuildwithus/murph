@@ -364,9 +364,9 @@ function resolveAssistantProviderUsageSource(input: {
   ]
 
   for (const candidate of candidates) {
-    if (candidate.record) {
+    if (hasAssistantProviderUsageTokenFields(candidate.record)) {
       return {
-        record: candidate.record,
+        record: candidate.record!,
         sourcePath: candidate.sourcePath,
       }
     }
@@ -379,6 +379,47 @@ function resolveAssistantProviderUsageSource(input: {
         sourcePath: 'thread.tokenUsage.last',
       }
     : null
+}
+
+function hasAssistantProviderUsageTokenFields(
+  record: Record<string, unknown> | null,
+): boolean {
+  if (!record) {
+    return false
+  }
+
+  return (
+    readAssistantProviderInteger(
+      record,
+      'cacheWriteTokens',
+      'cache_write_tokens',
+      'cachedInputTokens',
+      'cached_input_tokens',
+      'inputTokens',
+      'input_tokens',
+      'prompt_tokens',
+      'promptTokens',
+      'outputTokens',
+      'output_tokens',
+      'completion_tokens',
+      'completionTokens',
+      'reasoningTokens',
+      'reasoning_tokens',
+      'reasoningOutputTokens',
+      'totalTokens',
+      'total_tokens',
+    ) !== null ||
+    readAssistantProviderNestedInteger(
+      record,
+      'input_tokens_details',
+      'cached_tokens',
+    ) !== null ||
+    readAssistantProviderNestedInteger(
+      record,
+      'output_tokens_details',
+      'reasoning_tokens',
+    ) !== null
+  )
 }
 
 function findAssistantCodexThreadTokenUsageRecord(

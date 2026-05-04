@@ -590,7 +590,7 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
   assert.equal(result.response, 'final after late input')
 })
 
-test('sendAssistantMessageLocal clears stale loop resume state without a fresh provider thread', async () => {
+test('sendAssistantMessageLocal clears final resume state without a fresh final provider thread', async () => {
   const session = createAssistantSession({
     resumeState: {
       providerSessionId: 'old-provider-thread',
@@ -610,8 +610,14 @@ test('sendAssistantMessageLocal clears stale loop resume state without a fresh p
         providerContinuation: {
           kind: 'explicit-structured-history',
         },
+        providerSessionId: 'fresh-provider-thread',
+        route: {
+          routeId: 'fresh-route',
+        },
         response: 'draft without fresh provider thread',
         session,
+        threadInstructionsFingerprint:
+          `thread-instructions-v1:${'g'.repeat(64)}:${'h'.repeat(64)}`,
       },
     }))
     .mockImplementationOnce(async () => ({
@@ -657,8 +663,8 @@ test('sendAssistantMessageLocal clears stale loop resume state without a fresh p
   assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
   assert.equal(
     mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
-      .resumeState,
-    null,
+      .resumeState?.providerSessionId,
+    'fresh-provider-thread',
   )
   assert.deepEqual(
     mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
@@ -673,6 +679,11 @@ test('sendAssistantMessageLocal clears stale loop resume state without a fresh p
         role: 'assistant',
       },
     ],
+  )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.providerResumeStateAction,
+    'clear',
   )
 })
 

@@ -3,13 +3,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const codexAppServerMocks = vi.hoisted(() => ({
   executeCodexAppServerTurn: vi.fn(),
 }))
+const diagnosticsMocks = vi.hoisted(() => ({
+  recordAssistantDiagnosticEvent: vi.fn(),
+}))
+const turnsMocks = vi.hoisted(() => ({
+  appendAssistantTurnReceiptEvent: vi.fn(),
+}))
 
 vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
   executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
 }))
+vi.mock('../src/assistant/diagnostics.ts', () => ({
+  recordAssistantDiagnosticEvent:
+    diagnosticsMocks.recordAssistantDiagnosticEvent,
+}))
+vi.mock('../src/assistant/turns.ts', () => ({
+  appendAssistantTurnReceiptEvent: turnsMocks.appendAssistantTurnReceiptEvent,
+}))
 
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { createAssistantBinding } from '../src/assistant/bindings.ts'
@@ -22,6 +36,7 @@ import {
   extractCodexAssistantProviderUsage,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
+import { recordProviderAttemptStarted } from '../src/assistant/provider-turn/attempt-observability.ts'
 import {
   executeCodexAssistantTurnAttempt,
   resolveCodexAssistantCapabilities,
@@ -29,12 +44,15 @@ import {
   resolveCodexStaticModels,
   resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/providers/registry.ts'
+import type { CodexThreadIdentity } from '../src/assistant/provider-route.ts'
 import type {
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
 
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
+  diagnosticsMocks.recordAssistantDiagnosticEvent.mockReset()
+  turnsMocks.appendAssistantTurnReceiptEvent.mockReset()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -84,6 +102,92 @@ describe('Codex assistant registry helpers', () => {
       rawUsageJson: null,
       servedModel: 'codex-mini',
       totalTokens: null,
+    })
+  })
+
+  it('records privacy-safe provider-attempt-started diagnostics', async () => {
+    const providerConfig = normalizeAssistantProviderConfig({
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+      profile: 'prod',
+      reasoningEffort: 'high',
+    })
+    const route: CodexThreadIdentity = {
+      codexCommand: '/opt/murph/bin/codex',
+      label: 'primary:Codex app-server:gpt-5.4:prod',
+      provider: 'codex-cli',
+      providerOptions: serializeAssistantProviderSessionOptions(providerConfig),
+      routeId: 'route-1',
+    }
+
+    await recordProviderAttemptStarted({
+      activeTurnMessagesPresent: true,
+      attemptCount: 2,
+      at: '2026-05-04T00:00:00.000Z',
+      conversationMessagesPresent: false,
+      hasResumeProviderSessionId: true,
+      hasStoredThreadInstructionsFingerprint: false,
+      hasThreadInstructionsFingerprint: true,
+      providerContinuationKind: 'provider-state-optimization',
+      refreshThreadInstructions: false,
+      route,
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      vault: '/vaults/test',
+    })
+
+    expect(turnsMocks.appendAssistantTurnReceiptEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'provider.attempt.started',
+        metadata: {
+          attempt: '2',
+          model: 'gpt-5.4',
+          provider: 'codex-cli',
+          routeId: 'route-1',
+        },
+      }),
+    )
+    expect(diagnosticsMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: 'provider',
+        kind: 'provider.attempt.started',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        data: {
+          activeTurnMessagesPresent: true,
+          attempt: 2,
+          conversationMessagesPresent: false,
+          hasResumeProviderSessionId: true,
+          hasStoredThreadInstructionsFingerprint: false,
+          hasThreadInstructionsFingerprint: true,
+          model: 'gpt-5.4',
+          modelProvider: 'vercel-ai-gateway',
+          provider: 'codex-cli',
+          providerContinuationKind: 'provider-state-optimization',
+          reasoningEffort: 'high',
+          refreshThreadInstructions: false,
+          routeId: 'route-1',
+        },
+      }),
+    )
+    expect(
+      diagnosticsMocks.recordAssistantDiagnosticEvent.mock.calls[0]?.[0]?.data,
+    ).toEqual({
+      activeTurnMessagesPresent: true,
+      attempt: 2,
+      conversationMessagesPresent: false,
+      hasResumeProviderSessionId: true,
+      hasStoredThreadInstructionsFingerprint: false,
+      hasThreadInstructionsFingerprint: true,
+      model: 'gpt-5.4',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
+      providerContinuationKind: 'provider-state-optimization',
+      reasoningEffort: 'high',
+      refreshThreadInstructions: false,
+      routeId: 'route-1',
     })
   })
 
@@ -297,6 +401,52 @@ describe('Codex assistant registry helpers', () => {
             turn: {
               id: 'turn-token-usage',
               model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cachedInputTokens: 55,
+        inputTokens: 89,
+        outputTokens: 21,
+        reasoningTokens: 8,
+        totalTokens: 118,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 55,
+        inputTokens: 89,
+        outputTokens: 21,
+        reasoningOutputTokens: 8,
+        totalTokens: 118,
+      },
+      expectedSourcePath: 'thread.tokenUsage.last',
+      name: 'Codex token usage notification with empty completion usage',
+      rawEvents: [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-empty-completion-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 55,
+                inputTokens: 89,
+                outputTokens: 21,
+                reasoningOutputTokens: 8,
+                totalTokens: 118,
+              },
+            },
+            turnId: 'turn-empty-completion-usage',
+          },
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-empty-completion-usage',
+              model: 'gpt-5.4',
+              usage: {},
             },
           },
           type: 'turn.completed',
