@@ -85,10 +85,10 @@ test("DeviceSyncConnectCompletePage prefers the signed-in member's assigned Mess
   assert.equal(metadata.title, "Device Connected - Murph");
   assert.match(markup, /WHOOP is connected/);
   assert.match(markup, /WHOOP is now available in your connected sources\./);
-  assert.match(markup, /href="sms:\+15550100002\?body=Just%20connected%20my%20WHOOP"/);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
-  assert.match(markup, /href="\/connect"/);
+  assert.match(markup, /href="\/settings"[^>]*>.*View devices/s);
   expect(mocks.buildHostedDeviceSyncSettingsResponse).toHaveBeenCalledWith({
     member: buildHostedAppSession().member,
   });
@@ -120,7 +120,8 @@ test("DeviceSyncConnectCompletePage falls back to Telegram when no Messages line
     }),
   }));
 
-  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=Just\+connected\+my\+WHOOP"/);
+  assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP"/);
+  assert.match(markup, /aria-label="Open Telegram in a new tab"/);
   assert.match(markup, />Open Telegram</);
   assert.doesNotMatch(markup, /href="sms:/);
 });
@@ -154,12 +155,14 @@ test("DeviceSyncConnectCompletePage uses connect source labels for Junction-back
   }));
 
   assert.match(markup, /Fitbit is connected/);
-  assert.match(markup, /href="sms:\+15550100002\?body=Just%20connected%20my%20Fitbit"/);
+  assert.match(markup, /Fitbit is now available in your connected sources\./);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20Fitbit"/);
   assert.doesNotMatch(markup, /Junction is connected/);
-  assert.doesNotMatch(markup, /Just%20connected%20my%20Junction/);
+  assert.doesNotMatch(markup, /Junction is now available/);
+  assert.doesNotMatch(markup, /I%20just%20connected%20my%20Junction/);
 });
 
-test("DeviceSyncConnectCompletePage keeps the /connect fallback when there is no messaging destination", async () => {
+test("DeviceSyncConnectCompletePage keeps the settings fallback when there is no messaging destination", async () => {
   const { default: DeviceSyncConnectCompletePage } = await import(
     "../app/device-sync/connect/complete/page"
   );
@@ -182,7 +185,8 @@ test("DeviceSyncConnectCompletePage keeps the /connect fallback when there is no
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /href="\/connect"/);
+  assert.match(markup, /WHOOP is connected and ready in Murph\. No extra step is needed\./);
+  assert.match(markup, /href="\/settings"[^>]*>.*View devices/s);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
@@ -225,7 +229,7 @@ test("DeviceSyncConnectCompletePage does not offer a messaging success CTA after
 
   assert.match(markup, /WHOOP connection did not finish/);
   assert.match(markup, /Try again from Murph when you are ready\./);
-  assert.match(markup, /href="\/connect"/);
+  assert.match(markup, /href="\/connect"[^>]*>.*Try again/s);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);

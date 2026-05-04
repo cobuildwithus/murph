@@ -120,9 +120,6 @@ export function ConnectSourcesGrid({
     try {
       const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
         method: "POST",
-        payload: {
-          returnTo: `/connect?connectSource=${encodeURIComponent(source.id)}`,
-        },
         url: `/api/connect-sources/${encodeURIComponent(source.id)}/start`,
       });
       window.location.assign(readConnectAuthorizationUrl(result));

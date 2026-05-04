@@ -5,6 +5,7 @@ import {
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
+import { buildHostedDeviceConnectCompletionReturnTo } from "@/src/lib/device-sync/connect-completion-return";
 import { startHostedDeviceSyncConnection } from "@/src/lib/device-sync/hosted-connect-start";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 
@@ -32,7 +33,11 @@ export const POST = withJsonError(async (
   const target = resolveHostedConnectSourceTarget(sourceId);
 
   return jsonOk(await startHostedDeviceSyncConnection({
-    defaultReturnTo: "/connect",
+    defaultReturnTo: buildHostedDeviceConnectCompletionReturnTo({
+      connectSourceId: target.connectSourceId,
+      connectTarget: target.connectTarget,
+      source: "connect",
+    }),
     request,
     target,
   }));

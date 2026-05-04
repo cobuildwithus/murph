@@ -58,12 +58,7 @@ test("buildHostedDeviceSyncSettingsResponse reads device sync connections server
   assert.equal(syntheticRequest.url, "https://murph.example/settings");
   expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
   expect(response.ok).toBe(true);
-  expect(response.sources).toHaveLength(1);
-  expect(response.sources[0]).toMatchObject({
-    provider: "oura",
-    providerLabel: "Oura",
-    statusLabel: "Not connected",
-  });
+  expect(response.sources).toEqual([]);
 });
 
 test("buildHostedDeviceSyncSettingsResponse explains canceled access before reading connections", async () => {

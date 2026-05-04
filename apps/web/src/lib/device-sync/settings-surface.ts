@@ -8,7 +8,7 @@ import { formatHostedDeviceSyncProviderLabel } from "./provider-label";
 export { formatHostedDeviceSyncProviderLabel };
 
 export interface HostedDeviceSyncSettingsAction {
-  kind: "connect" | "reconnect" | "disconnect";
+  kind: "disconnect";
   label: string;
 }
 
@@ -112,7 +112,6 @@ export function buildHostedDeviceSyncSettingsSources(input: {
     const connections = connectionsByProvider.get(key) ?? [];
 
     if (connections.length === 0) {
-      sources.push(buildAvailableSource(provider));
       continue;
     }
 
@@ -143,37 +142,6 @@ export function buildHostedDeviceSyncSettingsSources(input: {
   }
 
   return sources;
-}
-
-
-function buildAvailableSource(provider: PublicProviderDescriptor): HostedDeviceSyncSettingsSource {
-  return {
-    connectionId: null,
-    connectedAt: null,
-    detail: "Connect once for ongoing sync.",
-    displayName: null,
-    guidance: provider.supportsWebhooks
-      ? "Murph keeps an eye on this in the background and only asks for help when access expires."
-      : "Murph checks this quietly in the background and only asks for help when access expires.",
-    headline: "Ready when you are",
-    lastActivityAt: null,
-    lastSuccessfulSyncAt: null,
-    lastWebhookAt: null,
-    nextReconcileAt: null,
-    primaryAction: {
-      kind: "connect",
-      label: "Connect",
-    },
-    provider: provider.provider,
-    providerConfigured: true,
-    providerLabel: formatHostedDeviceSyncProviderLabel(provider.provider),
-    secondaryAction: null,
-    state: "available",
-    statusLabel: "Not connected",
-    tone: "muted",
-    updatedAt: null,
-    upstreamSources: [],
-  } satisfies HostedDeviceSyncSettingsSource;
 }
 
 function buildConnectedSource(input: {
@@ -214,18 +182,13 @@ function buildConnectedSource(input: {
         ? "This source is disconnected. Your past history stays in place."
         : "This source is disconnected.",
       displayName,
-      guidance: "Reconnect any time if you want fresh updates again.",
+      guidance: "Past history stays in place.",
       headline: "Disconnected",
       lastActivityAt,
       lastSuccessfulSyncAt,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: null,
-      primaryAction: input.provider
-        ? {
-            kind: "reconnect",
-            label: "Reconnect",
-          }
-        : null,
+      primaryAction: null,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
@@ -251,19 +214,14 @@ function buildConnectedSource(input: {
         : "Waiting for the provider to confirm the source.",
       displayName,
       guidance: setupNeedsAttention
-        ? "Reconnect when you're ready, or disconnect this source if you no longer need it."
+        ? "Disconnect this source if you no longer need it."
         : "Murph can keep listening for provider confirmation in the background.",
       headline: setupNeedsAttention ? "Setup needs attention" : "Finishing setup",
       lastActivityAt,
       lastSuccessfulSyncAt,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: connection.nextReconcileAt,
-      primaryAction: setupNeedsAttention
-        ? {
-            kind: "reconnect",
-            label: "Reconnect",
-          }
-        : null,
+      primaryAction: null,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
@@ -286,17 +244,14 @@ function buildConnectedSource(input: {
       detail: "The provider asked Murph to renew access before it can keep syncing.",
       displayName,
       guidance: lastSuccessfulSyncAt
-        ? "Your earlier history is still here. Reconnect when you're ready."
-        : "Reconnect when you're ready and Murph can finish the first full sync.",
-      headline: "Needs a quick reconnect",
+        ? "Your earlier history is still here."
+        : "Murph cannot finish the first full sync until access is renewed.",
+      headline: "Access needs attention",
       lastActivityAt,
       lastSuccessfulSyncAt,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: connection.nextReconcileAt,
-      primaryAction: {
-        kind: "reconnect",
-        label: "Reconnect",
-      },
+      primaryAction: null,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
@@ -305,7 +260,7 @@ function buildConnectedSource(input: {
         label: "Disconnect",
       },
       state: connection.status,
-      statusLabel: "Needs reconnect",
+      statusLabel: "Needs access",
       tone: "attention",
       updatedAt: connection.updatedAt,
       upstreamSources: input.upstreamSources,
@@ -318,10 +273,10 @@ function buildConnectedSource(input: {
       ? "Waiting for the first full sync."
       : "Murph has not seen a successful sync from this source yet.";
     const guidance = hasRecentError
-      ? "A reconnect could help if this has been stuck for a while."
+      ? "Disconnect this source if you no longer need it."
       : stillWithinFirstSyncWindow
         ? "This usually settles on its own after the initial connection."
-        : "Give it a little time before reconnecting unless you expect data here already.";
+        : "Give it a little time unless you expect data here already.";
 
     return {
       connectionId: connection.id,
@@ -334,12 +289,7 @@ function buildConnectedSource(input: {
       lastSuccessfulSyncAt: null,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: connection.nextReconcileAt,
-      primaryAction: hasRecentError
-        ? {
-            kind: "reconnect",
-            label: "Reconnect",
-          }
-        : null,
+      primaryAction: null,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
@@ -417,17 +367,14 @@ function buildConnectedSource(input: {
     detail: "Murph has not seen a fresh sync from this source recently.",
     displayName,
     guidance: hasRecentError
-      ? "A reconnect could help if you expect new data here."
-      : "This may resolve on its own. Reconnect only if you expect new data and it stays quiet.",
+      ? "Disconnect this source if you no longer need it."
+      : "This may resolve on its own if the provider sends new data.",
     headline: "Connected, but updates have been quiet lately",
     lastActivityAt,
     lastSuccessfulSyncAt,
     lastWebhookAt: connection.lastWebhookAt,
     nextReconcileAt: connection.nextReconcileAt,
-    primaryAction: {
-      kind: "reconnect",
-      label: "Reconnect",
-    },
+    primaryAction: null,
     provider: connection.provider,
     providerConfigured: true,
     providerLabel,
@@ -472,7 +419,7 @@ function buildUnavailableSource(
     connectedAt: connection.connectedAt,
     detail: "This source exists on your account, but it is not enabled in this environment right now.",
     displayName,
-    guidance: "If you still need it, re-enable that provider here before reconnecting.",
+    guidance: "If you still need it, this provider has to be enabled in the active environment first.",
     headline: "Unavailable here",
     lastActivityAt,
     lastSuccessfulSyncAt: connection.lastSyncCompletedAt,

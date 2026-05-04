@@ -4,6 +4,7 @@ import {
   AlertCircleIcon,
   CheckCircle2Icon,
   MessageCircleIcon,
+  RefreshCwIcon,
   SendIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -51,6 +52,7 @@ interface CompletionState {
 }
 
 interface CompletionContactAction {
+  ariaLabel?: string;
   href: string;
   kind: HostedDeviceSyncMessagingReturnTarget;
   label: string;
@@ -86,11 +88,17 @@ export default async function DeviceSyncConnectCompletePage({
   const detail = resolveCompletionDetail({
     connected,
     failed,
+    hasContactAction: Boolean(state.contactAction),
     hasSession: Boolean(state.session),
     loadError: state.loadError,
+    providerLabel,
     source: state.connectedSource,
   });
   const StatusIcon = failed ? AlertCircleIcon : CheckCircle2Icon;
+  const SecondaryActionIcon = failed ? RefreshCwIcon : SettingsIcon;
+  const secondaryAction = failed
+    ? { href: "/connect", label: "Try again" }
+    : { href: "/settings", label: "View devices" };
 
   return (
     <main className="min-h-[72vh] bg-background px-4 py-16 text-foreground sm:px-6 lg:px-8">
@@ -123,6 +131,7 @@ export default async function DeviceSyncConnectCompletePage({
                 className: "w-full sm:w-auto",
                 size: "lg",
               })}
+              aria-label={state.contactAction.ariaLabel}
               href={state.contactAction.href}
               rel={state.contactAction.rel}
               target={state.contactAction.target}
@@ -141,10 +150,10 @@ export default async function DeviceSyncConnectCompletePage({
               size: "lg",
               variant: state.contactAction ? "outline" : "default",
             })}
-            href="/connect"
+            href={secondaryAction.href}
           >
-            <SettingsIcon aria-hidden="true" className="size-4" />
-            View devices
+            <SecondaryActionIcon aria-hidden="true" className="size-4" />
+            {secondaryAction.label}
           </Link>
         </div>
       </section>
@@ -330,6 +339,7 @@ function resolvePreferredContactAction(input: {
       }),
       kind: "telegram",
       label: "Open Telegram",
+      ariaLabel: "Open Telegram in a new tab",
       rel: "noopener noreferrer",
       target: "_blank",
     };
@@ -341,8 +351,10 @@ function resolvePreferredContactAction(input: {
 function resolveCompletionDetail(input: {
   connected: boolean;
   failed: boolean;
+  hasContactAction: boolean;
   hasSession: boolean;
   loadError: string | null;
+  providerLabel: string;
   source: HostedDeviceSyncSettingsSource | null;
 }): string {
   if (input.failed) {
@@ -361,8 +373,12 @@ function resolveCompletionDetail(input: {
     return input.loadError;
   }
 
+  if (input.connected && !input.hasContactAction) {
+    return `${input.providerLabel} is connected and ready in Murph. No extra step is needed.`;
+  }
+
   if (input.connected && input.source) {
-    return `${input.source.providerLabel} is now available in your connected sources.`;
+    return `${input.providerLabel} is now available in your connected sources.`;
   }
 
   return "Your connected sources are ready in Murph.";

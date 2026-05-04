@@ -37,9 +37,9 @@ describe("device sync messaging return route", () => {
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     const html = await response.text();
     expect(html).toContain(
-      '<meta http-equiv="refresh" content="0;url=sms:+15550100001?body=Just%20connected%20my%20WHOOP">',
+      '<meta http-equiv="refresh" content="0;url=sms:+15550100001?body=I%20just%20connected%20my%20WHOOP">',
     );
-    expect(html).toContain('href="sms:+15550100001?body=Just%20connected%20my%20WHOOP"');
+    expect(html).toContain('href="sms:+15550100001?body=I%20just%20connected%20my%20WHOOP"');
     expect(html).toContain("WHOOP is connected");
     expect(html).not.toContain("<script");
   });
@@ -55,9 +55,9 @@ describe("device sync messaging return route", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain(
-      '<meta http-equiv="refresh" content="0;url=sms:+15550100999?body=Just%20connected%20my%20Oura">',
+      '<meta http-equiv="refresh" content="0;url=sms:+15550100999?body=I%20just%20connected%20my%20Oura">',
     );
-    expect(html).toContain('href="sms:+15550100999?body=Just%20connected%20my%20Oura"');
+    expect(html).toContain('href="sms:+15550100999?body=I%20just%20connected%20my%20Oura"');
   });
 
   it("ignores arbitrary Messages recipients that are not configured Murph lines", async () => {
@@ -69,7 +69,7 @@ describe("device sync messaging return route", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('href="sms:+15550100001?body=Just%20connected%20my%20Oura"');
+    expect(html).toContain('href="sms:+15550100001?body=I%20just%20connected%20my%20Oura"');
     expect(html).not.toContain("+15550999999");
   });
 
@@ -82,8 +82,8 @@ describe("device sync messaging return route", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('content="0;url=https://t.me/murph_bot?text=Just+connected+my+Oura"');
-    expect(html).toContain('href="https://t.me/murph_bot?text=Just+connected+my+Oura"');
+    expect(html).toContain('content="0;url=https://t.me/murph_bot?text=I+just+connected+my+Oura"');
+    expect(html).toContain('href="https://t.me/murph_bot?text=I+just+connected+my+Oura"');
     expect(html).toContain("Oura is connected");
   });
 
@@ -96,8 +96,8 @@ describe("device sync messaging return route", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('content="0;url=https://t.me/withmurph_bot?text=Just+connected+my+device"');
-    expect(html).toContain('href="https://t.me/withmurph_bot?text=Just+connected+my+device"');
+    expect(html).toContain('content="0;url=https://t.me/withmurph_bot?text=I+just+connected+my+device"');
+    expect(html).toContain('href="https://t.me/withmurph_bot?text=I+just+connected+my+device"');
   });
 
   it("ignores unsafe provider display values on supported targets", async () => {

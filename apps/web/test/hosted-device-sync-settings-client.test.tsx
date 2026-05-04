@@ -10,17 +10,12 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 
 const mocks = vi.hoisted(() => ({
-  describeDeviceSyncCallbackError: vi.fn((provider: string, errorCode: string | null) =>
-    `${provider}:${errorCode ?? "unknown"}`,
-  ),
-  formatHostedDeviceSyncProviderLabel: vi.fn((provider: string) => `provider:${provider}`),
   HostedDeviceSyncDisconnectDialog: vi.fn(() =>
     createElement("div", {
       "data-hosted-device-sync-disconnect-dialog": "true",
     }),
   ),
   HostedDeviceSyncSettingsContent: vi.fn((props: {
-    onConnect: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
     sources: HostedDeviceSyncSettingsSource[];
   }) =>
     createElement(
@@ -28,17 +23,7 @@ const mocks = vi.hoisted(() => ({
       {
         "data-hosted-device-sync-settings-content": "true",
       },
-      props.sources[0]
-        ? createElement(
-          "button",
-          {
-            "data-hosted-device-sync-connect-button": "true",
-            onClick: () => void props.onConnect(props.sources[0]!),
-            type: "button",
-          },
-          "Connect",
-        )
-        : null,
+      props.sources.length,
     ),
   ),
   HostedDeviceSyncSettingsStatusCard: vi.fn((props: { description: string; title: string }) =>
@@ -57,7 +42,6 @@ const mocks = vi.hoisted(() => ({
   ),
   requestHostedOnboardingJson: vi.fn(),
   sourceKey: vi.fn(() => "source-key"),
-  toErrorMessage: vi.fn((error: unknown, fallback: string) => fallback),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
@@ -76,17 +60,11 @@ vi.mock("@/src/components/settings/hosted-device-sync-settings-sections", () => 
 }));
 
 vi.mock("@/src/components/settings/hosted-device-sync-settings-utils", () => ({
-  describeDeviceSyncCallbackError: mocks.describeDeviceSyncCallbackError,
   sourceKey: mocks.sourceKey,
 }));
 
 vi.mock("@/src/components/settings/hosted-settings-session-state", () => ({
   HostedSettingsSessionState: mocks.HostedSettingsSessionState,
-}));
-
-vi.mock("@/src/components/settings/hosted-settings-utils", () => ({
-  formatHostedDeviceSyncProviderLabel: mocks.formatHostedDeviceSyncProviderLabel,
-  toErrorMessage: mocks.toErrorMessage,
 }));
 
 import { HostedDeviceSyncSettingsClient } from "@/src/components/settings/hosted-device-sync-settings-client";
@@ -106,14 +84,55 @@ afterEach(async () => {
   }
 });
 
-test("HostedDeviceSyncSettingsClient clears shared callback params from the current URL", async () => {
+test("HostedDeviceSyncSettingsClient renders settings content without a connect handler", async () => {
+  const source = createConnectedSource();
+  const { document, window } = loadLinkedom().parseHTML(
+    "<html><body><div id='root'></div></body></html>",
+  );
+  installHostedDeviceSyncClientGlobals(window, document);
+  mockWindowLocation(window, "https://app.example.test/settings");
+
+  const container = document.getElementById("root");
+  assert.ok(container);
+
+  const root: Root = createRoot(container);
+  cleanupRender = async () => {
+    await act(async () => {
+      root.unmount();
+    });
+  };
+
+  await act(async () => {
+    root.render(
+      createElement(HostedDeviceSyncSettingsClient, {
+        authenticated: true,
+        initialLoadError: null,
+        initialResponse: {
+          generatedAt: "2026-05-01T00:00:00.000Z",
+          ok: true,
+          sources: [source],
+        },
+      }),
+    );
+  });
+
+  expect(mocks.HostedDeviceSyncSettingsContent).toHaveBeenCalledWith(expect.objectContaining({
+    sources: [source],
+  }), undefined);
+  const contentProps = mocks.HostedDeviceSyncSettingsContent.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+  expect(contentProps).toBeDefined();
+  expect(contentProps && "onConnect" in contentProps).toBe(false);
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+});
+
+test("HostedDeviceSyncSettingsClient clears stale callback params without surfacing a settings callback", async () => {
   const { document, window } = loadLinkedom().parseHTML(
     "<html><body><div id='root'></div></body></html>",
   );
   installHostedDeviceSyncClientGlobals(window, document);
   mockWindowLocation(
     window,
-    "https://app.example.test/settings?keep=1&deviceSyncStatus=error&deviceSyncProvider=oura&deviceSyncConnectionId=conn_123&deviceSyncAccountId=acct_123&deviceSyncError=OLD&deviceSyncErrorMessage=legacy",
+    "https://app.example.test/settings?keep=1&deviceSyncStatus=connected&deviceSyncProvider=junction&connectSource=garmin&connectTarget=garmin&deviceSyncErrorMessage=legacy",
   );
   const replaceState = vi.fn();
   Object.defineProperty(window, "history", {
@@ -136,9 +155,13 @@ test("HostedDeviceSyncSettingsClient clears shared callback params from the curr
   await act(async () => {
     root.render(
       createElement(HostedDeviceSyncSettingsClient, {
-        authenticated: false,
+        authenticated: true,
         initialLoadError: null,
-        initialResponse: null,
+        initialResponse: {
+          generatedAt: "2026-05-01T00:00:00.000Z",
+          ok: true,
+          sources: [],
+        },
       }),
     );
   });
@@ -153,10 +176,10 @@ test("HostedDeviceSyncSettingsClient clears shared callback params from the curr
   expect(redirected.searchParams.get("keep")).toBe("1");
   expect(redirected.searchParams.get("deviceSyncStatus")).toBeNull();
   expect(redirected.searchParams.get("deviceSyncProvider")).toBeNull();
-  expect(redirected.searchParams.get("deviceSyncConnectionId")).toBeNull();
-  expect(redirected.searchParams.get("deviceSyncAccountId")).toBeNull();
-  expect(redirected.searchParams.get("deviceSyncError")).toBeNull();
+  expect(redirected.searchParams.get("connectSource")).toBeNull();
+  expect(redirected.searchParams.get("connectTarget")).toBeNull();
   expect(redirected.searchParams.get("deviceSyncErrorMessage")).toBeNull();
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 });
 
 test("HostedDeviceSyncSettingsClient renders an unavailable state instead of the empty state for blocked initial loads", async () => {
@@ -194,97 +217,6 @@ test("HostedDeviceSyncSettingsClient renders an unavailable state instead of the
     title: "Wearables unavailable",
   }), undefined);
   expect(mocks.HostedDeviceSyncSettingsContent).not.toHaveBeenCalled();
-});
-
-test("HostedDeviceSyncSettingsClient surfaces consent-required connect failures without an inline consent card", async () => {
-  const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
-  const source: HostedDeviceSyncSettingsSource = {
-    connectionId: null,
-    connectedAt: null,
-    detail: "Connect once for ongoing sync.",
-    displayName: null,
-    guidance: "Murph keeps an eye on this in the background and only asks for help when access expires.",
-    headline: "Ready when you are",
-    lastActivityAt: null,
-    lastSuccessfulSyncAt: null,
-    lastWebhookAt: null,
-    nextReconcileAt: null,
-    primaryAction: {
-      kind: "connect",
-      label: "Connect",
-    },
-    provider: "garmin",
-    providerConfigured: true,
-    providerLabel: "Garmin",
-    secondaryAction: null,
-    state: "available",
-    statusLabel: "Not connected",
-    tone: "muted",
-    updatedAt: null,
-    upstreamSources: [],
-  };
-
-  mocks.requestHostedOnboardingJson
-    .mockRejectedValueOnce(new HostedOnboardingApiError({
-      code: "HOSTED_CONSENT_REQUIRED",
-      details: {
-        missingScopes: ["launch.health-data"],
-      },
-      message: "Accept the current Murph legal consent before continuing.",
-    }));
-
-  const { document, window } = loadLinkedom().parseHTML(
-    "<html><body><div id='root'></div></body></html>",
-  );
-  installHostedDeviceSyncClientGlobals(window, document);
-  mockWindowLocation(window, "https://app.example.test/settings");
-  const assign = vi.fn();
-  Object.defineProperty(window, "location", {
-    configurable: true,
-    value: {
-      assign,
-      href: "https://app.example.test/settings",
-    },
-  });
-
-  const container = document.getElementById("root");
-  assert.ok(container);
-
-  const root: Root = createRoot(container);
-  cleanupRender = async () => {
-    await act(async () => {
-      root.unmount();
-    });
-  };
-
-  await act(async () => {
-    root.render(
-      createElement(HostedDeviceSyncSettingsClient, {
-        authenticated: true,
-        initialLoadError: null,
-        initialResponse: {
-          generatedAt: "2026-05-01T00:00:00.000Z",
-          ok: true,
-          sources: [source],
-        },
-      }),
-    );
-  });
-
-  const button = container.querySelector("[data-hosted-device-sync-connect-button='true']");
-  assert.ok(button instanceof window.HTMLButtonElement);
-
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-
-  await vi.waitFor(() => {
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Accept the current Murph legal consent before continuing.");
-  });
-
-  expect(container.querySelector("[data-hosted-legal-consent-card='true']")).toBeNull();
-  expect(assign).not.toHaveBeenCalled();
 });
 
 function loadLinkedom(): {
@@ -340,4 +272,32 @@ function mockWindowLocation(
       href,
     },
   });
+}
+
+function createConnectedSource(): HostedDeviceSyncSettingsSource {
+  return {
+    connectionId: "dspc_garmin_123",
+    connectedAt: "2026-05-01T00:00:00.000Z",
+    detail: "Murph has a fresh sync from this source.",
+    displayName: null,
+    guidance: "Nothing to do here.",
+    headline: "Connected and syncing normally",
+    lastActivityAt: "2026-05-01T00:00:00.000Z",
+    lastSuccessfulSyncAt: "2026-05-01T00:00:00.000Z",
+    lastWebhookAt: null,
+    nextReconcileAt: null,
+    primaryAction: null,
+    provider: "garmin",
+    providerConfigured: true,
+    providerLabel: "Garmin",
+    secondaryAction: {
+      kind: "disconnect",
+      label: "Disconnect",
+    },
+    state: "active",
+    statusLabel: "Connected",
+    tone: "calm",
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    upstreamSources: [],
+  };
 }

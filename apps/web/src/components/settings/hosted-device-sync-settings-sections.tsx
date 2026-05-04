@@ -23,7 +23,6 @@ export function HostedDeviceSyncSettingsContent(props: {
   isRefreshing: boolean;
   pendingActionKey: string | null;
   sources: HostedDeviceSyncSettingsSource[];
-  onConnect: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
   onDisconnectTargetChange: (source: HostedDeviceSyncSettingsSource | null) => void;
   onRefresh: () => Promise<void>;
 }) {
@@ -34,7 +33,7 @@ export function HostedDeviceSyncSettingsContent(props: {
           <div className="flex flex-col gap-1">
             <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Wearables</h2>
             <p className="text-sm leading-relaxed text-stone-500">
-              Connect, refresh, or disconnect wearable sources.
+              Review, refresh, or disconnect wearable sources.
             </p>
           </div>
           <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing} variant="outline">
@@ -46,8 +45,8 @@ export function HostedDeviceSyncSettingsContent(props: {
       {props.sources.length === 0 ? (
         <ConnectedAccountCard
           label="Wearables"
-          value="No sources available"
-          meta="Wearable integrations will appear here once they're enabled for your account."
+          value="No connected wearables"
+          meta="Connected wearable sources will appear here after setup."
           variant="empty"
         />
       ) : (
@@ -58,7 +57,6 @@ export function HostedDeviceSyncSettingsContent(props: {
               disconnectPending={props.disconnectTarget ? props.pendingActionKey === sourceKey(props.disconnectTarget, "disconnect") : false}
               pendingActionKey={props.pendingActionKey}
               source={source}
-              onConnect={props.onConnect}
               onDisconnectTargetChange={props.onDisconnectTargetChange}
             />
           ))}
@@ -95,10 +93,8 @@ function HostedDeviceSyncSourceCard(props: {
   disconnectPending: boolean;
   pendingActionKey: string | null;
   source: HostedDeviceSyncSettingsSource;
-  onConnect: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
   onDisconnectTargetChange: (source: HostedDeviceSyncSettingsSource | null) => void;
 }) {
-  const connectBusy = props.pendingActionKey === sourceKey(props.source, "connect");
   const disconnectBusy = props.pendingActionKey === sourceKey(props.source, "disconnect");
   const displayName = props.source.displayName
     ? `${props.source.providerLabel} - ${props.source.displayName}`
@@ -114,21 +110,11 @@ function HostedDeviceSyncSourceCard(props: {
           <Badge className={badgeClasses(props.source.tone)} variant="outline">
             {props.source.statusLabel}
           </Badge>
-          {props.source.primaryAction ? (
-            <Button
-              type="button"
-              onClick={() => void props.onConnect(props.source)}
-              disabled={connectBusy || disconnectBusy}
-              size="sm"
-            >
-              {connectBusy ? `${props.source.primaryAction.label}...` : props.source.primaryAction.label}
-            </Button>
-          ) : null}
           {props.source.secondaryAction?.kind === "disconnect" && props.source.connectionId ? (
             <Button
               type="button"
               onClick={() => props.onDisconnectTargetChange(props.source)}
-              disabled={connectBusy || disconnectBusy}
+              disabled={disconnectBusy}
               size="sm"
               variant="outline"
             >
@@ -205,7 +191,7 @@ export function HostedDeviceSyncDisconnectDialog(props: {
         <DialogHeader>
           <DialogTitle>Disconnect {props.disconnectTarget?.providerLabel ?? "source"}?</DialogTitle>
           <DialogDescription>
-            Murph will stop syncing new data. Your history is kept, and you can reconnect any time.
+            Murph will stop syncing new data. Your history is kept.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap justify-end gap-3">

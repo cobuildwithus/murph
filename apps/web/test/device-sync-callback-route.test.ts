@@ -82,6 +82,35 @@ describe("hosted device-sync callback route", () => {
     expect(location).not.toContain("dsc_junction");
   });
 
+  it("adds callback params to the device connect completion return target", async () => {
+    mocks.handleConnectionCallback.mockResolvedValue({
+      account: {
+        id: "dsc_junction",
+        provider: "junction",
+      },
+      returnTo:
+        "https://app.example.test/device-sync/connect/complete?source=connect&connectSource=garmin&connectTarget=garmin",
+    });
+
+    const response = await connectCallbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz&result=success"),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location");
+    expect(location).toBeTruthy();
+    const destination = new URL(location!);
+    expect(destination.origin).toBe("https://app.example.test");
+    expect(destination.pathname).toBe("/device-sync/connect/complete");
+    expect(destination.searchParams.get("source")).toBe("connect");
+    expect(destination.searchParams.get("connectSource")).toBe("garmin");
+    expect(destination.searchParams.get("connectTarget")).toBe("garmin");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
+    expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
+    expect(destination.searchParams.get("deviceSyncConnectionId")).toBeNull();
+  });
+
   it("preserves source intent on generic connect callback error redirects", async () => {
     mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
       code: "OAUTH_CALLBACK_REJECTED",

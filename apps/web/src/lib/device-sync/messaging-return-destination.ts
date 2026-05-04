@@ -44,7 +44,7 @@ export function resolveHostedDeviceSyncCallbackStatus(
 export function buildHostedDeviceSyncMessagingReturnMessageBody(
   providerLabel: string | null,
 ): string {
-  return providerLabel ? `Just connected my ${providerLabel}` : "Just connected my device";
+  return providerLabel ? `I just connected my ${providerLabel}` : "I just connected my device";
 }
 
 export function resolveHostedDeviceSyncMessagingReturnDestination(input: {

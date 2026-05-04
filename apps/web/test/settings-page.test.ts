@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
     React.createElement("div", null, `Hosted billing settings ${String(props.authenticated)}`)),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
+  HostedDeviceSyncSettings: vi.fn((props: { authenticated: boolean }) =>
+    React.createElement("div", null, `Hosted device sync settings ${String(props.authenticated)}`)),
   prisma: {},
   readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
@@ -73,6 +75,10 @@ vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
 
 vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
   HostedDataPrivacySettings: mocks.HostedDataPrivacySettings,
+}));
+
+vi.mock("@/src/components/settings/hosted-device-sync-settings", () => ({
+  HostedDeviceSyncSettings: mocks.HostedDeviceSyncSettings,
 }));
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -150,13 +156,12 @@ test("SettingsPage reads the app session and persisted account settings into the
 
   assert.match(markup, /Hosted billing settings/);
   assert.match(markup, /Hosted account settings \+15550100001/);
+  assert.match(markup, /Hosted device sync settings true/);
   assert.match(markup, /Hosted data privacy settings/);
   assert.match(markup, /Your account/);
-  assert.match(markup, /Subscription, connected accounts, data sources, and data privacy\./);
-  assert.match(markup, /Data sources/);
-  assert.match(markup, /href="\/connect"[^>]*>Connect devices/);
-  assert.equal(markup.includes("Wearables"), false);
-  assert.equal(markup.includes("Hosted device sync settings"), false);
+  assert.match(markup, /Subscription, connected accounts, and data privacy\./);
+  assert.doesNotMatch(markup, /Data sources/);
+  assert.doesNotMatch(markup, /href="\/connect"[^>]*>Connect devices/);
   for (const removedCopy of [
     ["vault", "sync"].join(" "),
     ["Sync", "local", "vault"].join(" "),
@@ -181,5 +186,13 @@ test("SettingsPage reads the app session and persisted account settings into the
   }), undefined);
   expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
+  }), undefined);
+  expect(mocks.HostedDeviceSyncSettings).toHaveBeenCalledWith(expect.objectContaining({
+    authenticated: true,
+    member: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
   }), undefined);
 });

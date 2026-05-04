@@ -56,38 +56,22 @@ function buildConnection(overrides: Partial<HostedBrowserDeviceSyncConnection> =
 }
 
 describe("buildHostedDeviceSyncSettingsSources", () => {
-  it("creates an available placeholder when a provider is configured but not connected", () => {
-    const [source] = buildHostedDeviceSyncSettingsSources({
+  it("omits configured providers that do not have a connection yet", () => {
+    const sources = buildHostedDeviceSyncSettingsSources({
       connections: [],
       providers: [OURA_PROVIDER],
     });
 
-    expect(source).toMatchObject({
-      connectionId: null,
-      headline: "Ready when you are",
-      primaryAction: { kind: "connect", label: "Connect" },
-      provider: "oura",
-      providerLabel: "Oura",
-      state: "available",
-      statusLabel: "Not connected",
-      tone: "muted",
-    });
+    expect(sources).toEqual([]);
   });
 
-  it("uses the shared Strava provider label when rendering available sources", () => {
-    const [source] = buildHostedDeviceSyncSettingsSources({
+  it("does not expose configured-only provider labels on the settings surface", () => {
+    const sources = buildHostedDeviceSyncSettingsSources({
       connections: [],
       providers: [STRAVA_PROVIDER],
     });
 
-    expect(source).toMatchObject({
-      connectionId: null,
-      provider: "strava",
-      providerLabel: "Strava",
-      state: "available",
-      statusLabel: "Not connected",
-      tone: "muted",
-    });
+    expect(sources).toEqual([]);
   });
 
   it("marks fresh active connections as calm and connected", () => {
@@ -184,7 +168,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     expect(sources[0]?.displayName).not.toBe(sources[1]?.displayName);
   });
 
-  it("recommends reconnect when the provider requires reauthorization", () => {
+  it("marks provider reauthorization as attention-worthy without a settings connect action", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({
         lastSyncCompletedAt: "2026-04-02T07:00:00.000Z",
@@ -196,11 +180,11 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
 
     expect(source).toMatchObject({
-      headline: "Needs a quick reconnect",
-      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      headline: "Access needs attention",
+      primaryAction: null,
       secondaryAction: { kind: "disconnect", label: "Disconnect" },
       state: "reauthorization_required",
-      statusLabel: "Needs reconnect",
+      statusLabel: "Needs access",
       tone: "attention",
     });
   });
@@ -227,7 +211,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
-  it("recommends reconnect when external-link setup fails or expires", () => {
+  it("marks failed or expired external-link setup without a settings connect action", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({
         connectedAt: "2026-04-03T08:00:00.000Z",
@@ -241,7 +225,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
 
     expect(source).toMatchObject({
       headline: "Setup needs attention",
-      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      primaryAction: null,
       secondaryAction: { kind: "disconnect", label: "Disconnect" },
       state: "active",
       statusLabel: "Setup incomplete",
@@ -263,7 +247,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
 
     expect(source).toMatchObject({
       headline: "Setup needs attention",
-      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      primaryAction: null,
       statusLabel: "Setup incomplete",
       tone: "attention",
     });
@@ -283,7 +267,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     expect(source).toMatchObject({
       detail: "Murph has not seen a fresh sync from this source recently.",
       headline: "Connected, but updates have been quiet lately",
-      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      primaryAction: null,
       state: "active",
       statusLabel: "Needs attention",
       tone: "attention",

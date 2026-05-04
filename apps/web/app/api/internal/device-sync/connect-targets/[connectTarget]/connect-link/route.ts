@@ -7,14 +7,12 @@ import {
 } from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { buildHostedDeviceConnectCompletionReturnTo } from "@/src/lib/device-sync/connect-completion-return";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-
-const HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO =
-  "/device-sync/connect/complete?source=assistant";
 
 type HostedAssistantDeviceConnectMessagingReturnTarget =
   "imessage" | "telegram";
@@ -145,7 +143,11 @@ async function startHostedDeviceConnection(
     return await controlPlane.startConnection(
       userId,
       provider,
-      buildHostedDeviceConnectCompletionReturnTo({ connectSourceId, connectTarget }),
+      buildHostedDeviceConnectCompletionReturnTo({
+        connectSourceId,
+        connectTarget,
+        source: "assistant",
+      }),
       { connectSourceId, connectTarget, sourceProviderSlug },
     );
   } catch (error) {
@@ -211,16 +213,6 @@ function readHostedDeviceConnectMessagingReturnTarget(
     message: "Hosted device connect-link messaging return target is invalid.",
     retryable: false,
   });
-}
-
-function buildHostedDeviceConnectCompletionReturnTo(input: {
-  connectSourceId: string;
-  connectTarget: string;
-}): string {
-  const url = new URL(HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO, "https://murph.internal");
-  url.searchParams.set("connectSource", input.connectSourceId);
-  url.searchParams.set("connectTarget", input.connectTarget);
-  return `${url.pathname}${url.search}`;
 }
 
 function remapHostedDeviceConnectBackendSetupError(
