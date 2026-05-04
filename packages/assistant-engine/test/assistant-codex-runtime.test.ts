@@ -1167,6 +1167,7 @@ describe('assistant codex runtime', () => {
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual({
         ...expectedThreadContext,
+        excludeTurns: true,
         threadId: 'thread-resume-request',
       })
 

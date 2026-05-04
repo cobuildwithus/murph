@@ -457,7 +457,19 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
   last: Record<string, unknown> | null
   total: Record<string, unknown> | null
 }> {
-  return input.rawEvents.flatMap((rawEvent) => {
+  const turnStartedEventIndex = findAssistantCodexTurnStartedEventIndex(input)
+  const currentTurnOutputEventIndex =
+    findAssistantCodexCurrentTurnOutputEventIndex({
+      rawEvents: input.rawEvents,
+      turnId: input.turnId,
+      turnStartedEventIndex,
+    })
+
+  const events = input.rawEvents.flatMap((rawEvent, index) => {
+    if (turnStartedEventIndex !== null && index < turnStartedEventIndex) {
+      return []
+    }
+
     const record = readAssistantProviderRecord(rawEvent)
     const eventType = readAssistantProviderString(
       record?.method,
@@ -477,11 +489,119 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
     const tokenUsage = readAssistantProviderRecord(params?.tokenUsage)
     return [
       {
+        index,
         last: readAssistantProviderRecord(tokenUsage?.last),
         total: readAssistantProviderRecord(tokenUsage?.total),
       },
     ]
   })
+
+  if (currentTurnOutputEventIndex === null) {
+    return events.map(({ last, total }) => ({
+      last,
+      total,
+    }))
+  }
+
+  const postOutputEvents = events.filter(
+    (event) => event.index >= currentTurnOutputEventIndex,
+  )
+  const selectedEvents = postOutputEvents.length > 0 ? postOutputEvents : events
+
+  return selectedEvents.map(({ last, total }) => ({
+    last,
+    total,
+  }))
+}
+
+function findAssistantCodexTurnStartedEventIndex(input: {
+  rawEvents: readonly unknown[]
+  turnId: string | null
+}): number | null {
+  let fallbackIndex: number | null = null
+
+  for (let index = 0; index < input.rawEvents.length; index += 1) {
+    const record = readAssistantProviderRecord(input.rawEvents[index])
+    const eventType = readAssistantProviderString(
+      record?.method,
+      record?.type,
+      record?.event,
+    )
+
+    if (eventType !== 'turn/started' && eventType !== 'turn.started') {
+      continue
+    }
+
+    fallbackIndex ??= index
+    if (!isAssistantCodexTurnEventForTurn(record, input.turnId)) {
+      continue
+    }
+
+    return index
+  }
+
+  return fallbackIndex
+}
+
+function findAssistantCodexCurrentTurnOutputEventIndex(input: {
+  rawEvents: readonly unknown[]
+  turnId: string | null
+  turnStartedEventIndex: number | null
+}): number | null {
+  const startIndex = input.turnStartedEventIndex ?? 0
+
+  for (let index = startIndex; index < input.rawEvents.length; index += 1) {
+    const record = readAssistantProviderRecord(input.rawEvents[index])
+    if (!isAssistantCodexTurnEventForTurn(record, input.turnId)) {
+      continue
+    }
+
+    if (isAssistantCodexCurrentTurnOutputEvent(record)) {
+      return index
+    }
+  }
+
+  return null
+}
+
+function isAssistantCodexCurrentTurnOutputEvent(
+  record: Record<string, unknown> | null,
+): boolean {
+  const eventType = readAssistantProviderString(
+    record?.method,
+    record?.type,
+    record?.event,
+  )
+
+  if (
+    eventType === 'item/agentMessage/delta'
+    || eventType === 'item/plan/delta'
+    || eventType === 'item/reasoning/summaryPartAdded'
+    || eventType === 'item/reasoning/summaryTextDelta'
+    || eventType === 'item/reasoning/textDelta'
+    || eventType === 'rawResponseItem/completed'
+  ) {
+    return true
+  }
+
+  if (eventType !== 'item/started' && eventType !== 'item/completed') {
+    return false
+  }
+
+  const params = readAssistantProviderRecord(record?.params)
+  const item = readAssistantProviderRecord(params?.item)
+  const itemType = readAssistantProviderString(item?.type)
+
+  return (
+    itemType === 'agentMessage'
+    || itemType === 'plan'
+    || itemType === 'reasoning'
+    || itemType === 'commandExecution'
+    || itemType === 'fileChange'
+    || itemType === 'mcpToolCall'
+    || itemType === 'dynamicToolCall'
+    || itemType === 'webSearch'
+  )
 }
 
 function isAssistantCodexTokenUsageEventForTurn(
@@ -493,6 +613,28 @@ function isAssistantCodexTokenUsageEventForTurn(
   }
 
   return readAssistantProviderString(params?.turnId, params?.turn_id) === turnId
+}
+
+function isAssistantCodexTurnEventForTurn(
+  record: Record<string, unknown> | null,
+  turnId: string | null,
+): boolean {
+  if (!turnId) {
+    return true
+  }
+
+  const params = readAssistantProviderRecord(record?.params)
+  const turn =
+    readAssistantProviderRecord(params?.turn) ??
+    readAssistantProviderRecord(record?.turn)
+
+  return readAssistantProviderString(
+    params?.turnId,
+    params?.turn_id,
+    turn?.id,
+    record?.turnId,
+    record?.turn_id,
+  ) === turnId
 }
 
 function resolveAssistantCodexThreadTokenUsageTotalDelta(

@@ -682,6 +682,155 @@ describe('Codex assistant registry helpers', () => {
     },
     {
       expected: {
+        cachedInputTokens: 0,
+        inputTokens: 38474,
+        outputTokens: 27,
+        reasoningTokens: 0,
+        totalTokens: 38501,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 0,
+        inputTokens: 38474,
+        outputTokens: 27,
+        reasoningOutputTokens: 0,
+        totalTokens: 38501,
+      },
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
+      name: 'resumed Codex token usage ignores replayed pre-output cumulative notification',
+      rawEvents: [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resume-prestart-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 0,
+                inputTokens: 37815,
+                outputTokens: 202,
+                reasoningOutputTokens: 46,
+                totalTokens: 38017,
+              },
+              total: {
+                cachedInputTokens: 0,
+                inputTokens: 37815,
+                outputTokens: 202,
+                reasoningOutputTokens: 46,
+                totalTokens: 38017,
+              },
+            },
+            turnId: 'turn-resume-prestart-token-usage',
+          },
+        },
+        {
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-resume-prestart-token-usage',
+            },
+          },
+        },
+        {
+          method: 'item/started',
+          params: {
+            item: {
+              content: [
+                {
+                  text: 'Reply briefly.',
+                  type: 'text',
+                },
+              ],
+              id: 'item-resume-prestart-user',
+              type: 'userMessage',
+            },
+            threadId: 'thread-resume-prestart-token-usage',
+            turnId: 'turn-resume-prestart-token-usage',
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              content: [
+                {
+                  text: 'Reply briefly.',
+                  type: 'text',
+                },
+              ],
+              id: 'item-resume-prestart-user',
+              type: 'userMessage',
+            },
+            threadId: 'thread-resume-prestart-token-usage',
+            turnId: 'turn-resume-prestart-token-usage',
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resume-prestart-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 0,
+                inputTokens: 37815,
+                outputTokens: 202,
+                reasoningOutputTokens: 46,
+                totalTokens: 38017,
+              },
+              total: {
+                cachedInputTokens: 0,
+                inputTokens: 37815,
+                outputTokens: 202,
+                reasoningOutputTokens: 46,
+                totalTokens: 38017,
+              },
+            },
+            turnId: 'turn-resume-prestart-token-usage',
+          },
+        },
+        {
+          method: 'item/agentMessage/delta',
+          params: {
+            delta: 'OK',
+            itemId: 'item-resume-prestart-agent',
+            threadId: 'thread-resume-prestart-token-usage',
+            turnId: 'turn-resume-prestart-token-usage',
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resume-prestart-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 0,
+                inputTokens: 38474,
+                outputTokens: 27,
+                reasoningOutputTokens: 0,
+                totalTokens: 38501,
+              },
+              total: {
+                cachedInputTokens: 0,
+                inputTokens: 76289,
+                outputTokens: 229,
+                reasoningOutputTokens: 46,
+                totalTokens: 76518,
+              },
+            },
+            turnId: 'turn-resume-prestart-token-usage',
+          },
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-resume-prestart-token-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
         cachedInputTokens: 55,
         inputTokens: 89,
         outputTokens: 21,

@@ -59,7 +59,7 @@ export function buildCodexThreadResumeParams(input: {
       includeServiceName: false,
       input: input.input,
     }),
-    excludeTurns: input.input.excludeResumeTurns === true ? true : undefined,
+    excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,
     threadId: input.providerSessionId,
   })
 }

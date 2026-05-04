@@ -42,6 +42,7 @@ interface CodexUsageSnapshot {
   cachedInputTokens: number
   inputTokens: number
   outputTokens: number
+  reasoningOutputTokens: number
   totalTokens: number
 }
 
@@ -61,6 +62,31 @@ interface CacheProbeSummary {
   summedLastCachedInputTokens: number
   summedLastInputTokens: number
   usageCount: number
+}
+
+interface ResumeCacheProbeSummary {
+  first: {
+    finalContainsOk: boolean
+    finalLastUsage: CodexUsageSnapshot | null
+    providerActionCount: number
+    usageCount: number
+  }
+  second: {
+    allUsageEvents: CodexTokenUsageEvent[]
+    currentPostStartLastUsage: CodexUsageSnapshot
+    eventSequence: Array<{
+      index: number
+      type: string | null
+      usage?: {
+        last: CodexUsageSnapshot
+        total: CodexUsageSnapshot
+      }
+    }>
+    finalContainsOk: boolean
+    providerActionCount: number
+    turnIdPresent: boolean
+    usageCount: number
+  }
 }
 
 describeRealCodex('real Codex app-server cache usage e2e', () => {
@@ -120,6 +146,56 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             `attempt summaries: ${JSON.stringify(summaries)}`,
           ].join(' '),
         )
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'records resumed low-reasoning usage from the current post-start provider request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const probe = await runResumeCacheProbeAttempt({
+          config,
+        })
+        const currentUsage = probe.summary.second.currentPostStartLastUsage
+        const summaryJson = JSON.stringify(probe.summary)
+        const extractedUsage = extractCodexAssistantProviderUsage({
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli',
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+          }),
+          rawEvents: probe.rawEvents,
+        })
+
+        expect(probe.summary.first.finalContainsOk).toBe(true)
+        expect(probe.summary.second.finalContainsOk).toBe(true)
+        expect(currentUsage.inputTokens).toBeGreaterThan(1024)
+        expect(extractedUsage.inputTokens, summaryJson).toBe(
+          currentUsage.inputTokens,
+        )
+        expect(extractedUsage.cachedInputTokens, summaryJson).toBe(
+          currentUsage.cachedInputTokens,
+        )
+        expect(extractedUsage.outputTokens, summaryJson).toBe(
+          currentUsage.outputTokens,
+        )
+        expect(extractedUsage.reasoningTokens, summaryJson).toBe(
+          currentUsage.reasoningOutputTokens,
+        )
+
+        if (process.env.MURPH_REAL_CODEX_EXPECT_RESUME_CACHE_MISS === '1') {
+          expect(
+            currentUsage.cachedInputTokens,
+            `expected local resumed cache miss, summary=${JSON.stringify(probe.summary)}`,
+          ).toBe(0)
+        }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
@@ -250,6 +326,88 @@ async function runCacheProbeAttempt(input: {
   }
 }
 
+async function runResumeCacheProbeAttempt(input: {
+  config: RealCodexE2eConfig
+}): Promise<{
+  rawEvents: unknown[]
+  summary: ResumeCacheProbeSummary
+}> {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-codex-resume-cache-e2e-'),
+  )
+
+  try {
+    const commonInput = {
+      approvalPolicy: 'never',
+      codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions: buildResumeCacheProbeInstructions(),
+      env: input.config.env,
+      excludeResumeTurns: true,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+    const first = await executeRealCodexAppServerTurn({
+      ...commonInput,
+      prompt: 'Reply exactly RESUME_CACHE_PROBE_ONE_OK.',
+      refreshThreadInstructions: true,
+    })
+    const second = await executeRealCodexAppServerTurn({
+      ...commonInput,
+      prompt: 'Reply exactly RESUME_CACHE_PROBE_TWO_OK.',
+      refreshThreadInstructions: false,
+      resumeSessionId: first.sessionId,
+    })
+    const firstUsageEvents = readCodexTokenUsageEvents(first.jsonEvents)
+    const secondUsageEvents = readCodexTokenUsageEvents(second.jsonEvents)
+    const currentPostStartUsage =
+      readFinalCodexPostStartTokenUsageEvent({
+        events: second.jsonEvents,
+        turnId: second.turnId,
+      })?.last
+
+    if (!currentPostStartUsage) {
+      throw new Error(
+        `Real Codex resume cache probe produced no post-start token usage event: ${JSON.stringify({
+          secondTurnIdPresent: second.turnId !== null,
+          secondUsageCount: secondUsageEvents.length,
+        })}`,
+      )
+    }
+
+    return {
+      rawEvents: second.jsonEvents,
+      summary: {
+        first: {
+          finalContainsOk: first.finalMessage.includes(
+            'RESUME_CACHE_PROBE_ONE_OK',
+          ),
+          finalLastUsage: firstUsageEvents.at(-1)?.last ?? null,
+          providerActionCount: first.providerActionCount,
+          usageCount: firstUsageEvents.length,
+        },
+        second: {
+          allUsageEvents: secondUsageEvents,
+          currentPostStartLastUsage: currentPostStartUsage,
+          eventSequence: summarizeCodexEventSequence(second.jsonEvents),
+          finalContainsOk: second.finalMessage.includes(
+            'RESUME_CACHE_PROBE_TWO_OK',
+          ),
+          providerActionCount: second.providerActionCount,
+          turnIdPresent: second.turnId !== null,
+          usageCount: secondUsageEvents.length,
+        },
+      },
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([workingDirectory])
+  }
+}
+
 async function executeRealCodexAppServerTurn(
   input: Parameters<typeof executeCodexAppServerTurn>[0],
 ): ReturnType<typeof executeCodexAppServerTurn> {
@@ -323,6 +481,14 @@ function buildCacheProbePrompt(attempt: number): string {
   ].join('\n\n')
 }
 
+function buildResumeCacheProbeInstructions(): string {
+  return Array.from(
+    { length: 3600 },
+    (_, index) =>
+      `resume-cache-static-instruction-${String(index).padStart(4, '0')} preserve-this-prefix-for-cache-diagnosis`,
+  ).join('\n')
+}
+
 function hasTotalUsageRegressionShape(summary: CacheProbeSummary): boolean {
   return summary.finalContainsOk
     && summary.providerActionCount >= 2
@@ -340,12 +506,15 @@ function sumCodexLastUsageSnapshots(
         total.cachedInputTokens + event.last.cachedInputTokens,
       inputTokens: total.inputTokens + event.last.inputTokens,
       outputTokens: total.outputTokens + event.last.outputTokens,
+      reasoningOutputTokens:
+        total.reasoningOutputTokens + event.last.reasoningOutputTokens,
       totalTokens: total.totalTokens + event.last.totalTokens,
     }),
     {
       cachedInputTokens: 0,
       inputTokens: 0,
       outputTokens: 0,
+      reasoningOutputTokens: 0,
       totalTokens: 0,
     },
   )
@@ -399,8 +568,78 @@ function readCodexUsageSnapshot(record: Record<string, unknown>): CodexUsageSnap
       record.completionTokens,
       record.completion_tokens,
     ),
+    reasoningOutputTokens: readIntegerTokenCount(
+      record.reasoningOutputTokens,
+      record.reasoningTokens,
+      record.reasoning_tokens,
+      readRecord(record.output_tokens_details)?.reasoning_tokens,
+    ),
     totalTokens: readIntegerTokenCount(record.totalTokens, record.total_tokens),
   }
+}
+
+function readFinalCodexPostStartTokenUsageEvent(input: {
+  events: readonly unknown[]
+  turnId: string | null
+}): CodexTokenUsageEvent | null {
+  const turnStartedIndex = input.events.findIndex((event) => {
+    const record = readRecord(event)
+    const eventType = readString(record?.method, record?.type, record?.event)
+    if (eventType !== 'turn/started' && eventType !== 'turn.started') {
+      return false
+    }
+
+    if (!input.turnId) {
+      return true
+    }
+
+    const params = readRecord(record?.params)
+    const turn = readRecord(params?.turn) ?? readRecord(record?.turn)
+    return readString(
+      params?.turnId,
+      params?.turn_id,
+      turn?.id,
+      record?.turnId,
+      record?.turn_id,
+    ) === input.turnId
+  })
+  const eligibleEvents =
+    turnStartedIndex >= 0
+      ? input.events.slice(turnStartedIndex)
+      : input.events
+
+  return readCodexTokenUsageEvents(eligibleEvents).at(-1) ?? null
+}
+
+function summarizeCodexEventSequence(
+  events: readonly unknown[],
+): ResumeCacheProbeSummary['second']['eventSequence'] {
+  return events.flatMap((event, index) => {
+    const record = readRecord(event)
+    const eventType = readString(record?.method, record?.type, record?.event)
+    if (!eventType) {
+      return []
+    }
+
+    const tokenUsage = readRecord(readRecord(record?.params)?.tokenUsage)
+    const last = readRecord(tokenUsage?.last)
+    const total = readRecord(tokenUsage?.total)
+
+    return [
+      {
+        index,
+        type: eventType,
+        ...(last && total
+          ? {
+              usage: {
+                last: readCodexUsageSnapshot(last),
+                total: readCodexUsageSnapshot(total),
+              },
+            }
+          : {}),
+      },
+    ]
+  })
 }
 
 async function resolveRealCodexE2eConfig(): Promise<RealCodexE2eConfig> {
