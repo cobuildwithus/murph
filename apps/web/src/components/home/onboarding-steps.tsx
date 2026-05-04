@@ -25,7 +25,7 @@ const steps: {
     title: "Connect devices",
     description:
       "Add Apple Health or a wearable to sync sleep, activity, recovery, and more.",
-    cta: "Connect devices",
+    cta: "Connect",
     href: "/connect",
     icon: WatchHeartIcon,
   },
@@ -35,7 +35,7 @@ const steps: {
     title: "Sync labs",
     description:
       "Share blood work or lab results to track biomarkers over time.",
-    cta: "Sync labs",
+    cta: "Sync",
     href: "/settings",
     icon: LabReportIcon,
   },
