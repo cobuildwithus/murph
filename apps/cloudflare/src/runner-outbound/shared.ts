@@ -63,9 +63,6 @@ const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
 ]);
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_MAX_ENTRIES = 1_024;
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS = 30_000;
-const RUNNER_OUTBOUND_BIND_USER_CACHE_SUCCESS_TTL_MS = 60_000;
-const RUNNER_OUTBOUND_BIND_USER_CACHE_PENDING_TTL_MS = 30_000;
-const RUNNER_OUTBOUND_BIND_USER_CACHE_MAX_ENTRIES = 2_048;
 
 interface RunnerOutboundCryptoContextPendingLoad {
   expiresAtMs: number;
@@ -73,19 +70,9 @@ interface RunnerOutboundCryptoContextPendingLoad {
   token: object;
 }
 
-interface RunnerOutboundBindUserCacheEntry {
-  expiresAtMs: number;
-  promise: Promise<RunnerOutboundUserRunnerStubLike>;
-  token: object;
-}
-
 const runnerOutboundCryptoContextPendingLoads = new Map<
   string,
   RunnerOutboundCryptoContextPendingLoad
->();
-let runnerOutboundBindUserCaches = new WeakMap<
-  RunnerOutboundEnvironmentSource["USER_RUNNER"],
-  Map<string, RunnerOutboundBindUserCacheEntry>
 >();
 
 export async function resolveRunnerOutboundUserCryptoContext(input: {
@@ -139,51 +126,16 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 
 export function resetRunnerOutboundSharedCachesForTest(): void {
   runnerOutboundCryptoContextPendingLoads.clear();
-  runnerOutboundBindUserCaches = new WeakMap();
 }
 
 export async function resolveRunnerOutboundUserRunnerStub(
   env: RunnerOutboundEnvironmentSource,
   userId: string,
 ): Promise<RunnerOutboundUserRunnerStubLike> {
-  const cache = getRunnerOutboundBindUserCache(env.USER_RUNNER);
-  const nowMs = Date.now();
-  const existing = cache.get(userId);
-  if (existing && existing.expiresAtMs > nowMs) {
-    return await existing.promise;
-  }
-  if (existing) {
-    cache.delete(userId);
-  }
-
-  const cacheToken = {};
-  const promise = (async (): Promise<RunnerOutboundUserRunnerStubLike> => {
-    const stub = env.USER_RUNNER.getByName(userId);
-    requireRunnerOutboundUserStubMethod(stub, "bindUser");
-    await stub.bindUser(userId);
-    const cached = cache.get(userId);
-    if (cached?.token === cacheToken) {
-      cached.expiresAtMs = Date.now() + RUNNER_OUTBOUND_BIND_USER_CACHE_SUCCESS_TTL_MS;
-    }
-    return stub;
-  })();
-
-  cache.set(userId, {
-    expiresAtMs: nowMs + RUNNER_OUTBOUND_BIND_USER_CACHE_PENDING_TTL_MS,
-    promise,
-    token: cacheToken,
-  });
-  trimRunnerOutboundBindUserCache(cache);
-
-  try {
-    return await promise;
-  } catch (error) {
-    const cached = cache.get(userId);
-    if (cached?.token === cacheToken) {
-      cache.delete(userId);
-    }
-    throw error;
-  }
+  const stub = env.USER_RUNNER.getByName(userId);
+  requireRunnerOutboundUserStubMethod(stub, "bindUser");
+  await stub.bindUser(userId);
+  return stub;
 }
 
 export function requireRunnerOutboundUserStubMethod<TKey extends keyof RunnerOutboundUserRunnerStubLike>(
@@ -244,42 +196,6 @@ function trimRunnerOutboundCryptoContextPendingLoads(): void {
       return;
     }
     runnerOutboundCryptoContextPendingLoads.delete(oldestKey);
-  }
-}
-
-function getRunnerOutboundBindUserCache(
-  namespace: RunnerOutboundEnvironmentSource["USER_RUNNER"],
-): Map<string, RunnerOutboundBindUserCacheEntry> {
-  let cache = runnerOutboundBindUserCaches.get(namespace);
-
-  if (!cache) {
-    cache = new Map();
-    runnerOutboundBindUserCaches.set(namespace, cache);
-  }
-
-  return cache;
-}
-
-function trimRunnerOutboundBindUserCache(
-  cache: Map<string, RunnerOutboundBindUserCacheEntry>,
-): void {
-  if (cache.size <= RUNNER_OUTBOUND_BIND_USER_CACHE_MAX_ENTRIES) {
-    return;
-  }
-
-  const nowMs = Date.now();
-  for (const [key, value] of cache) {
-    if (value.expiresAtMs <= nowMs) {
-      cache.delete(key);
-    }
-  }
-
-  while (cache.size > RUNNER_OUTBOUND_BIND_USER_CACHE_MAX_ENTRIES) {
-    const oldestKey = cache.keys().next().value;
-    if (typeof oldestKey !== "string") {
-      return;
-    }
-    cache.delete(oldestKey);
   }
 }
 
