@@ -195,8 +195,10 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it('records provider-plan diagnostics for production resume verification', async () => {
+    vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', 'diagnostic-secret')
     const providerConfig = normalizeAssistantProviderConfig({
       provider: 'codex-cli',
+      codexHome: '/operator-home/.codex-hosted',
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
       oss: false,
@@ -211,6 +213,7 @@ describe('Codex assistant registry helpers', () => {
     }
 
     await recordProviderPlan({
+      activeTurnHistoryMessageCount: 3,
       activeTurnHistoryPresent: true,
       at: '2026-05-04T00:10:24.000Z',
       providerContinuation: 'provider-state-optimization',
@@ -223,6 +226,8 @@ describe('Codex assistant registry helpers', () => {
       threadInstructionsFingerprintPresent: true,
       turnId: 'turn-plan',
       vault: '/vaults/test',
+      vaultRoot: '/vaults/test',
+      workingDirectory: '/proc/self/cwd',
     })
 
     expect(diagnosticsMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledWith(
@@ -234,6 +239,8 @@ describe('Codex assistant registry helpers', () => {
         turnId: 'turn-plan',
         data: {
           activeTurnHistoryPresent: true,
+          activeTurnHistoryMessageCount: 3,
+          codexHomeHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
           providerContinuation: 'provider-state-optimization',
           providerRequestOrdinal: 1,
           refreshThreadInstructions: false,
@@ -242,9 +249,17 @@ describe('Codex assistant registry helpers', () => {
           sessionId: 'session-plan',
           storedThreadInstructionsFingerprintPresent: true,
           threadInstructionsFingerprintPresent: true,
+          vaultRootHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
+          workingDirectoryHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
+          workingDirectoryKind: 'hosted-stable-proc-cwd',
         },
       }),
     )
+    const dataJson = JSON.stringify(
+      diagnosticsMocks.recordAssistantDiagnosticEvent.mock.calls[0]?.[0]?.data,
+    )
+    expect(dataJson).not.toContain('/vaults/test')
+    expect(dataJson).not.toContain('/operator-home')
   })
 
   it.each([

@@ -1,15 +1,23 @@
-import { resolveAssistantCliAccessContext } from '../assistant-cli-access.js'
+import path from 'node:path'
+import {
+  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
+  resolveAssistantCliAccessContext,
+} from '../assistant-cli-access.js'
 import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
 import {
   resolveAssistantFirstContactStateDocIds,
 } from './first-contact.js'
+import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { isAssistantOnboardingOpen } from './onboarding-state.js'
+import { normalizeNullableString } from './shared.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
   ResolvedAssistantSession,
 } from './service-contracts.js'
+
+export const HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY = '/proc/self/cwd'
 
 export async function resolveAssistantTurnSharedPlan(
   input: AssistantMessageInput,
@@ -17,7 +25,7 @@ export async function resolveAssistantTurnSharedPlan(
 ): Promise<AssistantTurnSharedPlan> {
   const includeOnboardingGuidance = input.includeEarlySessionOnboarding === true
   const cliAccess = resolveAssistantCliAccessContext()
-  const requestedWorkingDirectory = input.workingDirectory ?? input.vault
+  const requestedWorkingDirectory = resolveAssistantRequestedWorkingDirectory(input)
   const conversationPolicy = resolveAssistantConversationPolicy({
     message: {
       conversation: input.conversation,
@@ -56,6 +64,35 @@ export async function resolveAssistantTurnSharedPlan(
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,
   }
+}
+
+export function resolveAssistantRequestedWorkingDirectory(
+  input: AssistantMessageInput,
+  options: {
+    currentWorkingDirectory?: string
+    env?: NodeJS.ProcessEnv
+    platform?: NodeJS.Platform
+  } = {},
+): string {
+  const explicitWorkingDirectory = normalizeNullableString(input.workingDirectory)
+  if (explicitWorkingDirectory) {
+    return explicitWorkingDirectory
+  }
+
+  const executionContext = normalizeAssistantExecutionContext(input.executionContext)
+  const env = options.env ?? process.env
+  const platform = options.platform ?? process.platform
+  const currentWorkingDirectory = options.currentWorkingDirectory ?? process.cwd()
+  if (
+    executionContext.hosted &&
+    env[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1' &&
+    platform === 'linux' &&
+    path.resolve(input.vault) === path.resolve(currentWorkingDirectory)
+  ) {
+    return HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
+  }
+
+  return input.vault
 }
 
 export async function resolveAssistantOnboardingGuidanceOpenForVault(input: {

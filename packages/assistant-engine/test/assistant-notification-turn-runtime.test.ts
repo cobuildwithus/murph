@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import path from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
@@ -518,7 +521,7 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     })),
     executeProviderTurnWithRecovery: vi.fn(async (input) => {
       assert.equal(input.input.turnTrigger, 'automation-cron')
-      assert.equal(input.input.workingDirectory, '/vaults/skip')
+      assert.equal(input.input.workingDirectory, undefined)
       return {
         kind: 'succeeded',
         providerTurn: providerResult,
@@ -613,6 +616,115 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
   expect(mocks.persistPendingAssistantUsageEvent).toHaveBeenCalledTimes(1)
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal lets hosted shared planning stabilize provider cwd', async () => {
+  const previousCwd = process.cwd()
+  const vault = await mkdtemp(path.join(tmpdir(), 'assistant-notification-hosted-cwd-'))
+  process.chdir(vault)
+  vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+
+  try {
+    const providerSession = createAssistantSession()
+    const providerResult = createProviderResult({
+      response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
+      session: providerSession,
+    })
+    const mocks = {
+      executeProviderTurnWithRecovery: vi.fn(async (input) => {
+        assert.equal(input.input.workingDirectory, undefined)
+        assert.equal(input.plan.requestedWorkingDirectory, '/proc/self/cwd')
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      }),
+      persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+      resolveAssistantOperatorDefaults: vi.fn(async () => ({
+        timezone: 'Australia/Sydney',
+      })),
+      resolveAssistantSessionForMessage: vi.fn(async () => ({
+        created: false,
+        session: providerSession,
+      })),
+      resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
+      withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+    }
+
+    vi.doMock('@murphai/operator-config/operator-config', () => ({
+      resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+    }))
+    vi.doMock('@murphai/operator-config/assistant-backend', async () => ({
+      ...(await vi.importActual<typeof import('@murphai/operator-config/assistant-backend')>(
+        '@murphai/operator-config/assistant-backend',
+      )),
+      createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+    }))
+    vi.doMock('../src/assistant/session-resolution.js', () => ({
+      resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    }))
+    vi.doMock('../src/assistant/turn-plan.js', async () => {
+      const actual = await vi.importActual<typeof import('../src/assistant/turn-plan.ts')>(
+        '../src/assistant/turn-plan.js',
+      )
+      return {
+        ...actual,
+        resolveAssistantTurnSharedPlan: vi.fn(async (messageInput) => ({
+          ...createSharedPlan(),
+          requestedWorkingDirectory: actual.resolveAssistantRequestedWorkingDirectory(
+            messageInput,
+            {
+              currentWorkingDirectory: vault,
+              env: {
+                MURPH_HOSTED_RUNTIME_PROCESS: '1',
+              },
+              platform: 'linux',
+            },
+          ),
+        })),
+      }
+    })
+    vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
+      executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+    }))
+    vi.doMock('../src/assistant/service-usage.js', () => ({
+      persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+    }))
+    vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+      resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+    }))
+    vi.doMock('../src/assistant/turns.js', () => ({
+      createAssistantTurnId: () => 'turn-notification-hosted-cwd',
+    }))
+    vi.doMock('../src/assistant/turn-lock.js', () => ({
+      withAssistantTurnLock: mocks.withAssistantTurnLock,
+    }))
+
+    const { sendAssistantNotificationLocal } = await import(
+      '../src/assistant/notification-turn.ts'
+    )
+
+    const result = await sendAssistantNotificationLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member_hosted_cwd',
+          userEnvKeys: [],
+        },
+      },
+      instructions: 'Decide if the operator should be interrupted.',
+      vault,
+    })
+
+    expect(result.response).toBeNull()
+    expect(result.decision.kind).toBe('skip')
+    expect(mocks.executeProviderTurnWithRecovery).toHaveBeenCalledTimes(1)
+  } finally {
+    process.chdir(previousCwd)
+    await rm(vault, {
+      force: true,
+      recursive: true,
+    })
+  }
 })
 
 test('sendAssistantNotificationLocal surfaces failed delivery results', async () => {

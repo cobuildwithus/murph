@@ -3,6 +3,11 @@ import type {
 } from '../provider-route.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import {
+  fingerprintHostedAssistantContextValue,
+  resolveHostedAssistantContextFingerprintSecret,
+} from '../hosted-context-diagnostics.js'
+import { HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY } from '../turn-plan.js'
+import {
   appendAssistantTurnReceiptEvent,
 } from '../turns.js'
 
@@ -65,6 +70,7 @@ export async function recordProviderAttemptStarted(input: {
 }
 
 export async function recordProviderPlan(input: {
+  activeTurnHistoryMessageCount: number
   activeTurnHistoryPresent: boolean
   at: string
   providerContinuation: string
@@ -77,7 +83,14 @@ export async function recordProviderPlan(input: {
   threadInstructionsFingerprintPresent: boolean
   turnId: string
   vault: string
+  vaultRoot: string
+  workingDirectory: string
 }): Promise<void> {
+  const pathDiagnostics = buildProviderPlanPathDiagnostics({
+    codexHome: input.route.providerOptions.codexHome ?? null,
+    vaultRoot: input.vaultRoot,
+    workingDirectory: input.workingDirectory,
+  })
   await recordAssistantDiagnosticEvent({
     vault: input.vault,
     component: 'provider',
@@ -93,13 +106,50 @@ export async function recordProviderPlan(input: {
       resumeProviderSessionIdPresent: input.resumeProviderSessionIdPresent,
       refreshThreadInstructions: input.refreshThreadInstructions,
       activeTurnHistoryPresent: input.activeTurnHistoryPresent,
+      activeTurnHistoryMessageCount: input.activeTurnHistoryMessageCount,
       threadInstructionsFingerprintPresent:
         input.threadInstructionsFingerprintPresent,
       storedThreadInstructionsFingerprintPresent:
         input.storedThreadInstructionsFingerprintPresent,
+      ...pathDiagnostics,
     },
     at: input.at,
   })
+}
+
+function buildProviderPlanPathDiagnostics(input: {
+  codexHome: string | null
+  vaultRoot: string
+  workingDirectory: string
+}): {
+  codexHomeHash: string | null
+  vaultRootHash: string | null
+  workingDirectoryHash: string | null
+  workingDirectoryKind: 'hosted-stable-proc-cwd' | 'raw'
+} {
+  const secret = resolveHostedAssistantContextFingerprintSecret()
+  return {
+    codexHomeHash:
+      secret
+        ? fingerprintHostedAssistantContextValue(secret, 'codex_home', input.codexHome)
+        : null,
+    vaultRootHash:
+      secret
+        ? fingerprintHostedAssistantContextValue(secret, 'vault_root', input.vaultRoot)
+        : null,
+    workingDirectoryHash:
+      secret
+        ? fingerprintHostedAssistantContextValue(
+            secret,
+            'working_directory',
+            input.workingDirectory,
+          )
+        : null,
+    workingDirectoryKind:
+      input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
+        ? 'hosted-stable-proc-cwd'
+        : 'raw',
+  }
 }
 
 export async function recordProviderAttemptSucceeded(input: {
