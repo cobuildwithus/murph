@@ -20,7 +20,6 @@ import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { clearHostedRuntimeCryptoContextEnvelopeCacheForTests } from "../src/hosted-crypto/runtime-user-crypto-context.ts";
 import {
   handleRunnerOutboundRequest,
-  resetRunnerOutboundCachesForTest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import {
@@ -176,7 +175,6 @@ describe("handleRunnerOutboundRequest", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
-    resetRunnerOutboundCachesForTest();
     resetRunnerOutboundSharedCachesForTest();
   });
 
