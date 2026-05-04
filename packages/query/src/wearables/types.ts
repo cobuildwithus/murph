@@ -328,6 +328,7 @@ export interface WearableProvenanceDiagnostic {
 
 export interface WearableMetricScorecard {
   agreementScore: number;
+  metricPolicyScore: number;
   providerScore: number;
   recencyScore: number;
   resourceScore: number;

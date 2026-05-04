@@ -9,6 +9,10 @@ import {
   sourceFamilyScore,
 } from "./provider-policy.ts";
 import { normalizeWearableOriginSourceSlug } from "./origin.ts";
+import {
+  buildMetricPolicySelectionReason,
+  scoreMetricPolicy,
+} from "./metric-policies.ts";
 import { compareIsoDesc, normalizeLowercaseString } from "./shared.ts";
 import type {
   WearableMetricCandidate,
@@ -75,6 +79,15 @@ export function resolveMetric(
         runnerUpScorecard,
       ),
     );
+
+    const metricPolicyReason = buildMetricPolicySelectionReason(
+      metric,
+      selectionCandidate,
+      sortedCandidates,
+    );
+    if (metricPolicyReason) {
+      reasons.push(metricPolicyReason);
+    }
   }
 
   if (agreeingProviders.length > 1) {
@@ -254,14 +267,16 @@ function rankMetricCandidates(
     const familyScore = sourceFamilyScore(candidate.sourceFamily);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.occurredAt ?? "") ?? 0;
     const agreementScore = scoreMetricAgreement(metric, candidate, candidates);
+    const metricPolicyScore = scoreMetricPolicy(metric, candidate, candidates);
 
     scorecards.set(candidate.candidateId, {
       agreementScore,
+      metricPolicyScore,
       providerScore,
       recencyScore,
       resourceScore,
       sourceFamilyScore: familyScore,
-      total: providerScore + resourceScore + familyScore + recencyScore + agreementScore,
+      total: providerScore + resourceScore + familyScore + recencyScore + agreementScore + metricPolicyScore,
     });
   }
 
@@ -276,6 +291,12 @@ function rankMetricCandidates(
     const resourceDifference = (rightScore?.resourceScore ?? 0) - (leftScore?.resourceScore ?? 0);
     if (resourceDifference !== 0) {
       return resourceDifference;
+    }
+
+    const metricPolicyDifference =
+      (rightScore?.metricPolicyScore ?? 0) - (leftScore?.metricPolicyScore ?? 0);
+    if (metricPolicyDifference !== 0) {
+      return metricPolicyDifference;
     }
 
     const recencyDifference = (rightScore?.recencyScore ?? 0) - (leftScore?.recencyScore ?? 0);
@@ -465,6 +486,10 @@ function scoreSleepWindowAgreement(
   );
 }
 
+function formatSignedScore(score: number): string {
+  return score >= 0 ? `+${score}` : `${score}`;
+}
+
 function buildMetricSelectionReason(
   metric: WearableMetricKey,
   candidate: WearableMetricCandidate,
@@ -478,6 +503,9 @@ function buildMetricSelectionReason(
     `source family +${scorecard.sourceFamilyScore}`,
     `recency +${scorecard.recencyScore}`,
     `agreement +${scorecard.agreementScore}`,
+    ...(scorecard.metricPolicyScore === 0
+      ? []
+      : [`metric policy ${formatSignedScore(scorecard.metricPolicyScore)}`]),
   ];
 
   if (!runnerUp || !runnerUpScorecard) {
