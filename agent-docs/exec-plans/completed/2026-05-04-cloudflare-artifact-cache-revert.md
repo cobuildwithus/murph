@@ -22,4 +22,7 @@ Success criteria:
 
 ## Verification
 
-- Pending: focused Cloudflare verification after patch.
+- Passed: `pnpm --dir apps/cloudflare verify` after the cache removal and coverage assertions.
+Status: completed
+Updated: 2026-05-04
+Completed: 2026-05-04
