@@ -99,6 +99,21 @@ beforeEach(() => {
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 });
 
+test("UploadLabsMurphContactAction opens auth before login", async () => {
+  const { UploadLabsMurphContactAction } = await import(
+    "@/src/components/home/upload-labs-action"
+  );
+  const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
+
+  assert.match(markup, /data-slot="auth-button"/);
+  assert.match(markup, /aria-label="Sync labs with Murph"/);
+  assert.match(markup, />Sync<svg/u);
+  assert.doesNotMatch(markup, /disabled=""/);
+  assert.doesNotMatch(markup, /href=/);
+  assert.equal(mocks.readHostedAccountSettingsSnapshot.mock.calls.length, 0);
+  assert.equal(mocks.readHostedMemberRoutingState.mock.calls.length, 0);
+});
+
 test("UploadLabsMurphContactAction opens assigned SMS with the lab-report message", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
