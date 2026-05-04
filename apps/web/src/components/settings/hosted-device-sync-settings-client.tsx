@@ -10,7 +10,6 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import {
-  formatHostedDeviceSyncProviderLabel,
   type HostedDeviceSyncSettingsResponse,
   type HostedDeviceSyncSettingsSource,
 } from "@/src/lib/device-sync/settings-surface";
@@ -21,19 +20,20 @@ import {
   HostedDeviceSyncSettingsStatusCard,
 } from "./hosted-device-sync-settings-sections";
 import {
-  describeDeviceSyncCallbackError,
   sourceKey,
 } from "./hosted-device-sync-settings-utils";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import type { HostedDeviceSyncSettingsInitialLoadError } from "./hosted-device-sync-settings";
 
-interface HostedDeviceSyncConnectResponse {
-  authorizationUrl: string;
-}
-
 interface HostedDeviceSyncDisconnectResponse {
   warning?: { code: string; message: string };
 }
+
+const SETTINGS_DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS = [
+  ...DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS,
+  "connectSource",
+  "connectTarget",
+] as const;
 
 export function HostedDeviceSyncSettingsClient(props: {
   authenticated: boolean;
@@ -59,6 +59,26 @@ export function HostedDeviceSyncSettingsClient(props: {
     ? pendingActionKey === sourceKey(disconnectTarget, "disconnect")
     : false;
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const hasCallbackParam = SETTINGS_DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS.some((key) =>
+      url.searchParams.has(key)
+    );
+
+    if (!hasCallbackParam) {
+      return;
+    }
+
+    for (const key of SETTINGS_DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS) {
+      url.searchParams.delete(key);
+    }
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+
   const loadSources = useCallback(async () => {
     setIsRefreshing(true);
 
@@ -76,68 +96,6 @@ export function HostedDeviceSyncSettingsClient(props: {
       setIsRefreshing(false);
     }
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const url = new URL(window.location.href);
-    const status = url.searchParams.get("deviceSyncStatus");
-
-    if (!status) {
-      return;
-    }
-
-    const provider = formatHostedDeviceSyncProviderLabel(url.searchParams.get("deviceSyncProvider") ?? "source");
-    const errorCode = url.searchParams.get("deviceSyncError");
-
-    if (status === "connected") {
-      setSuccessMessage(`Connected ${provider}.`);
-      setWarningMessage(null);
-      setErrorState(null);
-      void loadSources();
-    } else if (status === "error") {
-      setErrorState({
-        code: null,
-        message: describeDeviceSyncCallbackError(provider, errorCode),
-        phase: "action",
-      });
-      setSuccessMessage(null);
-    }
-
-    for (const key of DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS) {
-      url.searchParams.delete(key);
-    }
-    window.history.replaceState({}, "", url.toString());
-  }, [loadSources]);
-
-  async function handleConnect(source: HostedDeviceSyncSettingsSource) {
-    setPendingActionKey(sourceKey(source, "connect"));
-    setErrorState(null);
-    setSuccessMessage(null);
-    setWarningMessage(null);
-
-    try {
-      const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
-        method: "POST",
-        payload: {
-          returnTo: "/settings",
-        },
-        url: `/api/settings/device-sync/providers/${encodeURIComponent(source.provider)}/connect`,
-      });
-      window.location.assign(result.authorizationUrl);
-    } catch (error) {
-      setErrorState(
-        createHostedDeviceSyncErrorState(
-          error,
-          `We could not start the ${source.providerLabel} connection right now.`,
-          "action",
-        ),
-      );
-      setPendingActionKey(null);
-    }
-  }
 
   async function handleDisconnectConfirmed() {
     const source = disconnectTarget;
@@ -232,7 +190,6 @@ export function HostedDeviceSyncSettingsClient(props: {
           isRefreshing={isRefreshing}
           pendingActionKey={pendingActionKey}
           sources={sources}
-          onConnect={handleConnect}
           onDisconnectTargetChange={setDisconnectTarget}
           onRefresh={loadSources}
         />

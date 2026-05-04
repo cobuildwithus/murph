@@ -538,12 +538,10 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/dexcom/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
-    body: JSON.stringify({ returnTo: "/connect?connectSource=dexcom" }),
+    body: undefined,
     cache: "no-store",
     credentials: "same-origin",
-    headers: {
-      "content-type": "application/json",
-    },
+    headers: {},
     method: "POST",
     keepalive: false,
   });
@@ -692,12 +690,10 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/garmin/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
-    body: JSON.stringify({ returnTo: "/connect?connectSource=garmin" }),
+    body: undefined,
     cache: "no-store",
     credentials: "same-origin",
-    headers: {
-      "content-type": "application/json",
-    },
+    headers: {},
     method: "POST",
     keepalive: false,
   });

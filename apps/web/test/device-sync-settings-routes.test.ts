@@ -42,14 +42,12 @@ vi.mock("@/src/lib/prisma", () => ({
 
 type SettingsDeviceSyncRouteModule = typeof import("../app/api/settings/device-sync/route");
 type SettingsDeviceSyncSidebarStatusRouteModule = typeof import("../app/api/settings/device-sync/sidebar-status/route");
-type SettingsDeviceSyncConnectRouteModule = typeof import("../app/api/settings/device-sync/providers/[provider]/connect/route");
 type SettingsDeviceSyncDisconnectRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
 type SettingsDeviceSyncStatusRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
 type ConnectSourceStartRouteModule = typeof import("../app/api/connect-sources/[sourceId]/start/route");
 
 let settingsDeviceSyncRoute: SettingsDeviceSyncRouteModule;
 let settingsDeviceSyncSidebarStatusRoute: SettingsDeviceSyncSidebarStatusRouteModule;
-let settingsDeviceSyncConnectRoute: SettingsDeviceSyncConnectRouteModule;
 let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
 let connectSourceStartRoute: ConnectSourceStartRouteModule;
@@ -58,7 +56,6 @@ describe("device sync settings routes", () => {
   beforeAll(async () => {
     settingsDeviceSyncRoute = await import("../app/api/settings/device-sync/route");
     settingsDeviceSyncSidebarStatusRoute = await import("../app/api/settings/device-sync/sidebar-status/route");
-    settingsDeviceSyncConnectRoute = await import("../app/api/settings/device-sync/providers/[provider]/connect/route");
     settingsDeviceSyncDisconnectRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
     settingsDeviceSyncStatusRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
     connectSourceStartRoute = await import("../app/api/connect-sources/[sourceId]/start/route");
@@ -203,82 +200,7 @@ describe("device sync settings routes", () => {
     });
   });
 
-  it("starts a hosted settings connect flow for the requested provider", async () => {
-    const response = await settingsDeviceSyncConnectRoute.POST(
-      createJsonPostRequest(
-        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
-        {
-          returnTo: "/settings?tab=wearables",
-        },
-        {
-          headers: {
-            origin: "https://join.example.test",
-          },
-        },
-      ),
-      createRouteContext({ provider: "oura" }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: mocks.prismaClient,
-    });
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_123",
-      "oura",
-      "/settings?tab=wearables",
-      {
-        connectSourceId: "oura",
-        connectTarget: "oura",
-        sourceProviderSlug: null,
-      },
-    );
-    await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://provider.example.test/oauth/start",
-    });
-  });
-
-  it("starts Garmin settings connect through Junction when Garmin is a Junction target", async () => {
-    vi.stubEnv("OURA_CLIENT_ID", "");
-    vi.stubEnv("OURA_CLIENT_SECRET", "");
-    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
-    vi.stubEnv("JUNCTION_ENV", "sandbox");
-    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit,garmin");
-    vi.stubEnv("JUNCTION_REGION", "us");
-
-    const response = await settingsDeviceSyncConnectRoute.POST(
-      createJsonPostRequest(
-        "https://join.example.test/api/settings/device-sync/providers/garmin/connect",
-        {
-          returnTo: "/connect",
-        },
-        {
-          headers: {
-            origin: "https://join.example.test",
-          },
-        },
-      ),
-      createRouteContext({ provider: "garmin" }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_123",
-      "junction",
-      "/connect",
-      {
-        connectSourceId: "garmin",
-        connectTarget: "garmin",
-        sourceProviderSlug: "garmin",
-      },
-    );
-  });
-
-  it("starts a hosted connect source flow by source id without returning OAuth state", async () => {
+  it("starts a hosted connect source flow by source id with the server-owned completion return", async () => {
     mocks.startConnection.mockResolvedValueOnce({
       authorizationUrl: "https://provider.example.test/oauth/source-start",
       state: "state_browser_leak",
@@ -303,7 +225,7 @@ describe("device sync settings routes", () => {
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
       "oura",
-      "/connect?connectSource=oura",
+      "/device-sync/connect/complete?source=connect&connectSource=oura&connectTarget=oura",
       {
         connectSourceId: "oura",
         connectTarget: "oura",
@@ -339,7 +261,7 @@ describe("device sync settings routes", () => {
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
       "junction",
-      "/connect",
+      "/device-sync/connect/complete?source=connect&connectSource=garmin&connectTarget=garmin",
       {
         connectSourceId: "garmin",
         connectTarget: "garmin",
@@ -348,14 +270,17 @@ describe("device sync settings routes", () => {
     );
   });
 
-  it("rejects oversized hosted connect source start payloads before starting OAuth", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("requires hosted auth before starting a connect source flow", async () => {
+    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+      message: "Verify your phone to continue.",
+    }));
+
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
         "https://join.example.test/api/connect-sources/oura/start",
-        {
-          returnTo: `/connect?padding=${"x".repeat(5_000)}`,
-        },
+        {},
         {
           headers: {
             origin: "https://join.example.test",
@@ -365,60 +290,80 @@ describe("device sync settings routes", () => {
       createRouteContext({ sourceId: "oura" }),
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(401);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "INVALID_REQUEST",
-        message: "Invalid request.",
+        code: "AUTH_REQUIRED",
+        message: "Verify your phone to continue.",
+        retryable: false,
       },
     });
-    expect(mocks.startConnection).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
   });
 
-  it("rejects Garmin settings connect when Junction does not expose Garmin", async () => {
-    const response = await settingsDeviceSyncConnectRoute.POST(
+  it("requires launch consent before starting a connect source flow", async () => {
+    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Accept the current Murph legal consent before continuing.",
+    }));
+
+    const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
-        "https://join.example.test/api/settings/device-sync/providers/garmin/connect",
-        {
-          returnTo: "/connect",
-        },
+        "https://join.example.test/api/connect-sources/oura/start",
+        {},
         {
           headers: {
             origin: "https://join.example.test",
           },
         },
       ),
-      createRouteContext({ provider: "garmin" }),
+      createRouteContext({ sourceId: "oura" }),
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
-        message: "Hosted device connect target is not configured.",
+        code: "HOSTED_CONSENT_REQUIRED",
+        message: "Accept the current Murph legal consent before continuing.",
         retryable: false,
       },
     });
-    expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
-  it("rejects GET requests on the hosted settings connect route", async () => {
-    const response = await settingsDeviceSyncConnectRoute.GET();
-
-    expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("POST");
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "METHOD_NOT_ALLOWED",
-        message:
-          "Hosted settings device-sync connect routes only allow POST because starting a connection mutates server state.",
-      },
+  it("rejects connect source requests from an untrusted origin", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
+        httpStatus: 403,
+        message: "Hosted browser mutation origin is not allowed.",
+      });
     });
-    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/oura/start",
+        {},
+        {
+          headers: {
+            origin: "https://evil.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "oura" }),
+    );
+
+    expect(response.status).toBe(403);
     expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
+        message: "Hosted browser mutation origin is not allowed.",
+        retryable: false,
+      },
+    });
   });
 
   it("returns one settings source for an opaque connection id status lookup", async () => {
@@ -459,108 +404,6 @@ describe("device sync settings routes", () => {
       warning: {
         code: "REMOTE_REVOKE_FAILED",
         message: "Provider revocation timed out.",
-      },
-    });
-  });
-
-  it("requires hosted auth before starting a connect flow", async () => {
-    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      httpStatus: 401,
-      message: "Verify your phone to continue.",
-    }));
-
-    const response = await settingsDeviceSyncConnectRoute.POST(
-      createJsonPostRequest(
-        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
-        {
-          returnTo: "/settings",
-        },
-        {
-          headers: {
-            origin: "https://join.example.test",
-          },
-        },
-      ),
-      createRouteContext({ provider: "oura" }),
-    );
-
-    expect(response.status).toBe(401);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "AUTH_REQUIRED",
-        message: "Verify your phone to continue.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("requires launch consent before starting a connect flow", async () => {
-    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
-      code: "HOSTED_CONSENT_REQUIRED",
-      httpStatus: 403,
-      message: "Accept the current Murph legal consent before continuing.",
-    }));
-
-    const response = await settingsDeviceSyncConnectRoute.POST(
-      createJsonPostRequest(
-        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
-        {
-          returnTo: "/settings",
-        },
-        {
-          headers: {
-            origin: "https://join.example.test",
-          },
-        },
-      ),
-      createRouteContext({ provider: "oura" }),
-    );
-
-    expect(response.status).toBe(403);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_CONSENT_REQUIRED",
-        message: "Accept the current Murph legal consent before continuing.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("rejects connect requests from an untrusted origin", async () => {
-    mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {
-      throw hostedOnboardingError({
-        code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
-        httpStatus: 403,
-        message: "Hosted browser mutation origin is not allowed.",
-      });
-    });
-
-    const response = await settingsDeviceSyncConnectRoute.POST(
-      createJsonPostRequest(
-        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
-        {
-          returnTo: "/settings",
-        },
-        {
-          headers: {
-            origin: "https://evil.example.test",
-          },
-        },
-      ),
-      createRouteContext({ provider: "oura" }),
-    );
-
-    expect(response.status).toBe(403);
-    expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
-    expect(mocks.startConnection).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
-        message: "Hosted browser mutation origin is not allowed.",
-        retryable: false,
       },
     });
   });
