@@ -18,6 +18,11 @@ import {
   fetchHostedWorkerRuntimeRoot,
   unwrapHostedWorkerRuntimeRoots,
 } from "../src/hosted-crypto/runtime-crypto-context.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests,
+  requireHostedUserCryptoContextFromEnvironment,
+} from "../src/hosted-crypto/runtime-user-crypto-context.ts";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -25,6 +30,7 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "../src/internal-hosts.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 test("Cloudflare hosted runtime crypto context verifies signatures and unwraps ingress/runtime roots", async () => {
   const cloudflareRecipient = await generateP256EcdhKeyPair();
@@ -396,6 +402,600 @@ test("Cloudflare hosted runtime crypto context fetches just the ingress root whe
 
   assert.deepEqual(unwrapped.rootKey, ingressRoot);
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test("Cloudflare runtime user crypto context caches verified envelope JSON without reusing plaintext roots", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  vi.useFakeTimers();
+
+  try {
+    vi.setSystemTime(new Date("2026-05-01T00:00:00.000Z"));
+
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 150 + index);
+    const runtime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const [url, init] = args;
+      assert.equal(String(url), `https://web.example.test${HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH}`);
+      assert.equal(init?.method, "POST");
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("x-hosted-execution-user-id"), "user-1");
+      assert.equal(headers.has("x-hosted-execution-signature"), true);
+      return new Response(JSON.stringify({
+        cacheMaxAgeMs: 5 * 60 * 1000,
+        cryptoContextVersion: "hccv_test_runtime_context",
+        envelopes: { runtime },
+        fetchedAt: new Date().toISOString(),
+        ignored: "not cached",
+        schema: "murph.hosted-runtime-crypto-context.v1",
+        userId: "user-1",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+
+    const first = await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache",
+      userId: "user-1",
+    });
+
+    assert.equal(first.cacheMaxAgeMs, 60_000);
+    assert.deepEqual(first.rootKey, runtimeRoot);
+    first.rootKey.fill(0);
+
+    vi.setSystemTime(new Date("2026-05-01T00:00:30.000Z"));
+    const second = await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache",
+      userId: "user-1",
+    });
+
+    assert.deepEqual(second.rootKey, runtimeRoot);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-05-01T00:01:01.000Z"));
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache",
+      userId: "user-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
+});
+
+test("Cloudflare runtime user crypto context does not cache failed web-control responses", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+
+  try {
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 100 + index);
+    const runtime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    let attempt = 0;
+    const fetchMock = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return new Response(JSON.stringify({ error: "hosted_member_not_active" }), {
+          status: 403,
+        });
+      }
+      return new Response(JSON.stringify({
+        cacheMaxAgeMs: 5 * 60 * 1000,
+        cryptoContextVersion: "hccv_test_runtime_context_after_failure",
+        envelopes: { runtime },
+        fetchedAt: new Date().toISOString(),
+        schema: "murph.hosted-runtime-crypto-context.v1",
+        userId: "user-1",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+
+    await expect(requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-failed-cache",
+      userId: "user-1",
+    })).rejects.toMatchObject({ status: 403 });
+
+    const context = await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-failed-cache",
+      userId: "user-1",
+    });
+
+    assert.deepEqual(context.rootKey, runtimeRoot);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
+});
+
+test("Cloudflare runtime user crypto context refetches when cached envelope verification fails", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  vi.useFakeTimers();
+
+  try {
+    vi.setSystemTime(new Date("2026-05-01T00:00:00.000Z"));
+
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const staleSigner = await generateP256SigningKeyPair();
+    const freshSigner = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const staleRuntimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 20 + index);
+    const freshRuntimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 80 + index);
+    const staleRuntime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: staleRuntimeRoot,
+      signer: staleSigner.privateKey,
+      userId: "user-1",
+    });
+    const freshRuntime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: freshRuntimeRoot,
+      signer: freshSigner.privateKey,
+      userId: "user-1",
+    });
+    const staleEnvironment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+        staleSigner.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const freshEnvironment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+        freshSigner.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const fetchMock = vi.fn(async () => {
+      const runtime = fetchMock.mock.calls.length === 1 ? staleRuntime : freshRuntime;
+      const cryptoContextVersion = fetchMock.mock.calls.length === 1
+        ? "hccv_stale_runtime_context"
+        : "hccv_fresh_runtime_context";
+
+      return new Response(JSON.stringify({
+        cacheMaxAgeMs: 5 * 60 * 1000,
+        cryptoContextVersion,
+        envelopes: { runtime },
+        fetchedAt: new Date().toISOString(),
+        schema: "murph.hosted-runtime-crypto-context.v1",
+        userId: "user-1",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+
+    const stale = await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment: staleEnvironment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-fallback",
+      userId: "user-1",
+    });
+
+    assert.deepEqual(stale.rootKey, staleRuntimeRoot);
+
+    vi.setSystemTime(new Date("2026-05-01T00:00:30.000Z"));
+    const fresh = await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment: freshEnvironment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-fallback",
+      userId: "user-1",
+    });
+
+    assert.deepEqual(fresh.rootKey, freshRuntimeRoot);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
+});
+
+test("Cloudflare runtime user crypto context refetches when cached envelope parsing fails", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+
+  try {
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 40 + index);
+    const runtime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      cacheMaxAgeMs: 5 * 60 * 1000,
+      cryptoContextVersion: "hccv_test_runtime_context",
+      envelopes: { runtime },
+      fetchedAt: new Date().toISOString(),
+      schema: "murph.hosted-runtime-crypto-context.v1",
+      userId: "user-1",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-parse-failure",
+      userId: "user-1",
+    });
+
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+      throw new SyntaxError("corrupt cached envelope");
+    });
+
+    try {
+      const context = await requireHostedUserCryptoContextFromEnvironment({
+        domain: "runtime",
+        environment,
+        fetchImpl: fetchMock,
+        reason: "test-cache-parse-failure",
+        userId: "user-1",
+      });
+
+      assert.deepEqual(context.rootKey, runtimeRoot);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      parseSpy.mockRestore();
+    }
+  } finally {
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
+});
+
+test("Cloudflare runtime user crypto context clamps future fetchedAt before returning decrypted roots", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  vi.useFakeTimers();
+
+  try {
+    vi.setSystemTime(new Date("2026-05-01T00:00:00.000Z"));
+
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 180 + index);
+    const runtime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      cacheMaxAgeMs: 5 * 60 * 1000,
+      cryptoContextVersion: "hccv_test_future_runtime_context",
+      envelopes: { runtime },
+      fetchedAt: "2026-05-01T00:05:00.000Z",
+      schema: "murph.hosted-runtime-crypto-context.v1",
+      userId: "user-1",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    const context = await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-future-fetched-at",
+      userId: "user-1",
+    });
+
+    assert.equal(context.cacheMaxAgeMs, 60_000);
+    assert.equal(context.fetchedAtMs, Date.parse("2026-05-01T00:00:00.000Z"));
+    assert.deepEqual(context.rootKey, runtimeRoot);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
+});
+
+test("Cloudflare runtime user crypto context skips oversized envelope cache entries", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  vi.useFakeTimers();
+
+  try {
+    vi.setSystemTime(new Date("2026-05-01T00:00:00.000Z"));
+
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 60 + index);
+    const runtime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const oversizedVersion = `hccv_${"a".repeat(70 * 1024)}`;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      cacheMaxAgeMs: 5 * 60 * 1000,
+      cryptoContextVersion: oversizedVersion,
+      envelopes: { runtime },
+      fetchedAt: new Date().toISOString(),
+      schema: "murph.hosted-runtime-crypto-context.v1",
+      userId: "user-1",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-size",
+      userId: "user-1",
+    });
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-size",
+      userId: "user-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
+});
+
+test("Cloudflare runtime user crypto context does not cache envelopes older than the capped TTL", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  vi.useFakeTimers();
+
+  try {
+    vi.setSystemTime(new Date("2026-05-01T00:02:00.000Z"));
+
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 90 + index);
+    const runtime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      cacheMaxAgeMs: 5 * 60 * 1000,
+      cryptoContextVersion: "hccv_test_old_runtime_context",
+      envelopes: { runtime },
+      fetchedAt: "2026-05-01T00:00:00.000Z",
+      schema: "murph.hosted-runtime-crypto-context.v1",
+      userId: "user-1",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-old-context",
+      userId: "user-1",
+    });
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-old-context",
+      userId: "user-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
+});
+
+test("Cloudflare runtime user crypto context caches the verified canonical envelope shape", async () => {
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  vi.useFakeTimers();
+
+  try {
+    vi.setSystemTime(new Date("2026-05-01T00:00:00.000Z"));
+
+    const cloudflareRecipient = await generateP256EcdhKeyPair();
+    const signer = await generateP256SigningKeyPair();
+    const keyVersionName =
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+    const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 120 + index);
+    const runtime = await createSignedWorkerEnvelope({
+      domain: "runtime",
+      keyVersionName,
+      publicJwk: cloudflareRecipient.publicJwk,
+      rootKey: runtimeRoot,
+      signer: signer.privateKey,
+      userId: "user-1",
+    });
+    const runtimeWithUnsignedExtra = {
+      ...runtime,
+      unsignedExtra: "a".repeat(70 * 1024),
+    };
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: keyVersionName,
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/gu, "\\n"),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+        cloudflareRecipient.privateJwk,
+      ),
+      HOSTED_CRYPTO_ENV: "test",
+    }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      cacheMaxAgeMs: 5 * 60 * 1000,
+      cryptoContextVersion: "hccv_test_canonical_runtime_context",
+      envelopes: { runtime: runtimeWithUnsignedExtra },
+      fetchedAt: new Date().toISOString(),
+      schema: "murph.hosted-runtime-crypto-context.v1",
+      userId: "user-1",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-canonical-envelope",
+      userId: "user-1",
+    });
+    await requireHostedUserCryptoContextFromEnvironment({
+      domain: "runtime",
+      environment,
+      fetchImpl: fetchMock,
+      reason: "test-cache-canonical-envelope",
+      userId: "user-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  }
 });
 
 test("Cloudflare hosted runtime crypto context can use the local internal web-control host", async () => {
