@@ -489,7 +489,8 @@ function isHostedCodexHomeSensitiveBasename(basename: string): boolean {
   }
 
   if (
-    basename.includes("access-token")
+    hasHostedCodexHomeSensitiveBasenameToken(basename)
+    || basename.includes("access-token")
     || basename.includes("api-key")
     || basename.includes("apikey")
     || basename.includes("credential")
@@ -503,6 +504,29 @@ function isHostedCodexHomeSensitiveBasename(basename: string): boolean {
     return true;
   }
 
+  return hasHostedCodexHomeSensitiveExtension(basename);
+}
+
+function hasHostedCodexHomeSensitiveBasenameToken(basename: string): boolean {
+  const tokens = basename.split(/[^a-z0-9]+/u);
+  return tokens.some((token) =>
+    token === "auth"
+    || token === "apikey"
+    || token === "cert"
+    || token === "certificate"
+    || token === "credential"
+    || token === "credentials"
+    || token === "cookie"
+    || token === "key"
+    || token === "keys"
+    || token === "oauth"
+    || token === "password"
+    || token === "secret"
+    || token === "token"
+  );
+}
+
+function hasHostedCodexHomeSensitiveExtension(basename: string): boolean {
   return (
     basename.endsWith(".cer")
     || basename.endsWith(".crt")
