@@ -23,6 +23,16 @@ import {
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
+const ARTIFACT_WRITE_LEASE_CACHE_TTL_MS = 5_000;
+const ARTIFACT_WRITE_LEASE_CACHE_MAX_ENTRIES = 2_048;
+
+interface ArtifactWriteLeaseCacheEntry {
+  expiresAtMs: number;
+  promise: Promise<boolean>;
+}
+
+const artifactWriteLeaseCache = new Map<string, ArtifactWriteLeaseCacheEntry>();
+
 export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
@@ -136,6 +146,17 @@ async function handleRunnerArtifactRequest(input: {
   sha256: string;
   userId: string;
 }): Promise<Response> {
+  if (input.request.method === "PUT") {
+    const ownsActiveLease = await artifactWriteRequestOwnsActiveInvocationLease({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+    if (!ownsActiveLease) {
+      return unauthorized();
+    }
+  }
+
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
     domain: "runtime",
@@ -167,15 +188,6 @@ async function handleRunnerArtifactRequest(input: {
     });
   }
 
-  const ownsActiveLease = await artifactWriteRequestOwnsActiveInvocationLease({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!ownsActiveLease) {
-    return unauthorized();
-  }
-
   const bytes = new Uint8Array(await input.request.arrayBuffer());
   await artifactStore.writeArtifact(input.sha256, bytes);
   return json({
@@ -197,17 +209,103 @@ async function artifactWriteRequestOwnsActiveInvocationLease(input: {
     return false;
   }
 
+  const cacheKey = artifactWriteLeaseCacheKey({
+    attemptId,
+    leaseGeneration,
+    userId: input.userId,
+    workspaceVersion,
+  });
+  const nowMs = Date.now();
+  const existing = artifactWriteLeaseCache.get(cacheKey);
+  if (existing && existing.expiresAtMs > nowMs) {
+    return await existing.promise;
+  }
+  if (existing) {
+    artifactWriteLeaseCache.delete(cacheKey);
+  }
+
+  const promise = artifactWriteRequestOwnsActiveInvocationLeaseUncached({
+    attemptId,
+    env: input.env,
+    leaseGeneration,
+    userId: input.userId,
+    workspaceVersion,
+  });
+  artifactWriteLeaseCache.set(cacheKey, {
+    expiresAtMs: nowMs + ARTIFACT_WRITE_LEASE_CACHE_TTL_MS,
+    promise,
+  });
+  trimArtifactWriteLeaseCache();
+
+  try {
+    const ownsActiveLease = await promise;
+    if (!ownsActiveLease) {
+      artifactWriteLeaseCache.delete(cacheKey);
+    }
+    return ownsActiveLease;
+  } catch (error) {
+    artifactWriteLeaseCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+export function resetRunnerOutboundCachesForTest(): void {
+  artifactWriteLeaseCache.clear();
+}
+
+async function artifactWriteRequestOwnsActiveInvocationLeaseUncached(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  userId: string;
+  workspaceVersion: string;
+}): Promise<boolean> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
     stub,
     "ownsActiveInvocationLease",
   );
   return await ownsActiveInvocationLease({
-    attemptId,
-    leaseGeneration,
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
     userId: input.userId,
-    workspaceVersion,
+    workspaceVersion: input.workspaceVersion,
   });
+}
+
+function artifactWriteLeaseCacheKey(input: {
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+  workspaceVersion: string;
+}): string {
+  return [
+    input.userId,
+    input.attemptId,
+    input.leaseGeneration,
+    input.workspaceVersion,
+  ].join("\0");
+}
+
+function trimArtifactWriteLeaseCache(): void {
+  if (artifactWriteLeaseCache.size <= ARTIFACT_WRITE_LEASE_CACHE_MAX_ENTRIES) {
+    return;
+  }
+
+  const nowMs = Date.now();
+  for (const [key, value] of artifactWriteLeaseCache) {
+    if (value.expiresAtMs <= nowMs) {
+      artifactWriteLeaseCache.delete(key);
+    }
+  }
+
+  while (artifactWriteLeaseCache.size > ARTIFACT_WRITE_LEASE_CACHE_MAX_ENTRIES) {
+    const oldestKey = artifactWriteLeaseCache.keys().next().value;
+    if (typeof oldestKey !== "string") {
+      return;
+    }
+    artifactWriteLeaseCache.delete(oldestKey);
+  }
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

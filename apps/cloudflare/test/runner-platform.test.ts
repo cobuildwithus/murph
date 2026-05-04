@@ -1041,6 +1041,135 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
+  it("deduplicates successful artifact uploads by SHA within one platform instance", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+    await platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+    await platform.artifactStore.put({
+      bytes: new Uint8Array([4, 5, 6]),
+      sha256: "b".repeat(64),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requireFetchRequest(fetchMock.mock.calls[0], "first artifact upload").url).toBe(
+      `http://artifacts.worker/objects/${"a".repeat(64)}`,
+    );
+    expect(requireFetchRequest(fetchMock.mock.calls[1], "second artifact upload").url).toBe(
+      `http://artifacts.worker/objects/${"b".repeat(64)}`,
+    );
+  });
+
+  it("shares concurrent same-SHA artifact uploads with the in-flight request", async () => {
+    let resolveUpload = (_response: Response): void => {
+      throw new Error("Expected the artifact upload resolver to be initialized.");
+    };
+    const uploadResponse = new Promise<Response>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const fetchMock = vi.fn(async () => uploadResponse);
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const firstUpload = platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+    const secondUpload = platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveUpload(new Response(null, { status: 200 }));
+    await Promise.all([firstUpload, secondUpload]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache a shared in-flight artifact upload until the response is OK", async () => {
+    let resolveUpload = (_response: Response): void => {
+      throw new Error("Expected the artifact upload resolver to be initialized.");
+    };
+    const uploadResponse = new Promise<Response>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return uploadResponse;
+      }
+
+      return new Response(null, { status: 200 });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const firstUpload = platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+    const secondUpload = platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveUpload(new Response("temporary failure", { status: 503 }));
+    await expect(firstUpload).rejects.toThrow(/Hosted artifact upload/u);
+    await expect(secondUpload).rejects.toThrow(/Hosted artifact upload/u);
+
+    await platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not mark failed artifact uploads as deduplicated", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response("temporary failure", { status: 503 });
+      }
+
+      return new Response(null, { status: 200 });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await expect(platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    })).rejects.toThrow(/Hosted artifact upload/u);
+    await platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("advances heartbeat lease payloads after a successful workspace checkpoint", async () => {
     let currentLease = {
       attemptId: "attempt_1",

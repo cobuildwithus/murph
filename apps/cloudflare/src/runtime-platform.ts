@@ -122,6 +122,57 @@ export function buildHostedExecutionRuntimePlatform(input: {
         transport: hostedWebControlTransport,
       })
     : null;
+  const uploadedArtifactShas = new Set<string>();
+  const inFlightArtifactUploads = new Map<string, Promise<void>>();
+  const putArtifactUncached = async (artifact: {
+    bytes: Uint8Array;
+    sha256: string;
+  }): Promise<void> => {
+    const headers = new Headers();
+    const lease = await input.workspaceCheckpointBridge?.readCurrentLease() ?? null;
+    if (lease) {
+      headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
+      headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
+      headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
+    }
+    const response = await fetchHostedResponse({
+      description: `Hosted artifact upload ${artifact.sha256}`,
+      fetchImpl,
+      init: {
+        body: copyBytesToArrayBuffer(artifact.bytes),
+        headers,
+        method: "PUT",
+      },
+      timeoutMs,
+      url: new URL(`/objects/${artifact.sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
+    });
+
+    assertHostedOk(response, `Hosted artifact upload ${artifact.sha256}`);
+  };
+  const putArtifactOnce = async (artifact: {
+    bytes: Uint8Array;
+    sha256: string;
+  }): Promise<void> => {
+    if (uploadedArtifactShas.has(artifact.sha256)) {
+      return;
+    }
+
+    const existing = inFlightArtifactUploads.get(artifact.sha256);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const upload = putArtifactUncached(artifact)
+      .then(() => {
+        uploadedArtifactShas.add(artifact.sha256);
+      })
+      .finally(() => {
+        inFlightArtifactUploads.delete(artifact.sha256);
+      });
+    inFlightArtifactUploads.set(artifact.sha256, upload);
+    await upload;
+  };
   return {
     artifactStore: {
       async get(sha256) {
@@ -140,26 +191,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         return new Uint8Array(await response.arrayBuffer());
       },
       async put({ bytes, sha256 }) {
-        const headers = new Headers();
-        const lease = await input.workspaceCheckpointBridge?.readCurrentLease() ?? null;
-        if (lease) {
-          headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
-          headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
-          headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
-        }
-        const response = await fetchHostedResponse({
-          description: `Hosted artifact upload ${sha256}`,
-          fetchImpl,
-          init: {
-            body: copyBytesToArrayBuffer(bytes),
-            headers,
-            method: "PUT",
-          },
-          timeoutMs,
-          url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
-        });
-
-        assertHostedOk(response, `Hosted artifact upload ${sha256}`);
+        await putArtifactOnce({ bytes, sha256 });
       },
     },
     ...(hostedWebControlTransport
