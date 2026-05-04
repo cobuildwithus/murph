@@ -121,14 +121,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           ].join(' '),
         )
       } finally {
-        await Promise.all(
-          config.temporaryPaths.map((targetPath) =>
-            rm(targetPath, {
-              force: true,
-              recursive: true,
-            })
-          ),
-        )
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
     },
     360_000,
@@ -171,6 +164,30 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(configToml).toContain('env_key = "PROVIDER_KEY"')
     expect(configToml).not.toContain('provider-value')
   })
+
+  it('sanitizes live provider failures before Vitest prints them', () => {
+    const rawError = Object.assign(
+      new Error('Quota exceeded for request req_sensitive_123'),
+      {
+        code: 'ASSISTANT_CODEX_FAILED',
+        context: {
+          codexFailureStage: 'turn_failed',
+          codexTurnStatus: 'failed',
+          providerActionCount: 2,
+          providerSessionId: 'thread_sensitive_123',
+        },
+      },
+    )
+
+    const message = buildRealCodexE2eFailureMessage(rawError)
+
+    expect(message).toBe(
+      'Real Codex cache probe failed: code=ASSISTANT_CODEX_FAILED stage=turn_failed status=failed providerActionCount=2',
+    )
+    expect(message).not.toContain('Quota')
+    expect(message).not.toContain('req_sensitive')
+    expect(message).not.toContain('thread_sensitive')
+  })
 })
 
 async function runCacheProbeAttempt(input: {
@@ -196,7 +213,7 @@ async function runCacheProbeAttempt(input: {
       'utf8',
     )
 
-    const result = await executeCodexAppServerTurn({
+    const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
         ?? undefined,
@@ -229,11 +246,64 @@ async function runCacheProbeAttempt(input: {
       },
     }
   } finally {
-    await rm(workingDirectory, {
-      force: true,
-      recursive: true,
-    })
+    await removeRealCodexTemporaryPaths([workingDirectory])
   }
+}
+
+async function executeRealCodexAppServerTurn(
+  input: Parameters<typeof executeCodexAppServerTurn>[0],
+): ReturnType<typeof executeCodexAppServerTurn> {
+  try {
+    return await executeCodexAppServerTurn(input)
+  } catch (error) {
+    throw new Error(buildRealCodexE2eFailureMessage(error))
+  }
+}
+
+function buildRealCodexE2eFailureMessage(error: unknown): string {
+  const record = readRecord(error)
+  const context = readRecord(record?.context)
+  const parts = [
+    `code=${readSafeDiagnosticString(record?.code, 'UNKNOWN')}`,
+  ]
+  const stage = readSafeDiagnosticString(context?.codexFailureStage)
+  if (stage) {
+    parts.push(`stage=${stage}`)
+  }
+  const status = readSafeDiagnosticString(context?.codexTurnStatus)
+  if (status) {
+    parts.push(`status=${status}`)
+  }
+  const providerActionCount = readNonNegativeInteger(context?.providerActionCount)
+  if (providerActionCount !== null) {
+    parts.push(`providerActionCount=${providerActionCount}`)
+  }
+
+  return `Real Codex cache probe failed: ${parts.join(' ')}`
+}
+
+async function removeRealCodexTemporaryPaths(paths: readonly string[]): Promise<void> {
+  await Promise.all(paths.map((targetPath) => removeRealCodexTemporaryPath(targetPath)))
+}
+
+async function removeRealCodexTemporaryPath(targetPath: string): Promise<void> {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      await rm(targetPath, {
+        force: true,
+        recursive: true,
+      })
+      return
+    } catch {
+      await delay(50 * attempt)
+    }
+  }
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, milliseconds)
+  })
 }
 
 function buildCacheProbePrompt(attempt: number): string {
@@ -503,6 +573,28 @@ function readPositiveIntegerEnv(value: string | undefined): number | null {
 
   const parsed = Number.parseInt(normalized, 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function readSafeDiagnosticString(
+  value: unknown,
+  fallback?: string,
+): string | null {
+  if (typeof value !== 'string') {
+    return fallback ?? null
+  }
+
+  const normalized = value.trim()
+  if (/^[A-Za-z0-9_.:-]+$/u.test(normalized)) {
+    return normalized
+  }
+
+  return fallback ?? 'present'
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+    ? value
+    : null
 }
 
 function readIntegerTokenCount(...values: unknown[]): number {
