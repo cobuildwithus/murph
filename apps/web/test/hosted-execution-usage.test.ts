@@ -457,6 +457,76 @@ describe("importHostedAiUsageRecords", () => {
     );
   });
 
+  it("accepts an existing usage row when raw usage JSON only differs by key order", async () => {
+    const prisma = {
+      hostedAiUsage: {
+        upsert: vi.fn(async (args: { create: Record<string, unknown> }) => ({
+          ...args.create,
+          rawUsageJson: {
+            total_tokens: 165,
+            output_tokens_details: {
+              reasoning_tokens: 8,
+            },
+            output_tokens: 45,
+            input_tokens_details: {
+              cached_tokens: 12,
+            },
+            input_tokens: 120,
+          },
+        })),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => null),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [BASE_USAGE_RECORD],
+      }),
+    ).resolves.toMatchObject({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+  });
+
+  it("rejects an existing usage row when raw usage JSON values differ", async () => {
+    const prisma = {
+      hostedAiUsage: {
+        upsert: vi.fn(async (args: { create: Record<string, unknown> }) => ({
+          ...args.create,
+          rawUsageJson: {
+            input_tokens: 121,
+            input_tokens_details: {
+              cached_tokens: 12,
+            },
+            output_tokens: 45,
+            output_tokens_details: {
+              reasoning_tokens: 8,
+            },
+            total_tokens: 166,
+          },
+        })),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => null),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [BASE_USAGE_RECORD],
+      }),
+    ).rejects.toThrow(
+      "Hosted AI usage already exists with different immutable fields: rawUsageJson.",
+    );
+  });
+
   it("accepts an existing usage row when the stored billing outcome already differs", async () => {
     const prisma = {
       hostedAiUsage: {

@@ -921,7 +921,48 @@ function compareHostedAiUsageJsonField(
   actual: Prisma.JsonValue | null,
   expected: Prisma.JsonValue,
 ): string | null {
-  return JSON.stringify(actual) === JSON.stringify(expected) ? null : fieldName;
+  return stringifyHostedAiUsageJsonForComparison(actual)
+    === stringifyHostedAiUsageJsonForComparison(expected)
+    ? null
+    : fieldName;
+}
+
+function stringifyHostedAiUsageJsonForComparison(
+  value: Prisma.JsonValue | null,
+): string {
+  return JSON.stringify(normalizeHostedAiUsageJsonForComparison(value));
+}
+
+function normalizeHostedAiUsageJsonForComparison(
+  value: Prisma.JsonValue | null,
+): Prisma.JsonValue | null {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeHostedAiUsageJsonForComparison(entry));
+  }
+
+  if (isHostedAiUsageJsonObject(value)) {
+    const normalized: Prisma.JsonObject = {};
+
+    for (const [key, entry] of Object.entries(value).sort(([left], [right]) =>
+      left.localeCompare(right),
+    )) {
+      if (entry === undefined) {
+        continue;
+      }
+
+      normalized[key] = normalizeHostedAiUsageJsonForComparison(entry);
+    }
+
+    return normalized;
+  }
+
+  return value;
+}
+
+function isHostedAiUsageJsonObject(
+  value: Prisma.JsonValue | null,
+): value is Prisma.JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeHostedAiUsageJsonObject(
