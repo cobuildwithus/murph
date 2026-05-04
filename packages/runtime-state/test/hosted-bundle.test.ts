@@ -810,6 +810,11 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(assistantRuntimeRoot, "state", "onboarding", "first-contact"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "transcripts"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "usage", "pending"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "logs"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "secrets"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "tmp"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "device-sync"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "inbox"), { recursive: true });
@@ -901,6 +906,26 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, "tmp"), "tmp\n");
     await writeFile(path.join(assistantRuntimeRoot, ".tmp"), "tmp\n");
     await writeFile(path.join(assistantRuntimeRoot, "secrets", "sessions", "session_1.json"), "{\"secret\":true}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "config.toml"), "model = \"gpt-test\"\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "{\"thread\":\"thread_1\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "{\"thread\":\"thread_1\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", ".env"), "CODEX_SECRET=1\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", ".netrc"), "machine example.test login token\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "auth.json"), "{\"token\":\"secret\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "credentials.json"), "{\"token\":\"secret\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "history.jsonl"), "{\"prompt\":\"raw\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "oauth.json"), "{\"token\":\"secret\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "token.json"), "{\"token\":\"secret\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "cache", "state.json"), "{\"cache\":true}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "logs", "codex.log"), "prompt log\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "secrets", "token.json"), "{\"token\":\"secret\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "debug.log"), "debug\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "nested-token.json"), "{\"token\":\"secret\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "private.key"), "private key\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.lock"), "locked\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.pid"), "1234\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.sock"), "socket\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "tmp", "scratch.json"), "{\"tmp\":true}\n");
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
     await writeFile(
       path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"),
@@ -1010,6 +1035,30 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       },
       { expected: "{\"schema\":\"cfg\"}\n", path: ".murph/config.json", root: "operator-home" },
       { expected: null, path: ".murph/hosted/user-env.json", root: "operator-home" },
+      { expected: "model = \"gpt-test\"\n", path: ".codex-hosted/config.toml", root: "operator-home" },
+      { expected: "{\"thread\":\"thread_1\"}\n", path: ".codex-hosted/session_index.jsonl", root: "operator-home" },
+      {
+        expected: "{\"thread\":\"thread_1\"}\n",
+        path: ".codex-hosted/sessions/thread_1/rollout.json",
+        root: "operator-home",
+      },
+      { expected: null, path: ".codex-hosted/.env", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/.netrc", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/auth.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/credentials.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/history.jsonl", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/oauth.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/token.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/cache/state.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/logs/codex.log", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/secrets/token.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/sessions/thread_1/debug.log", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/sessions/thread_1/nested-token.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/sessions/thread_1/private.key", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/sessions/thread_1/turn.lock", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/sessions/thread_1/turn.pid", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/sessions/thread_1/turn.sock", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/tmp/scratch.json", root: "operator-home" },
       { expected: null, path: "raw/inbox/2026-03-28/capture_123/attachments/report.pdf", root: "vault" },
       {
         expected: "{\"version\":1,\"entries\":[]}\n",
@@ -1188,6 +1237,34 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
       "{\"schema\":\"cfg\"}\n",
     );
+    assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
+      "model = \"gpt-test\"\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "utf8"),
+      "{\"thread\":\"thread_1\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "utf8"),
+      "{\"thread\":\"thread_1\"}\n",
+    );
+    assert.equal(
+      (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted"))).mode & 0o777,
+      ASSISTANT_STATE_DIRECTORY_MODE,
+    );
+    assert.equal(
+      (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions"))).mode & 0o777,
+      ASSISTANT_STATE_DIRECTORY_MODE,
+    );
+    assert.equal(
+      (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1"))).mode & 0o777,
+      ASSISTANT_STATE_DIRECTORY_MODE,
+    );
+    assert.equal(
+      (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted", "config.toml"))).mode & 0o777,
+      ASSISTANT_STATE_FILE_MODE,
+    );
     assert.deepEqual(
       await readFile(
         path.join(restored.vaultRoot, "raw", "inbox", "2026-03-28", "capture_123", "attachments", "report.pdf"),
@@ -1196,6 +1273,57 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     await assert.rejects(
       readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", ".env"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", ".netrc"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "auth.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "credentials.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "history.jsonl"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "oauth.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "token.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "cache", "state.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "logs", "codex.log"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "secrets", "token.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "debug.log"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "nested-token.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "private.key"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.lock"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.pid"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.sock"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "tmp", "scratch.json"), "utf8"),
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "secrets", "sessions", "session_1.json"), "utf8"),

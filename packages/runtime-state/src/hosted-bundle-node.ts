@@ -20,6 +20,11 @@ import {
 } from "./hosted-bundle.ts";
 import type { HostedExecutionBundleKind } from "./hosted-bundle-ref.ts";
 
+const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
+const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
+const HOSTED_CODEX_HOME_DIRECTORY_MODE = 0o700;
+const HOSTED_CODEX_HOME_FILE_MODE = 0o600;
+
 export interface HostedBundleArtifactSnapshotInput {
   absolutePath: string;
   bytes: Uint8Array;
@@ -281,6 +286,7 @@ async function writeHostedBundleRestoredFile(input: {
 
 async function ensureHostedBundleRestoreParentDirectory(input: {
   absolutePath: string;
+  mappedRoot: string;
   path: string;
   root: string;
 }): Promise<void> {
@@ -292,12 +298,62 @@ async function ensureHostedBundleRestoreParentDirectory(input: {
   });
 
   if (typeof mode === "number") {
+    if (isHostedCodexHomeRestorePath({
+      path: path.posix.dirname(input.path),
+      root: input.root,
+    })) {
+      await ensureHostedCodexHomeRestoreDirectory({
+        mappedRoot: input.mappedRoot,
+        relativeDirectory: path.posix.dirname(input.path),
+      });
+      return;
+    }
+
     await ensureAssistantStateDirectory(directoryPath);
     await chmod(directoryPath, mode);
     return;
   }
 
   await mkdir(directoryPath, { recursive: true });
+}
+
+async function ensureHostedCodexHomeRestoreDirectory(input: {
+  mappedRoot: string;
+  relativeDirectory: string;
+}): Promise<void> {
+  const normalizedRelativeDirectory = normalizeBundlePath(input.relativeDirectory);
+  if (
+    normalizedRelativeDirectory !== HOSTED_CODEX_HOME_RELATIVE_PATH
+    && !normalizedRelativeDirectory.startsWith(`${HOSTED_CODEX_HOME_RELATIVE_PATH}/`)
+  ) {
+    throw new Error(`Hosted Codex restore path is outside ${HOSTED_CODEX_HOME_RELATIVE_PATH}.`);
+  }
+
+  await mkdir(input.mappedRoot, { recursive: true });
+
+  let currentPath = input.mappedRoot;
+  for (const segment of normalizedRelativeDirectory.split("/").filter(Boolean)) {
+    currentPath = path.join(currentPath, segment);
+    try {
+      const entry = await lstat(currentPath);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Hosted Codex restore directory must not contain symlinks: ${input.relativeDirectory}`);
+      }
+      if (!entry.isDirectory()) {
+        throw new Error(`Hosted Codex restore path is not a directory: ${currentPath}`);
+      }
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw error;
+      }
+
+      await mkdir(currentPath, {
+        mode: HOSTED_CODEX_HOME_DIRECTORY_MODE,
+      });
+    }
+
+    await chmod(currentPath, HOSTED_CODEX_HOME_DIRECTORY_MODE);
+  }
 }
 
 async function chmodHostedBundleRestoredFile(input: {
@@ -321,11 +377,35 @@ function resolveHostedBundleRestoreMode(input: {
   path: string;
   root: string;
 }): number | undefined {
-  return resolveAssistantStateRestoreMode({
+  const assistantStateMode = resolveAssistantStateRestoreMode({
     kind: input.kind,
     relativePath: input.path,
     root: input.root,
   });
+  if (assistantStateMode !== undefined) {
+    return assistantStateMode;
+  }
+
+  if (isHostedCodexHomeRestorePath(input)) {
+    return input.kind === "directory"
+      ? HOSTED_CODEX_HOME_DIRECTORY_MODE
+      : HOSTED_CODEX_HOME_FILE_MODE;
+  }
+
+  return undefined;
+}
+
+function isHostedCodexHomeRestorePath(input: {
+  path: string;
+  root: string;
+}): boolean {
+  if (input.root !== HOSTED_OPERATOR_HOME_ROOT_KEY) {
+    return false;
+  }
+
+  const normalizedRelativePath = normalizeBundlePath(input.path);
+  return normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
+    || normalizedRelativePath.startsWith(`${HOSTED_CODEX_HOME_RELATIVE_PATH}/`);
 }
 
 async function collectBundleFiles(input: {

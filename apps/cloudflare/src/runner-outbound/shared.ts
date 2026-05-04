@@ -65,6 +65,9 @@ const RUNNER_OUTBOUND_CRYPTO_CONTEXT_MAX_ENTRIES = 1_024;
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_MAX_TTL_MS = 5 * 60 * 1000;
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS = 30_000;
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_SKEW_MS = 1_000;
+const RUNNER_OUTBOUND_BIND_USER_CACHE_SUCCESS_TTL_MS = 60_000;
+const RUNNER_OUTBOUND_BIND_USER_CACHE_PENDING_TTL_MS = 30_000;
+const RUNNER_OUTBOUND_BIND_USER_CACHE_MAX_ENTRIES = 2_048;
 
 interface RunnerOutboundCryptoContextCacheEntry {
   expiresAtMs: number;
@@ -72,9 +75,19 @@ interface RunnerOutboundCryptoContextCacheEntry {
   token: object;
 }
 
+interface RunnerOutboundBindUserCacheEntry {
+  expiresAtMs: number;
+  promise: Promise<RunnerOutboundUserRunnerStubLike>;
+  token: object;
+}
+
 const runnerOutboundCryptoContextCache = new Map<
   string,
   RunnerOutboundCryptoContextCacheEntry
+>();
+let runnerOutboundBindUserCaches = new WeakMap<
+  RunnerOutboundEnvironmentSource["USER_RUNNER"],
+  Map<string, RunnerOutboundBindUserCacheEntry>
 >();
 
 export async function resolveRunnerOutboundUserCryptoContext(input: {
@@ -86,6 +99,7 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 }) {
   const cacheKey = cryptoContextCacheKey({
     domain: input.domain,
+    environment: input.environment,
     userId: input.userId,
   });
   const nowMs = Date.now();
@@ -97,10 +111,9 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
     runnerOutboundCryptoContextCache.delete(cacheKey);
   }
 
-  await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-
   const cacheToken = {};
   const promise = (async (): Promise<HostedUserCryptoContext> => {
+    await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
     const context = await requireHostedUserCryptoContextFromEnvironment({
       bucket: input.bucket,
       domain: input.domain,
@@ -134,16 +147,51 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 
 export function resetRunnerOutboundSharedCachesForTest(): void {
   runnerOutboundCryptoContextCache.clear();
+  runnerOutboundBindUserCaches = new WeakMap();
 }
 
 export async function resolveRunnerOutboundUserRunnerStub(
   env: RunnerOutboundEnvironmentSource,
   userId: string,
 ): Promise<RunnerOutboundUserRunnerStubLike> {
-  const stub = env.USER_RUNNER.getByName(userId);
-  requireRunnerOutboundUserStubMethod(stub, "bindUser");
-  await stub.bindUser(userId);
-  return stub;
+  const cache = getRunnerOutboundBindUserCache(env.USER_RUNNER);
+  const nowMs = Date.now();
+  const existing = cache.get(userId);
+  if (existing && existing.expiresAtMs > nowMs) {
+    return await existing.promise;
+  }
+  if (existing) {
+    cache.delete(userId);
+  }
+
+  const cacheToken = {};
+  const promise = (async (): Promise<RunnerOutboundUserRunnerStubLike> => {
+    const stub = env.USER_RUNNER.getByName(userId);
+    requireRunnerOutboundUserStubMethod(stub, "bindUser");
+    await stub.bindUser(userId);
+    const cached = cache.get(userId);
+    if (cached?.token === cacheToken) {
+      cached.expiresAtMs = Date.now() + RUNNER_OUTBOUND_BIND_USER_CACHE_SUCCESS_TTL_MS;
+    }
+    return stub;
+  })();
+
+  cache.set(userId, {
+    expiresAtMs: nowMs + RUNNER_OUTBOUND_BIND_USER_CACHE_PENDING_TTL_MS,
+    promise,
+    token: cacheToken,
+  });
+  trimRunnerOutboundBindUserCache(cache);
+
+  try {
+    return await promise;
+  } catch (error) {
+    const cached = cache.get(userId);
+    if (cached?.token === cacheToken) {
+      cache.delete(userId);
+    }
+    throw error;
+  }
 }
 
 export function requireRunnerOutboundUserStubMethod<TKey extends keyof RunnerOutboundUserRunnerStubLike>(
@@ -161,9 +209,23 @@ export function requireRunnerOutboundUserStubMethod<TKey extends keyof RunnerOut
 
 function cryptoContextCacheKey(input: {
   domain: Extract<HostedCryptoDomain, "ingress" | "runtime">;
+  environment: Pick<
+    ReturnType<typeof readHostedExecutionEnvironment>,
+    "hostedCrypto" | "hostedWebBaseUrl" | "webCallbackSigning"
+  >;
   userId: string;
 }): string {
-  return `${input.userId}\0${input.domain}`;
+  const hostedCrypto = input.environment.hostedCrypto;
+  return JSON.stringify([
+    "runner-outbound-crypto-context-cache:v1",
+    input.environment.hostedWebBaseUrl,
+    input.environment.webCallbackSigning.keyId,
+    hostedCrypto?.HOSTED_CRYPTO_ENV ?? "",
+    hostedCrypto?.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION ?? "",
+    hostedCrypto?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID ?? "",
+    input.userId,
+    input.domain,
+  ]);
 }
 
 function resolveRunnerOutboundCryptoContextExpiresAtMs(
@@ -202,6 +264,42 @@ function trimRunnerOutboundCryptoContextCache(): void {
       return;
     }
     runnerOutboundCryptoContextCache.delete(oldestKey);
+  }
+}
+
+function getRunnerOutboundBindUserCache(
+  namespace: RunnerOutboundEnvironmentSource["USER_RUNNER"],
+): Map<string, RunnerOutboundBindUserCacheEntry> {
+  let cache = runnerOutboundBindUserCaches.get(namespace);
+
+  if (!cache) {
+    cache = new Map();
+    runnerOutboundBindUserCaches.set(namespace, cache);
+  }
+
+  return cache;
+}
+
+function trimRunnerOutboundBindUserCache(
+  cache: Map<string, RunnerOutboundBindUserCacheEntry>,
+): void {
+  if (cache.size <= RUNNER_OUTBOUND_BIND_USER_CACHE_MAX_ENTRIES) {
+    return;
+  }
+
+  const nowMs = Date.now();
+  for (const [key, value] of cache) {
+    if (value.expiresAtMs <= nowMs) {
+      cache.delete(key);
+    }
+  }
+
+  while (cache.size > RUNNER_OUTBOUND_BIND_USER_CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== "string") {
+      return;
+    }
+    cache.delete(oldestKey);
   }
 }
 

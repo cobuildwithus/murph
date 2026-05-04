@@ -24,6 +24,7 @@ import {
 } from "./hosted-bundle-node.ts";
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
+const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
 const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
   WORKSPACE_OPERATOR_HOME_ROOT,
   "vault",
@@ -370,9 +371,113 @@ function parseWorkspaceSnapshotArtifactPath(relativePath: string): {
 }
 
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+
+  if (
+    normalizedRelativePath === ".murph"
+    || normalizedRelativePath === ".murph/config.json"
+  ) {
+    return true;
+  }
+
+  if (hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH)) {
+    return shouldIncludeHostedCodexHomeRelativePath(
+      normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
+        ? ""
+        : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length),
+    );
+  }
+
+  return false;
+}
+
+function shouldIncludeHostedCodexHomeRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+  if (normalizedRelativePath.length === 0) {
+    return true;
+  }
+
+  if (isEnvironmentRelativePath(normalizedRelativePath)) {
+    return false;
+  }
+
+  const segments = normalizedRelativePath
+    .split(path.posix.sep)
+    .map((segment) => segment.toLowerCase());
+  if (
+    segments.some((segment) =>
+      segment === "tmp"
+      || segment === ".tmp"
+      || segment === "cache"
+      || segment === ".cache"
+      || segment === "logs"
+      || segment === ".logs"
+      || segment === "secrets"
+      || segment === ".secrets"
+    )
+  ) {
+    return false;
+  }
+
+  const basename = path.posix.basename(normalizedRelativePath).toLowerCase();
+  if (isHostedCodexHomeSensitiveBasename(basename)) {
+    return false;
+  }
+
   return (
-    relativePath === ".murph"
-    || relativePath === ".murph/config.json"
+    normalizedRelativePath === "config.toml"
+    || normalizedRelativePath === "session_index.jsonl"
+    || normalizedRelativePath === "sessions"
+    || normalizedRelativePath.startsWith(`sessions${path.posix.sep}`)
+  );
+}
+
+function isHostedCodexHomeSensitiveBasename(basename: string): boolean {
+  if (
+    basename === ".netrc"
+    || basename === "auth.json"
+    || basename === "credentials.json"
+    || basename === "history.json"
+    || basename === "history.jsonl"
+    || basename === "history.jsonl.db"
+    || basename === "oauth.json"
+    || basename === "token.json"
+    || basename === "tokens.json"
+  ) {
+    return true;
+  }
+
+  if (
+    basename.includes("access-token")
+    || basename.includes("api-key")
+    || basename.includes("apikey")
+    || basename.includes("credential")
+    || basename.includes("cookie")
+    || basename.includes("oauth")
+    || basename.includes("password")
+    || basename.includes("refresh-token")
+    || basename.includes("secret")
+    || basename.includes("token")
+  ) {
+    return true;
+  }
+
+  return (
+    basename.endsWith(".cer")
+    || basename.endsWith(".crt")
+    || basename.endsWith(".der")
+    || basename.endsWith(".key")
+    || basename.endsWith(".keystore")
+    || basename.endsWith(".lock")
+    || basename.endsWith(".log")
+    || basename.endsWith(".p12")
+    || basename.endsWith(".pem")
+    || basename.endsWith(".pfx")
+    || basename.endsWith(".pid")
+    || basename.endsWith(".sock")
+    || basename.endsWith(".socket")
+    || basename.endsWith(".tmp")
+    || basename.startsWith(".tmp-")
   );
 }
 
