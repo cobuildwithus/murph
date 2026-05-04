@@ -44,6 +44,9 @@ describe('assistant input attachment evidence model materialization', () => {
       mediaType: 'image/jpeg',
       reason: 'supported-format',
     })
+    expect(bundle.fileName).toBe('01__meal.jpg')
+    expect(bundle.combinedText).toContain('fileName: 01__meal.jpg')
+    expect(bundle.combinedText).not.toContain('attachmentId:')
 
     const prepared = await prepareAssistantInputMultimodalUserMessageContent({
       attachmentSources: [bundle],
@@ -58,6 +61,35 @@ describe('assistant input attachment evidence model materialization', () => {
       text: 'Look at this image.',
     })
     expect(prepared.userMessageContent?.some((part) => part.type === 'image')).toBe(true)
+    expect(prepared.userMessageContent).toContainEqual({
+      type: 'text',
+      text: 'Attachment image 1 (01__meal.jpg).',
+    })
+  })
+
+  it('uses preserved filenames when deciding image routing eligibility', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const imagePath = 'raw/assistant-input/ain_11111111111111111111111111111111/attachments/001'
+    await writeVaultFile(vaultRoot, imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+    const bundle = await buildAssistantInputAttachmentModelBundle({
+      attachment: {
+        ...createAttachmentEvidence({
+          kind: 'image',
+          mime: 'application/octet-stream',
+          rawPath: imagePath,
+        }),
+        fileName: 'meal.png',
+      },
+      vaultRoot,
+    })
+
+    expect(bundle.fileName).toBe('meal.png')
+    expect(bundle.routingImage).toMatchObject({
+      eligible: true,
+      mediaType: 'image/png',
+      reason: 'supported-format',
+    })
   })
 
   it.each([
@@ -271,7 +303,7 @@ describe('assistant input attachment evidence model materialization', () => {
       },
       {
         type: 'text',
-        text: 'Attachment image 1.',
+        text: 'Attachment image 1 (01__meal.jpg).',
       },
       expect.objectContaining({
         type: 'image',

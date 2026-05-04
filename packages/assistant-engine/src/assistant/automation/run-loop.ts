@@ -47,6 +47,7 @@ import {
   materializeAssistantInputAttachmentRawArtifactRefs,
   type InboxCaptureAttachmentLike,
 } from '../inbox-attachment-evidence.js'
+import { normalizeAssistantInputFileName } from '../attachment-file-name.js'
 import { notifyAssistantActiveTurnInputAvailable } from '../active-turn-input-controller.js'
 import {
   errorMessage,
@@ -346,7 +347,7 @@ async function stageImportedCaptureAssistantInputEvent(input: {
             contentType: normalizeLocalAssistantInputContentType(
               attachment.mime,
             ),
-            fileName: null,
+            fileName: normalizeLocalAssistantInputFileName(attachment.fileName),
             kind: normalizeLocalAssistantInputToken(attachment.kind, 'attachment'),
             sizeBytes: normalizeLocalAssistantInputSize(
               attachment.byteSize,
@@ -786,6 +787,10 @@ function normalizeLocalAssistantInputContentType(value: unknown): string | null 
       .test(normalized)
     ? normalized
     : null
+}
+
+function normalizeLocalAssistantInputFileName(value: unknown): string | null {
+  return normalizeAssistantInputFileName(value)
 }
 
 function normalizeLocalAssistantInputSize(value: unknown): number | null {

@@ -37,6 +37,9 @@ export {
   type UpsertAssistantInputEventInput,
 } from './input-store.js'
 export {
+  normalizeAssistantInputFileName,
+} from './attachment-file-name.js'
+export {
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,

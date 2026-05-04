@@ -5,6 +5,7 @@ import type {
   AssistantInputAttachmentEvidence,
   AssistantInputAttachmentEvidenceItem,
 } from './input-store.js'
+import { normalizeAssistantInputFileName } from './attachment-file-name.js'
 
 const INLINE_FRAGMENT_TEXT_MAX_LENGTH = 6_000
 const SAFE_EVIDENCE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,190}$/u
@@ -143,7 +144,7 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
       input.descriptorAttachmentId,
       normalizeEvidenceToken(input.attachment.attachmentId, input.fallbackAttachmentId),
     ),
-    fileName: null,
+    fileName: normalizeFileName(input.attachment.fileName),
     inlineFragments: [
       createInlineFragment({
         kind: 'attachment_extracted_text',
@@ -262,6 +263,10 @@ function extensionForAttachmentArtifact(input: {
   }
 
   return input.kind === 'document' ? '.bin' : '.dat'
+}
+
+function normalizeFileName(value: unknown): string | null {
+  return normalizeAssistantInputFileName(value)
 }
 
 function extensionForMediaType(mediaType: string | null): string | null {

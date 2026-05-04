@@ -20,6 +20,7 @@ import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 const mocks = vi.hoisted(() => ({
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
+  emitHostedExecutionStructuredLog: vi.fn(),
   ensureHostedAssistantOperatorDefaults: vi.fn(),
   inboxInit: vi.fn(),
   inboxList: vi.fn(),
@@ -40,6 +41,17 @@ vi.mock("@murphai/contracts", async () => {
       ...actual.VAULT_LAYOUT,
       metadata: "vault.json",
     },
+  };
+});
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
   };
 });
 
@@ -76,7 +88,9 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 });
 
 import {
+  ensureHostedInboxSidecarReady,
   prepareHostedWakeContext,
+  prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
   reconcileHostedAssistantChannelState,
   requireHostedBootstrapForWake,
@@ -145,6 +159,7 @@ beforeEach(() => {
   mocks.inboxList.mockResolvedValue({
     items: [],
   });
+  mocks.inboxInit.mockResolvedValue(undefined);
   mocks.readOperatorConfig.mockResolvedValue(null);
   mocks.resolveHostedAssistantConfig.mockResolvedValue(null);
   mocks.resolveHostedAssistantOperatorDefaultsState.mockReturnValue({
@@ -656,6 +671,91 @@ describe("hosted runtime context coverage", () => {
           }),
         ),
       ).resolves.toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("initializes hosted inbox sidecar with rebuild and makes later projection init cheap", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+
+    try {
+      await expect(
+        ensureHostedInboxSidecarReady({
+          bestEffort: false,
+          rebuild: true,
+          requestId: "req_startup_sidecar",
+          vaultRoot,
+        }),
+      ).resolves.toBe(true);
+
+      await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_sidecar");
+
+      expect(mocks.createIntegratedInboxServices).toHaveBeenCalledTimes(2);
+      expect(mocks.inboxInit).toHaveBeenNthCalledWith(1, {
+        rebuild: true,
+        requestId: "req_startup_sidecar",
+        vault: vaultRoot,
+      });
+      expect(mocks.inboxInit).toHaveBeenNthCalledWith(2, {
+        rebuild: false,
+        requestId: "req_projection_sidecar",
+        vault: vaultRoot,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("uses rebuild for projection init when startup sidecar bootstrap was skipped", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+
+    try {
+      await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_without_startup");
+
+      expect(mocks.inboxInit).toHaveBeenCalledWith({
+        rebuild: true,
+        requestId: "req_projection_without_startup",
+        vault: vaultRoot,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("logs sanitized best-effort hosted inbox sidecar bootstrap failures", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+    const sensitiveErrorMessage =
+      "failed rebuilding capture cap_private_attachment_001 from raw/inbox/private-labs.pdf";
+    mocks.inboxInit.mockRejectedValueOnce(
+      new Error(sensitiveErrorMessage),
+    );
+
+    try {
+      await expect(
+        ensureHostedInboxSidecarReady({
+          bestEffort: true,
+          rebuild: true,
+          requestId: "req_startup_sidecar_failed",
+          vaultRoot,
+        }),
+      ).resolves.toBe(false);
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "hosted.inbox",
+          details: expect.objectContaining({
+            errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
+            rebuild: true,
+            requestId: "req_startup_sidecar_failed",
+          }),
+          level: "warn",
+          message: "Hosted inbox sidecar bootstrap failed; continuing best-effort.",
+        }),
+      );
+      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
+        sensitiveErrorMessage,
+      );
     } finally {
       await cleanup();
     }

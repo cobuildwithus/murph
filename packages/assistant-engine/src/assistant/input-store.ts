@@ -69,7 +69,7 @@ const ASSISTANT_INPUT_RUNTIME_EVENT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
 const ASSISTANT_INPUT_EVENT_REASON_CODE_PATTERN =
   /^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/u
 const ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u
-const ASSISTANT_INPUT_EVENT_SAFE_FILE_NAME_PATTERN = /^[^/\\:?#[\]\r\n]{1,191}$/u
+const ASSISTANT_INPUT_EVENT_SAFE_FILE_NAME_PATTERN = /^[^\u0000-\u001f\u007f/\\:?#[\]]{1,191}$/u
 
 const assistantInputProjectionStatusValues = [
   'not_attempted',
@@ -853,6 +853,14 @@ function assertAssistantInputEventReplayCompatible(input: {
   if (stableStringify(existingIdentity) === stableStringify(nextIdentity)) {
     return
   }
+  const replayCompatibilityIdentity =
+    assistantInputEventReplayCompatibilityIdentity({
+      existing: input.existing,
+      next: input.next,
+    })
+  if (stableStringify(existingIdentity) === stableStringify(replayCompatibilityIdentity)) {
+    return
+  }
 
   throw new VaultCliError(
     'ASSISTANT_INPUT_EVENT_CONFLICT',
@@ -863,9 +871,47 @@ function assertAssistantInputEventReplayCompatible(input: {
   )
 }
 
+function assistantInputEventReplayCompatibilityIdentity(input: {
+  existing: AssistantInputEventRecord
+  next: AssistantInputEventRecord
+}): unknown {
+  return {
+    ...assistantInputEventImmutableIdentity(input.next),
+    content: assistantInputContentReplayCompatibilitySnapshot({
+      existing: input.existing.content,
+      next: input.next.content,
+    }),
+  }
+}
+
+function assistantInputContentReplayCompatibilitySnapshot(input: {
+  existing: AssistantInputContent
+  next: AssistantInputContent
+}): AssistantInputContent {
+  const existingDescriptors = input.existing.attachmentDescriptors
+  const nextDescriptors = input.next.attachmentDescriptors
+  if (existingDescriptors.length !== nextDescriptors.length) {
+    return input.next
+  }
+
+  return {
+    ...input.next,
+    attachmentDescriptors: nextDescriptors.map((descriptor, index) => {
+      const existingDescriptor = existingDescriptors[index]
+      if (existingDescriptor?.fileName !== null || descriptor.fileName === null) {
+        return descriptor
+      }
+      return {
+        ...descriptor,
+        fileName: null,
+      }
+    }),
+  }
+}
+
 function assistantInputEventImmutableIdentity(
   record: AssistantInputEventRecord,
-): unknown {
+): Record<string, unknown> {
   return {
     content: record.content,
     conversation: record.conversation,
@@ -1424,6 +1470,13 @@ function safeAttachmentFileNameSchema() {
     .default(null)
     .superRefine((value, context) => {
       if (value === null) {
+        return
+      }
+      if (value === '.' || value === '..') {
+        context.addIssue({
+          code: 'custom',
+          message: 'fileName must not be a path segment sentinel.',
+        })
         return
       }
       if (isPathOrUrlLike(value)) {

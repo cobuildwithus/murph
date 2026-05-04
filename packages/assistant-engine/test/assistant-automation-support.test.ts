@@ -1179,7 +1179,7 @@ describe('assistant auto-reply prompt builder support', () => {
     )
   })
 
-  it('skips prepared multimodal input when no textual or rich evidence is available', async () => {
+  it('keeps lifecycle context when no textual or rich evidence is available', async () => {
     promptBuilderMocks.buildAssistantInputAttachmentModelBundles.mockResolvedValue([
       {
         attachmentId: 'bundle-1',
@@ -1217,10 +1217,15 @@ describe('assistant auto-reply prompt builder support', () => {
       '/tmp/automation-support-vault',
     )
 
-    expect(result).toEqual({
-      kind: 'skip',
-      reason: 'input has no text or parsed attachment content',
-    })
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('Attachment evidence:')
+    expect(result.prompt).toContain('- raw evidence: partial')
+    expect(result.prompt).toContain('- parser output: succeeded')
+    expect(result.prompt).toContain('Attachment 1\nfileName: attachment-1.txt')
+    expect(result.userMessageContent).toBeNull()
   })
 
   it('prepares rich multimodal input when only attachment evidence remains', async () => {

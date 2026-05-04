@@ -139,6 +139,59 @@ describe('assistant input event store', () => {
     expect((await stat(inputPath)).mode & 0o077).toBe(0)
   })
 
+  it('treats safe descriptor filename additions as compatible with old staged input', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-filename-replay-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_filename_replay',
+      itemId: 'item_filename_replay',
+      laneSeq: '42',
+    })
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          attachmentDescriptors: [
+            {
+              attachmentId: 'att_1',
+              contentType: 'audio/mp4',
+              fileName: null,
+              kind: 'audio',
+              sizeBytes: 1234,
+            },
+          ],
+          text: 'decoded hosted text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef,
+      },
+    })
+
+    const replay = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          attachmentDescriptors: [
+            {
+              attachmentId: 'att_1',
+              contentType: 'audio/mp4',
+              fileName: 'voice-note.m4a',
+              kind: 'audio',
+              sizeBytes: 1234,
+            },
+          ],
+          text: 'decoded hosted text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef,
+      },
+    })
+
+    expect(replay).toEqual(first)
+    expect(replay.content.attachmentDescriptors[0]?.fileName).toBeNull()
+  })
+
   it('uses source-neutral ids for stored inbox source refs', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-inbox-id-',
@@ -1204,6 +1257,54 @@ describe('assistant input event store', () => {
         },
       }),
     ).rejects.toThrow(/paths or URLs/iu)
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            attachmentDescriptors: [
+              {
+                attachmentId: 'att_control_char',
+                contentType: 'audio/mp4',
+                fileName: 'voice\tmemo.m4a',
+                kind: 'audio',
+              },
+            ],
+            text: 'unsafe attachment filename',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_unsafe_control_filename',
+            laneSeq: '44',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/Invalid string|fileName/iu)
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            attachmentDescriptors: [
+              {
+                attachmentId: 'att_dotdot',
+                contentType: 'audio/mp4',
+                fileName: '..',
+                kind: 'audio',
+              },
+            ],
+            text: 'unsafe attachment filename',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_unsafe_dotdot_filename',
+            laneSeq: '45',
+          }),
+        },
+      }),
+    ).rejects.toThrow(/path segment sentinel/iu)
   })
 
   it('rejects raw provider payload, auth header, and oversized text', async () => {

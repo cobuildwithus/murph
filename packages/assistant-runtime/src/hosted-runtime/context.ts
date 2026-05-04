@@ -70,6 +70,7 @@ const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelStat
   telegramAutoReplyEnabled: false,
 };
 const DEFAULT_HOSTED_MEMBER_TIME_ZONE = "America/New_York";
+const hostedInboxSidecarReadyByVaultRoot = new Map<string, boolean>();
 
 export async function prepareHostedWakeContext(
   vaultRoot: string,
@@ -515,14 +516,51 @@ export async function requireHostedBootstrapForWake(
   );
 }
 
+export async function ensureHostedInboxSidecarReady(input: {
+  bestEffort: boolean;
+  rebuild: boolean;
+  requestId: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const inboxServices = createIntegratedInboxServices();
+  try {
+    await inboxServices.init({
+      rebuild: input.rebuild,
+      requestId: input.requestId,
+      vault: input.vaultRoot,
+    });
+    hostedInboxSidecarReadyByVaultRoot.set(input.vaultRoot, true);
+    return true;
+  } catch (error) {
+    hostedInboxSidecarReadyByVaultRoot.set(input.vaultRoot, false);
+    if (!input.bestEffort) {
+      throw error;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.inbox",
+      details: {
+        errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
+        errorName: error instanceof Error ? error.name : typeof error,
+        rebuild: input.rebuild,
+        requestId: input.requestId,
+      },
+      level: "warn",
+      message: "Hosted inbox sidecar bootstrap failed; continuing best-effort.",
+      phase: "wake.running",
+    });
+    return false;
+  }
+}
+
 export async function prepareHostedInboxProjectionRuntime(
   vaultRoot: string,
   requestId: string,
 ): Promise<void> {
-  const inboxServices = createIntegratedInboxServices();
-  await inboxServices.init({
-    rebuild: false,
+  await ensureHostedInboxSidecarReady({
+    bestEffort: false,
+    rebuild: hostedInboxSidecarReadyByVaultRoot.get(vaultRoot) !== true,
     requestId,
-    vault: vaultRoot,
+    vaultRoot,
   });
 }

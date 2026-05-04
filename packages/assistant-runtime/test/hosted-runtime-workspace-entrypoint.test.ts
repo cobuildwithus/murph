@@ -3,11 +3,13 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { initializeVault } from "@murphai/core";
 import {
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
   writeHostedBundleTextFile,
   resolveAssistantStatePaths,
+  resolveRuntimePaths,
 } from "@murphai/runtime-state/node";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -23,7 +25,22 @@ import {
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  ensureHostedInboxSidecarReady: vi.fn(),
+}));
+
+vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/hosted-runtime/context.ts")>();
+
+  return {
+    ...actual,
+    ensureHostedInboxSidecarReady: mocks.ensureHostedInboxSidecarReady.mockImplementation(
+      actual.ensureHostedInboxSidecarReady,
+    ),
+  };
+});
 
 import {
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
@@ -74,48 +91,62 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: Array<{ id: string; route: string }> = [];
 
     try {
+      const ensureHostedInboxSidecarReadyImpl =
+        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
+      assert.ok(ensureHostedInboxSidecarReadyImpl);
+      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
+        events.push("sidecar.ready");
+        assert.equal(input.bestEffort, true);
+        assert.equal(input.rebuild, true);
+        assert.equal(input.requestId, "hosted-workspace-invocation:attempt_synthetic_workspace_entrypoint");
+        assert.equal(input.vaultRoot, path.resolve(vaultRoot));
+        return await ensureHostedInboxSidecarReadyImpl(input);
+      });
+
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-          attemptId: "attempt_synthetic_workspace_entrypoint",
-          budget: {
-            maxMailboxItems: 10,
+            attemptId: "attempt_synthetic_workspace_entrypoint",
+            budget: {
+              maxMailboxItems: 10,
+            },
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
           },
-          leaseGeneration: "7",
-          reason: "nudge",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
-        },
         }),
-      {
-        async createCheckpointSnapshot(snapshotInput) {
-          const state = await readHostedMailboxImportState({ vaultRoot });
-          events.push(`snapshot:${state.watermarks.conversation}`);
-          assert.equal(snapshotInput.state.watermarks.conversation, "1");
-          return {
-            snapshotRef: createBundleRef({
-              hash: "a".repeat(64),
-              key: "users/bundles/member-synthetic/workspace-entrypoint.bundle.json",
-              size: 512,
-            }),
-          };
-        },
-        async importItem(item) {
-          imported.push({
-            id: item.item.id,
-            route: item.route.action,
-          });
-          events.push(`import:${item.item.id}`);
-          return { status: "imported" };
-        },
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort,
-        }),
-        vaultRoot,
-      });
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            const state = await readHostedMailboxImportState({ vaultRoot });
+            events.push(`snapshot:${state.watermarks.conversation}`);
+            assert.equal(snapshotInput.state.watermarks.conversation, "1");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/workspace-entrypoint.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push({
+              id: item.item.id,
+              route: item.route.action,
+            });
+            events.push(`import:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort,
+          }),
+          vaultRoot,
+        });
       assert.deepEqual(events, [
         "workspace.read",
+        "sidecar.ready",
         "mailbox.fetch",
         "import:mailbox_item_entrypoint_001",
         "snapshot:1",
@@ -148,6 +179,9 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         status: "idle",
       });
+      const runtimePaths = resolveRuntimePaths(vaultRoot);
+      await stat(runtimePaths.inboxConfigPath);
+      await stat(runtimePaths.inboxDbPath);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

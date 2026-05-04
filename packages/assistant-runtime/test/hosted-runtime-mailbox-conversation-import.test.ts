@@ -151,7 +151,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(event.content.attachmentDescriptors[0], {
       attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
       contentType: "audio/mp4",
-      fileName: null,
+      fileName: "voice.m4a",
       kind: "voice_memo",
       sizeBytes: 12_345,
     });
@@ -163,7 +163,7 @@ describe("hosted mailbox conversation import adapter", () => {
       updatedAt: event.projection.updatedAt,
     });
     assert.equal(JSON.stringify(event).includes("https://signed.example.invalid"), false);
-    assert.equal(JSON.stringify(event).includes("voice.m4a"), false);
+    assert.equal(JSON.stringify(event).includes("voice.m4a"), true);
     assert.equal(JSON.stringify(event).includes("+15550100000"), false);
 
     await outcome.afterCheckpoint?.();
@@ -297,7 +297,7 @@ describe("hosted mailbox conversation import adapter", () => {
           manifestPath:
             "derived/inbox/cap_synthetic_evidence_001/attachments/att_voice_1/manifest.json",
         },
-        fileName: null,
+        fileName: "voice-note.m4a",
         inlineFragments: [
           {
             kind: "attachment_extracted_text",
@@ -964,6 +964,20 @@ describe("hosted mailbox conversation import adapter", () => {
               kind: "voice",
               mimeType: "audio/ogg",
             },
+            {
+              fileId: "telegram_unsafe_file_1",
+              fileName: "../private-photo.jpg",
+              fileSize: 2048,
+              kind: "photo",
+              mimeType: "image/jpeg",
+            },
+            {
+              fileId: "telegram_dot_file_1",
+              fileName: "..",
+              fileSize: 64,
+              kind: "document",
+              mimeType: "application/octet-stream",
+            },
           ],
           mediaGroupId: "album_7",
           messageId: "777",
@@ -1023,19 +1037,34 @@ describe("hosted mailbox conversation import adapter", () => {
         : "",
       HASHED_IDENTIFIER_PATTERN,
     );
-    assert.equal(event.content.attachmentDescriptors.length, 1);
+    assert.equal(event.content.attachmentDescriptors.length, 3);
     assert.deepEqual(event.content.attachmentDescriptors[0], {
       attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
       contentType: "audio/ogg",
-      fileName: null,
+      fileName: "private-voice.ogg",
       kind: "voice",
       sizeBytes: 4096,
+    });
+    assert.deepEqual(event.content.attachmentDescriptors[1], {
+      attachmentId: event.content.attachmentDescriptors[1]?.attachmentId,
+      contentType: "image/jpeg",
+      fileName: null,
+      kind: "photo",
+      sizeBytes: 2048,
+    });
+    assert.deepEqual(event.content.attachmentDescriptors[2], {
+      attachmentId: event.content.attachmentDescriptors[2]?.attachmentId,
+      contentType: "application/octet-stream",
+      fileName: null,
+      kind: "document",
+      sizeBytes: 64,
     });
     assert.match(
       event.content.attachmentDescriptors[0]?.attachmentId ?? "",
       HASHED_IDENTIFIER_PATTERN,
     );
-    assert.equal(JSON.stringify(event).includes("private-voice.ogg"), false);
+    assert.equal(JSON.stringify(event).includes("private-voice.ogg"), true);
+    assert.equal(JSON.stringify(event).includes("../private-photo.jpg"), false);
     assert.equal(JSON.stringify(event).includes("album_7"), false);
   });
 
@@ -1950,11 +1979,11 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(event.content.attachmentDescriptors[0], {
       attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
       contentType: "application/pdf",
-      fileName: null,
+      fileName: "labs.pdf",
       kind: "email_attachment",
       sizeBytes: 321,
     });
-    assert.equal(JSON.stringify(event).includes("labs.pdf"), false);
+    assert.equal(JSON.stringify(event).includes("labs.pdf"), true);
     assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
   });
 
