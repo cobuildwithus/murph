@@ -11,6 +11,7 @@ From the repo root:
 ```bash
 pnpm hosted-local up
 pnpm hosted-local e2e
+pnpm hosted-local e2e checkpoint-baseline --no-bundle
 pnpm hosted-local e2e linq-webhook
 pnpm hosted-local e2e --list
 pnpm hosted-local profiles

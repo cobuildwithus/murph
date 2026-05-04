@@ -74,6 +74,9 @@ describe("hosted-local harness", () => {
   });
 
   test("resolves scenario aliases through one registry", () => {
+    expect(resolveHostedLocalE2eScenarios("checkpoint-baseline")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("telegram")[0]?.name).toBe(
       "telegram-first-contact",
     );
