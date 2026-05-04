@@ -14,6 +14,7 @@ import type {
   DeviceSyncIngressWebhook,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncProvider,
+  DeviceSyncPublicIngressConnectionEstablishedInput,
   DeviceSyncPublicIngressStore,
   DeviceSyncPublicIngressWebhookAcceptedInput,
   DeviceSyncPublicIngressWebhookAcceptedResult,
@@ -2475,6 +2476,40 @@ test("public ingress preserves callback redirect context on OAuth callback failu
       error.details?.provider === "demo" &&
       error.details?.returnTo === "https://app.example.test/settings/devices",
   );
+});
+
+test("public ingress passes connect source context to connection-established hooks", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const connectionEvents: DeviceSyncPublicIngressConnectionEstablishedInput[] = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    allowedReturnOrigins: ["https://app.example.test"],
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+    hooks: {
+      onConnectionEstablished(event) {
+        connectionEvents.push(event);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({
+    connectSourceId: "garmin",
+    connectTarget: "garmin",
+    provider: "demo",
+    returnTo: "https://app.example.test/settings/devices",
+  });
+
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  assert.equal(connectionEvents.length, 1);
+  assert.equal(connectionEvents[0]?.account.id, connected.account.id);
+  assert.equal(connectionEvents[0]?.connectSourceId, "garmin");
+  assert.equal(connectionEvents[0]?.connectTarget, "garmin");
 });
 
 test("public ingress best-effort revokes pending provider access when OAuth persistence fails", async () => {

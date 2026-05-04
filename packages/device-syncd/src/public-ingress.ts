@@ -682,6 +682,8 @@ export class DeviceSyncPublicIngress {
 
       await this.hooks.onConnectionEstablished?.({
         account,
+        ...(connectSourceId ? { connectSourceId } : {}),
+        ...(connectTarget ? { connectTarget } : {}),
         connection: {
           ...connection,
           ...(initialJobs ? { initialJobs } : {}),

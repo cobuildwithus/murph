@@ -375,6 +375,8 @@ export interface ProviderWebhookAdminCapability {
 
 export interface DeviceSyncPublicIngressConnectionEstablishedInput {
   account: PublicDeviceSyncAccount;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
   connection: ProviderConnectionResult;
   provider: DeviceSyncProvider;
   now: string;

@@ -8,6 +8,7 @@ import {
   createJunctionDeviceSyncProvider,
 } from "../src/providers/junction.ts";
 import {
+  buildJunctionProviderSourceInstanceKey,
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   JUNCTION_LINK_PROVIDER_SLUGS,
@@ -208,6 +209,26 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
   assert.equal(resolveJunctionConnectTargetForSourceId("accuchek"), "accuchek_ble");
   assert.equal(resolveJunctionConnectTargetForSourceId("onetouch"), "onetouch_ble");
   assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
+});
+
+test("Junction provider source keys are stable provider-level opaque ids", () => {
+  const garminKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: "acct-junction-1",
+    sourceProviderSlug: "Garmin",
+  });
+  const garminKeyAgain = buildJunctionProviderSourceInstanceKey({
+    connectionId: "acct-junction-1",
+    sourceProviderSlug: "garmin",
+  });
+  const pelotonKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: "acct-junction-1",
+    sourceProviderSlug: "peloton",
+  });
+
+  assert.equal(garminKey, garminKeyAgain);
+  assert.notEqual(garminKey, pelotonKey);
+  assert.match(garminKey ?? "", /^jxn_src_[a-f0-9]{32}$/u);
+  assert.doesNotMatch(garminKey ?? "", /acct|junction|garmin/u);
 });
 
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
@@ -1173,16 +1194,20 @@ test("Junction polling updates source projection and imports bounded summary/tim
   );
 
   assert.equal(result.metadataPatch, undefined);
-  assert.equal(sources.length, 2);
+  assert.equal(sources.length, 1);
   assert.equal(sources[0]?.sourceProviderSlug, "oura");
-  assert.equal(sources[1]?.sourceProviderSlug, "oura");
   assert.equal(sources[0]?.status, "connected");
-  assert.match(sources[0]?.sourceInstanceKey ?? "", /^jxn_[a-f0-9]{32}$/u);
-  assert.match(sources[1]?.sourceInstanceKey ?? "", /^jxn_[a-f0-9]{32}$/u);
-  assert.notEqual(sources[0]?.sourceInstanceKey, sources[1]?.sourceInstanceKey);
+  assert.equal(
+    sources[0]?.sourceInstanceKey,
+    buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "oura",
+    }),
+  );
   assert.doesNotMatch(sources[0]?.sourceInstanceKey ?? "", /provider|device|oura|ring|app/u);
   assert.equal(sources[0]?.resourceAvailabilitySummary.sourceInstanceKeyFallback, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.sleep, true);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.activity, true);
   assert.equal(sources[0]?.resourceAvailabilitySummary.connectedSources, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.source, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.provider, undefined);
@@ -1271,7 +1296,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(requests.every((url) => !url.includes("glucose") && !url.includes("cgm")), true);
 });
 
-test("Junction source projection marks the slug-only instance-key fallback", async () => {
+test("Junction source projection uses provider-level keys for slug-only sources", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -1335,9 +1360,15 @@ test("Junction source projection marks the slug-only instance-key fallback", asy
   );
 
   assert.equal(sources.length, 1);
-  assert.match(sources[0]?.sourceInstanceKey ?? "", /^jxn_[a-f0-9]{32}$/u);
+  assert.equal(
+    sources[0]?.sourceInstanceKey,
+    buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "withings",
+    }),
+  );
   assert.equal(sources[0]?.resourceAvailabilitySummary.body, true);
-  assert.equal(sources[0]?.resourceAvailabilitySummary.sourceInstanceKeyFallback, true);
+  assert.equal(sources[0]?.resourceAvailabilitySummary.sourceInstanceKeyFallback, undefined);
 });
 
 test("Junction resource jobs fetch only the hinted resource window", async () => {
