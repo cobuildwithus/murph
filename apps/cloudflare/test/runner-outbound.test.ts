@@ -207,13 +207,11 @@ describe("handleRunnerOutboundRequest", () => {
     expect(stub.bindUser).toHaveBeenCalledWith("member_123");
   });
 
-  it("briefly reuses successful outbound bindUser assertions", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-04T00:00:00.000Z"));
-    const stub = {
-      bindUser: vi.fn(async (userId: string) => ({ userId })),
-    };
-    const getByName = vi.fn(() => stub);
+  it("does not reuse successful outbound bindUser assertions across calls", async () => {
+    const bindUser = vi.fn(async (userId: string) => ({ userId }));
+    const getByName = vi.fn(() => ({
+      bindUser,
+    }));
     const env = createDirectRunnerOutboundEnv({
       USER_RUNNER: {
         getByName,
@@ -222,17 +220,15 @@ describe("handleRunnerOutboundRequest", () => {
 
     const firstStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
     const secondStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
-    await vi.advanceTimersByTimeAsync(60_001);
     const thirdStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
 
-    expect(firstStub).toBe(stub);
-    expect(secondStub).toBe(stub);
-    expect(thirdStub).toBe(stub);
-    expect(getByName).toHaveBeenCalledTimes(2);
-    expect(stub.bindUser).toHaveBeenCalledTimes(2);
+    expect(firstStub).not.toBe(secondStub);
+    expect(secondStub).not.toBe(thirdStub);
+    expect(getByName).toHaveBeenCalledTimes(3);
+    expect(bindUser).toHaveBeenCalledTimes(3);
   });
 
-  it("drops rejected outbound bindUser assertions from the cache", async () => {
+  it("retries rejected outbound bindUser assertions", async () => {
     const bindUser = vi.fn()
       .mockRejectedValueOnce(new Error("bind failed"))
       .mockResolvedValueOnce({ userId: "member_123" });
@@ -797,15 +793,14 @@ describe("handleRunnerOutboundRequest", () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
+    const getByName = vi.fn(() => ({
+      bindUser,
+      ownsActiveInvocationLease,
+    }));
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
-        getByName() {
-          return {
-            bindUser,
-            ownsActiveInvocationLease,
-          };
-        },
+        getByName,
       },
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
@@ -836,7 +831,8 @@ describe("handleRunnerOutboundRequest", () => {
     expect(secondResponse.status).toBe(200);
     expect(firstResponse.status).toBe(200);
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
-    expect(bindUser).toHaveBeenCalledOnce();
+    expect(getByName).toHaveBeenCalledTimes(4);
+    expect(bindUser).toHaveBeenCalledTimes(4);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -889,7 +885,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(secondResponse.status).toBe(200);
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
-    expect(bindUser).toHaveBeenCalledOnce();
+    expect(bindUser).toHaveBeenCalledTimes(3);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -1112,7 +1108,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(secondContext.rootKey).not.toBe(firstContext.rootKey);
     expect(secondContext.rootKey[0]).toBe(101);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
-    expect(bindUser).toHaveBeenCalledOnce();
+    expect(bindUser).toHaveBeenCalledTimes(2);
   });
 
   it("coalesces concurrent outbound runtime crypto cold binds and fetches", async () => {
@@ -1177,7 +1173,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
 
     expect(thirdResolved).not.toBe(firstResolved);
-    expect(bindUser).toHaveBeenCalledOnce();
+    expect(bindUser).toHaveBeenCalledTimes(2);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
