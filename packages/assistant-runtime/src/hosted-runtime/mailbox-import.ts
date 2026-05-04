@@ -120,150 +120,160 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   let importedCount = 0;
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let nextRetryAt: string | null = null;
+  const stoppedLanes = new Set<HostedMailboxLane>();
+  const expectedSeqByLane = Object.fromEntries(
+    lanes.map((lane) => [lane, BigInt(nextState.watermarks[lane]) + 1n]),
+  ) as Record<HostedMailboxLane, bigint>;
 
-  for (const lane of lanes) {
-    let expectedSeq = BigInt(nextState.watermarks[lane]) + 1n;
+  for (const { item, lane } of interleaveMailboxItemsByLane(lanes, itemsByLane)) {
+    if (stoppedLanes.has(lane)) {
+      continue;
+    }
 
-    for (const item of itemsByLane[lane]) {
-      const route = createHostedMailboxRoutingPlan(item);
-      const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
+    const route = createHostedMailboxRoutingPlan(item);
+    const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
+    const expectedSeq = expectedSeqByLane[lane];
 
-      if (itemSeq !== null && itemSeq !== expectedSeq) {
-        blocked.push({
-          itemId: item.id,
-          lane,
-          reasonCode: "lane.gap",
-          retryable: true,
-          seq: item.laneSeq,
-        });
-        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
-        break;
-      }
+    if (itemSeq !== null && itemSeq !== expectedSeq) {
+      blocked.push({
+        itemId: item.id,
+        lane,
+        reasonCode: "lane.gap",
+        retryable: true,
+        seq: item.laneSeq,
+      });
+      nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      stoppedLanes.add(lane);
+      continue;
+    }
 
-      if (route.state === "quarantine") {
-        nextState = recordHostedMailboxImportQuarantine(nextState, {
-          itemKind: item.kind,
-          lane,
-          occurredAt: now(),
-          reasonCode: `route.${route.quarantineCode}`,
-          seq: normalizeSeqForStatus(item.laneSeq),
-        });
-        blocked.push({
-          itemId: item.id,
-          lane,
-          reasonCode: `route.${route.quarantineCode}`,
-          retryable: false,
-          seq: item.laneSeq,
-        });
-        if (itemSeq === null) {
-          break;
-        }
-        nextState = advanceHostedMailboxLaneWatermark(nextState, {
-          lane,
-          seq: item.laneSeq,
-        }).state;
-        expectedSeq += 1n;
-        continue;
-      }
-
+    if (route.state === "quarantine") {
+      nextState = recordHostedMailboxImportQuarantine(nextState, {
+        itemKind: item.kind,
+        lane,
+        occurredAt: now(),
+        reasonCode: `route.${route.quarantineCode}`,
+        seq: normalizeSeqForStatus(item.laneSeq),
+      });
+      blocked.push({
+        itemId: item.id,
+        lane,
+        reasonCode: `route.${route.quarantineCode}`,
+        retryable: false,
+        seq: item.laneSeq,
+      });
       if (itemSeq === null) {
-        throw new TypeError("Hosted mailbox routed seq must be a valid decimal string.");
-      }
-
-      const payload = await resolveHostedMailboxItemPayload({
-        item,
-        mailboxPort: input.mailboxPort,
-        requestId: `${input.requestId}:${item.id}:payload`,
-      });
-      if (payload.status === "blocked") {
-        const reasonCode = `payload.${payload.code}`;
-        blocked.push({
-          itemId: item.id,
-          lane,
-          reasonCode,
-          retryable: payload.retryable,
-          seq: item.laneSeq,
-        });
-        if (payload.retryable) {
-          nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
-          break;
-        }
-        nextState = recordHostedMailboxImportQuarantine(nextState, {
-          itemKind: item.kind,
-          lane,
-          occurredAt: now(),
-          reasonCode,
-          seq: item.laneSeq,
-        });
-        nextState = advanceHostedMailboxLaneWatermark(nextState, {
-          lane,
-          seq: item.laneSeq,
-        }).state;
-        expectedSeq += 1n;
+        stoppedLanes.add(lane);
         continue;
       }
-
-      const outcome = await input.importItem({
-        item,
-        payload,
-        route,
-      });
-      if (outcome.status === "deferred") {
-        const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
-        blocked.push({
-          itemId: item.id,
-          lane,
-          reasonCode,
-          retryable: true,
-          seq: item.laneSeq,
-        });
-        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
-        break;
-      }
-
-      if (outcome.status === "blocked") {
-        const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
-        blocked.push({
-          itemId: item.id,
-          lane,
-          reasonCode,
-          retryable: outcome.retryable,
-          seq: item.laneSeq,
-        });
-        if (outcome.retryable) {
-          nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
-          break;
-        }
-        nextState = recordHostedMailboxImportQuarantine(nextState, {
-          itemKind: item.kind,
-          lane,
-          occurredAt: now(),
-          reasonCode,
-          seq: item.laneSeq,
-        });
-        nextState = advanceHostedMailboxLaneWatermark(nextState, {
-          lane,
-          seq: item.laneSeq,
-        }).state;
-        expectedSeq += 1n;
-        continue;
-      }
-
       nextState = advanceHostedMailboxLaneWatermark(nextState, {
         lane,
         seq: item.laneSeq,
       }).state;
-      nextState = recordHostedMailboxImportStatus(nextState, {
+      expectedSeqByLane[lane] += 1n;
+      continue;
+    }
+
+    if (itemSeq === null) {
+      throw new TypeError("Hosted mailbox routed seq must be a valid decimal string.");
+    }
+
+    const payload = await resolveHostedMailboxItemPayload({
+      item,
+      mailboxPort: input.mailboxPort,
+      requestId: `${input.requestId}:${item.id}:payload`,
+    });
+    if (payload.status === "blocked") {
+      const reasonCode = `payload.${payload.code}`;
+      blocked.push({
+        itemId: item.id,
+        lane,
+        reasonCode,
+        retryable: payload.retryable,
+        seq: item.laneSeq,
+      });
+      if (payload.retryable) {
+        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+        stoppedLanes.add(lane);
+        continue;
+      }
+      nextState = recordHostedMailboxImportQuarantine(nextState, {
         itemKind: item.kind,
         lane,
         occurredAt: now(),
-        reasonCode: normalizeNullableReasonCode(outcome.reasonCode),
+        reasonCode,
         seq: item.laneSeq,
-        status: outcome.status,
       });
-      importedCount += outcome.status === "imported" ? 1 : 0;
-      expectedSeq += 1n;
+      nextState = advanceHostedMailboxLaneWatermark(nextState, {
+        lane,
+        seq: item.laneSeq,
+      }).state;
+      expectedSeqByLane[lane] += 1n;
+      continue;
     }
+
+    const outcome = await input.importItem({
+      item,
+      payload,
+      route,
+    });
+    if (outcome.status === "deferred") {
+      const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
+      blocked.push({
+        itemId: item.id,
+        lane,
+        reasonCode,
+        retryable: true,
+        seq: item.laneSeq,
+      });
+      nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+      stoppedLanes.add(lane);
+      continue;
+    }
+
+    if (outcome.status === "blocked") {
+      const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
+      blocked.push({
+        itemId: item.id,
+        lane,
+        reasonCode,
+        retryable: outcome.retryable,
+        seq: item.laneSeq,
+      });
+      if (outcome.retryable) {
+        nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
+        stoppedLanes.add(lane);
+        continue;
+      }
+      nextState = recordHostedMailboxImportQuarantine(nextState, {
+        itemKind: item.kind,
+        lane,
+        occurredAt: now(),
+        reasonCode,
+        seq: item.laneSeq,
+      });
+      nextState = advanceHostedMailboxLaneWatermark(nextState, {
+        lane,
+        seq: item.laneSeq,
+      }).state;
+      expectedSeqByLane[lane] += 1n;
+      continue;
+    }
+
+    nextState = advanceHostedMailboxLaneWatermark(nextState, {
+      lane,
+      seq: item.laneSeq,
+    }).state;
+    nextState = recordHostedMailboxImportStatus(nextState, {
+      itemKind: item.kind,
+      lane,
+      occurredAt: now(),
+      reasonCode: normalizeNullableReasonCode(outcome.reasonCode),
+      seq: item.laneSeq,
+      status: outcome.status,
+    });
+    importedCount += outcome.status === "imported" ? 1 : 0;
+    expectedSeqByLane[lane] += 1n;
   }
 
   return {
@@ -310,6 +320,28 @@ function groupMailboxItemsByLane(
   }
 
   return grouped;
+}
+
+function interleaveMailboxItemsByLane(
+  lanes: readonly HostedMailboxLane[],
+  itemsByLane: Record<HostedMailboxLane, HostedMailboxItem[]>,
+): Array<{ lane: HostedMailboxLane; item: HostedMailboxItem }> {
+  const ordered: Array<{ lane: HostedMailboxLane; item: HostedMailboxItem }> = [];
+  const maxItems = lanes.reduce(
+    (max, lane) => Math.max(max, itemsByLane[lane]?.length ?? 0),
+    0,
+  );
+
+  for (let index = 0; index < maxItems; index += 1) {
+    for (const lane of lanes) {
+      const item = itemsByLane[lane]?.[index];
+      if (item) {
+        ordered.push({ item, lane });
+      }
+    }
+  }
+
+  return ordered;
 }
 
 function parseMailboxSeqForImportOrNull(value: string): bigint | null {

@@ -77,6 +77,72 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.system, "0");
   });
 
+  test("interleaves mailbox lanes so conversation replies are not starved by system backlogs", async () => {
+    const firstSystem = createMailboxItem({
+      id: "mailbox_item_system_001",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const secondSystem = createMailboxItem({
+      id: "mailbox_item_system_002",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const thirdSystem = createMailboxItem({
+      id: "mailbox_item_system_003",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "3",
+    });
+    const conversation = createMailboxItem({
+      id: "mailbox_item_conversation_001",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [firstSystem, secondSystem, thirdSystem, conversation],
+    });
+    const imported: string[] = [];
+    let importAttempts = 0;
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        importAttempts += 1;
+        if (importAttempts > 2) {
+          return {
+            reasonCode: "budget.mailbox_items",
+            status: "deferred",
+          };
+        }
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_fair_lanes",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, [
+      "mailbox_item_system_001",
+      "mailbox_item_conversation_001",
+    ]);
+    assert.deepEqual(result.blocked, [
+      {
+        itemId: "mailbox_item_system_002",
+        lane: "system",
+        reasonCode: "budget.mailbox_items",
+        retryable: true,
+        seq: "2",
+      },
+    ]);
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.equal(result.state.watermarks.system, "1");
+  });
+
   test("stops a lane on a strict-prefix gap without importing later items", async () => {
     const { mailboxPort } = createMailboxPort({
       items: [

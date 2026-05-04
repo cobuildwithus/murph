@@ -1449,6 +1449,29 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ]);
   });
 
+  it("drops empty string payload fields from hosted wake job hints", () => {
+    const hint = parseHostedExecutionDeviceSyncWakeHint({
+      jobs: [
+        {
+          kind: "resource",
+          payload: {
+            objectId: "",
+            resource: "heartrate",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "",
+            windowStart: "2026-04-08T00:00:00Z",
+          },
+        },
+      ],
+    });
+
+    expect(hint?.jobs?.[0]?.payload).toEqual({
+      resource: "heartrate",
+      resourceCategory: "timeseries",
+      windowStart: "2026-04-08T00:00:00.000Z",
+    });
+  });
+
   it("rejects invalid hosted wake job payloads, payload keys, and schedule timestamps", () => {
     expect(() =>
       parseHostedExecutionDeviceSyncWakeHint({
