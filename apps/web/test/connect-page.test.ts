@@ -112,7 +112,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />32 of 32 sources</);
+  assert.match(markup, />27 of 27 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -150,11 +150,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Runkeeper",
     },
     {
-      assetPath: "/brand-logos/connect/samsung-health.png",
-      description: "Samsung phone and watch activity, sleep, heart, and wellness metrics.",
-      name: "Samsung Health",
-    },
-    {
       assetPath: "/brand-logos/connect/tandem-source.svg",
       description: "Insulin pump, CGM, therapy, and diabetes device records from Tandem.",
       name: "Tandem Source",
@@ -170,19 +165,9 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Strava",
     },
     {
-      assetPath: "/brand-logos/connect/freestyle-libre-ble.png",
-      description: "Bluetooth Libre glucose readings, trends, and sensor status in near real time.",
-      name: "Freestyle Libre BLE",
-    },
-    {
       assetPath: "/brand-logos/connect/omron.png",
       description: "Blood pressure, pulse, weight, and connected home measurements from Omron.",
       name: "Omron",
-    },
-    {
-      assetPath: "/brand-logos/connect/accuchek.svg",
-      description: "Accu-Chek glucose readings, meter history, and diabetes tracking context records.",
-      name: "Accu-Chek",
     },
     {
       assetPath: "/brand-logos/connect/eight-sleep.svg",
@@ -230,11 +215,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Wahoo",
     },
     {
-      assetPath: "/brand-logos/connect/contour-ble.png",
-      description: "Bluetooth Contour glucose meter readings and diabetes tracking history records.",
-      name: "Contour BLE",
-    },
-    {
       assetPath: "/brand-logos/connect/withings.png",
       description: "Withings scale, sleep, blood pressure, temperature, and activity measurement trends.",
       name: "Withings",
@@ -248,11 +228,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       assetPath: "/brand-logos/connect/zwift.png",
       description: "Indoor rides, runs, power, distance, elevation, and virtual training sessions.",
       name: "Zwift",
-    },
-    {
-      assetPath: "/brand-logos/connect/onetouch.png",
-      description: "OneTouch glucose readings, meter history, and diabetes tracking record context.",
-      name: "OneTouch",
     },
     {
       assetPath: "/brand-logos/connect/abbott-libreview.svg",
@@ -281,7 +256,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 32);
+  assert.equal(sources.length, 27);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length);
   assert.match(markup, /disabled=""/);
@@ -292,11 +267,16 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Apple Health</u);
   assert.doesNotMatch(markup, />Health Connect</u);
+  assert.doesNotMatch(markup, />Samsung Health</u);
+  assert.doesNotMatch(markup, />Freestyle Libre BLE</u);
+  assert.doesNotMatch(markup, />Accu-Chek</u);
+  assert.doesNotMatch(markup, />Contour BLE</u);
+  assert.doesNotMatch(markup, />OneTouch</u);
   assert.doesNotMatch(markup, />Manual</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
-  assert.ok(sourceHeadingIndex(markup, "Samsung Health") < sourceHeadingIndex(markup, "Garmin"));
   assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
-  assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Strava"));
+  assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
+  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Strava"));
   assert.ok(sourceHeadingIndex(markup, "Strava") < sourceHeadingIndex(markup, "Whoop"));
 
   for (const source of sources) {
@@ -440,9 +420,9 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
-  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, 5);
-  assert.match(markup, /aria-label="Accu-Chek connection is not available yet"/u);
-  assert.match(markup, /aria-label="Samsung Health connection is not available yet"/u);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
+  assert.doesNotMatch(markup, />Accu-Chek</u);
+  assert.doesNotMatch(markup, />Samsung Health</u);
 
   const { listVisibleConnectSources } = await import("../app/(dashboard)/connect/page");
   const visibleSourceIds = new Set(listVisibleConnectSources().map((source) => source.id));
@@ -509,7 +489,8 @@ test("ConnectPage enables mapped Junction Link source slugs only", async () => {
 
   assert.match(markup, /aria-label="Connect MapMyFitness"/u);
   assert.match(markup, /aria-label="Connect Beurer"/u);
-  assert.match(markup, /aria-label="Accu-Chek connection is not available yet"/u);
+  assert.match(markup, /aria-label="Garmin connection is not available yet"/u);
+  assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, /aria-label="Connect Accu-Chek"/u);
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 2);
 });
@@ -611,7 +592,7 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
   assert.match(markup, /Whoop connected/);
   assert.equal(markup.match(/>Connected<\/span>/gu)?.length, 2);
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
-  assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Samsung Health"));
+  assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Garmin"));
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });

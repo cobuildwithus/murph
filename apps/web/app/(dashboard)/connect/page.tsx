@@ -45,6 +45,7 @@ type ConnectPageInitialLoadError = {
 type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
 
 type ConnectSourceUi = Omit<ConnectSource, "id">;
+type DeviceConnectRoute = (typeof DEVICE_CONNECT_SOURCES)[number]["routes"][number];
 
 const CONNECT_SOURCE_UI = {
   whoop: {
@@ -264,6 +265,10 @@ export default async function ConnectPage({
 
 export function listVisibleConnectSources(): ConnectSource[] {
   return DEVICE_CONNECT_SOURCES.flatMap((source) => {
+    if (!hasHostedConnectRoute(source.routes)) {
+      return [];
+    }
+
     const ui = readConnectSourceUi(source.connectSourceId);
     return ui
       ? [
@@ -276,6 +281,10 @@ export function listVisibleConnectSources(): ConnectSource[] {
         ]
       : [];
   });
+}
+
+function hasHostedConnectRoute(routes: readonly DeviceConnectRoute[]): boolean {
+  return routes.some((route) => route.kind === "direct" || route.kind === "junction_link");
 }
 
 export function resolveConfiguredConnectSources(
