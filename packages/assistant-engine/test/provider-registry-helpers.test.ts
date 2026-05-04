@@ -36,7 +36,10 @@ import {
   extractCodexAssistantProviderUsage,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
-import { recordProviderAttemptStarted } from '../src/assistant/provider-turn/attempt-observability.ts'
+import {
+  recordProviderAttemptStarted,
+  recordProviderPlan,
+} from '../src/assistant/provider-turn/attempt-observability.ts'
 import {
   executeCodexAssistantTurnAttempt,
   resolveCodexAssistantCapabilities,
@@ -189,6 +192,59 @@ describe('Codex assistant registry helpers', () => {
       refreshThreadInstructions: false,
       routeId: 'route-1',
     })
+  })
+
+  it('records provider-plan diagnostics for production resume verification', async () => {
+    const providerConfig = normalizeAssistantProviderConfig({
+      provider: 'codex-cli',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+      reasoningEffort: 'low',
+    })
+    const route: CodexThreadIdentity = {
+      codexCommand: null,
+      label: 'primary:Codex app-server:gpt-5.5',
+      provider: 'codex-cli',
+      providerOptions: serializeAssistantProviderSessionOptions(providerConfig),
+      routeId: 'route-plan',
+    }
+
+    await recordProviderPlan({
+      activeTurnHistoryPresent: true,
+      at: '2026-05-04T00:10:24.000Z',
+      providerContinuation: 'provider-state-optimization',
+      providerRequestOrdinal: 1,
+      refreshThreadInstructions: false,
+      resumeProviderSessionIdPresent: true,
+      route,
+      sessionId: 'session-plan',
+      storedThreadInstructionsFingerprintPresent: true,
+      threadInstructionsFingerprintPresent: true,
+      turnId: 'turn-plan',
+      vault: '/vaults/test',
+    })
+
+    expect(diagnosticsMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: 'provider',
+        kind: 'provider.plan',
+        message: 'Assistant provider plan resolved.',
+        sessionId: 'session-plan',
+        turnId: 'turn-plan',
+        data: {
+          activeTurnHistoryPresent: true,
+          providerContinuation: 'provider-state-optimization',
+          providerRequestOrdinal: 1,
+          refreshThreadInstructions: false,
+          resumeProviderSessionIdPresent: true,
+          routeId: 'route-plan',
+          sessionId: 'session-plan',
+          storedThreadInstructionsFingerprintPresent: true,
+          threadInstructionsFingerprintPresent: true,
+        },
+      }),
+    )
   })
 
   it.each([

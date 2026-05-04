@@ -368,6 +368,7 @@ export async function sendAssistantMessageLocal(
             profile: {
               threadScope,
             },
+            providerRequestOrdinal,
             resolvedSession: currentSession,
             turnCreatedAt: currentUserTurn.turnCreatedAt,
             turnId: currentUserTurn.turnId,

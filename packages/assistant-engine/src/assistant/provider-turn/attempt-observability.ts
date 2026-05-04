@@ -64,6 +64,44 @@ export async function recordProviderAttemptStarted(input: {
   })
 }
 
+export async function recordProviderPlan(input: {
+  activeTurnHistoryPresent: boolean
+  at: string
+  providerContinuation: string
+  providerRequestOrdinal: number | null
+  refreshThreadInstructions: boolean
+  resumeProviderSessionIdPresent: boolean
+  route: CodexThreadIdentity
+  sessionId: string
+  storedThreadInstructionsFingerprintPresent: boolean
+  threadInstructionsFingerprintPresent: boolean
+  turnId: string
+  vault: string
+}): Promise<void> {
+  await recordAssistantDiagnosticEvent({
+    vault: input.vault,
+    component: 'provider',
+    kind: 'provider.plan',
+    message: 'Assistant provider plan resolved.',
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    data: {
+      sessionId: input.sessionId,
+      routeId: input.route.routeId,
+      providerRequestOrdinal: input.providerRequestOrdinal,
+      providerContinuation: input.providerContinuation,
+      resumeProviderSessionIdPresent: input.resumeProviderSessionIdPresent,
+      refreshThreadInstructions: input.refreshThreadInstructions,
+      activeTurnHistoryPresent: input.activeTurnHistoryPresent,
+      threadInstructionsFingerprintPresent:
+        input.threadInstructionsFingerprintPresent,
+      storedThreadInstructionsFingerprintPresent:
+        input.storedThreadInstructionsFingerprintPresent,
+    },
+    at: input.at,
+  })
+}
+
 export async function recordProviderAttemptSucceeded(input: {
   activityLabels?: readonly string[]
   attemptCount: number
