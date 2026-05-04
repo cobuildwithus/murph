@@ -456,14 +456,6 @@ export async function sendAssistantMessageLocal(
             if (activeTurnInput?.kind !== 'accepted') {
               if (activeTurnInput && phase === 'commit_barrier') {
                 activeTurnInputController.close()
-                await currentInput.activeTurnCheckpoint?.({
-                  acceptedInputIds: [],
-                  providerRequestOrdinal,
-                  sessionId: providerResult.session.sessionId,
-                  signal: currentInput.abortSignal,
-                  turnId: currentUserTurn.turnId,
-                  vault: currentInput.vault,
-                })
               }
               continue
             }
@@ -546,14 +538,16 @@ export async function sendAssistantMessageLocal(
               detail: null,
               metadata: activeTurnInput.receiptMetadata ?? {},
             })
-            await currentInput.activeTurnCheckpoint?.({
-              acceptedInputIds: acceptedInputJournal.inputIds,
-              providerRequestOrdinal,
-              sessionId: providerResult.session.sessionId,
-              signal: currentInput.abortSignal,
-              turnId: currentUserTurn.turnId,
-              vault: currentInput.vault,
-            })
+            if (acceptedInputJournal.inputIds.length > 0) {
+              await currentInput.activeTurnCheckpoint?.({
+                acceptedInputIds: acceptedInputJournal.inputIds,
+                providerRequestOrdinal,
+                sessionId: providerResult.session.sessionId,
+                signal: currentInput.abortSignal,
+                turnId: currentUserTurn.turnId,
+                vault: currentInput.vault,
+              })
+            }
             const nextInput = buildActiveTurnContinuationInput({
               acceptedInput: activeTurnInput,
               input: previousInput,
