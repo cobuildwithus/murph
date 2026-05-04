@@ -408,14 +408,52 @@ function shouldIncludeHostedCodexHomeRelativePath(relativePath: string): boolean
     segments.some((segment) =>
       segment === "tmp"
       || segment === ".tmp"
+      || segment === "auth"
+      || segment === ".auth"
       || segment === "cache"
       || segment === ".cache"
+      || segment === "cert"
+      || segment === ".cert"
+      || segment === "certs"
+      || segment === ".certs"
+      || segment === "certificate"
+      || segment === ".certificate"
+      || segment === "certificates"
+      || segment === ".certificates"
+      || segment === "cookie"
+      || segment === ".cookie"
+      || segment === "cookies"
+      || segment === ".cookies"
+      || segment === "credential"
+      || segment === ".credential"
+      || segment === "credentials"
+      || segment === ".credentials"
+      || segment === "key"
+      || segment === ".key"
+      || segment === "keys"
+      || segment === ".keys"
+      || segment === "log"
+      || segment === ".log"
       || segment === "logs"
       || segment === ".logs"
+      || segment === "oauth"
+      || segment === ".oauth"
+      || segment === "password"
+      || segment === ".password"
+      || segment === "passwords"
+      || segment === ".passwords"
       || segment === "secrets"
       || segment === ".secrets"
+      || segment === "token"
+      || segment === ".token"
+      || segment === "tokens"
+      || segment === ".tokens"
     )
   ) {
+    return false;
+  }
+
+  if (isHostedCodexHomeRootHistoryPath(normalizedRelativePath)) {
     return false;
   }
 
@@ -432,14 +470,17 @@ function shouldIncludeHostedCodexHomeRelativePath(relativePath: string): boolean
   );
 }
 
+function isHostedCodexHomeRootHistoryPath(relativePath: string): boolean {
+  return relativePath === "history.json"
+    || relativePath === "history.jsonl"
+    || relativePath === "history.jsonl.db";
+}
+
 function isHostedCodexHomeSensitiveBasename(basename: string): boolean {
   if (
     basename === ".netrc"
     || basename === "auth.json"
     || basename === "credentials.json"
-    || basename === "history.json"
-    || basename === "history.jsonl"
-    || basename === "history.jsonl.db"
     || basename === "oauth.json"
     || basename === "token.json"
     || basename === "tokens.json"

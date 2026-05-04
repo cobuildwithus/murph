@@ -61,15 +61,13 @@ const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
 ]);
-const RUNNER_OUTBOUND_CRYPTO_CONTEXT_MAX_ENTRIES = 1_024;
-const RUNNER_OUTBOUND_CRYPTO_CONTEXT_MAX_TTL_MS = 5 * 60 * 1000;
+const RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_MAX_ENTRIES = 1_024;
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS = 30_000;
-const RUNNER_OUTBOUND_CRYPTO_CONTEXT_SKEW_MS = 1_000;
 const RUNNER_OUTBOUND_BIND_USER_CACHE_SUCCESS_TTL_MS = 60_000;
 const RUNNER_OUTBOUND_BIND_USER_CACHE_PENDING_TTL_MS = 30_000;
 const RUNNER_OUTBOUND_BIND_USER_CACHE_MAX_ENTRIES = 2_048;
 
-interface RunnerOutboundCryptoContextCacheEntry {
+interface RunnerOutboundCryptoContextPendingLoad {
   expiresAtMs: number;
   promise: Promise<HostedUserCryptoContext>;
   token: object;
@@ -81,9 +79,9 @@ interface RunnerOutboundBindUserCacheEntry {
   token: object;
 }
 
-const runnerOutboundCryptoContextCache = new Map<
+const runnerOutboundCryptoContextPendingLoads = new Map<
   string,
-  RunnerOutboundCryptoContextCacheEntry
+  RunnerOutboundCryptoContextPendingLoad
 >();
 let runnerOutboundBindUserCaches = new WeakMap<
   RunnerOutboundEnvironmentSource["USER_RUNNER"],
@@ -103,50 +101,44 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
     userId: input.userId,
   });
   const nowMs = Date.now();
-  const existing = runnerOutboundCryptoContextCache.get(cacheKey);
+  const existing = runnerOutboundCryptoContextPendingLoads.get(cacheKey);
   if (existing && existing.expiresAtMs > nowMs) {
     return await existing.promise;
   }
   if (existing) {
-    runnerOutboundCryptoContextCache.delete(cacheKey);
+    runnerOutboundCryptoContextPendingLoads.delete(cacheKey);
   }
 
   const cacheToken = {};
   const promise = (async (): Promise<HostedUserCryptoContext> => {
     await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-    const context = await requireHostedUserCryptoContextFromEnvironment({
+    return await requireHostedUserCryptoContextFromEnvironment({
       bucket: input.bucket,
       domain: input.domain,
       environment: input.environment,
       reason: "runner-outbound-access",
       userId: input.userId,
     });
-    const cached = runnerOutboundCryptoContextCache.get(cacheKey);
-    if (cached?.token === cacheToken) {
-      cached.expiresAtMs = resolveRunnerOutboundCryptoContextExpiresAtMs(context, Date.now());
-    }
-    return context;
   })();
-  runnerOutboundCryptoContextCache.set(cacheKey, {
+  runnerOutboundCryptoContextPendingLoads.set(cacheKey, {
     expiresAtMs: nowMs + RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS,
     promise,
     token: cacheToken,
   });
-  trimRunnerOutboundCryptoContextCache();
+  trimRunnerOutboundCryptoContextPendingLoads();
 
   try {
     return await promise;
-  } catch (error) {
-    const cached = runnerOutboundCryptoContextCache.get(cacheKey);
+  } finally {
+    const cached = runnerOutboundCryptoContextPendingLoads.get(cacheKey);
     if (cached?.token === cacheToken) {
-      runnerOutboundCryptoContextCache.delete(cacheKey);
+      runnerOutboundCryptoContextPendingLoads.delete(cacheKey);
     }
-    throw error;
   }
 }
 
 export function resetRunnerOutboundSharedCachesForTest(): void {
-  runnerOutboundCryptoContextCache.clear();
+  runnerOutboundCryptoContextPendingLoads.clear();
   runnerOutboundBindUserCaches = new WeakMap();
 }
 
@@ -228,42 +220,30 @@ function cryptoContextCacheKey(input: {
   ]);
 }
 
-function resolveRunnerOutboundCryptoContextExpiresAtMs(
-  context: Pick<HostedUserCryptoContext, "cacheMaxAgeMs" | "fetchedAtMs">,
-  localNowMs: number,
-): number {
-  const ttlMs = Math.max(
-    0,
-    Math.min(context.cacheMaxAgeMs, RUNNER_OUTBOUND_CRYPTO_CONTEXT_MAX_TTL_MS),
-  );
-  const fetchedAtMs = Number.isFinite(context.fetchedAtMs)
-    ? context.fetchedAtMs
-    : localNowMs;
-  const expiresAtMs = Math.min(
-    fetchedAtMs + ttlMs - RUNNER_OUTBOUND_CRYPTO_CONTEXT_SKEW_MS,
-    localNowMs + ttlMs - RUNNER_OUTBOUND_CRYPTO_CONTEXT_SKEW_MS,
-  );
-  return Math.max(localNowMs, expiresAtMs);
-}
-
-function trimRunnerOutboundCryptoContextCache(): void {
-  if (runnerOutboundCryptoContextCache.size <= RUNNER_OUTBOUND_CRYPTO_CONTEXT_MAX_ENTRIES) {
+function trimRunnerOutboundCryptoContextPendingLoads(): void {
+  if (
+    runnerOutboundCryptoContextPendingLoads.size
+      <= RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_MAX_ENTRIES
+  ) {
     return;
   }
 
   const nowMs = Date.now();
-  for (const [key, value] of runnerOutboundCryptoContextCache) {
+  for (const [key, value] of runnerOutboundCryptoContextPendingLoads) {
     if (value.expiresAtMs <= nowMs) {
-      runnerOutboundCryptoContextCache.delete(key);
+      runnerOutboundCryptoContextPendingLoads.delete(key);
     }
   }
 
-  while (runnerOutboundCryptoContextCache.size > RUNNER_OUTBOUND_CRYPTO_CONTEXT_MAX_ENTRIES) {
-    const oldestKey = runnerOutboundCryptoContextCache.keys().next().value;
+  while (
+    runnerOutboundCryptoContextPendingLoads.size
+      > RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_MAX_ENTRIES
+  ) {
+    const oldestKey = runnerOutboundCryptoContextPendingLoads.keys().next().value;
     if (typeof oldestKey !== "string") {
       return;
     }
-    runnerOutboundCryptoContextCache.delete(oldestKey);
+    runnerOutboundCryptoContextPendingLoads.delete(oldestKey);
   }
 }
 
