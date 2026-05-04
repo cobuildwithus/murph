@@ -785,7 +785,7 @@ function resolveProviderResumeStateAction(input: {
 
   return normalizeNullableString(input.providerSessionId)
     ? 'persist-from-provider-turn'
-    : 'preserve-existing'
+    : 'clear'
 }
 
 function resolveActiveTurnProviderLoopSession(input: {

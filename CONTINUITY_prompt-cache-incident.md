@@ -12,7 +12,7 @@ Key decisions:
 - Use current OpenAI docs for prompt-cache behavior.
 
 State:
-- Incident patch in progress.
+- Incident fix implemented and verified; final scoped commit in progress.
 
 Done:
 - Loaded required repo routing, architecture, security, reliability, verification, OpenAI, and Cloudflare skill guidance.
@@ -25,13 +25,20 @@ Done:
   crypto-context 403 failures during the incident window.
 - Registered active plan
   `agent-docs/exec-plans/active/2026-05-04-hosted-prompt-cache-incident.md`.
+- Fixed active-turn provider loop resume materialization, stale-resume fallback
+  replay, final session-thread resume-state persistence/clear behavior, Codex
+  token-usage extraction, and privacy-safe provider planning diagnostics.
+- Ran focused tests, `pnpm typecheck`, `git diff --check`, and diff-aware
+  owner/reverse-dependent verification successfully.
+- Completed required security/privacy, simplify, coverage-write, and final
+  completion reviews.
 
 Now:
-- Patch active-turn Codex resume state and usage extraction.
+- Commit remaining final-review/test proof changes and close the plan.
 
 Next:
-- Add focused regression tests.
-- Run focused verification and typecheck.
+- Monitor hosted usage rows after deploy for non-null token usage and reduced
+  repeated cold starts.
 
 Open questions (UNCONFIRMED if needed):
 - Whether Vercel AI Gateway/OpenAI cache routing can be improved through a
