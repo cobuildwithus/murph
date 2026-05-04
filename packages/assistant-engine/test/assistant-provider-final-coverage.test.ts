@@ -37,6 +37,7 @@ const providerTurnRunnerMocks = vi.hoisted(() => ({
   recordProviderAttemptFailed: vi.fn(),
   recordProviderAttemptStarted: vi.fn(),
   recordProviderAttemptSucceeded: vi.fn(),
+  recordProviderPlan: vi.fn(),
 }))
 
 vi.mock('../src/assistant/provider-registry.js', () => ({
@@ -62,6 +63,7 @@ vi.mock('../src/assistant/provider-turn/attempt-observability.js', () => ({
   recordProviderAttemptStarted: providerTurnRunnerMocks.recordProviderAttemptStarted,
   recordProviderAttemptSucceeded:
     providerTurnRunnerMocks.recordProviderAttemptSucceeded,
+  recordProviderPlan: providerTurnRunnerMocks.recordProviderPlan,
 }))
 
 vi.mock('../src/assistant/issue-reporting.js', () => ({
@@ -114,6 +116,7 @@ afterEach(() => {
   providerTurnRunnerMocks.recordProviderAttemptFailed.mockReset()
   providerTurnRunnerMocks.recordProviderAttemptStarted.mockReset()
   providerTurnRunnerMocks.recordProviderAttemptSucceeded.mockReset()
+  providerTurnRunnerMocks.recordProviderPlan.mockReset()
   vi.restoreAllMocks()
 })
 
@@ -521,6 +524,7 @@ describe('Codex model catalog', () => {
     await executeProviderTurnWithRecovery({
       input,
       plan: createSharedPlan(),
+      providerRequestOrdinal: 1,
       resolvedSession: session,
       route,
       turnCreatedAt: '2026-04-29T00:00:00.000Z',
@@ -540,6 +544,21 @@ describe('Codex model catalog', () => {
         type: 'image',
       },
     ])
+    expect(providerTurnRunnerMocks.recordProviderPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeTurnHistoryPresent: false,
+        providerContinuation: 'explicit-structured-history',
+        providerRequestOrdinal: 1,
+        refreshThreadInstructions: false,
+        resumeProviderSessionIdPresent: false,
+        route,
+        sessionId: session.sessionId,
+        storedThreadInstructionsFingerprintPresent: false,
+        threadInstructionsFingerprintPresent: false,
+        turnId: 'turn-1',
+        vault: '/vaults/test',
+      }),
+    )
   })
 
   it('passes hosted device-connect requests through the Codex provider', async () => {

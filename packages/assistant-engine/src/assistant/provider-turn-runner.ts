@@ -53,6 +53,7 @@ import {
   recordProviderAttemptFailed,
   recordProviderAttemptStarted,
   recordProviderAttemptSucceeded,
+  recordProviderPlan,
 } from './provider-turn/attempt-observability.js'
 import {
   buildAssistantProviderTurnExecutionPlan,
@@ -130,6 +131,7 @@ export async function executeProviderTurnWithRecovery(input: {
   }) => Promise<void>
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnThreadScopeProfile | null
+  providerRequestOrdinal?: number | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   turnCreatedAt: string
@@ -150,6 +152,7 @@ export async function executeProviderTurnWithRecovery(input: {
   const attemptOutcome = await executeAssistantProviderAttempt({
     attemptPlan,
     executionPlan,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? null,
   })
 
   switch (attemptOutcome.kind) {
@@ -229,6 +232,7 @@ function createAssistantProviderUsageAttribution(input: {
 async function executeAssistantProviderAttempt(input: {
   attemptPlan: AssistantProviderAttemptPlan
   executionPlan: AssistantProviderTurnExecutionPlan
+  providerRequestOrdinal: number | null
 }): Promise<AssistantProviderAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
   let attemptMetadata: AssistantProviderAttemptMetadata = {
@@ -239,6 +243,25 @@ async function executeAssistantProviderAttempt(input: {
   }
 
   const attemptAt = new Date().toISOString()
+  await recordProviderPlan({
+    activeTurnHistoryPresent:
+      (executionPlan.activeTurnHistory?.messages.length ?? 0) > 0,
+    at: attemptAt,
+    providerContinuation: attemptPlan.routePlan.providerContinuation.kind,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
+    resumeProviderSessionIdPresent:
+      attemptPlan.routePlan.resumeProviderSessionId !== null,
+    route: attemptPlan.route,
+    sessionId: attemptPlan.session.sessionId,
+    storedThreadInstructionsFingerprintPresent:
+      typeof attemptPlan.session.resumeState?.threadInstructionsFingerprint ===
+      'string',
+    threadInstructionsFingerprintPresent:
+      attemptPlan.routePlan.threadInstructionsFingerprint !== null,
+    turnId: executionPlan.turnId,
+    vault: executionPlan.input.vault,
+  })
   await recordProviderAttemptStarted({
     activeTurnMessagesPresent:
       (attemptPlan.routePlan.activeTurnMessages?.length ?? 0) > 0,
