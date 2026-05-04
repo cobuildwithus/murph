@@ -286,6 +286,52 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
   pipeline.close();
 });
 
+test("processCapture stores raw other attachments without enqueueing parser jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-other-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-other-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const archivePath = await writeExternalFile(sourceRoot, "archive.zip", "zip bytes");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  try {
+    const result = await pipeline.processCapture({
+      source: "email",
+      externalId: "msg-zip",
+      thread: {
+        id: "chat-zip",
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt: "2026-03-13T09:00:00.000Z",
+      text: "Archive attached",
+      attachments: [
+        {
+          externalId: "zip-1",
+          kind: "other",
+          mime: "application/zip",
+          originalPath: archivePath,
+          fileName: "archive.zip",
+        },
+      ],
+      raw: {},
+    });
+
+    const capture = runtime.getCapture(result.captureId);
+    assert.ok(capture);
+    assert.equal(capture.attachments.length, 1);
+    assert.equal(capture.attachments[0]?.kind, "other");
+    assert.equal(capture.attachments[0]?.mime, "application/zip");
+    assert.equal(capture.attachments[0]?.storedPath?.startsWith("raw/inbox/email/"), true);
+    assert.equal(capture.attachments[0]?.parseState ?? null, null);
+    assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
+  } finally {
+    pipeline.close();
+  }
+});
+
 test("processCapture caps canonical inbox-capture text while preserving full local runtime input", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-long-text-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

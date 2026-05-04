@@ -104,8 +104,105 @@ describe('inbox attachment evidence adapter', () => {
       fileName: null,
       kind: 'image',
       mime: 'image/jpeg',
+      parseState: null,
       raw: null,
       sourceAttachmentId: 'att_1',
+    })
+  })
+
+  it('marks raw unsupported attachments as available evidence without making them parser failures', () => {
+    const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
+      capture: {
+        captureId: 'cap_zip',
+        attachments: [
+          createAttachment({
+            attachmentId: 'att_zip',
+            byteSize: 42,
+            fileName: 'archive.zip',
+            kind: 'other',
+            mime: 'application/zip',
+            storedPath: 'raw/inbox/cap_zip/attachments/001__archive.zip',
+          }),
+        ],
+      },
+      rawArtifactPathForAttachment: ({ normalizedSourcePath }) => normalizedSourcePath,
+      source: 'local-inbox-import',
+    })
+
+    expect(evidence.status).toBe('available')
+    expect(evidence.reasonCode).toBeNull()
+    expect(evidence.attachments[0]).toMatchObject({
+      byteSize: 42,
+      kind: 'other',
+      mime: 'application/zip',
+      parseState: 'unsupported',
+      raw: {
+        byteSize: 42,
+        kind: 'vault-relative-file',
+        mediaType: 'application/zip',
+        path: 'raw/inbox/cap_zip/attachments/001__archive.zip',
+      },
+    })
+  })
+
+  it('preserves explicit unsupported parse state on parser-supported attachments', () => {
+    const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
+      capture: {
+        captureId: 'cap_image',
+        attachments: [
+          createAttachment({
+            attachmentId: 'att_image',
+            byteSize: 64,
+            fileName: 'photo.jpg',
+            kind: 'image',
+            mime: 'image/jpeg',
+            parseState: 'unsupported',
+            storedPath: 'raw/inbox/cap_image/attachments/001__photo.jpg',
+          }),
+        ],
+      },
+      rawArtifactPathForAttachment: ({ normalizedSourcePath }) => normalizedSourcePath,
+      source: 'local-inbox-import',
+    })
+
+    expect(evidence.status).toBe('available')
+    expect(evidence.reasonCode).toBeNull()
+    expect(evidence.attachments[0]).toMatchObject({
+      kind: 'image',
+      mime: 'image/jpeg',
+      parseState: 'unsupported',
+      raw: {
+        byteSize: 64,
+        kind: 'vault-relative-file',
+        mediaType: 'image/jpeg',
+        path: 'raw/inbox/cap_image/attachments/001__photo.jpg',
+      },
+    })
+  })
+
+  it('keeps unsupported metadata-only attachments partial with explicit unsupported parse state', () => {
+    const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
+      capture: {
+        captureId: 'cap_zip',
+        attachments: [
+          createAttachment({
+            attachmentId: 'att_zip',
+            fileName: 'archive.zip',
+            kind: 'other',
+            mime: 'application/zip',
+            storedPath: null,
+          }),
+        ],
+      },
+      source: 'local-inbox-import',
+    })
+
+    expect(evidence.status).toBe('partial')
+    expect(evidence.reasonCode).toBe('attachment.evidence_partial')
+    expect(evidence.attachments[0]).toMatchObject({
+      kind: 'other',
+      parseState: 'unsupported',
+      raw: null,
     })
   })
 

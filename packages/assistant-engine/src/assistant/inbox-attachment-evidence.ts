@@ -41,7 +41,7 @@ export interface InboxCaptureAttachmentLike {
   mime?: string | null
   ordinal?: number | null
   originalPath?: string | null
-  parseState?: 'pending' | 'running' | 'succeeded' | 'failed' | string | null
+  parseState?: 'pending' | 'running' | 'succeeded' | 'failed' | 'unsupported' | string | null
   parserProviderId?: string | null
   sha256?: string | null
   storedPath?: string | null
@@ -128,6 +128,7 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
     )
     : null
   const derivedPath = normalizeDerivedArtifactPath(input.attachment.derivedPath ?? null)
+  const kind = normalizeAttachmentKind(input.attachment.kind)
 
   return {
     byteSize: normalizeByteSize(input.attachment.byteSize),
@@ -157,10 +158,10 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
     ].filter((fragment): fragment is AssistantInputAttachmentEvidenceItem['inlineFragments'][number] =>
       fragment !== null,
     ),
-    kind: normalizeAttachmentKind(input.attachment.kind),
+    kind,
     mime,
     ordinal,
-    parseState: normalizeParseState(input.attachment.parseState ?? null),
+    parseState: normalizeParseStateForAttachment(input.attachment, kind),
     raw: rawPath
       ? {
           byteSize: normalizeByteSize(input.attachment.byteSize),
@@ -365,10 +366,32 @@ function normalizeParseState(
     case 'running':
     case 'succeeded':
     case 'failed':
+    case 'unsupported':
       return value
     default:
       return null
   }
+}
+
+function normalizeParseStateForAttachment(
+  attachment: InboxCaptureAttachmentLike,
+  kind: AssistantInputAttachmentEvidenceItem['kind'],
+): AssistantInputAttachmentEvidenceItem['parseState'] {
+  const explicit = normalizeParseState(attachment.parseState ?? null)
+  if (explicit) {
+    return explicit
+  }
+
+  return isParserSupportedAttachmentKind(kind) ? null : 'unsupported'
+}
+
+function isParserSupportedAttachmentKind(
+  kind: AssistantInputAttachmentEvidenceItem['kind'],
+): boolean {
+  return kind === 'image' ||
+    kind === 'audio' ||
+    kind === 'video' ||
+    kind === 'document'
 }
 
 function normalizeEvidenceToken(
