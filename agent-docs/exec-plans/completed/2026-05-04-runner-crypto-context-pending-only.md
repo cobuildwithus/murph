@@ -1,6 +1,6 @@
 # Runner crypto context pending-only cache
 
-Status: active
+Status: completed
 Created: 2026-05-04
 Updated: 2026-05-04
 
@@ -55,4 +55,20 @@ Updated: 2026-05-04
 
 ## Verification
 
-- Commands to run: focused runner outbound Vitest, `bash scripts/workspace-verify.sh test:diff ...`, `pnpm typecheck`, completion audits, and `git diff --check`.
+- PASS: `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/runner-outbound.test.ts --no-coverage -t "outbound runtime crypto"`
+- PASS: `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/runner-outbound.test.ts --no-coverage`
+- PASS: `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/hosted-runtime-crypto-context.test.ts apps/cloudflare/test/runner-outbound.test.ts --no-coverage`
+- PASS: `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-outbound/shared.ts apps/cloudflare/test/runner-outbound.test.ts agent-docs/exec-plans/active/2026-05-04-runner-crypto-context-pending-only.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+- PASS: `pnpm typecheck`
+- PASS: `git diff --check -- apps/cloudflare/src/runner-outbound/shared.ts apps/cloudflare/test/runner-outbound.test.ts agent-docs/exec-plans/active/2026-05-04-runner-crypto-context-pending-only.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+
+## Audits
+
+- Security/privacy review: no findings.
+- Coverage-write pass: no additional test changes needed.
+- Final task review: no findings.
+
+## Commit status
+
+- Implementation is present in current `HEAD`.
+- Plan closeout was staged separately from unrelated dirty work.
