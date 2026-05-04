@@ -47,9 +47,12 @@ vi.mock("@murphai/operator-config/linq-runtime", () => ({
 import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "../src/hosted-runtime/events/conversation.ts";
+import {
+  ensureHostedInboxSidecarReady,
+} from "../src/hosted-runtime/context.ts";
 
 describe("hosted Linq document preservation", () => {
-  it("reproduces the hosted PDF no-reply boundary when inbox runtime config is missing", async () => {
+  it("bootstraps the hosted inbox sidecar before document preservation", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-document-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const pdfBytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
@@ -165,15 +168,29 @@ describe("hosted Linq document preservation", () => {
       });
       expect(importDocument).not.toHaveBeenCalled();
 
-      await services.init({
+      await ensureHostedInboxSidecarReady({
+        bestEffort: false,
+        rebuild: true,
         requestId: "req_init_inbox_runtime",
-        vault: vaultRoot,
+        vaultRoot,
+      });
+
+      await expect(
+        services.show({
+          captureId,
+          requestId: "req_show_after_hosted_sidecar_bootstrap",
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        capture: {
+          captureId,
+        },
       });
 
       await expect(
         services.preserveDocumentAttachments({
           captureId,
-          requestId: "req_preserve_after_init",
+          requestId: "req_preserve_after_hosted_sidecar_bootstrap",
           vault: vaultRoot,
         }),
       ).resolves.toMatchObject({
@@ -182,6 +199,13 @@ describe("hosted Linq document preservation", () => {
         preservedCount: 1,
       });
       expect(importDocument).toHaveBeenCalledTimes(1);
+
+      await ensureHostedInboxSidecarReady({
+        bestEffort: false,
+        rebuild: false,
+        requestId: "req_idempotent_inbox_runtime",
+        vaultRoot,
+      });
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

@@ -25,6 +25,7 @@ import {
   type AssistantInputAttachmentDescriptor,
   type AssistantInputProjectionStatus,
   type InboxCaptureAttachmentLike,
+  normalizeAssistantInputFileName,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -1016,7 +1017,7 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
           part.attachmentId ?? `part_${index}`,
         ),
         contentType: normalizeHostedAssistantInputMimeType(part.mimeType),
-        fileName: null,
+        fileName: normalizeAssistantInputFileName(part.fileName),
         kind: part.type,
         sizeBytes: normalizeHostedAssistantInputSize(part.size),
       }];
@@ -1030,7 +1031,7 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
         attachment.fileId,
       ),
       contentType: normalizeHostedAssistantInputMimeType(attachment.mimeType),
-      fileName: null,
+      fileName: normalizeAssistantInputFileName(attachment.fileName),
       kind: safeHostedAssistantInputTokenOrHash(attachment.kind),
       sizeBytes: normalizeHostedAssistantInputSize(attachment.fileSize),
     }));
@@ -1048,7 +1049,7 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
         ].join(":"),
       ),
       contentType: normalizeHostedAssistantInputMimeType(attachment.contentType),
-      fileName: null,
+      fileName: normalizeAssistantInputFileName(attachment.fileName),
       kind: "email_attachment",
       sizeBytes: normalizeHostedAssistantInputSize(attachment.sizeBytes),
     }));

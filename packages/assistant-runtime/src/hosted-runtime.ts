@@ -65,6 +65,9 @@ import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
+  ensureHostedInboxSidecarReady,
+} from "./hosted-runtime/context.ts";
+import {
   enqueueHostedSystemMailboxItem,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
@@ -313,6 +316,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     activeVaultRoot = restored.vaultRoot;
+    assertRuntimeLiveness();
+    await raceHostedRuntimeLiveness(
+      ensureHostedInboxSidecarReady({
+        bestEffort: true,
+        rebuild: true,
+        requestId,
+        vaultRoot: restored.vaultRoot,
+      }),
+      livenessAbortController.signal,
+    );
     assertRuntimeLiveness();
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,

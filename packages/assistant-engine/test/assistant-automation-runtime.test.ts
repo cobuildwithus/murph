@@ -7278,7 +7278,7 @@ describe('assistant automation run loop', () => {
       {
         attachmentId: expect.stringMatching(/^lid_[0-9a-f]{32}$/u),
         contentType: 'image/jpeg',
-        fileName: null,
+        fileName: 'private-photo.jpg',
         kind: 'image',
         sizeBytes: 2048,
       },
@@ -7292,7 +7292,7 @@ describe('assistant automation run loop', () => {
     expect(stagedInputs[0]?.event.attachmentEvidence.attachments).toEqual([
       expect.objectContaining({
         descriptorAttachmentId: expect.stringMatching(/^lid_[0-9a-f]{32}$/u),
-        fileName: null,
+        fileName: 'private-photo.jpg',
         kind: 'image',
         mime: 'image/jpeg',
         raw: null,

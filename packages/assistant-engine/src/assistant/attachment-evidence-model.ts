@@ -88,7 +88,7 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
       attachment: {
         byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
         derivedPath: input.attachment.derived?.manifestPath ?? null,
-        fileName: null,
+        fileName: input.attachment.fileName,
         mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
         storedPath: rawPath,
       },
@@ -107,7 +107,7 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
     ordinal: input.attachment.ordinal,
     kind: input.attachment.kind,
     mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,
-    fileName: null,
+    fileName: input.attachment.fileName,
     byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
     storedPath: rawPath,
     parseState: normalizeAttachmentEvidenceParseState(input.attachment.parseState),
@@ -211,7 +211,9 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   for (const item of routingEvidence.evidence) {
     content.push({
       type: 'text',
-      text: `Attachment image ${item.ordinal}.`,
+      text: item.fileName
+        ? `Attachment image ${item.ordinal} (${item.fileName}).`
+        : `Attachment image ${item.ordinal}.`,
     })
     content.push({
       type: 'image',
@@ -257,9 +259,9 @@ function buildMetadataFragment(
 ) {
   const promptStoredPath = renderPromptStoredPath(rawPath)
   const metadataLines = [
-    `attachmentId: ${attachment.sourceAttachmentId ?? attachment.descriptorAttachmentId ?? `attachment-${attachment.ordinal}`}`,
     `ordinal: ${attachment.ordinal}`,
     `kind: ${attachment.kind}`,
+    `fileName: ${attachment.fileName ?? 'unknown'}`,
     `mime: ${attachment.mime ?? attachment.raw?.mediaType ?? 'unknown'}`,
     `byteSize: ${attachment.byteSize ?? attachment.raw?.byteSize ?? 'unknown'}`,
     `storedPath: ${promptStoredPath}`,
@@ -410,7 +412,7 @@ async function readPreparedRoutingEvidence(input: {
       evidence.push({
         kind: 'image',
         ordinal: attachment.ordinal,
-        fileName: null,
+        fileName: attachment.fileName,
         mediaType: attachment.routingImage.mediaType ?? null,
         bytes,
       })
@@ -443,7 +445,7 @@ function getAttachmentEvidenceRoutingImageEligibility(input: {
 }): RoutingImageEligibility {
   return getRoutingImageEligibility({
     byteSize: input.attachment.byteSize ?? input.attachment.raw?.byteSize ?? null,
-    fileName: null,
+    fileName: input.attachment.fileName,
     kind: input.attachment.kind,
     mediaType: input.attachment.raw?.mediaType ?? null,
     mime: input.attachment.mime ?? input.attachment.raw?.mediaType ?? null,

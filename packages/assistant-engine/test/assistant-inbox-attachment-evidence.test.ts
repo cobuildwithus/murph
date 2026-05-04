@@ -67,7 +67,7 @@ describe('inbox attachment evidence adapter', () => {
             truncated: false,
           },
         ],
-        fileName: null,
+        fileName: 'scan.pdf',
         raw: {
           byteSize: 1234,
           kind: 'vault-relative-file',
@@ -101,7 +101,7 @@ describe('inbox attachment evidence adapter', () => {
     expect(evidence.status).toBe('partial')
     expect(evidence.reasonCode).toBe('attachment.evidence_partial')
     expect(evidence.attachments[0]).toMatchObject({
-      fileName: null,
+      fileName: 'photo.jpg',
       kind: 'image',
       mime: 'image/jpeg',
       parseState: null,
