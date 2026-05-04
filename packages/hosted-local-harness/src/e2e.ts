@@ -6,6 +6,7 @@ import { runForegroundCommand } from "./process.ts";
 
 export type HostedLocalE2eScenarioName =
   | "all"
+  | "checkpoint-baseline"
   | "device-connect"
   | "mailbox-platform-env"
   | "linq-first-contact"
@@ -22,6 +23,10 @@ export interface HostedLocalE2eScenario {
 }
 
 export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
+  {
+    file: "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
+    name: "checkpoint-baseline",
+  },
   {
     file: "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
     name: "device-connect",
