@@ -240,6 +240,17 @@ export class PrismaHostedConnectionStore {
     return record ? await this.buildDurableConnectionRecord(record, { externalAccountId }) : null;
   }
 
+  async getConnectionById(connectionId: string): Promise<PublicDeviceSyncAccount | null> {
+    const record = await this.prisma.deviceConnection.findUnique({
+      where: {
+        id: connectionId,
+      },
+      ...hostedConnectionRecordArgs,
+    });
+
+    return record ? await this.buildDurableConnectionRecord(record) : null;
+  }
+
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
     const record = await this.getConnectionRecordById(accountId);
 

@@ -92,12 +92,13 @@ model DeviceTokenAudit {
 }
 
 model DeviceOauthSession {
-  state     String   @id
-  userId    String?  @map("user_id")
-  provider  String
-  returnTo  String?  @map("return_to")
-  createdAt DateTime @map("created_at")
-  expiresAt DateTime @map("expires_at")
+  state        String   @id
+  userId       String?  @map("user_id")
+  provider     String
+  returnTo     String?  @map("return_to")
+  metadataJson Json?    @map("metadata_json")
+  createdAt    DateTime @map("created_at")
+  expiresAt    DateTime @map("expires_at")
 
   @@index([expiresAt])
   @@index([userId, provider])

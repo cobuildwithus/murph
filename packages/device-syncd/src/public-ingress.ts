@@ -346,7 +346,6 @@ function setSeededConnectionStateMetadata(
   return {
     ...metadata,
     [SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY]: account.id,
-    [SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY]: account.externalAccountId,
     ...(setupExpiresAt
       ? { [SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY]: setupExpiresAt }
       : {}),
@@ -581,7 +580,7 @@ export class DeviceSyncPublicIngress {
     const stateRecord = stateResult.record;
     const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);
-    const seededExternalAccountId = readSeededConnectionExternalAccountId(stateRecord.metadata);
+    let seededExternalAccountId = readSeededConnectionExternalAccountId(stateRecord.metadata);
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
     const connectSourceId = readConnectSourceId(stateRecord.metadata);
     const connectTarget = readConnectTarget(stateRecord.metadata);
@@ -589,8 +588,21 @@ export class DeviceSyncPublicIngress {
     let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
 
+    let seededAccount = seededAccountId ? await this.store.getConnectionById(seededAccountId) : null;
+
+    if (seededAccount && seededAccount.provider !== provider.provider) {
+      throw deviceSyncError({
+        code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+        message: "Device sync connection callback referenced a seeded account for another provider.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+
+    seededExternalAccountId = seededAccount?.externalAccountId ?? seededExternalAccountId ?? null;
+
     if (seededExternalAccountId) {
-      const seededAccount = await this.store.getConnectionByExternalAccount(
+      seededAccount ??= await this.store.getConnectionByExternalAccount(
         provider.provider,
         seededExternalAccountId,
       );

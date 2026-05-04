@@ -20,6 +20,7 @@ type MutableOAuthSession = {
   userId: string | null;
   provider: string;
   returnTo: string | null;
+  metadataJson: Record<string, unknown> | null;
   createdAt: Date;
   expiresAt: Date;
 };
@@ -77,6 +78,10 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           userId: "user-123",
           provider: "oura",
           returnTo: "https://example.test/return",
+          metadataJson: {
+            __murphConnectSourceId: "oura",
+            __murphConnectTarget: "oura",
+          },
           createdAt: new Date("2026-03-25T00:00:00.000Z"),
           expiresAt: new Date("2026-03-25T01:00:00.000Z"),
         },
@@ -122,7 +127,10 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
         provider: "oura",
         returnTo: "https://example.test/return",
         ownerId: "user-123",
-        metadata: {},
+        metadata: {
+          __murphConnectSourceId: "oura",
+          __murphConnectTarget: "oura",
+        },
         createdAt: "2026-03-25T00:00:00.000Z",
         expiresAt: "2026-03-25T01:00:00.000Z",
       },
@@ -139,6 +147,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           userId: "user-123",
           provider: "oura",
           returnTo: null,
+          metadataJson: null,
           createdAt: new Date("2026-03-25T00:00:00.000Z"),
           expiresAt: new Date("2026-03-25T00:05:00.000Z"),
         },
@@ -192,6 +201,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           userId: "user-123",
           provider: "oura",
           returnTo: "https://example.test/return",
+          metadataJson: null,
           createdAt: new Date("2026-03-25T00:00:00.000Z"),
           expiresAt: new Date("2026-03-25T01:00:00.000Z"),
         },
@@ -783,6 +793,33 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     await expect(store.getConnectionByExternalAccount("oura", "acct_456")).resolves.toEqual(expect.objectContaining({
       id: "dsc_123",
       provider: "oura",
+      status: "active",
+    }));
+  });
+
+  it("rehydrates seeded hosted callback accounts by durable connection id", async () => {
+    const connection = createConnection({
+      id: "dsc_seeded",
+      provider: "junction",
+      status: "active",
+      userId: "user-123",
+      externalAccountIdEncrypted: "enc:junction-user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findUnique: async ({ where }: { where: { id: string } }) =>
+            where.id === "dsc_seeded" ? cloneConnection(connection) : null,
+        },
+      } as never,
+    });
+
+    await expect(store.getConnectionById("dsc_seeded")).resolves.toEqual(expect.objectContaining({
+      externalAccountId: "junction-user-123",
+      id: "dsc_seeded",
+      provider: "junction",
       status: "active",
     }));
   });

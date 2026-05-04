@@ -7,9 +7,50 @@ interface MockDeviceOauthSessionRow {
   userId: string | null;
   provider: string;
   returnTo: string | null;
+  metadataJson: Record<string, unknown> | null;
   createdAt: Date;
   expiresAt: Date;
 }
+
+describe("PrismaHostedOAuthSessionStore.createOAuthState", () => {
+  it("persists safe source and seeded connection metadata for external-link callbacks", async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const store = {
+      prisma: {
+        deviceOauthSession: {
+          create,
+        },
+      },
+      createOAuthState: PrismaHostedOAuthSessionStore.prototype.createOAuthState,
+    };
+
+    await expect(store.createOAuthState({
+      state: "state_123",
+      ownerId: "user_123",
+      provider: "junction",
+      returnTo: "https://murph.test/connect?connectSource=garmin",
+      metadata: {
+        __murphConnectSourceId: "garmin",
+        __murphConnectTarget: "garmin",
+        __murphSeededConnectionAccountId: "dsc_seeded",
+      },
+      createdAt: "2026-04-13T12:00:00.000Z",
+      expiresAt: "2026-04-13T12:15:00.000Z",
+    })).resolves.toMatchObject({
+      state: "state_123",
+      provider: "junction",
+    });
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        metadataJson: {
+          __murphConnectSourceId: "garmin",
+          __murphConnectTarget: "garmin",
+          __murphSeededConnectionAccountId: "dsc_seeded",
+        },
+      }),
+    });
+  });
+});
 
 describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
   it("fails closed when another callback already consumed the same state", async () => {
@@ -48,7 +89,13 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
   });
 
   it("returns the stored state after a successful single consumer delete", async () => {
-    const record = buildOAuthSessionRow();
+    const record = buildOAuthSessionRow({
+      metadataJson: {
+        __murphConnectSourceId: "garmin",
+        __murphConnectTarget: "garmin",
+        __murphSeededConnectionAccountId: "dsc_seeded",
+      },
+    });
     const tx = createTransaction({ record });
     const store = createStore(tx);
 
@@ -61,7 +108,11 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         provider: record.provider,
         returnTo: record.returnTo,
         ownerId: record.userId,
-        metadata: {},
+        metadata: {
+          __murphConnectSourceId: "garmin",
+          __murphConnectTarget: "garmin",
+          __murphSeededConnectionAccountId: "dsc_seeded",
+        },
         createdAt: record.createdAt.toISOString(),
         expiresAt: record.expiresAt.toISOString(),
       },
@@ -83,6 +134,7 @@ function buildOAuthSessionRow(
     userId: overrides.userId ?? "user_123",
     provider: overrides.provider ?? "whoop",
     returnTo: overrides.returnTo ?? "https://murph.test/settings",
+    metadataJson: overrides.metadataJson ?? null,
     createdAt: overrides.createdAt ?? new Date("2026-04-13T12:00:00.000Z"),
     expiresAt: overrides.expiresAt ?? new Date("2026-04-13T12:15:00.000Z"),
   };
