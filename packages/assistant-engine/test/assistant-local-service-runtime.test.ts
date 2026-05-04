@@ -2570,7 +2570,7 @@ test('active-turn controller retries boundary admission after non-fatal input-av
   }
 })
 
-test('sendAssistantMessageLocal closes steering before commit checkpoint work starts', async () => {
+test('sendAssistantMessageLocal closes steering at commit barrier without empty checkpoint', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -2585,21 +2585,13 @@ test('sendAssistantMessageLocal closes steering before commit checkpoint work st
       threadIsDirect: false,
     },
   })
-  const commitCheckpointStarted = createDeferred<void>()
-  const commitCheckpointRelease = createDeferred<void>()
+  const commitStarted = createDeferred<void>()
+  const commitRelease = createDeferred<void>()
   const activeTurnInput = vi.fn(async () => ({
     kind: 'no-new-input' as const,
   }))
   const activeTurnCheckpoint = vi.fn(
-    async (input: AssistantActiveTurnInputCheckpointInput) => {
-      if (
-        input.providerRequestOrdinal === 0 &&
-        input.acceptedInputIds.length === 0
-      ) {
-        commitCheckpointStarted.resolve()
-        await commitCheckpointRelease.promise
-      }
-    },
+    async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
   )
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
@@ -2632,6 +2624,12 @@ test('sendAssistantMessageLocal closes steering before commit checkpoint work st
       },
     })
   mocks.finalizeAssistantTurnArtifacts.mockResolvedValue(session)
+  mocks.runtimeState.turns.acceptedInputs.updateAdmissionState
+    .mockImplementationOnce(async () => {
+      commitStarted.resolve()
+      await commitRelease.promise
+      return null
+    })
 
   const firstResultPromise = sendAssistantMessageLocal({
     activeTurnCheckpoint,
@@ -2639,12 +2637,13 @@ test('sendAssistantMessageLocal closes steering before commit checkpoint work st
     prompt: 'Initial prompt',
     vault: '/vaults/test',
   })
-  await commitCheckpointStarted.promise
+  await commitStarted.promise
   assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
   assert.equal(
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock.calls.length,
-    0,
+    1,
   )
+  assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
 
   await expect(sendAssistantMessageLocal({
     conversation: {
@@ -2677,11 +2676,11 @@ test('sendAssistantMessageLocal closes steering before commit checkpoint work st
     'Arrived after commit barrier',
   )
 
-  commitCheckpointRelease.resolve()
+  commitRelease.resolve()
   const firstResult = await firstResultPromise
   assert.equal(firstResult.response, 'first response')
   assert.equal(activeTurnInput.mock.calls.length, 2)
-  assert.equal(activeTurnCheckpoint.mock.calls.length, 1)
+  assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
