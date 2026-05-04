@@ -924,6 +924,10 @@ function pickConfiguredDeviceSyncHostedHintPayload(
 
     const value = payload[field];
 
+    if (spec.kind === "string" && value === "") {
+      continue;
+    }
+
     if (matchesConfiguredDeviceSyncJobFieldKind(value, spec.kind)) {
       shaped[field] = value;
     }

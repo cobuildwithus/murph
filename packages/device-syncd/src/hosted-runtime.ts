@@ -535,6 +535,10 @@ function parseHostedExecutionDeviceSyncJobHintPayload(
       throw new TypeError(`${label}.${field} is not supported.`);
     }
 
+    if (kind === "string" && rawValue === "") {
+      continue;
+    }
+
     next[field] = parseHostedExecutionDeviceSyncJobHintPayloadField(
       rawValue,
       kind,

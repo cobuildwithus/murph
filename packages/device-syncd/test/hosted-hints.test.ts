@@ -102,6 +102,30 @@ test("hosted job hint payload shaping ignores unsupported kinds and empty nested
   );
 
   assert.deepEqual(
+    shapeHostedDeviceSyncJobHintPayload("junction", {
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.heartrate.created",
+        objectId: "",
+        occurredAt: "2026-04-07T00:00:00.000Z",
+        resource: "heartrate",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "",
+        windowEnd: "2026-04-07T01:00:00.000Z",
+        windowStart: "2026-04-07T00:00:00.000Z",
+      },
+    }),
+    {
+      eventType: "daily.data.heartrate.created",
+      occurredAt: "2026-04-07T00:00:00.000Z",
+      resource: "heartrate",
+      resourceCategory: "timeseries",
+      windowEnd: "2026-04-07T01:00:00.000Z",
+      windowStart: "2026-04-07T00:00:00.000Z",
+    },
+  );
+
+  assert.deepEqual(
     shapeHostedDeviceSyncJobHintPayload("oura", {
       kind: "delete",
       payload: {
