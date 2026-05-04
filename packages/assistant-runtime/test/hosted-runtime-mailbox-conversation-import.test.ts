@@ -323,6 +323,74 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(listed.events[0]).includes("https://signed.example.invalid"), false);
   });
 
+  test("records inbox runtime unavailable as a specific projection and evidence reason", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-inbox-unavailable-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_inbox_unavailable_001",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_inbox_unavailable",
+          from: "+15550100000",
+          isFromMe: false,
+          messageId: "msg_synthetic_inbox_unavailable",
+          parts: [
+            {
+              attachmentId: "zip_part_1",
+              fileName: "archive.zip",
+              mimeType: "application/zip",
+              size: 512,
+              type: "media",
+              url: "https://signed.example.invalid/archive.zip",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw Object.assign(new Error("inbox runtime not initialized"), {
+          code: "INBOX_NOT_INITIALIZED",
+        });
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_inbox_unavailable_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.deepEqual(await outcome.afterCheckpoint?.(), {
+      attachmentEvidenceUpdated: true,
+      kind: "inbox_projection",
+      projectionUpdated: true,
+      reasonCode: "conversation-import.inbox-runtime-unavailable",
+      status: "failed",
+    });
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events[0]?.projection.status, "failed");
+    assert.equal(
+      listed.events[0]?.projection.reasonCode,
+      "conversation-import.inbox-runtime-unavailable",
+    );
+    assert.equal(listed.events[0]?.attachmentEvidence.status, "failed");
+    assert.equal(
+      listed.events[0]?.attachmentEvidence.reasonCode,
+      "conversation-import.inbox-runtime-unavailable",
+    );
+  });
+
   test("does not downgrade useful hosted attachment evidence after replayed projection failure", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-replay-"));
     tempRoots.push(parentRoot);
@@ -636,6 +704,248 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events[0]?.attachmentEvidence.status, "failed");
     assert.equal(listed.events[0]?.attachmentEvidence.attachments.length, 0);
   });
+
+  test("classifies raw attachment materialization failures as partial evidence", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-raw-materialization-failed-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_raw_materialization_failed_001",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_raw_materialization_failed",
+          from: "+15550100000",
+          isFromMe: false,
+          messageId: "msg_synthetic_raw_materialization_failed",
+          parts: [
+            {
+              attachmentId: "zip_part_1",
+              fileName: "archive.zip",
+              mimeType: "application/zip",
+              size: 512,
+              type: "media",
+              url: "https://signed.example.invalid/archive.zip",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_raw_materialization_failed_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async loadAttachmentEvidenceCapture() {
+        throw Object.assign(new Error("raw attachment materialization failed"), {
+          code: "RAW_MATERIALIZATION_FAILED",
+        });
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_raw_materialization_failed_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.deepEqual(await outcome.afterCheckpoint?.(), {
+      attachmentEvidenceUpdated: true,
+      kind: "inbox_projection",
+      projectionUpdated: true,
+      reasonCode: "attachment.evidence_partial",
+      status: "partial",
+    });
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events[0]?.projection.status, "succeeded");
+    assert.equal(listed.events[0]?.projection.reasonCode, null);
+    assert.equal(listed.events[0]?.attachmentEvidence.status, "failed");
+    assert.equal(
+      listed.events[0]?.attachmentEvidence.reasonCode,
+      "attachment.evidence_partial",
+    );
+    assert.equal(
+      listed.events[0]?.attachmentEvidence.optionalInboxCaptureId,
+      "cap_synthetic_raw_materialization_failed_001",
+    );
+  });
+
+  test.each([
+    ["ENOENT"],
+    ["ATTACHMENT_MATERIALIZATION_FAILED"],
+  ] as const)(
+    "classifies %s attachment materialization failures as partial evidence",
+    async (failureCode) => {
+      const parentRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-hosted-input-raw-materialization-code-"),
+      );
+      tempRoots.push(parentRoot);
+      const vaultRoot = path.join(parentRoot, "vault");
+      const suffix = failureCode.toLowerCase();
+      const decodedWake = createConversationWake({
+        eventId: `evt_synthetic_${suffix}_001`,
+        message: {
+          channel: "linq",
+          linqMessage: {
+            chatId: `chat_synthetic_${suffix}`,
+            from: "+15550100000",
+            isFromMe: false,
+            messageId: `msg_synthetic_${suffix}`,
+            parts: [
+              {
+                attachmentId: "zip_part_1",
+                fileName: "archive.zip",
+                mimeType: "application/zip",
+                size: 512,
+                type: "media",
+                url: "https://signed.example.invalid/archive.zip",
+              },
+            ],
+          },
+          phoneLookupKey: "redacted-contact-sentinel",
+        },
+      });
+
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: `cap_synthetic_${suffix}_001`,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        async loadAttachmentEvidenceCapture() {
+          throw Object.assign(new Error("raw attachment materialization failed"), {
+            code: failureCode,
+          });
+        },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: `mailbox_item_${suffix}_001`,
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      assert.equal(outcome.status, "imported");
+      assert.deepEqual(await outcome.afterCheckpoint?.(), {
+        attachmentEvidenceUpdated: true,
+        kind: "inbox_projection",
+        projectionUpdated: true,
+        reasonCode: "attachment.evidence_partial",
+        status: "partial",
+      });
+
+      const listed = await listAssistantInputEvents({
+        vault: vaultRoot,
+      });
+      assert.equal(listed.events[0]?.projection.status, "succeeded");
+      assert.equal(listed.events[0]?.projection.reasonCode, null);
+      assert.equal(listed.events[0]?.attachmentEvidence.status, "failed");
+      assert.equal(
+        listed.events[0]?.attachmentEvidence.reasonCode,
+        "attachment.evidence_partial",
+      );
+    },
+  );
+
+  test.each([
+    ["SOME_UNKNOWN_CODE"],
+    ["conversation-import.raw-email-missing"],
+    ["x".repeat(128)],
+  ] as const)(
+    "keeps unallowlisted attachment evidence failure code %s generic",
+    async (failureCode) => {
+      const parentRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-hosted-input-attachment-evidence-code-"),
+      );
+      tempRoots.push(parentRoot);
+      const vaultRoot = path.join(parentRoot, "vault");
+      const decodedWake = createConversationWake({
+        eventId: `evt_synthetic_attachment_evidence_${failureCode.length}_001`,
+        message: {
+          channel: "linq",
+          linqMessage: {
+            chatId: `chat_synthetic_attachment_evidence_${failureCode.length}`,
+            from: "+15550100000",
+            isFromMe: false,
+            messageId: `msg_synthetic_attachment_evidence_${failureCode.length}`,
+            parts: [
+              {
+                attachmentId: "zip_part_1",
+                fileName: "archive.zip",
+                mimeType: "application/zip",
+                size: 512,
+                type: "media",
+                url: "https://signed.example.invalid/archive.zip",
+              },
+            ],
+          },
+          phoneLookupKey: "redacted-contact-sentinel",
+        },
+      });
+
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: `cap_synthetic_attachment_evidence_${failureCode.length}_001`,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        async loadAttachmentEvidenceCapture() {
+          throw Object.assign(new Error("attachment evidence unavailable"), {
+            code: failureCode,
+          });
+        },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: `mailbox_item_attachment_evidence_${failureCode.length}_001`,
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      assert.equal(outcome.status, "imported");
+      assert.deepEqual(await outcome.afterCheckpoint?.(), {
+        attachmentEvidenceUpdated: true,
+        kind: "inbox_projection",
+        projectionUpdated: true,
+        reasonCode: "conversation-import.attachment-evidence-failed",
+        status: "partial",
+      });
+
+      const listed = await listAssistantInputEvents({
+        vault: vaultRoot,
+      });
+      assert.equal(listed.events[0]?.projection.status, "succeeded");
+      assert.equal(
+        listed.events[0]?.attachmentEvidence.reasonCode,
+        "conversation-import.attachment-evidence-failed",
+      );
+    },
+  );
 
   test("keeps Telegram conversation metadata hashed while replyTarget uses real thread and message ids", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-"));
@@ -1035,6 +1345,94 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     ]);
   });
+
+  test("does not collapse raw-copy projection failures into the generic projection reason", async () => {
+    const projectionUpdates: unknown[] = [];
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "raw attachment copy failed",
+          {
+            cause: Object.assign(new Error("raw copy failed"), {
+              code: "RAW_COPY_FAILED",
+            }),
+          },
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager({
+        projectionUpdates,
+      }),
+      vaultRoot: "synthetic-vault-root",
+    });
+    if (outcome.status !== "imported") {
+      throw new Error("Expected imported mailbox outcome.");
+    }
+
+    assert.deepEqual(await outcome.afterCheckpoint?.(), {
+      attachmentEvidenceUpdated: null,
+      kind: "inbox_projection",
+      projectionUpdated: true,
+      reasonCode: "attachment.evidence_partial",
+      status: "failed",
+    });
+    assert.deepEqual(projectionUpdates, [
+      {
+        captureId: null,
+        reasonCode: "attachment.evidence_partial",
+        status: "failed",
+      },
+    ]);
+  });
+
+  test.each([
+    ["SOME_UNKNOWN_CODE"],
+    ["conversation-import.raw-email-missing"],
+    ["x".repeat(128)],
+  ] as const)(
+    "keeps unallowlisted projection failure code %s generic",
+    async (failureCode) => {
+      const projectionUpdates: unknown[] = [];
+
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+        async importConversationWake() {
+          throw Object.assign(new Error("unexpected projection adapter failure"), {
+            code: failureCode,
+          });
+        },
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem(),
+        runtime: createRuntime(),
+        stageAssistantInputEvent: createAssistantInputEventStager({
+          projectionUpdates,
+        }),
+        vaultRoot: "synthetic-vault-root",
+      });
+      if (outcome.status !== "imported") {
+        throw new Error("Expected imported mailbox outcome.");
+      }
+
+      assert.deepEqual(await outcome.afterCheckpoint?.(), {
+        attachmentEvidenceUpdated: null,
+        kind: "inbox_projection",
+        projectionUpdated: true,
+        reasonCode: "conversation-import.projection-failed",
+        status: "failed",
+      });
+      assert.deepEqual(projectionUpdates, [
+        {
+          captureId: null,
+          reasonCode: "conversation-import.projection-failed",
+          status: "failed",
+        },
+      ]);
+    },
+  );
 
   test("returns partial post-checkpoint result when projection update fails", async () => {
     const outcome = await importHostedConversationMailboxItem({
