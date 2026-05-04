@@ -875,6 +875,7 @@ describe("handleRunnerOutboundRequest", () => {
         RUNNER_PROXY_TOKEN,
       ),
     ).rejects.toThrow("lease check failed");
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
     const secondResponse = await handleRunnerOutboundRequest(
       createArtifactPutRequest({
         bytes,
@@ -1012,6 +1013,7 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
     const allowedResponse = await handleRunnerOutboundRequest(
       createArtifactPutRequest({
         bytes,
