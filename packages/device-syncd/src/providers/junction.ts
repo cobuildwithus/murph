@@ -18,6 +18,7 @@ import {
   type JunctionRegion,
 } from "./junction-client.ts";
 import {
+  buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   normalizeJunctionProviderFilter,
 } from "./junction-connect-sources.ts";
@@ -1411,6 +1412,37 @@ async function projectJunctionSources(
     return;
   }
 
+  for (const source of projectJunctionSourcesByProviderSlug(
+    context.account.id,
+    providers,
+  )) {
+    await context.upsertConnectionSource({
+      sourceInstanceKey: source.sourceInstanceKey,
+      sourceProviderSlug: source.sourceProviderSlug,
+      displayName: null,
+      status: source.status,
+      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      lastSeenAt: context.now,
+    });
+  }
+}
+
+function projectJunctionSourcesByProviderSlug(
+  connectionId: string,
+  providers: readonly JunctionProviderConnection[],
+): Array<{
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+  status: DeviceConnectionSourceStatus;
+  resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+}> {
+  const projected = new Map<string, {
+    sourceInstanceKey: string;
+    sourceProviderSlug: string;
+    status: DeviceConnectionSourceStatus;
+    resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+  }>();
+
   for (const provider of providers) {
     const origin = resolveJunctionOrigin(
       {
@@ -1427,54 +1459,86 @@ async function projectJunctionSources(
         sourceInstanceId: provider.origin.sourceInstanceId,
       },
     );
-    const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug) ?? provider.slug;
-    const sourceInstance = buildJunctionSourceInstance(provider, context.account.externalAccountId, sourceProviderSlug);
-    const resourceAvailabilitySummary = sanitizeJunctionResourceAvailabilitySummary(provider.resourceAvailability);
-    if (sourceInstance.usedFallback) {
-      resourceAvailabilitySummary.sourceInstanceKeyFallback = true;
+    const sourceProviderSlug =
+      normalizeProviderSlug(origin.sourceProviderSlug) ?? normalizeProviderSlug(provider.slug);
+    if (!sourceProviderSlug) {
+      continue;
     }
 
-    await context.upsertConnectionSource({
-      sourceInstanceKey: sourceInstance.key,
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
       sourceProviderSlug,
-      displayName: null,
+    });
+    if (!sourceInstanceKey) {
+      continue;
+    }
+
+    const resourceAvailabilitySummary = sanitizeJunctionResourceAvailabilitySummary(provider.resourceAvailability);
+    const existing = projected.get(sourceProviderSlug);
+    if (existing) {
+      mergeJunctionResourceAvailabilitySummary(
+        existing.resourceAvailabilitySummary,
+        resourceAvailabilitySummary,
+      );
+      existing.status = mergeJunctionSourceStatus(
+        existing.status,
+        mapJunctionSourceStatus(provider.status),
+      );
+      continue;
+    }
+
+    projected.set(sourceProviderSlug, {
+      sourceInstanceKey,
+      sourceProviderSlug,
       status: mapJunctionSourceStatus(provider.status),
       resourceAvailabilitySummary,
-      lastSeenAt: context.now,
     });
+  }
+
+  return [...projected.values()];
+}
+
+function mergeJunctionResourceAvailabilitySummary(
+  target: Record<string, string | number | boolean | null>,
+  source: Record<string, string | number | boolean | null>,
+): void {
+  for (const [key, value] of Object.entries(source)) {
+    target[key] = mergeJunctionResourceAvailabilityValue(target[key], value);
   }
 }
 
-function buildJunctionSourceInstance(
-  provider: JunctionProviderConnection,
-  userId: string,
-  sourceProviderSlug: string,
-): { key: string; usedFallback: boolean } {
-  const originSourceInstanceId = normalizeString(provider.origin.sourceInstanceId);
-  const providerId = normalizeString(provider.id);
-  const sourceDeviceId = normalizeString(provider.source?.deviceId);
-  const sourceAppId = normalizeString(provider.source?.appId);
-  const hasInstanceId = Boolean(originSourceInstanceId || providerId || sourceDeviceId || sourceAppId);
-  const hashInput = hasInstanceId
-    ? [
-        "junction-source",
-        userId,
-        originSourceInstanceId,
-        providerId,
-        sourceProviderSlug,
-        sourceDeviceId,
-        sourceAppId,
-      ]
-    : [
-        "junction-source",
-        userId,
-        sourceProviderSlug,
-      ];
+function mergeJunctionResourceAvailabilityValue(
+  existing: string | number | boolean | null | undefined,
+  next: string | number | boolean | null,
+): string | number | boolean | null {
+  if (existing === undefined || existing === null || existing === false) {
+    return next;
+  }
 
-  return {
-    key: `jxn_${createHash("sha256").update(JSON.stringify(hashInput)).digest("hex").slice(0, 32)}`,
-    usedFallback: !hasInstanceId,
-  };
+  if (typeof existing === "boolean" && typeof next === "boolean") {
+    return existing || next;
+  }
+
+  return existing;
+}
+
+function mergeJunctionSourceStatus(
+  existing: DeviceConnectionSourceStatus,
+  next: DeviceConnectionSourceStatus,
+): DeviceConnectionSourceStatus {
+  if (existing === "connected" || next === "connected") {
+    return "connected";
+  }
+
+  if (existing === "error" || next === "error") {
+    return "error";
+  }
+
+  if (existing === "unavailable" || next === "unavailable") {
+    return "unavailable";
+  }
+
+  return "disconnected";
 }
 
 function buildJunctionImportAccountId(connectionId: string): string {

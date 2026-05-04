@@ -96,6 +96,7 @@ export {
   createJunctionDeviceSyncProvider,
 } from "./providers/junction.ts";
 export {
+  buildJunctionProviderSourceInstanceKey,
   JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   JUNCTION_LINK_PROVIDER_SLUGS,

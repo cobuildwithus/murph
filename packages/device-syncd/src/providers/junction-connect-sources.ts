@@ -6,6 +6,7 @@ import {
   resolveDeviceConnectSourceById,
   resolveJunctionDeviceConnectRouteByProviderSlug,
 } from "../config/connect-routes.ts";
+import { normalizeString, sha256Text } from "../shared.ts";
 
 import type {
   DeviceConnectJunctionLinkRoute,
@@ -59,6 +60,26 @@ export function resolveJunctionConnectSourceLabel(providerSlug: string): string 
 
 export function normalizeJunctionProviderFilter(value: readonly string[] | undefined): string[] {
   return normalizeJunctionLinkProviderFilter(value);
+}
+
+export function buildJunctionProviderSourceInstanceKey(input: {
+  connectionId: string;
+  sourceProviderSlug: string;
+}): string | null {
+  const connectionId = normalizeString(input.connectionId);
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+
+  if (!connectionId || !sourceProviderSlug) {
+    return null;
+  }
+
+  return `jxn_src_${
+    sha256Text(JSON.stringify([
+      "junction-provider-source",
+      connectionId,
+      sourceProviderSlug,
+    ])).slice(0, 32)
+  }`;
 }
 
 function isJunctionProviderRoute(

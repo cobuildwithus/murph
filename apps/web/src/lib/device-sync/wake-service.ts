@@ -1,4 +1,8 @@
 import {
+  buildJunctionProviderSourceInstanceKey,
+  normalizeJunctionProviderSlug,
+} from "@murphai/device-syncd/config";
+import {
   deviceSyncError,
   isDeviceSyncError,
   type DeviceSyncIngressWebhook,
@@ -164,6 +168,8 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     provider: string;
     scopes: string[];
   };
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   now: string;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -198,6 +204,22 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     wake,
     store: input.store,
     persist: async (tx) => {
+      const linkedSource = resolveHostedJunctionLinkedSource({
+        account: input.account,
+        connectTarget: input.connectTarget ?? null,
+      });
+      if (linkedSource) {
+        await input.store.upsertConnectionSource({
+          connectionId: input.account.id,
+          sourceInstanceKey: linkedSource.sourceInstanceKey,
+          sourceProviderSlug: linkedSource.sourceProviderSlug,
+          status: "connected",
+          firstSeenAt: input.now,
+          lastSeenAt: input.now,
+          tx,
+        });
+      }
+
       await input.store.createSignal({
         userId: ownerId,
         connectionId: input.account.id,
@@ -210,6 +232,35 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
       });
     },
   });
+}
+
+function resolveHostedJunctionLinkedSource(input: {
+  account: {
+    id: string;
+    provider: string;
+  };
+  connectTarget: string | null;
+}): { sourceInstanceKey: string; sourceProviderSlug: string } | null {
+  if (input.account.provider !== "junction") {
+    return null;
+  }
+
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.connectTarget);
+  if (!sourceProviderSlug) {
+    return null;
+  }
+
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: input.account.id,
+    sourceProviderSlug,
+  });
+
+  return sourceInstanceKey
+    ? {
+      sourceInstanceKey,
+      sourceProviderSlug,
+    }
+    : null;
 }
 
 export async function handleHostedDeviceSyncWebhookAccepted(input: {

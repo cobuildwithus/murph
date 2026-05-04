@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     registryGet: vi.fn(),
     registryList: vi.fn(),
     syncDurableConnectionState: vi.fn(),
+    upsertConnectionSource: vi.fn(),
     prismaTx: {
       __tx: true,
       deviceSyncSignal: {
@@ -201,6 +202,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     listConnectionsForUser = mocks.listConnectionsForUser;
     persistStoredConnectionTokenBundle = mocks.persistStoredConnectionTokenBundle;
     syncDurableConnectionState = mocks.syncDurableConnectionState;
+    upsertConnectionSource = mocks.upsertConnectionSource;
     prisma = mocks.prisma;
   },
   generateHostedAgentBearerToken: vi.fn(),
@@ -873,6 +875,177 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
       publicBaseUrl: "https://control.example.test/api/device-sync",
     });
+  });
+
+  it("durably upserts a Junction source row from the connected ingress hook", async () => {
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(async () => {
+        await input.hooks?.onConnectionEstablished?.({
+          account: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            displayName: "Junction",
+            externalAccountId: "junction-user-1",
+            id: "dsc_junction",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            metadata: {},
+            nextReconcileAt: null,
+            provider: "junction",
+            scopes: [],
+            status: "active",
+            updatedAt: "2026-03-26T12:00:00.000Z",
+          },
+          connectSourceId: "garmin",
+          connectTarget: "garmin",
+          connection: {
+            initialJobs: [],
+            nextReconcileAt: null,
+          },
+          now: "2026-03-26T12:00:00.000Z",
+          provider: {
+            provider: "junction",
+          },
+        });
+        return {
+          connection: {
+            id: "dsc_junction",
+          },
+        };
+      }),
+      handleWebhook: vi.fn(),
+      startConnection: vi.fn(),
+    }));
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?state=xyz"),
+    );
+
+    await controlPlane.handleConnectionCallback("junction");
+
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledWith({
+      connectionId: "dsc_junction",
+      firstSeenAt: "2026-03-26T12:00:00.000Z",
+      lastSeenAt: "2026-03-26T12:00:00.000Z",
+      sourceInstanceKey: expect.stringMatching(/^jxn_src_[a-f0-9]{32}$/u),
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      tx: mocks.prismaTx,
+    });
+    const sourceInstanceKey = mocks.upsertConnectionSource.mock.calls[0]?.[0]?.sourceInstanceKey;
+    expect(sourceInstanceKey).not.toMatch(/dsc|junction|garmin/u);
+  });
+
+  it("reuses the same Junction source row key for repeated slugs and keeps distinct slugs separate", async () => {
+    const upsertedSourceKeys: Array<{ sourceInstanceKey: string; sourceProviderSlug: string }> = [];
+    const connectTargets: Array<"garmin" | "garmin" | "peloton"> = ["garmin", "garmin", "peloton"];
+
+    mocks.getConnectionOwnerId.mockResolvedValue("user-123");
+    mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
+      hooks?: {
+        onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(async () => {
+        const connectTarget = connectTargets.shift() ?? null;
+        await input.hooks?.onConnectionEstablished?.({
+          account: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            displayName: "Junction",
+            externalAccountId: "junction-user-1",
+            id: "dsc_junction",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            metadata: {},
+            nextReconcileAt: null,
+            provider: "junction",
+            scopes: [],
+            status: "active",
+            updatedAt: "2026-03-26T12:00:00.000Z",
+          },
+          connectSourceId: connectTarget,
+          connectTarget,
+          connection: {
+            initialJobs: [],
+            nextReconcileAt: null,
+          },
+          now: connectTarget === "peloton"
+            ? "2026-03-26T12:10:00.000Z"
+            : "2026-03-26T12:00:00.000Z",
+          provider: {
+            provider: "junction",
+          },
+        });
+        return {
+          connection: {
+            id: "dsc_junction",
+          },
+        };
+      }),
+      handleWebhook: vi.fn(),
+      startConnection: vi.fn(),
+    }));
+    mocks.upsertConnectionSource.mockImplementation(async (input: {
+      connectionId: string;
+      firstSeenAt: string;
+      lastSeenAt: string;
+      sourceInstanceKey: string;
+      sourceProviderSlug: string;
+      status: "connected";
+      tx: typeof mocks.prismaTx;
+    }) => {
+      upsertedSourceKeys.push({
+        sourceInstanceKey: input.sourceInstanceKey,
+        sourceProviderSlug: input.sourceProviderSlug,
+      });
+      return {
+        id: `src_${String(upsertedSourceKeys.length).padStart(2, "0")}`,
+        connectionId: input.connectionId,
+        sourceInstanceKey: input.sourceInstanceKey,
+        sourceProviderSlug: input.sourceProviderSlug,
+        displayName: null,
+        status: input.status,
+        resourceAvailabilitySummary: {},
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        firstSeenAt: input.firstSeenAt,
+        lastSeenAt: input.lastSeenAt,
+        createdAt: input.lastSeenAt,
+        updatedAt: input.lastSeenAt,
+      };
+    });
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/oauth/junction/callback?code=abc&state=xyz"),
+    );
+
+    await controlPlane.handleOAuthCallback("junction");
+    await controlPlane.handleOAuthCallback("junction");
+    await controlPlane.handleOAuthCallback("junction");
+
+    expect(upsertedSourceKeys).toHaveLength(3);
+    expect(upsertedSourceKeys[0]?.sourceProviderSlug).toBe("garmin");
+    expect(upsertedSourceKeys[1]?.sourceProviderSlug).toBe("garmin");
+    expect(upsertedSourceKeys[2]?.sourceProviderSlug).toBe("peloton");
+    expect(upsertedSourceKeys[0]?.sourceInstanceKey).toBe(upsertedSourceKeys[1]?.sourceInstanceKey);
+    expect(upsertedSourceKeys[2]?.sourceInstanceKey).not.toBe(upsertedSourceKeys[0]?.sourceInstanceKey);
+    expect(upsertedSourceKeys[0]?.sourceInstanceKey).toMatch(/^jxn_src_[a-f0-9]{32}$/u);
+    expect(upsertedSourceKeys[0]?.sourceInstanceKey ?? "").not.toMatch(/dsc|junction|garmin|peloton/u);
   });
 
   it("keeps connect-time webhook upkeep best-effort when provider admin throws before returning a promise", async () => {
