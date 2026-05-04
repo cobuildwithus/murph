@@ -793,7 +793,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("caches successful artifact write lease checks for bursty same-workspace PUTs", async () => {
+  it("checks the active invocation lease for every artifact PUT", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
@@ -835,12 +835,12 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(secondResponse.status).toBe(200);
     expect(firstResponse.status).toBe(200);
-    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
     expect(bindUser).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("does not retain thrown artifact write lease checks in the cache", async () => {
+  it("recovers when a later artifact write lease check succeeds", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn();
     ownsActiveInvocationLease.mockImplementationOnce(() => {
@@ -892,7 +892,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("revalidates cached artifact write leases for a different workspace version", async () => {
+  it("checks artifact write leases for different workspace versions", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const env = createRunnerOutboundEnv({
@@ -936,7 +936,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
   });
 
-  it("revalidates cached artifact write leases after the short TTL expires", async () => {
+  it("checks artifact write leases again for repeated workspace versions", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const env = createRunnerOutboundEnv({
@@ -953,8 +953,6 @@ describe("handleRunnerOutboundRequest", () => {
       },
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-04T00:00:00.000Z"));
     const bytes = new Uint8Array([1, 2, 3]);
     const sha256 = sha256Hex(bytes);
 
@@ -968,7 +966,6 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
-    await vi.advanceTimersByTimeAsync(5_001);
     await handleRunnerOutboundRequest(
       createArtifactPutRequest({
         bytes,
@@ -983,7 +980,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
   });
 
-  it("does not cache denied artifact write lease checks", async () => {
+  it("checks artifact write leases again after denied artifact PUTs", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn()
       .mockResolvedValueOnce(false)
