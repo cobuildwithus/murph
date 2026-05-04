@@ -57,8 +57,12 @@ const CONVERSATION_PROJECTION_UPDATE_FAILED_REASON =
   "conversation-import.projection-update-failed";
 const CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON =
   "conversation-import.attachment-evidence-update-failed";
+const CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON =
+  "conversation-import.inbox-runtime-unavailable";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
+const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
+  "attachment.evidence_partial";
 const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
 
 export type HostedConversationMailboxPayloadDecodeResult =
@@ -563,6 +567,14 @@ function readHostedConversationProjectionFailureReason(
     return CONVERSATION_RAW_EMAIL_MISSING_REASON;
   }
 
+  const errorCode = readHostedConversationFailureCode(error);
+  if (errorCode === "inbox-not-initialized") {
+    return CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON;
+  }
+  if (isRawAttachmentMaterializationFailureCode(errorCode)) {
+    return ATTACHMENT_EVIDENCE_PARTIAL_REASON;
+  }
+
   return CONVERSATION_PROJECTION_FAILED_REASON;
 }
 
@@ -573,7 +585,55 @@ function readHostedConversationAttachmentEvidenceFailureReason(
     return CONVERSATION_RAW_EMAIL_MISSING_REASON;
   }
 
+  const errorCode = readHostedConversationFailureCode(error);
+  if (errorCode === "inbox-not-initialized") {
+    return CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON;
+  }
+  if (isRawAttachmentMaterializationFailureCode(errorCode)) {
+    return ATTACHMENT_EVIDENCE_PARTIAL_REASON;
+  }
+
   return CONVERSATION_ATTACHMENT_EVIDENCE_FAILED_REASON;
+}
+
+function readHostedConversationFailureCode(error: unknown): string | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    const code = readSafeHostedConversationFailureCode(current);
+    if (code) {
+      return code;
+    }
+    current = readHostedConversationFailureCause(current);
+    if (!current) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function readSafeHostedConversationFailureCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return null;
+  }
+  const code = (error as { code?: unknown }).code;
+  if (typeof code !== "string") {
+    return null;
+  }
+  const normalized = code.trim().toLowerCase().replace(/_/gu, "-");
+  return /^[a-z][a-z0-9-]{0,63}$/u.test(normalized) ? normalized : null;
+}
+
+function readHostedConversationFailureCause(error: unknown): unknown {
+  return error && typeof error === "object" && "cause" in error
+    ? (error as { cause?: unknown }).cause
+    : null;
+}
+
+function isRawAttachmentMaterializationFailureCode(code: string | null): boolean {
+  return code === "enoent" ||
+    code === "raw-copy-failed" ||
+    code === "raw-materialization-failed" ||
+    code === "attachment-materialization-failed";
 }
 
 function isUsefulHostedAttachmentEvidence(
