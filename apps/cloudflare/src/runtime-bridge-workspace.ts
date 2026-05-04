@@ -20,12 +20,14 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceInvocationRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
+  type HostedCodexHomeSnapshotDiagnostics,
 } from "@murphai/runtime-state/node";
 
 import {
@@ -68,7 +70,7 @@ export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
   request: HostedWorkspaceInvocationRequest;
   runtime: HostedAssistantRuntimeConfig;
-  vaultRoot?: string | null;
+  vaultRoot: string;
   webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
   webControlFetch?: typeof fetch;
@@ -108,6 +110,10 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           redactedStatus: checkpointInput.redactedStatus ?? null,
           snapshotRef: null,
         },
+        codexHomeSnapshotHashSecret: resolveHostedCodexHomeSnapshotHashSecret({
+          forwardedEnv: runtime.forwardedEnv,
+          platformEnv: runtime.platformEnv,
+        }),
         userId: input.request.userId,
         vaultRoot,
       }),
@@ -158,6 +164,7 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
 }
 
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
+  codexHomeSnapshotHashSecret: string | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
@@ -175,8 +182,14 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
             sha256: artifact.ref.sha256,
           });
         },
+        codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
         operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
         vaultRoot: input.vaultRoot,
+      });
+      await writeHostedCodexHomeSnapshotDiagnosticLog({
+        diagnostics: snapshot.codexHomeSnapshotDiagnostics,
+        platform: input.platform,
+        request: input.request,
       });
 
       return snapshot.bundle;
@@ -197,6 +210,63 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
       };
     },
   });
+}
+
+async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
+  diagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+}): Promise<void> {
+  if (!input.diagnostics || !input.platform.logPort) {
+    return;
+  }
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    codexHomeIncludedRelHashes: input.diagnostics.codexHomeIncludedRelHashes,
+    codexHomeSnapshotCandidateCount:
+      input.diagnostics.codexHomeSnapshotCandidateCount,
+    codexHomeSnapshotExcludedClassSummary:
+      input.diagnostics.codexHomeSnapshotExcludedClassSummary,
+    codexHomeSnapshotIncludedCount:
+      input.diagnostics.codexHomeSnapshotIncludedCount,
+  };
+
+  try {
+    await input.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: input.request.attemptId,
+          component: "workspace",
+          eventCode: "workspace.codex_home_snapshot",
+          leaseGeneration: input.request.leaseGeneration,
+          level: "info",
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: input.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted Codex home snapshot diagnostic log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+function resolveHostedCodexHomeSnapshotHashSecret(input: {
+  forwardedEnv: Readonly<Record<string, string>>;
+  platformEnv: Readonly<Record<string, string>>;
+}): string | null {
+  return normalizeHostedRuntimeBridgeString(
+    input.forwardedEnv.HOSTED_LOG_FINGERPRINT_SECRET
+      ?? input.platformEnv.HOSTED_LOG_FINGERPRINT_SECRET,
+  );
+}
+
+function normalizeHostedRuntimeBridgeString(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
@@ -427,5 +497,13 @@ function resolveWorkspaceOperatorHomeRoot(vaultRoot: string): string {
 
 function normalizeVaultRoot(value: string | null | undefined): string {
   const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : process.env.VAULT ?? process.cwd();
+  if (!normalized) {
+    throw new TypeError("Hosted workspace runtime bridge requires an explicit vault root.");
+  }
+
+  if (!path.isAbsolute(normalized)) {
+    throw new TypeError("Hosted workspace runtime bridge vault root must be absolute.");
+  }
+
+  return normalized;
 }

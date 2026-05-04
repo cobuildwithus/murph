@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -106,6 +106,87 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
     }));
     expect(putArtifact).toHaveBeenCalled();
+  });
+
+  it("logs hashed Codex home snapshot diagnostics when checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    const operatorHomeRoot = `${vaultRoot}-operator-home`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "rollouts"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1.json"),
+      "{\"rollout\":\"kept\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "cache", "scratch.json"),
+      "{\"cache\":true}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", ".env"),
+      "SHOULD_NOT_APPEAR=1\n",
+      "utf8",
+    );
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact: async () => {},
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {
+        forwardedEnv: {
+          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
+        },
+      },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput());
+
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          attemptId: "attempt_1",
+          component: "workspace",
+          eventCode: "workspace.codex_home_snapshot",
+          leaseGeneration: "4",
+          level: "info",
+          phase: "checkpoint",
+          redactedJson: {
+            codexHomeIncludedRelHashes: [
+              expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
+            ],
+            codexHomeSnapshotCandidateCount: 3,
+            codexHomeSnapshotExcludedClassSummary: expect.arrayContaining([
+              "environment:1",
+              "unsafe-container:1",
+            ]),
+            codexHomeSnapshotIncludedCount: 1,
+          },
+          workspaceVersion: "7",
+        }),
+      ],
+    });
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("rollout_1");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("SHOULD_NOT_APPEAR");
   });
 
   it("decrypts sidecar mailbox payloads through the bridge using the sidecar payload schema", async () => {
@@ -348,6 +429,9 @@ function createCheckpointInput() {
 
 function createPlatform(input: {
   putArtifact: (payload: { bytes: Uint8Array; sha256: string }) => Promise<void>;
+  writeLog?: (request: {
+    entries: readonly unknown[];
+  }) => Promise<{ loggedCount: number }>;
 }) {
   return {
     artifactStore: {
@@ -358,5 +442,12 @@ function createPlatform(input: {
       readRawEmailMessage: async () => null,
       sendEmail: async () => undefined,
     },
+    ...(input.writeLog
+      ? {
+          logPort: {
+            write: input.writeLog,
+          },
+        }
+      : {}),
   };
 }

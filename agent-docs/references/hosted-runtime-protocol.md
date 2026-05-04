@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-02
+Last verified: 2026-05-04
 
 ## Decision
 
@@ -170,6 +170,15 @@ state, parser executable-selector config, quarantine payloads, locks,
 pid/socket files, global cache/tmp, and rebuildable projections. This is
 intentionally denylist-based so newly added hosted operational state is not
 silently dropped from later checkpoints.
+
+Hosted snapshots also preserve safe non-secret Codex home continuity under
+`.codex-hosted/**` by default, while excluding environment files, credential,
+auth, token, key, cert, temp, cache, log, lock, pid, socket, and secret-looking
+paths. Checkpoint diagnostics for that tree may expose only candidate/included
+counts, exclusion classes, and keyed hashed relative names when the hosted log
+fingerprint secret is configured; raw Codex home paths, filenames, prompts, and
+credentials must not appear in hosted runtime logs. Without the fingerprint
+secret, checkpoint diagnostics stay count/class only.
 
 ## Ownership Rules
 

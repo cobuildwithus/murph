@@ -17,6 +17,7 @@ import {
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
   isHostedConversationMessageWake,
+  sanitizeHostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
@@ -39,6 +40,18 @@ type HostedMailboxOutcome = HostedMailboxEffect & {
 
 const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
   "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.";
+const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
+  "murph.assistant-provider-plan-diagnostics.v1";
+const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = "assistant.provider.plan";
+const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
+  "explicit-structured-history",
+  "provider-state-optimization",
+  "thread-start",
+]);
+const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
+  "hosted-stable-proc-cwd",
+  "raw",
+]);
 
 export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
@@ -310,8 +323,133 @@ export function emitHostedAssistantProviderTraceLog(input: {
   event: unknown;
   wake: HostedRuntimeEvent;
 }): HostedExecutionRedactedLogEntry | null {
-  void input;
-  return null;
+  const diagnostic = readHostedAssistantProviderPlanDiagnosticTrace(input.event);
+  if (!diagnostic) {
+    return null;
+  }
+
+  const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
+    ...(input.details ?? {}),
+    ...diagnostic,
+  });
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime.provider",
+    details: redactedDetails,
+    message: "Hosted assistant provider plan captured.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
+
+  return {
+    component: "runtime.provider",
+    eventId: input.wake.eventId,
+    level: "info",
+    message: "Hosted assistant provider plan captured.",
+    phase: "wake.running",
+    redacted: redactedDetails,
+  };
+}
+
+function readHostedAssistantProviderPlanDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    return null;
+  }
+
+  const rawEvent = (event as { rawEvent?: unknown }).rawEvent;
+  if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+    return null;
+  }
+
+  const record = rawEvent as Record<string, unknown>;
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA
+    || type !== ASSISTANT_PROVIDER_PLAN_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const providerContinuation = readHostedAssistantProviderPlanAllowedString(
+    record,
+    "providerContinuation",
+    HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES,
+  );
+  const workingDirectoryKind = readHostedAssistantProviderPlanAllowedString(
+    record,
+    "workingDirectoryKind",
+    HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES,
+  );
+  if (!providerContinuation || !workingDirectoryKind) {
+    return null;
+  }
+
+  return {
+    activeTurnHistoryCount:
+      readHostedAssistantProviderPlanNullableNumber(record, "activeTurnHistoryCount"),
+    activeTurnHistoryPresent:
+      readHostedAssistantProviderPlanBoolean(record, "activeTurnHistoryPresent"),
+    providerContinuation,
+    providerPlanKind: "provider.plan",
+    providerRequestOrdinal:
+      readHostedAssistantProviderPlanNullableNumber(record, "providerRequestOrdinal"),
+    refreshThreadInstructions:
+      readHostedAssistantProviderPlanBoolean(record, "refreshThreadInstructions"),
+    resumeProviderSessionIdPresent:
+      readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
+    storedThreadInstructionsFingerprintPresent:
+      readHostedAssistantProviderPlanBoolean(
+        record,
+        "storedThreadInstructionsFingerprintPresent",
+      ),
+    threadInstructionsFingerprintPresent:
+      readHostedAssistantProviderPlanBoolean(
+        record,
+        "threadInstructionsFingerprintPresent",
+      ),
+    workingDirectoryKind,
+  };
+}
+
+function readHostedAssistantProviderPlanBoolean(
+  record: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  const value = record[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function readHostedAssistantProviderPlanNullableNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readHostedAssistantProviderPlanAllowedString(
+  record: Record<string, unknown>,
+  key: string,
+  allowedValues: ReadonlySet<string>,
+): string | null {
+  const value = readHostedAssistantProviderPlanString(record, key);
+  return value && allowedValues.has(value) ? value : null;
+}
+
+function readHostedAssistantProviderPlanString(
+  record: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = record[key];
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 128 ? normalized : null;
 }
 
 function buildAssistantNotificationInput(

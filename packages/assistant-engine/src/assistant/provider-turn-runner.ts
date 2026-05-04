@@ -29,6 +29,7 @@ import { appendAssistantTranscriptEntries } from './store.js'
 import {
   buildAssistantProviderTranscriptAuditEntries,
 } from './transcript-audit.js'
+import { HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY } from './turn-plan.js'
 import {
   createAssistantUsageAttribution,
   resolveAssistantUsageEnvironment,
@@ -49,6 +50,7 @@ import type {
 import type { AssistantProviderContinuation } from './active-turn-input-journal.js'
 import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
+import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
   recordProviderAttemptFailed,
   recordProviderAttemptStarted,
@@ -65,6 +67,10 @@ import type {
   AssistantProviderTurnExecutionProfile,
   AssistantProviderTurnThreadScopeProfile,
 } from './provider-turn/planning.js'
+
+const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
+  'murph.assistant-provider-plan-diagnostics.v1'
+const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 
 export {
   resolveAssistantProviderThreadPlan,
@@ -229,6 +235,50 @@ function createAssistantProviderUsageAttribution(input: {
   })
 }
 
+function emitProviderPlanTraceEvent(input: {
+  activeTurnHistoryMessageCount: number
+  activeTurnHistoryPresent: boolean
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  providerContinuation: string
+  providerRequestOrdinal: number | null
+  refreshThreadInstructions: boolean
+  resumeProviderSessionIdPresent: boolean
+  storedThreadInstructionsFingerprintPresent: boolean
+  threadInstructionsFingerprintPresent: boolean
+  workingDirectory: string
+}): void {
+  if (!input.onTraceEvent) {
+    return
+  }
+
+  try {
+    input.onTraceEvent({
+      providerSessionId: null,
+      rawEvent: {
+        schema: ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA,
+        type: ASSISTANT_PROVIDER_PLAN_TRACE_TYPE,
+        activeTurnHistoryCount: input.activeTurnHistoryMessageCount,
+        activeTurnHistoryPresent: input.activeTurnHistoryPresent,
+        providerContinuation: input.providerContinuation,
+        providerRequestOrdinal: input.providerRequestOrdinal,
+        refreshThreadInstructions: input.refreshThreadInstructions,
+        resumeProviderSessionIdPresent: input.resumeProviderSessionIdPresent,
+        storedThreadInstructionsFingerprintPresent:
+          input.storedThreadInstructionsFingerprintPresent,
+        threadInstructionsFingerprintPresent:
+          input.threadInstructionsFingerprintPresent,
+        workingDirectoryKind:
+          input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
+            ? 'hosted-stable-proc-cwd'
+            : 'raw',
+      },
+      updates: [],
+    })
+  } catch {
+    // Provider-plan traces are diagnostic-only and must not block turns.
+  }
+}
+
 async function executeAssistantProviderAttempt(input: {
   attemptPlan: AssistantProviderAttemptPlan
   executionPlan: AssistantProviderTurnExecutionPlan
@@ -264,6 +314,24 @@ async function executeAssistantProviderAttempt(input: {
     turnId: executionPlan.turnId,
     vault: executionPlan.input.vault,
     vaultRoot: executionPlan.input.vault,
+    workingDirectory: attemptPlan.routePlan.workingDirectory,
+  })
+  emitProviderPlanTraceEvent({
+    activeTurnHistoryMessageCount:
+      executionPlan.activeTurnHistory?.messages.length ?? 0,
+    activeTurnHistoryPresent:
+      (executionPlan.activeTurnHistory?.messages.length ?? 0) > 0,
+    onTraceEvent: executionPlan.input.onTraceEvent,
+    providerContinuation: attemptPlan.routePlan.providerContinuation.kind,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
+    resumeProviderSessionIdPresent:
+      attemptPlan.routePlan.resumeProviderSessionId !== null,
+    storedThreadInstructionsFingerprintPresent:
+      typeof attemptPlan.session.resumeState?.threadInstructionsFingerprint ===
+      'string',
+    threadInstructionsFingerprintPresent:
+      attemptPlan.routePlan.threadInstructionsFingerprint !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
   await recordProviderAttemptStarted({
