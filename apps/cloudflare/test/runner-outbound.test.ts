@@ -17,6 +17,7 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import { clearHostedRuntimeCryptoContextEnvelopeCacheForTests } from "../src/hosted-crypto/runtime-user-crypto-context.ts";
 import {
   handleRunnerOutboundRequest,
   resetRunnerOutboundCachesForTest,
@@ -174,6 +175,7 @@ describe("handleRunnerOutboundRequest", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+    clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
     resetRunnerOutboundCachesForTest();
     resetRunnerOutboundSharedCachesForTest();
   });
@@ -1068,10 +1070,11 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("caches outbound runtime crypto context by user and domain until expiry", async () => {
+  it("does not retain resolved outbound plaintext crypto contexts", async () => {
     const fetchedAt = "2026-05-04T00:00:00.000Z";
     const fixture = await createHostedRuntimeCryptoContextFixture({
       cacheMaxAgeMs: 10_000,
+      cryptoContextVersion: "ctx-no-plaintext-cache",
       fetchedAt,
     });
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
@@ -1097,6 +1100,7 @@ describe("handleRunnerOutboundRequest", () => {
       environment,
       userId: "member_123",
     });
+    firstContext.rootKey[0] = 255;
     const secondContext = await resolveRunnerOutboundUserCryptoContext({
       bucket: env.BUNDLES,
       domain: "runtime",
@@ -1107,6 +1111,9 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(firstContext.rootKeyId).toBe("udrk:runtime:test-root");
     expect(secondContext.rootKeyId).toBe("udrk:runtime:test-root");
+    expect(secondContext).not.toBe(firstContext);
+    expect(secondContext.rootKey).not.toBe(firstContext.rootKey);
+    expect(secondContext.rootKey[0]).toBe(101);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
     expect(bindUser).toHaveBeenCalledOnce();
   });
@@ -1114,6 +1121,7 @@ describe("handleRunnerOutboundRequest", () => {
   it("coalesces concurrent outbound runtime crypto cold binds and fetches", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture({
       cacheMaxAgeMs: 10_000,
+      cryptoContextVersion: "ctx-pending-single-flight",
       fetchedAt: "2026-05-04T00:00:00.000Z",
     });
     let releaseBind!: () => void;
@@ -1135,6 +1143,8 @@ describe("handleRunnerOutboundRequest", () => {
       },
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-04T00:00:00.000Z"));
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
 
     const firstContext = resolveRunnerOutboundUserCryptoContext({
@@ -1155,18 +1165,30 @@ describe("handleRunnerOutboundRequest", () => {
     expect(bindUser).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).not.toHaveBeenCalled();
     releaseBind();
-    await expect(Promise.all([firstContext, secondContext])).resolves.toMatchObject([
-      { rootKeyId: "udrk:runtime:test-root" },
-      { rootKeyId: "udrk:runtime:test-root" },
-    ]);
+    const [firstResolved, secondResolved] = await Promise.all([firstContext, secondContext]);
+
+    expect(firstResolved.rootKeyId).toBe("udrk:runtime:test-root");
+    expect(secondResolved.rootKeyId).toBe("udrk:runtime:test-root");
+    expect(secondResolved).toBe(firstResolved);
+
+    const thirdResolved = await resolveRunnerOutboundUserCryptoContext({
+      bucket: env.BUNDLES,
+      domain: "runtime",
+      env,
+      environment,
+      userId: "member_123",
+    });
+
+    expect(thirdResolved).not.toBe(firstResolved);
     expect(bindUser).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("keys outbound runtime crypto context cache by hosted environment identity", async () => {
+  it("does not reuse outbound runtime crypto envelopes across hosted environment identity", async () => {
     const fetchedAt = "2026-05-04T00:00:00.000Z";
     const firstFixture = await createHostedRuntimeCryptoContextFixture({
       cacheMaxAgeMs: 10_000,
+      cryptoContextVersion: "ctx-first-env",
       fetchedAt,
       runtimeRootKeyId: "udrk:runtime:first-root",
     });
@@ -1175,6 +1197,7 @@ describe("handleRunnerOutboundRequest", () => {
         "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2",
       automationKeyId: "cf-key-v2",
       cacheMaxAgeMs: 10_000,
+      cryptoContextVersion: "ctx-second-env",
       cryptoEnv: "staging",
       fetchedAt,
       runtimeRootKeyId: "udrk:runtime:second-root",
@@ -1235,10 +1258,11 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("misses outbound runtime crypto context cache after cacheMaxAgeMs", async () => {
+  it("refetches outbound runtime crypto envelopes after the envelope cache TTL", async () => {
     const fetchedAt = "2026-05-04T00:00:00.000Z";
     const fixture = await createHostedRuntimeCryptoContextFixture({
       cacheMaxAgeMs: 2_000,
+      cryptoContextVersion: "ctx-short-envelope-ttl",
       fetchedAt,
     });
     const env = createRunnerOutboundEnv({
@@ -1256,73 +1280,7 @@ describe("handleRunnerOutboundRequest", () => {
       environment,
       userId: "member_123",
     });
-    await vi.advanceTimersByTimeAsync(1_001);
-    await resolveRunnerOutboundUserCryptoContext({
-      bucket: env.BUNDLES,
-      domain: "runtime",
-      env,
-      environment,
-      userId: "member_123",
-    });
-
-    expect(fixture.fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("caps outbound runtime crypto context cache expiry against local receive time", async () => {
-    const localNow = "2026-05-04T00:00:00.000Z";
-    const fixture = await createHostedRuntimeCryptoContextFixture({
-      cacheMaxAgeMs: 5 * 60 * 1000,
-      fetchedAt: "2026-05-04T01:00:00.000Z",
-    });
-    const env = createRunnerOutboundEnv({
-      ...fixture.env,
-    });
-    vi.stubGlobal("fetch", fixture.fetchMock);
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(localNow));
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-
-    await resolveRunnerOutboundUserCryptoContext({
-      bucket: env.BUNDLES,
-      domain: "runtime",
-      env,
-      environment,
-      userId: "member_123",
-    });
-    await vi.advanceTimersByTimeAsync((5 * 60 * 1000) - 999);
-    await resolveRunnerOutboundUserCryptoContext({
-      bucket: env.BUNDLES,
-      domain: "runtime",
-      env,
-      environment,
-      userId: "member_123",
-    });
-
-    expect(fixture.fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("caps outbound runtime crypto context cacheMaxAgeMs at five minutes", async () => {
-    const fetchedAt = "2026-05-04T00:00:00.000Z";
-    const fixture = await createHostedRuntimeCryptoContextFixture({
-      cacheMaxAgeMs: 10 * 60 * 1000,
-      fetchedAt,
-    });
-    const env = createRunnerOutboundEnv({
-      ...fixture.env,
-    });
-    vi.stubGlobal("fetch", fixture.fetchMock);
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(fetchedAt));
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-
-    await resolveRunnerOutboundUserCryptoContext({
-      bucket: env.BUNDLES,
-      domain: "runtime",
-      env,
-      environment,
-      userId: "member_123",
-    });
-    await vi.advanceTimersByTimeAsync((5 * 60 * 1000) - 999);
+    await vi.advanceTimersByTimeAsync(2_001);
     await resolveRunnerOutboundUserCryptoContext({
       bucket: env.BUNDLES,
       domain: "runtime",
@@ -1713,6 +1671,7 @@ async function createHostedRuntimeCryptoContextFixture(input: {
   authoritySignKeyVersion?: string;
   automationKeyId?: string;
   cacheMaxAgeMs?: number;
+  cryptoContextVersion?: string;
   cryptoEnv?: string;
   fetchedAt?: string;
   ingressRootKeyId?: string;
@@ -1721,6 +1680,7 @@ async function createHostedRuntimeCryptoContextFixture(input: {
 } = {}): Promise<{
   context: {
     cacheMaxAgeMs?: number;
+    cryptoContextVersion?: string;
     envelopes: {
       ingress: HostedDomainRootKeyEnvelopeV1;
       runtime: HostedDomainRootKeyEnvelopeV1;
@@ -1736,11 +1696,15 @@ async function createHostedRuntimeCryptoContextFixture(input: {
   const authoritySignKeyVersion = input.authoritySignKeyVersion
     ?? "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
   const automationKeyId = input.automationKeyId ?? "cf-key-v1";
+  const cacheMaxAgeMs = input.cacheMaxAgeMs ?? 60_000;
+  const cryptoContextVersion = input.cryptoContextVersion ?? "ctx-v1";
   const cryptoEnv = input.cryptoEnv ?? "test";
+  const fetchedAt = input.fetchedAt ?? new Date().toISOString();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
   const signer = await generateP256SigningKeyPair();
   const context = {
-    ...(input.cacheMaxAgeMs === undefined ? {} : { cacheMaxAgeMs: input.cacheMaxAgeMs }),
+    cacheMaxAgeMs,
+    cryptoContextVersion,
     envelopes: {
       ingress: await createSignedWorkerEnvelope({
         authoritySignKeyVersion,
@@ -1765,7 +1729,7 @@ async function createHostedRuntimeCryptoContextFixture(input: {
         userId,
       }),
     },
-    ...(input.fetchedAt === undefined ? {} : { fetchedAt: input.fetchedAt }),
+    fetchedAt,
     schema: "murph.hosted-runtime-crypto-context.v1" as const,
     userId,
   };
