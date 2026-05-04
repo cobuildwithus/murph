@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
 
 import type { HostedBrowserDeviceSyncConnection } from "@/src/lib/device-sync/public-connection";
-import { buildHostedDeviceSyncSettingsSources } from "@/src/lib/device-sync/settings-surface";
+import {
+  buildHostedDeviceSyncSettingsSources,
+  isActiveHostedDeviceSyncSource,
+} from "@/src/lib/device-sync/settings-surface";
 
 const STRAVA_PROVIDER: PublicProviderDescriptor = {
   callbackPath: "/oauth/strava/callback",
@@ -311,5 +314,33 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       statusLabel: "Unavailable",
       tone: "muted",
     });
+  });
+});
+
+describe("isActiveHostedDeviceSyncSource", () => {
+  it("matches sources that represent a live device-sync connection", () => {
+    expect(isActiveHostedDeviceSyncSource({
+      connectionId: "dspc_active",
+      state: "active",
+    })).toBe(true);
+    expect(isActiveHostedDeviceSyncSource({
+      connectionId: "dspc_reauth",
+      state: "reauthorization_required",
+    })).toBe(true);
+  });
+
+  it("ignores placeholders and inactive connection records", () => {
+    expect(isActiveHostedDeviceSyncSource({
+      connectionId: null,
+      state: "available",
+    })).toBe(false);
+    expect(isActiveHostedDeviceSyncSource({
+      connectionId: "dspc_disconnected",
+      state: "disconnected",
+    })).toBe(false);
+    expect(isActiveHostedDeviceSyncSource({
+      connectionId: "dspc_unavailable",
+      state: "unavailable",
+    })).toBe(false);
   });
 });
