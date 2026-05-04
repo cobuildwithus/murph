@@ -174,6 +174,10 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     return id ? (this.accounts.get(id) ?? null) : null;
   }
 
+  getConnectionById(accountId: string): PublicDeviceSyncAccount | null {
+    return this.accounts.get(accountId) ?? null;
+  }
+
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
     const key = `${input.provider}:${input.traceId}`;
     const existing = this.webhookTraces.get(key);
@@ -779,11 +783,13 @@ test("public ingress persists validated provider-config connection seeds before 
     account ? Object.values(stateRecord?.metadata ?? {}).includes(account.id) : false,
     true,
   );
+  assert.equal(Object.values(stateRecord?.metadata ?? {}).includes("external-account-1"), false);
 });
 
 test("public ingress completes external-link callbacks with sanitized state metadata and setup phase", async () => {
   const store = new InMemoryPublicIngressStore();
   let callbackStateMetadata: Record<string, unknown> | undefined;
+  let callbackSeededExternalAccountId: string | null | undefined;
   const provider = createFakeProvider({
     provider: "junction",
     credentialPolicy: {
@@ -835,6 +841,7 @@ test("public ingress completes external-link callbacks with sanitized state meta
     },
     async completeConnection(input) {
       callbackStateMetadata = input.stateMetadata;
+      callbackSeededExternalAccountId = input.seededExternalAccountId;
       return {
         externalAccountId: "external-account-1",
         displayName: "Junction",
@@ -869,6 +876,7 @@ test("public ingress completes external-link callbacks with sanitized state meta
   assert.deepEqual(callbackStateMetadata, {
     clientUserIdHash: "client-hash-1",
   });
+  assert.equal(callbackSeededExternalAccountId, "external-account-1");
   assert.equal(Object.prototype.hasOwnProperty.call(callbackStateMetadata ?? {}, "ownerId"), false);
   assert.equal(completed.account.setupPhase, "link_returned");
   assert.equal(completed.account.setupExpiresAt, seeded.setupExpiresAt);

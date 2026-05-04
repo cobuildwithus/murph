@@ -254,6 +254,9 @@ export interface DeviceSyncPublicIngressStore {
   markConnectionSetupFailed(
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  getConnectionById(
+    accountId: string,
+  ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
   getConnectionByExternalAccount(
     provider: string,
     externalAccountId: string,

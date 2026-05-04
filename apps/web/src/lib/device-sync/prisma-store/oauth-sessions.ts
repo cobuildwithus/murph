@@ -2,6 +2,9 @@ import { PrismaClient } from "@prisma/client";
 
 import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/public-ingress";
 
+import { toJsonRecord } from "../shared";
+import { toPrismaJsonObject } from "./prisma-json";
+
 export class PrismaHostedOAuthSessionStore {
   readonly prisma: PrismaClient;
 
@@ -27,6 +30,7 @@ export class PrismaHostedOAuthSessionStore {
         userId: input.ownerId ?? null,
         provider: input.provider,
         returnTo: input.returnTo,
+        metadataJson: toPrismaJsonObject(input.metadata ?? {}),
         createdAt: new Date(input.createdAt),
         expiresAt: new Date(input.expiresAt),
       },
@@ -93,7 +97,7 @@ export class PrismaHostedOAuthSessionStore {
           provider: record.provider,
           returnTo: record.returnTo,
           ownerId: record.userId,
-          metadata: {},
+          metadata: toJsonRecord(record.metadataJson),
           createdAt: record.createdAt.toISOString(),
           expiresAt: record.expiresAt.toISOString(),
         } satisfies OAuthStateRecord,

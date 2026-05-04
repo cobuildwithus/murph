@@ -160,6 +160,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceOauthSessionMetadataMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050402_device_oauth_session_metadata/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -177,6 +184,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260502000000_hosted_web_session",
       "2026050400_hosted_ai_usage_provider_request_outcome",
       "2026050401_hosted_ai_usage_sanitized_usage_metadata",
+      "2026050402_device_oauth_session_metadata",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -287,6 +295,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedAiUsageSanitizedMetadataMigrationSql).toContain(
       'ADD COLUMN "usage_extraction_source_path" TEXT',
+    );
+    expect(deviceOauthSessionMetadataMigrationSql).toContain(
+      'ALTER TABLE "device_oauth_session"',
+    );
+    expect(deviceOauthSessionMetadataMigrationSql).toContain(
+      'ADD COLUMN "metadata_json" JSONB',
     );
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');

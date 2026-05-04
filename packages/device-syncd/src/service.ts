@@ -192,6 +192,10 @@ class DeviceSyncServiceController {
           );
           return account ? this.toPublicAccount(account) : null;
         },
+        getConnectionById: (accountId) => {
+          const account = this.store.getAccountById(accountId);
+          return account ? this.toPublicAccount(account) : null;
+        },
         getConnectionByExternalAccount: (provider, externalAccountId) => {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
