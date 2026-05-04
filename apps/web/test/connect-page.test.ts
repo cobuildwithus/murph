@@ -294,6 +294,10 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />Health Connect</u);
   assert.doesNotMatch(markup, />Manual</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
+  assert.ok(sourceHeadingIndex(markup, "Samsung Health") < sourceHeadingIndex(markup, "Garmin"));
+  assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
+  assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Strava"));
+  assert.ok(sourceHeadingIndex(markup, "Strava") < sourceHeadingIndex(markup, "Whoop"));
 
   for (const source of sources) {
     assert.match(markup, new RegExp(escapeRegExp(source.name)));
@@ -356,6 +360,46 @@ test("filterConnectSourcesForSearch matches source names, ids, and descriptions"
   ]);
 });
 
+test("sortConnectSourcesByConnectionState keeps connected sources first, then popularity order", async () => {
+  const { sortConnectSourcesByConnectionState } = await import(
+    "../app/(dashboard)/connect/connect-source-order"
+  );
+  const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
+  const sources = [
+    {
+      id: "whoop",
+      name: "Whoop",
+      description: "Recovery.",
+      logo,
+    },
+    {
+      connected: true,
+      id: "oura",
+      name: "Oura",
+      description: "Sleep.",
+      logo,
+    },
+    {
+      id: "garmin",
+      name: "Garmin",
+      description: "Training.",
+      logo,
+    },
+    {
+      connected: true,
+      id: "strava",
+      name: "Strava",
+      description: "Workouts.",
+      logo,
+    },
+  ];
+
+  assert.deepEqual(
+    sortConnectSourcesByConnectionState(sources).map((source) => source.id),
+    ["strava", "oura", "garmin", "whoop"],
+  );
+});
+
 test("ConnectSourcesGrid shows an empty-state alert when no sources are available", async () => {
   const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
   const markup = renderToStaticMarkup(createElement(ConnectSourcesGrid, { sources: [] }));
@@ -410,34 +454,46 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.deepEqual([...visibleSourceIds].sort(), [...configuredSourceIds].sort());
 
   const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
+  const resolvedConnectSources = resolveConfiguredConnectSources([
+    {
+      id: "dexcom-g6-and-older",
+      name: "Dexcom (G6 and older)",
+      description: "Legacy Dexcom.",
+      logo,
+    },
+    {
+      id: "dexcom",
+      name: "Dexcom",
+      description: "Current Dexcom.",
+      logo,
+    },
+    {
+      id: "mapmyfitness",
+      name: "MapMyFitness",
+      description: "Workouts.",
+      logo,
+    },
+    {
+      id: "accuchek",
+      name: "Accu-Chek",
+      description: "Glucose meter.",
+      logo,
+    },
+  ]);
+  assert.deepEqual(resolvedConnectSources.map((source) => source.id), [
+    "dexcom",
+    "dexcom-g6-and-older",
+    "mapmyfitness",
+    "accuchek",
+  ]);
   assert.deepEqual(
-    resolveConfiguredConnectSources([
-      {
-        id: "dexcom-g6-and-older",
-        name: "Dexcom (G6 and older)",
-        description: "Legacy Dexcom.",
-        logo,
-      },
-      {
-        id: "dexcom",
-        name: "Dexcom",
-        description: "Current Dexcom.",
-        logo,
-      },
-      {
-        id: "mapmyfitness",
-        name: "MapMyFitness",
-        description: "Workouts.",
-        logo,
-      },
-      {
-        id: "accuchek",
-        name: "Accu-Chek",
-        description: "Glucose meter.",
-        logo,
-      },
-    ]).map((source) => source.connectTarget),
-    ["dexcom", "dexcom_v3", "map_my_fitness", undefined],
+    Object.fromEntries(resolvedConnectSources.map((source) => [source.id, source.connectTarget])),
+    {
+      accuchek: undefined,
+      dexcom: "dexcom_v3",
+      "dexcom-g6-and-older": "dexcom",
+      mapmyfitness: "map_my_fitness",
+    },
   );
 });
 
@@ -554,6 +610,8 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
   assert.match(markup, /Oura connected/);
   assert.match(markup, /Whoop connected/);
   assert.equal(markup.match(/>Connected<\/span>/gu)?.length, 2);
+  assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
+  assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Samsung Health"));
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
@@ -843,6 +901,7 @@ test("ConnectPage shows callback success with the original source label", async 
 
   assert.match(markup, /Connected Oura\./);
   assert.match(markup, /data-connection-state="connected"/u);
+  assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
 });
 
@@ -863,6 +922,12 @@ test("ConnectPage shows callback errors with the original source label", async (
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sourceHeadingIndex(markup: string, sourceName: string): number {
+  const index = markup.indexOf(`>${sourceName}</h2>`);
+  assert.notEqual(index, -1, `${sourceName} heading should exist`);
+  return index;
 }
 
 function expectSettingResponseNotLoaded() {

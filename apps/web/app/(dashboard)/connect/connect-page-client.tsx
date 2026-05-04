@@ -26,6 +26,8 @@ import {
 import { Input } from "@/src/components/ui/input";
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/settings-surface";
 
+import { sortConnectSourcesByConnectionState } from "./connect-source-order";
+
 type LogoAsset = {
   className: string;
   height: number;
@@ -88,7 +90,9 @@ export function ConnectSourcesGrid({
     ? resolveCallbackSourceId(initialCallback, sources)
     : null;
   const displaySources = useMemo(
-    () => markCallbackConnectedSource(sources, callbackConnectedSourceId),
+    () => sortConnectSourcesByConnectionState(
+      markCallbackConnectedSource(sources, callbackConnectedSourceId),
+    ),
     [callbackConnectedSourceId, sources],
   );
   const filteredSources = useMemo(
