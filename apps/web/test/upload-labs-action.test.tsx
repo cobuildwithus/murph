@@ -99,6 +99,21 @@ beforeEach(() => {
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 });
 
+test("UploadLabsMurphContactAction opens auth before login", async () => {
+  const { UploadLabsMurphContactAction } = await import(
+    "@/src/components/home/upload-labs-action"
+  );
+  const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
+
+  assert.match(markup, /data-slot="auth-button"/);
+  assert.match(markup, /aria-label="Sync labs with Murph"/);
+  assert.match(markup, />Sync<svg/u);
+  assert.doesNotMatch(markup, /disabled=""/);
+  assert.doesNotMatch(markup, /href=/);
+  assert.equal(mocks.readHostedAccountSettingsSnapshot.mock.calls.length, 0);
+  assert.equal(mocks.readHostedMemberRoutingState.mock.calls.length, 0);
+});
+
 test("UploadLabsMurphContactAction opens assigned SMS with the lab-report message", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -304,42 +319,6 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
   );
   assert.doesNotMatch(markup, /tg_user_123/);
   assert.doesNotMatch(markup, /member_handle/);
-});
-
-test("UploadLabsMurphContactAction stays disabled when no connected channel exists", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      id: "member_labs_no_channel",
-    },
-    linkedAccounts: [],
-    memberLookup: null,
-    session: null,
-  });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: null,
-    memberId: "member_labs_no_channel",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: null,
-    phone: null,
-    telegram: null,
-  });
-
-  const { UploadLabsMurphContactAction } = await import(
-    "@/src/components/home/upload-labs-action"
-  );
-  const markup = renderToStaticMarkup(await UploadLabsMurphContactAction());
-
-  assert.match(markup, /disabled=""/);
-  assert.match(markup, /data-slot="auth-button"/);
-  assert.doesNotMatch(markup, /href=/);
 });
 
 test("OnboardingSteps renders a supplied Upload labs action instead of the settings link", async () => {
