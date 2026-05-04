@@ -54,6 +54,30 @@ describe('assistant turn plan', () => {
     ).toBe('/workspace/explicit')
   })
 
+  it('stabilizes hosted Linux cwd when callers explicitly pass the vault cwd', () => {
+    expect(
+      resolveAssistantRequestedWorkingDirectory(
+        createMessageInput({
+          executionContext: {
+            hosted: {
+              memberId: 'member_test',
+              userEnvKeys: [],
+            },
+          },
+          vault: '/tmp/hosted-runner-launch-alpha',
+          workingDirectory: '/tmp/hosted-runner-launch-alpha',
+        }),
+        {
+          currentWorkingDirectory: '/tmp/hosted-runner-launch-alpha',
+          env: {
+            MURPH_HOSTED_RUNTIME_PROCESS: '1',
+          },
+          platform: 'linux',
+        },
+      ),
+    ).toBe(HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY)
+  })
+
   it('keeps the vault fallback outside hosted Linux restored-cwd invocations', () => {
     const hostedInput = createMessageInput({
       executionContext: {

@@ -75,14 +75,18 @@ export function resolveAssistantRequestedWorkingDirectory(
   } = {},
 ): string {
   const explicitWorkingDirectory = normalizeNullableString(input.workingDirectory)
-  if (explicitWorkingDirectory) {
-    return explicitWorkingDirectory
-  }
-
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const env = options.env ?? process.env
   const platform = options.platform ?? process.platform
   const currentWorkingDirectory = options.currentWorkingDirectory ?? process.cwd()
+  const explicitWorkingDirectoryMatchesVault =
+    explicitWorkingDirectory !== null
+    && path.resolve(explicitWorkingDirectory) === path.resolve(input.vault)
+
+  if (explicitWorkingDirectory && !explicitWorkingDirectoryMatchesVault) {
+    return explicitWorkingDirectory
+  }
+
   if (
     executionContext.hosted &&
     env[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1' &&
@@ -92,7 +96,7 @@ export function resolveAssistantRequestedWorkingDirectory(
     return HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
   }
 
-  return input.vault
+  return explicitWorkingDirectory ?? input.vault
 }
 
 export async function resolveAssistantOnboardingGuidanceOpenForVault(input: {

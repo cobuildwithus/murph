@@ -207,6 +207,53 @@ describe("handleRunnerOutboundRequest", () => {
     expect(stub.bindUser).toHaveBeenCalledWith("member_123");
   });
 
+  it("briefly reuses successful outbound bindUser assertions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-04T00:00:00.000Z"));
+    const stub = {
+      bindUser: vi.fn(async (userId: string) => ({ userId })),
+    };
+    const getByName = vi.fn(() => stub);
+    const env = createDirectRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName,
+      },
+    });
+
+    const firstStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
+    const secondStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
+    await vi.advanceTimersByTimeAsync(60_001);
+    const thirdStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
+
+    expect(firstStub).toBe(stub);
+    expect(secondStub).toBe(stub);
+    expect(thirdStub).toBe(stub);
+    expect(getByName).toHaveBeenCalledTimes(2);
+    expect(stub.bindUser).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops rejected outbound bindUser assertions from the cache", async () => {
+    const bindUser = vi.fn()
+      .mockRejectedValueOnce(new Error("bind failed"))
+      .mockResolvedValueOnce({ userId: "member_123" });
+    const env = createDirectRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName() {
+          return { bindUser };
+        },
+      },
+    });
+
+    await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).rejects.toThrow(
+      "bind failed",
+    );
+    await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).resolves.toMatchObject({
+      bindUser,
+    });
+
+    expect(bindUser).toHaveBeenCalledTimes(2);
+  });
+
   it("fails closed when the runner stub is malformed at runtime", async () => {
     const env = createDirectRunnerOutboundEnv({
       USER_RUNNER: {
@@ -502,6 +549,71 @@ describe("handleRunnerOutboundRequest", () => {
     },
   );
 
+  it("reuses the bound user runner stub while proxying workspace checkpoints", async () => {
+    const bindUser = vi.fn(async (userId: string) => ({ userId }));
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const recordActiveInvocationWorkspaceCheckpoint = vi.fn(async () => ({
+      recorded: true,
+    }));
+    const getByName = vi.fn(() => ({
+      bindUser,
+      ownsActiveInvocationLease,
+      recordActiveInvocationWorkspaceCheckpoint,
+    }));
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(
+      JSON.stringify(createHostedWorkspaceCheckpointResponse("5")),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-workspace/checkpoint", {
+        body: JSON.stringify({
+          attemptId: "attempt_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          snapshotRef: null,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName,
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(getByName).toHaveBeenCalledOnce();
+    expect(bindUser).toHaveBeenCalledOnce();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(recordActiveInvocationWorkspaceCheckpoint).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "5",
+    });
+  });
+
   it("rejects workspace checkpoints when the user runner no longer owns the active lease", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -724,7 +836,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(secondResponse.status).toBe(200);
     expect(firstResponse.status).toBe(200);
     expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(bindUser).toHaveBeenCalledTimes(2);
+    expect(bindUser).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -776,7 +888,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(secondResponse.status).toBe(200);
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
-    expect(bindUser).toHaveBeenCalledTimes(3);
+    expect(bindUser).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -997,6 +1109,130 @@ describe("handleRunnerOutboundRequest", () => {
     expect(secondContext.rootKeyId).toBe("udrk:runtime:test-root");
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
     expect(bindUser).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces concurrent outbound runtime crypto cold binds and fetches", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture({
+      cacheMaxAgeMs: 10_000,
+      fetchedAt: "2026-05-04T00:00:00.000Z",
+    });
+    let releaseBind!: () => void;
+    const bindRelease = new Promise<void>((resolve) => {
+      releaseBind = resolve;
+    });
+    const bindUser = vi.fn(async (userId: string) => {
+      await bindRelease;
+      return { userId };
+    });
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName() {
+          return {
+            bindUser,
+          };
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+
+    const firstContext = resolveRunnerOutboundUserCryptoContext({
+      bucket: env.BUNDLES,
+      domain: "runtime",
+      env,
+      environment,
+      userId: "member_123",
+    });
+    const secondContext = resolveRunnerOutboundUserCryptoContext({
+      bucket: env.BUNDLES,
+      domain: "runtime",
+      env,
+      environment,
+      userId: "member_123",
+    });
+
+    expect(bindUser).toHaveBeenCalledOnce();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
+    releaseBind();
+    await expect(Promise.all([firstContext, secondContext])).resolves.toMatchObject([
+      { rootKeyId: "udrk:runtime:test-root" },
+      { rootKeyId: "udrk:runtime:test-root" },
+    ]);
+    expect(bindUser).toHaveBeenCalledOnce();
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keys outbound runtime crypto context cache by hosted environment identity", async () => {
+    const fetchedAt = "2026-05-04T00:00:00.000Z";
+    const firstFixture = await createHostedRuntimeCryptoContextFixture({
+      cacheMaxAgeMs: 10_000,
+      fetchedAt,
+      runtimeRootKeyId: "udrk:runtime:first-root",
+    });
+    const secondFixture = await createHostedRuntimeCryptoContextFixture({
+      authoritySignKeyVersion:
+        "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2",
+      automationKeyId: "cf-key-v2",
+      cacheMaxAgeMs: 10_000,
+      cryptoEnv: "staging",
+      fetchedAt,
+      runtimeRootKeyId: "udrk:runtime:second-root",
+    });
+    const firstEnv = createRunnerOutboundEnv({
+      ...firstFixture.env,
+      HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+    });
+    const secondEnv = createRunnerOutboundEnv({
+      ...secondFixture.env,
+      HOSTED_WEB_BASE_URL: "https://web-staging.example.test",
+      HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v2",
+    });
+    const contextsByUrl = new Map([
+      [`https://web.example.test${HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH}`, firstFixture.context],
+      [
+        `https://web-staging.example.test${HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH}`,
+        secondFixture.context,
+      ],
+    ]);
+    const fetchMock = vi.fn(async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      const [url, init] = args;
+      const context = contextsByUrl.get(String(url));
+      assert.ok(context);
+      assert.equal(init?.method, "POST");
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("x-hosted-execution-user-id"), "member_123");
+      return new Response(JSON.stringify(context), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fetchedAt));
+
+    const firstContext = await resolveRunnerOutboundUserCryptoContext({
+      bucket: firstEnv.BUNDLES,
+      domain: "runtime",
+      env: firstEnv,
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(firstEnv)),
+      userId: "member_123",
+    });
+    const secondContext = await resolveRunnerOutboundUserCryptoContext({
+      bucket: secondEnv.BUNDLES,
+      domain: "runtime",
+      env: secondEnv,
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(secondEnv)),
+      userId: "member_123",
+    });
+
+    expect(firstContext.rootKeyId).toBe("udrk:runtime:first-root");
+    expect(secondContext.rootKeyId).toBe("udrk:runtime:second-root");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("misses outbound runtime crypto context cache after cacheMaxAgeMs", async () => {
@@ -1474,8 +1710,13 @@ function createDirectRunnerOutboundEnv(
 }
 
 async function createHostedRuntimeCryptoContextFixture(input: {
+  authoritySignKeyVersion?: string;
+  automationKeyId?: string;
   cacheMaxAgeMs?: number;
+  cryptoEnv?: string;
   fetchedAt?: string;
+  ingressRootKeyId?: string;
+  runtimeRootKeyId?: string;
   userId?: string;
 } = {}): Promise<{
   context: {
@@ -1492,22 +1733,34 @@ async function createHostedRuntimeCryptoContextFixture(input: {
   fetchMock: ReturnType<typeof vi.fn>;
 }> {
   const userId = input.userId ?? "member_123";
+  const authoritySignKeyVersion = input.authoritySignKeyVersion
+    ?? "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+  const automationKeyId = input.automationKeyId ?? "cf-key-v1";
+  const cryptoEnv = input.cryptoEnv ?? "test";
   const cloudflareRecipient = await generateP256EcdhKeyPair();
   const signer = await generateP256SigningKeyPair();
   const context = {
     ...(input.cacheMaxAgeMs === undefined ? {} : { cacheMaxAgeMs: input.cacheMaxAgeMs }),
     envelopes: {
       ingress: await createSignedWorkerEnvelope({
+        authoritySignKeyVersion,
+        cryptoEnv,
         domain: "ingress",
         publicJwk: cloudflareRecipient.publicJwk,
+        recipientKeyId: automationKeyId,
         rootKey: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+        rootKeyId: input.ingressRootKeyId,
         signer: signer.privateKey,
         userId,
       }),
       runtime: await createSignedWorkerEnvelope({
+        authoritySignKeyVersion,
+        cryptoEnv,
         domain: "runtime",
         publicJwk: cloudflareRecipient.publicJwk,
+        recipientKeyId: automationKeyId,
         rootKey: Uint8Array.from({ length: 32 }, (_, index) => 101 + index),
+        rootKeyId: input.runtimeRootKeyId,
         signer: signer.privateKey,
         userId,
       }),
@@ -1535,37 +1788,45 @@ async function createHostedRuntimeCryptoContextFixture(input: {
   return {
     context,
     env: {
-      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion,
       HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem.replace(/\n/g, "\\n"),
-      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: automationKeyId,
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
         cloudflareRecipient.privateJwk,
       ),
-      HOSTED_CRYPTO_ENV: "test",
+      HOSTED_CRYPTO_ENV: cryptoEnv,
     },
     fetchMock,
   };
 }
 
 async function createSignedWorkerEnvelope(input: {
+  authoritySignKeyVersion?: string;
+  cryptoEnv?: string;
   domain: "ingress" | "runtime";
   publicJwk: JsonWebKey;
+  recipientKeyId?: string;
   rootKey: Uint8Array;
+  rootKeyId?: string;
   signer: CryptoKey;
   userId: string;
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
-  const rootKeyId = `udrk:${input.domain}:test-root`;
+  const authoritySignKeyVersion = input.authoritySignKeyVersion
+    ?? "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+  const cryptoEnv = input.cryptoEnv ?? "test";
+  const recipientKeyId = input.recipientKeyId ?? "cf-key-v1";
+  const rootKeyId = input.rootKeyId ?? `udrk:${input.domain}:test-root`;
   const now = "2026-05-01T00:00:00.000Z";
   const wrap = await wrapHostedDomainRootKeyWithP256Ecdh({
     encryptionContext: buildHostedDomainRootWrapContext({
       domain: input.domain,
-      env: "test",
+      env: cryptoEnv,
       recipient: "cloudflare-automation-secret",
       rootKeyId,
       userId: input.userId,
     }),
     recipient: "cloudflare-automation-secret",
-    recipientKeyId: "cf-key-v1",
+    recipientKeyId,
     recipientPublicJwk: input.publicJwk,
     rootKey: input.rootKey,
   });
@@ -1586,7 +1847,7 @@ async function createSignedWorkerEnvelope(input: {
   );
   return attachHostedDomainRootEnvelopeSignature({
     body,
-    keyVersionName: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+    keyVersionName: authoritySignKeyVersion,
     signature: Buffer.from(new Uint8Array(signature)).toString("base64"),
     signedAt: now,
   });

@@ -17,6 +17,10 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 
+type RunnerOutboundUserRunnerStub = Awaited<
+  ReturnType<typeof resolveRunnerOutboundUserRunnerStub>
+>;
+
 export async function handleRunnerWebControlRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
@@ -42,14 +46,20 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST"
     ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
     : null;
+  const checkpointContext = checkpointRequest
+    ? {
+        request: checkpointRequest,
+        stub: await resolveRunnerOutboundUserRunnerStub(input.env, input.userId),
+      }
+    : null;
 
-  if (checkpointRequest) {
+  if (checkpointContext) {
     const hasLease = await runnerOwnsActiveInvocationLease({
-      attemptId: checkpointRequest.attemptId,
-      env: input.env,
-      leaseGeneration: checkpointRequest.leaseGeneration,
+      attemptId: checkpointContext.request.attemptId,
+      leaseGeneration: checkpointContext.request.leaseGeneration,
+      stub: checkpointContext.stub,
       userId: input.userId,
-      workspaceVersion: checkpointRequest.expectedWorkspaceVersion,
+      workspaceVersion: checkpointContext.request.expectedWorkspaceVersion,
     });
     if (!hasLease) {
       return unauthorized();
@@ -66,15 +76,15 @@ export async function handleRunnerWebControlRequest(input: {
     search: input.url.search || null,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
-  if (checkpointRequest && response.ok) {
+  if (checkpointContext && response.ok) {
     const checkpointResponse = parseHostedWorkspaceCheckpointResponse(
       await response.clone().json(),
     );
     if (checkpointResponse.checkpointed) {
       const recorded = await recordRunnerActiveInvocationWorkspaceCheckpoint({
-        attemptId: checkpointRequest.attemptId,
-        env: input.env,
-        leaseGeneration: checkpointRequest.leaseGeneration,
+        attemptId: checkpointContext.request.attemptId,
+        leaseGeneration: checkpointContext.request.leaseGeneration,
+        stub: checkpointContext.stub,
         userId: input.userId,
         workspaceVersion: checkpointResponse.workspace.version,
       });
@@ -89,14 +99,13 @@ export async function handleRunnerWebControlRequest(input: {
 
 async function runnerOwnsActiveInvocationLease(input: {
   attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
   leaseGeneration: string;
+  stub: RunnerOutboundUserRunnerStub;
   userId: string;
   workspaceVersion: string;
 }): Promise<boolean> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
-    stub,
+    input.stub,
     "ownsActiveInvocationLease",
   );
   return await ownsActiveInvocationLease({
@@ -109,14 +118,13 @@ async function runnerOwnsActiveInvocationLease(input: {
 
 async function recordRunnerActiveInvocationWorkspaceCheckpoint(input: {
   attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
   leaseGeneration: string;
+  stub: RunnerOutboundUserRunnerStub;
   userId: string;
   workspaceVersion: string;
 }): Promise<boolean> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const recordActiveInvocationWorkspaceCheckpoint = requireRunnerOutboundUserStubMethod(
-    stub,
+    input.stub,
     "recordActiveInvocationWorkspaceCheckpoint",
   );
   const response = await recordActiveInvocationWorkspaceCheckpoint({
