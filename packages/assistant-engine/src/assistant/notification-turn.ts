@@ -525,7 +525,7 @@ function buildAssistantNotificationMessageInput(
     turnTrigger: input.turnTrigger ?? 'automation-cron',
     userMessageContent: null,
     vault: input.vault,
-    workingDirectory: input.workingDirectory ?? input.vault,
+    workingDirectory: input.workingDirectory,
   }
 }
 

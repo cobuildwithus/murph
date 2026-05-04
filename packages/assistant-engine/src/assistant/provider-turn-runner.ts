@@ -244,6 +244,8 @@ async function executeAssistantProviderAttempt(input: {
 
   const attemptAt = new Date().toISOString()
   await recordProviderPlan({
+    activeTurnHistoryMessageCount:
+      executionPlan.activeTurnHistory?.messages.length ?? 0,
     activeTurnHistoryPresent:
       (executionPlan.activeTurnHistory?.messages.length ?? 0) > 0,
     at: attemptAt,
@@ -261,6 +263,8 @@ async function executeAssistantProviderAttempt(input: {
       attemptPlan.routePlan.threadInstructionsFingerprint !== null,
     turnId: executionPlan.turnId,
     vault: executionPlan.input.vault,
+    vaultRoot: executionPlan.input.vault,
+    workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
   await recordProviderAttemptStarted({
     activeTurnMessagesPresent:
