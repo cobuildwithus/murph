@@ -154,7 +154,7 @@ export function ConnectSourcesGrid({
       {notice ? (
         notice.kind === "success" ? (
           <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900">
-            <AlertTitle>Source connected</AlertTitle>
+            <AlertTitle>Device connected</AlertTitle>
             <AlertDescription>{notice.message}</AlertDescription>
           </Alert>
         ) : (
