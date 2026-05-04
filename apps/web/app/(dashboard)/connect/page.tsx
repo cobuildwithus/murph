@@ -15,6 +15,7 @@ import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { ConnectSourcesGrid, type ConnectCallbackInput } from "./connect-page-client";
+import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Connect Devices — Murph",
@@ -287,16 +288,18 @@ export function resolveConfiguredConnectSources(
     ).map((target) => [target.connectSourceId, target.connectTarget] as const),
   );
 
-  return sources.map((source) => {
-    const connectTarget = connectTargetBySourceId.get(source.id);
-    const connected = options.connectedSourceIds?.has(source.id) === true;
+  return sortConnectSourcesByConnectionState(
+    sources.map((source) => {
+      const connectTarget = connectTargetBySourceId.get(source.id);
+      const connected = options.connectedSourceIds?.has(source.id) === true;
 
-    return {
-      ...source,
-      ...(connectTarget ? { connectTarget } : {}),
-      ...(connected ? { connected } : {}),
-    };
-  });
+      return {
+        ...source,
+        ...(connectTarget ? { connectTarget } : {}),
+        ...(connected ? { connected } : {}),
+      };
+    }),
+  );
 }
 
 export function resolveConnectedConnectSourceIds(
