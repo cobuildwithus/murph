@@ -372,13 +372,14 @@ function resolveAssistantProviderUsageSource(input: {
     }
   }
 
-  const tokenUsageRecord = findAssistantCodexThreadTokenUsageRecord(input.rawEvents)
-  return tokenUsageRecord
-    ? {
-        record: tokenUsageRecord,
-        sourcePath: 'thread.tokenUsage.last',
-      }
-    : null
+  return findAssistantCodexThreadTokenUsageSource({
+    rawEvents: input.rawEvents,
+    turnId: readAssistantProviderString(
+      input.completionTurn?.id,
+      input.completionParams?.turnId,
+      input.completionRecord?.turnId,
+    ),
+  })
 }
 
 function hasAssistantProviderUsageTokenFields(
@@ -422,31 +423,220 @@ function hasAssistantProviderUsageTokenFields(
   )
 }
 
-function findAssistantCodexThreadTokenUsageRecord(
-  rawEvents: readonly unknown[],
-): Record<string, unknown> | null {
-  for (let index = rawEvents.length - 1; index >= 0; index -= 1) {
-    const record = readAssistantProviderRecord(rawEvents[index])
-    const eventType = readAssistantProviderString(
-      record?.type,
-      record?.event,
-      record?.method,
-    )
-
-    if (eventType !== 'thread/tokenUsage/updated') {
-      continue
+function findAssistantCodexThreadTokenUsageSource(input: {
+  rawEvents: readonly unknown[]
+  turnId: string | null
+}): { record: Record<string, unknown>; sourcePath: string } | null {
+  const tokenUsageEvents = readAssistantCodexThreadTokenUsageEvents(input)
+  const totalDeltaUsage =
+    resolveAssistantCodexThreadTokenUsageTotalDelta(tokenUsageEvents)
+  if (totalDeltaUsage) {
+    return {
+      record: totalDeltaUsage,
+      sourcePath: 'thread.tokenUsage.total.delta',
     }
+  }
 
-    const params = readAssistantProviderRecord(record?.params)
-    const tokenUsage = readAssistantProviderRecord(params?.tokenUsage)
-    const last = readAssistantProviderRecord(tokenUsage?.last)
-
-    if (last) {
-      return last
+  for (let index = tokenUsageEvents.length - 1; index >= 0; index -= 1) {
+    const event = tokenUsageEvents[index]!
+    if (hasAssistantProviderUsageTokenFields(event.last)) {
+      return {
+        record: event.last!,
+        sourcePath: 'thread.tokenUsage.last',
+      }
     }
   }
 
   return null
+}
+
+function readAssistantCodexThreadTokenUsageEvents(input: {
+  rawEvents: readonly unknown[]
+  turnId: string | null
+}): Array<{
+  last: Record<string, unknown> | null
+  total: Record<string, unknown> | null
+}> {
+  return input.rawEvents.flatMap((rawEvent) => {
+    const record = readAssistantProviderRecord(rawEvent)
+    const eventType = readAssistantProviderString(
+      record?.method,
+      record?.type,
+      record?.event,
+    )
+
+    if (eventType !== 'thread/tokenUsage/updated') {
+      return []
+    }
+
+    const params = readAssistantProviderRecord(record?.params)
+    if (!isAssistantCodexTokenUsageEventForTurn(params, input.turnId)) {
+      return []
+    }
+
+    const tokenUsage = readAssistantProviderRecord(params?.tokenUsage)
+    return [
+      {
+        last: readAssistantProviderRecord(tokenUsage?.last),
+        total: readAssistantProviderRecord(tokenUsage?.total),
+      },
+    ]
+  })
+}
+
+function isAssistantCodexTokenUsageEventForTurn(
+  params: Record<string, unknown> | null,
+  turnId: string | null,
+): boolean {
+  if (!turnId) {
+    return true
+  }
+
+  return readAssistantProviderString(params?.turnId, params?.turn_id) === turnId
+}
+
+function resolveAssistantCodexThreadTokenUsageTotalDelta(
+  events: ReadonlyArray<{
+    last: Record<string, unknown> | null
+    total: Record<string, unknown> | null
+  }>,
+): Record<string, unknown> | null {
+  const first = events.find(
+    (event) =>
+      hasAssistantProviderUsageTokenFields(event.last)
+      && hasAssistantProviderUsageTokenFields(event.total),
+  )
+  const final = [...events].reverse().find(
+    (event) =>
+      hasAssistantProviderUsageTokenFields(event.last)
+      && hasAssistantProviderUsageTokenFields(event.total),
+  )
+
+  if (!first?.last || !first.total || !final?.total) {
+    return null
+  }
+
+  const priorThreadBaseline = subtractAssistantProviderUsageRecords(
+    first.total,
+    first.last,
+  )
+  const currentTurnUsage = subtractAssistantProviderUsageRecords(
+    final.total,
+    priorThreadBaseline,
+  )
+  if (readAssistantProviderInteger(currentTurnUsage, 'totalTokens') === null) {
+    const totalTokens = resolveAssistantProviderTotalTokens({
+      inputTokens: readAssistantProviderInteger(currentTurnUsage, 'inputTokens'),
+      outputTokens: readAssistantProviderInteger(currentTurnUsage, 'outputTokens'),
+    })
+    if (totalTokens !== null) {
+      currentTurnUsage.totalTokens = totalTokens
+    }
+  }
+
+  return hasAssistantProviderUsageTokenFields(currentTurnUsage)
+    ? currentTurnUsage
+    : null
+}
+
+function subtractAssistantProviderUsageRecords(
+  minuend: Record<string, unknown>,
+  subtrahend: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  copyAssistantProviderUsageDifference(
+    result,
+    'cacheWriteTokens',
+    minuend,
+    subtrahend,
+    ['cacheWriteTokens', 'cache_write_tokens'],
+  )
+  copyAssistantProviderUsageDifference(
+    result,
+    'cachedInputTokens',
+    minuend,
+    subtrahend,
+    ['cachedInputTokens', 'cached_input_tokens'],
+    {
+      nested: ['input_tokens_details', 'cached_tokens'],
+    },
+  )
+  copyAssistantProviderUsageDifference(
+    result,
+    'inputTokens',
+    minuend,
+    subtrahend,
+    ['inputTokens', 'input_tokens', 'prompt_tokens', 'promptTokens'],
+  )
+  copyAssistantProviderUsageDifference(
+    result,
+    'outputTokens',
+    minuend,
+    subtrahend,
+    ['outputTokens', 'output_tokens', 'completion_tokens', 'completionTokens'],
+  )
+  copyAssistantProviderUsageDifference(
+    result,
+    'reasoningOutputTokens',
+    minuend,
+    subtrahend,
+    ['reasoningTokens', 'reasoning_tokens', 'reasoningOutputTokens'],
+    {
+      nested: ['output_tokens_details', 'reasoning_tokens'],
+    },
+  )
+  copyAssistantProviderUsageDifference(
+    result,
+    'totalTokens',
+    minuend,
+    subtrahend,
+    ['totalTokens', 'total_tokens'],
+  )
+
+  return result
+}
+
+function copyAssistantProviderUsageDifference(
+  target: Record<string, unknown>,
+  targetKey: string,
+  minuend: Record<string, unknown>,
+  subtrahend: Record<string, unknown>,
+  sourceKeys: readonly string[],
+  options: {
+    nested?: readonly [objectKey: string, valueKey: string]
+  } = {},
+): void {
+  const minuendValue = readAssistantProviderUsageInteger(
+    minuend,
+    sourceKeys,
+    options,
+  )
+  if (minuendValue === null) {
+    return
+  }
+
+  const subtrahendValue =
+    readAssistantProviderUsageInteger(subtrahend, sourceKeys, options) ?? 0
+  target[targetKey] = Math.max(0, minuendValue - subtrahendValue)
+}
+
+function readAssistantProviderUsageInteger(
+  source: Record<string, unknown>,
+  sourceKeys: readonly string[],
+  options: {
+    nested?: readonly [objectKey: string, valueKey: string]
+  } = {},
+): number | null {
+  return readAssistantProviderInteger(source, ...sourceKeys)
+    ?? (
+      options.nested
+        ? readAssistantProviderNestedInteger(
+            source,
+            options.nested[0],
+            options.nested[1],
+          )
+        : null
+    )
 }
 
 function findAssistantCodexCompletionEvent(

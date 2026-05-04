@@ -441,7 +441,7 @@ describe('Codex assistant registry helpers', () => {
         reasoningOutputTokens: 5,
         totalTokens: 119,
       },
-      expectedSourcePath: 'thread.tokenUsage.last',
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
       name: 'Codex thread token usage notification',
       rawEvents: [
         {
@@ -471,6 +471,208 @@ describe('Codex assistant registry helpers', () => {
           params: {
             turn: {
               id: 'turn-token-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cachedInputTokens: 41216,
+        inputTokens: 67969,
+        outputTokens: 185,
+        reasoningTokens: 0,
+        totalTokens: 68154,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 41216,
+        inputTokens: 67969,
+        outputTokens: 185,
+        reasoningOutputTokens: 0,
+        totalTokens: 68154,
+      },
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
+      name: 'multiple Codex token usage notifications use current-turn total delta accounting',
+      rawEvents: [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-multi-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 7552,
+                inputTokens: 33848,
+                outputTokens: 172,
+                reasoningOutputTokens: 0,
+                totalTokens: 34020,
+              },
+              total: {
+                cachedInputTokens: 7552,
+                inputTokens: 33848,
+                outputTokens: 172,
+                reasoningOutputTokens: 0,
+                totalTokens: 34020,
+              },
+            },
+            turnId: 'turn-multi-token-usage',
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-multi-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 33664,
+                inputTokens: 34121,
+                outputTokens: 13,
+                reasoningOutputTokens: 0,
+                totalTokens: 34134,
+              },
+              total: {
+                cachedInputTokens: 41216,
+                inputTokens: 67969,
+                outputTokens: 185,
+                reasoningOutputTokens: 0,
+                totalTokens: 68154,
+              },
+            },
+            turnId: 'turn-multi-token-usage',
+          },
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-multi-token-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cachedInputTokens: 11136,
+        inputTokens: 11532,
+        outputTokens: 16,
+        reasoningTokens: 0,
+        totalTokens: 11548,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 11136,
+        inputTokens: 11532,
+        outputTokens: 16,
+        reasoningOutputTokens: 0,
+        totalTokens: 11548,
+      },
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
+      name: 'resumed Codex token usage ignores thread-cumulative total',
+      rawEvents: [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resumed-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 11136,
+                inputTokens: 11532,
+                outputTokens: 16,
+                reasoningOutputTokens: 0,
+                totalTokens: 11548,
+              },
+              total: {
+                cachedInputTokens: 11136,
+                inputTokens: 23037,
+                outputTokens: 42,
+                reasoningOutputTokens: 0,
+                totalTokens: 23079,
+              },
+            },
+            turnId: 'turn-resumed-token-usage',
+          },
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-resumed-token-usage',
+              model: 'gpt-5.4',
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
+        cachedInputTokens: 33664,
+        inputTokens: 34121,
+        outputTokens: 13,
+        reasoningTokens: 0,
+        totalTokens: 34134,
+      },
+      expectedRawUsageJson: {
+        cachedInputTokens: 33664,
+        inputTokens: 34121,
+        outputTokens: 13,
+        reasoningOutputTokens: 0,
+        totalTokens: 34134,
+      },
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
+      name: 'resumed Codex token usage ignores restored previous-turn notification',
+      rawEvents: [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resume-replay-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 7552,
+                inputTokens: 33848,
+                outputTokens: 172,
+                reasoningOutputTokens: 0,
+                totalTokens: 34020,
+              },
+              total: {
+                cachedInputTokens: 7552,
+                inputTokens: 33848,
+                outputTokens: 172,
+                reasoningOutputTokens: 0,
+                totalTokens: 34020,
+              },
+            },
+            turnId: 'turn-previous-token-usage',
+          },
+        },
+        {
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-resume-replay-token-usage',
+            tokenUsage: {
+              last: {
+                cachedInputTokens: 33664,
+                inputTokens: 34121,
+                outputTokens: 13,
+                reasoningOutputTokens: 0,
+                totalTokens: 34134,
+              },
+              total: {
+                cachedInputTokens: 41216,
+                inputTokens: 67969,
+                outputTokens: 185,
+                reasoningOutputTokens: 0,
+                totalTokens: 68154,
+              },
+            },
+            turnId: 'turn-current-token-usage',
+          },
+        },
+        {
+          params: {
+            turn: {
+              id: 'turn-current-token-usage',
               model: 'gpt-5.4',
             },
           },
