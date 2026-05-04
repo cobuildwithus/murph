@@ -54,6 +54,15 @@ export interface HostedDeviceSyncSettingsResponse {
   sources: HostedDeviceSyncSettingsSource[];
 }
 
+export function isActiveHostedDeviceSyncSource(
+  source: Pick<HostedDeviceSyncSettingsSource, "connectionId" | "state">,
+): boolean {
+  return Boolean(source.connectionId)
+    && source.state !== "available"
+    && source.state !== "disconnected"
+    && source.state !== "unavailable";
+}
+
 const FIRST_SYNC_GRACE_MS = 6 * 60 * 60_000;
 const RECENT_SYNC_WINDOW_MS = 36 * 60 * 60_000;
 const STALE_SYNC_WINDOW_MS = 4 * 24 * 60 * 60_000;

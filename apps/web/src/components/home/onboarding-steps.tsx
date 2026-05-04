@@ -12,7 +12,6 @@ import {
 
 const steps: {
   id: "devices" | "experiments" | "labs";
-  step: number;
   title: string;
   description: string;
   cta: string;
@@ -21,7 +20,6 @@ const steps: {
 }[] = [
   {
     id: "devices",
-    step: 1,
     title: "Connect devices",
     description:
       "Add Apple Health or a wearable to sync sleep, activity, recovery, and more.",
@@ -31,7 +29,6 @@ const steps: {
   },
   {
     id: "labs",
-    step: 2,
     title: "Sync labs",
     description:
       "Share blood work or lab results to track biomarkers over time.",
@@ -41,7 +38,6 @@ const steps: {
   },
   {
     id: "experiments",
-    step: 3,
     title: "Start an experiment",
     description:
       "Browse protocols like sauna, creatine, or zone 2 and see what improves your markers.",
@@ -58,15 +54,21 @@ export function getOnboardingStepActionClass(isPrimary: boolean): string {
 }
 
 export function OnboardingSteps({
+  showDeviceStep = true,
   uploadLabsAction = null,
 }: {
+  showDeviceStep?: boolean;
   uploadLabsAction?: ReactNode;
 }) {
+  const visibleSteps = showDeviceStep
+    ? steps
+    : steps.filter((step) => step.id !== "devices");
+
   return (
     <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-      {steps.map((step, i) => {
+      {visibleSteps.map((step, i) => {
         const Icon = step.icon;
-        const isPrimary = i === 0;
+        const isPrimary = step.id === "devices";
         const customAction = step.id === "labs" ? uploadLabsAction : null;
         const defaultAction = step.id === "devices" ? (
           <AuthButton
@@ -94,13 +96,13 @@ export function OnboardingSteps({
 
         return (
           <div
-            key={step.step}
+            key={step.id}
             className={`group flex flex-col justify-between rounded-2xl border p-7 transition-colors duration-300 ${isPrimary ? "border-primary/35 bg-primary/12 hover:border-primary/45" : "border-border/50 bg-[rgba(255,252,246,0.9)] hover:border-[#7a8c6e]/25"}`}
           >
             <div>
               <div className="mb-6 flex items-start justify-between">
                 <span className="rounded-full bg-foreground/[0.04] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Step {step.step}
+                  Step {i + 1}
                 </span>
                 <div className="flex size-14 items-center justify-center rounded-2xl bg-[#f0ede8] ring-1 ring-[#e5e0d8]/60 transition-transform duration-300 group-hover:scale-105">
                   <Icon className="size-6 text-[#7a8c6e]" />
