@@ -13,10 +13,8 @@ import {
   HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
-  HOSTED_AI_USAGE_BILLING_MODE_ENV,
-} from "@murphai/hosted-execution";
-
-import type { StringEnvSource } from "./string-env.ts";
+  type StringEnvSource,
+} from "./string-env.ts";
 
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",
@@ -77,12 +75,9 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   "HOME",
-  HOSTED_AI_USAGE_BILLING_MODE_ENV,
-  "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
-  "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
   // This is a platform metering secret forwarded by the assistant env profile,
   // not a member-supplied runner secret. Letting userEnv override it would
-  // break stable anonymized Gateway reporting IDs.
+  // break stable anonymized usage reporting IDs.
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   // This is a platform-owned HMAC key for non-identifying log correlation.
   "HOSTED_LOG_FINGERPRINT_SECRET",

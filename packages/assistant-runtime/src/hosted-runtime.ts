@@ -19,9 +19,6 @@ import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import {
-  resolveHostedVercelAiGatewayStripeCustomerId,
-} from "./hosted-runtime/billing.ts";
-import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
 import type {
@@ -87,9 +84,6 @@ export {
   parseHostedRuntimeChildResult,
 } from "./hosted-runtime/child-result.ts";
 export {
-  resolveHostedVercelAiGatewayStripeCustomerId,
-} from "./hosted-runtime/billing.ts";
-export {
   createHostedBrowserVaultReplicaForSnapshot,
 } from "./hosted-runtime/browser-vault-replica.ts";
 
@@ -149,13 +143,8 @@ export {
   executeHostedMailboxEvent,
 };
 export {
-  parseHostedRuntimeBillingStripeCustomerResponse,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
-} from "./hosted-runtime/platform.ts";
-export {
-  HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV,
-  HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV,
 } from "./hosted-runtime/platform.ts";
 export {
   computeHostedRuntimeElapsedMs,

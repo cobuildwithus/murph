@@ -53,7 +53,6 @@ export {
   parseHostedAssistantWorkspaceRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
 export {
-  parseHostedRuntimeBillingStripeCustomerResponse,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";

@@ -2,9 +2,6 @@ import {
   readConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import {
-  HOSTED_AI_USAGE_BILLING_MODE_ENV,
-} from "@murphai/hosted-execution";
-import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution/hosted-email";
 
@@ -48,9 +45,6 @@ export const HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV =
 export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   assistant: [
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
-    HOSTED_AI_USAGE_BILLING_MODE_ENV,
-    "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
-    "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
     "HOSTED_AI_USAGE_REPORTING_SECRET",
     "HOSTED_LOG_FINGERPRINT_SECRET",
     HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,

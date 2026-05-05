@@ -34,7 +34,6 @@ export interface AssistantHostedExecutionContext {
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
   memberId: string
-  stripeCustomerId?: string | null
   userEnvKeys: readonly string[]
 }
 
@@ -54,7 +53,6 @@ export function normalizeAssistantExecutionContext(
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
     hosted?.deviceConnectProviders,
   )
-  const stripeCustomerId = normalizeNullableString(hosted?.stripeCustomerId ?? null)
   if (!memberId) {
     return {
       hosted: null,
@@ -81,11 +79,6 @@ export function normalizeAssistantExecutionContext(
       ...(deviceConnectProviders.length > 0
         ? {
             deviceConnectProviders,
-          }
-        : {}),
-      ...(stripeCustomerId
-        ? {
-            stripeCustomerId,
           }
         : {}),
       memberId,

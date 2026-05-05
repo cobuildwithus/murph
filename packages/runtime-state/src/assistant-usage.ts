@@ -16,9 +16,7 @@ import {
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
 const ASSISTANT_USAGE_FILE_SCHEMA_VERSION = 1;
-const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set([
-  "VERCEL_AI_API_KEY",
-]);
+const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>();
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
 export type AssistantProviderRequestOutcome =
@@ -26,7 +24,7 @@ export type AssistantProviderRequestOutcome =
   | "failed"
   | "partial"
   | "succeeded";
-export type AssistantUsageStripeMeterSource = "murph" | "vercel-ai-gateway";
+export type AssistantUsageStripeMeterSource = "murph";
 
 export interface AssistantUsageRecord {
   apiKeyEnv: string | null;
@@ -372,9 +370,9 @@ export function normalizeAssistantUsageStripeMeterSource(
     return "murph";
   }
 
-  if (normalized !== "murph" && normalized !== "vercel-ai-gateway") {
+  if (normalized !== "murph") {
     throw new TypeError(
-      "stripeMeterSource must be 'murph' or 'vercel-ai-gateway' when provided.",
+      "stripeMeterSource must be 'murph' when provided.",
     );
   }
 

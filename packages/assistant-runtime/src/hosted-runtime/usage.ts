@@ -1,7 +1,7 @@
 import {
-  deletePendingAssistantUsageRecord,
   ASSISTANT_RUNTIME_ISSUE_SCHEMA,
   createAssistantRuntimeIssueFingerprint,
+  deletePendingAssistantUsageRecord,
   listPendingAssistantRuntimeIssueRecords,
   listPendingAssistantUsageRecords,
   writePendingAssistantRuntimeIssueRecord,
@@ -61,10 +61,20 @@ export async function exportHostedPendingAssistantUsage(input: {
     vaultRoot: input.vaultRoot,
   });
 
-  if (!input.usageExportPort || pendingRecords.length === 0) {
+  if (pendingRecords.length === 0) {
     return {
       exported: 0,
-      failed: input.usageExportPort ? invalidPendingRecordCount : 0,
+      failed: invalidPendingRecordCount,
+      invalid: invalidPendingRecordCount,
+      invalidIssueRecorded,
+      pending: totalPendingRecords,
+    };
+  }
+
+  if (!input.usageExportPort) {
+    return {
+      exported: 0,
+      failed: invalidPendingRecordCount,
       invalid: invalidPendingRecordCount,
       invalidIssueRecorded,
       pending: totalPendingRecords,

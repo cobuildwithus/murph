@@ -230,8 +230,6 @@ Hosted AI usage metering:
 - `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter` re-enables the classic hosted-web Stripe meter fallback and requires `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` plus `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME`.
 - `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices when you use `stripe_meter`.
 - `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending usage rows each cron drain attempts.
-- `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests only when `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`.
-- `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` must be a Stripe restricted key with billing meter-event write permission only; it is forwarded to hosted execution, never persisted with usage rows, and ignored unless it starts with `rk_`.
 - Hosted AI included-allowance gating is app-owned: web prices imported `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
 - Pulse Trial uses the same allowance system with a phase-aware 2.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
@@ -241,12 +239,10 @@ Hosted runner cleanup:
 - `HOSTED_STALE_RUNNER_USER_IDS` is an operator-only, comma or whitespace separated list of stale hosted member ids whose Cloudflare runner Durable Objects should be cleaned up by the cron path. Leave it unset during normal operation. The cleanup checks `HostedMember` first and skips any candidate id that still exists in Postgres.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
-While usage billing is disabled, imported rows keep `stripeMeterSource=murph`
-and `stripeMeterStatus=skipped` so they cannot be backbilled later. Rows
-delegated to Vercel AI Gateway keep `stripeMeterSource=vercel-ai-gateway`
-and `stripeMeterStatus=delegated` only when `stripe_meter` billing is enabled
-in both the web app and execution worker,
-while the hosted-web Stripe drain owns `stripeMeterSource=murph`.
+Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
+While usage billing is disabled, imported rows keep
+`stripeMeterStatus=skipped` so they cannot be backbilled later. The hosted-web
+Stripe drain owns `stripeMeterSource=murph` when `stripe_meter` is enabled.
 
 Stripe meter state remains downstream billing/reconciliation. The hosted
 allowance gate reads web-owned spend, never Stripe meter totals, and Cloudflare

@@ -3,7 +3,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
-  normalizeAssistantUsageStripeMeterSource,
   parseAssistantUsageRecord,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
@@ -25,7 +24,6 @@ export interface ImportHostedAiUsageResult {
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
 export type HostedAiUsageStripeMeterStatus =
-  | "delegated"
   | "failed"
   | "metered"
   | "pending"
@@ -221,8 +219,7 @@ function normalizeHostedAiUsageStripeMeterStatus(
   value: string,
 ): HostedAiUsageStripeMeterStatus {
   if (
-    value === "delegated"
-    || value === "failed"
+    value === "failed"
     || value === "metered"
     || value === "pending"
     || value === "processing"
@@ -232,29 +229,6 @@ function normalizeHostedAiUsageStripeMeterStatus(
   }
 
   throw new TypeError(`Unsupported hosted AI usage Stripe meter status: ${value}`);
-}
-
-export async function markHostedAiUsageStripeDelegated(input: {
-  id: string;
-  message: string;
-  prisma?: HostedAiUsageClient;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.hostedAiUsage.updateMany({
-    where: {
-      id: input.id,
-      stripeMeterStatus: "pending",
-    },
-    data: {
-      stripeMeterError: input.message,
-      stripeMeterIdentifier: null,
-      stripeMeterLastAttemptedAt: null,
-      stripeMeterNextAttemptAt: null,
-      stripeMeterStatus: "delegated",
-      stripeMeteredAt: null,
-    },
-  });
 }
 
 export async function claimHostedAiUsageStripeMetering(input: {
@@ -548,17 +522,9 @@ export async function importHostedAiUsageRecords(input: {
   const aiUsageBillingMode = input.aiUsageBillingMode ?? readHostedAiUsageBillingMode();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageImportRecords(input.usage));
   const recordedIds: string[] = [];
-  const memberStripeCustomerIdCache = new Map<string, Promise<string | null>>();
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    const stripeMeterSource = await resolveHostedAiUsageStripeMeterSource({
-      memberId,
-      prisma,
-      record,
-      aiUsageBillingMode,
-      stripeCustomerIdCache: memberStripeCustomerIdCache,
-    });
     await runHostedAiUsageImportTransaction(prisma, async (tx) => {
       const storedRecord = await tx.hostedAiUsage.upsert({
         where: {
@@ -567,7 +533,7 @@ export async function importHostedAiUsageRecords(input: {
         create: buildHostedAiUsageCreateData(
           record,
           memberId,
-          stripeMeterSource,
+          "murph",
           aiUsageBillingMode,
         ),
         update: {},
@@ -771,13 +737,6 @@ function buildHostedAiUsageCreateData(
           stripeMeterStatus: "skipped" as const,
         }
       : {}),
-    ...(stripeMeterSource === "vercel-ai-gateway"
-      ? {
-          stripeMeterError:
-            "Delegated Stripe token metering is handled upstream by Vercel AI Gateway.",
-          stripeMeterStatus: "delegated" as const,
-        }
-      : {}),
   };
 }
 
@@ -848,6 +807,11 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageJsonField("gatewayTagsJson", input.storedRecord.gatewayTagsJson, expected.gatewayTags),
     compareHostedAiUsageField("reportingUserId", input.storedRecord.reportingUserId, expected.reportingUserId),
     compareHostedAiUsageField("surface", input.storedRecord.surface, expected.surface),
+    compareHostedAiUsageField(
+      "stripeMeterSource",
+      input.storedRecord.stripeMeterSource,
+      expected.stripeMeterSource,
+    ),
     compareHostedAiUsageField("triggerKind", input.storedRecord.triggerKind, expected.triggerKind),
     compareHostedAiUsageField("inputTokens", input.storedRecord.inputTokens, expected.inputTokens),
     compareHostedAiUsageField("outputTokens", input.storedRecord.outputTokens, expected.outputTokens),
@@ -862,79 +826,6 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
       `Hosted AI usage already exists with different immutable fields: ${mismatchedFields.join(", ")}.`,
     );
   }
-}
-
-async function resolveHostedAiUsageStripeMeterSource(input: {
-  aiUsageBillingMode: HostedAiUsageBillingMode;
-  memberId: string;
-  prisma: HostedAiUsageClient;
-  record: AssistantUsageRecord;
-  stripeCustomerIdCache: Map<string, Promise<string | null>>;
-}): Promise<AssistantUsageRecord["stripeMeterSource"]> {
-  if (input.aiUsageBillingMode === "disabled") {
-    return "murph";
-  }
-
-  const requestedSource = normalizeAssistantUsageStripeMeterSource(input.record.stripeMeterSource);
-
-  if (requestedSource !== "vercel-ai-gateway") {
-    return "murph";
-  }
-
-  if (
-    input.record.credentialSource !== "platform"
-    || !isHostedAiUsageVercelAiGatewayRecord(input.record)
-  ) {
-    return "murph";
-  }
-
-  const stripeCustomerId = await readHostedAiUsageMemberStripeCustomerId({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    stripeCustomerIdCache: input.stripeCustomerIdCache,
-  });
-
-  return stripeCustomerId ? "vercel-ai-gateway" : "murph";
-}
-
-async function readHostedAiUsageMemberStripeCustomerId(input: {
-  memberId: string;
-  prisma: HostedAiUsageClient;
-  stripeCustomerIdCache: Map<string, Promise<string | null>>;
-}): Promise<string | null> {
-  const cached = input.stripeCustomerIdCache.get(input.memberId);
-
-  if (cached) {
-    return cached;
-  }
-
-  const pendingStripeCustomerId = input.prisma.hostedMemberBillingRef.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-    select: {
-      memberId: true,
-      stripeCustomerIdEncrypted: true,
-      stripeSubscriptionIdEncrypted: true,
-    },
-  }).then((billingRef) =>
-    billingRef
-      ? readHostedMemberBillingPrivateState(
-          billingRef,
-          input.prisma,
-        ).then((privateState) => privateState.stripeCustomerId)
-      : null,
-  );
-
-  input.stripeCustomerIdCache.set(input.memberId, pendingStripeCustomerId);
-  return pendingStripeCustomerId;
-}
-
-function isHostedAiUsageVercelAiGatewayRecord(record: AssistantUsageRecord): boolean {
-  const normalizedProviderName = normalizeOptionalString(record.providerName, "providerName");
-
-  return record.provider === "codex-cli"
-    && normalizedProviderName?.toLowerCase() === "vercel-ai-gateway";
 }
 
 function compareHostedAiUsageField(

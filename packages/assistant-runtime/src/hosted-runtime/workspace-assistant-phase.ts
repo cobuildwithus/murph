@@ -29,9 +29,6 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
 import {
-  resolveHostedVercelAiGatewayStripeCustomerId,
-} from "./billing.ts";
-import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
 import {
@@ -226,12 +223,6 @@ export async function runHostedWorkspaceAssistantPhase(
     triggerKind: "runtime_timer",
     userId: input.request.userId,
   });
-  const stripeCustomerId = await resolveHostedVercelAiGatewayStripeCustomerId({
-    billingPort: input.runtime.platform.billingPort,
-    forwardedEnv: input.runtime.forwardedEnv,
-    userEnv: input.runtime.userEnv,
-    wake,
-  });
   const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
   const issueDeviceConnectLink = resolveHostedWorkspaceIssueDeviceConnectLink({
     deviceConnectProviders,
@@ -259,7 +250,6 @@ export async function runHostedWorkspaceAssistantPhase(
         deviceConnectProviders,
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         memberId: input.request.userId,
-        ...(stripeCustomerId ? { stripeCustomerId } : {}),
         userEnvKeys: Object.keys(input.runtime.userEnv),
       },
     },
