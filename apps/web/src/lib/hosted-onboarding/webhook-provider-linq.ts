@@ -95,7 +95,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   const existingMemberLookup = participantContact.kind === "phone"
-    ? await lookupHostedMemberIdentityByPhoneNumber({
+    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
         phoneNumber: participantContact.value,
         prisma: input.prisma,
       })
@@ -553,6 +553,29 @@ function serializedHostedLinqWakeBytes(
   wake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>,
 ): number {
   return new TextEncoder().encode(JSON.stringify(wake)).byteLength;
+}
+
+async function lookupHostedMemberIdentityByPhoneNumberForLinqWebhook(input: {
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<Awaited<ReturnType<typeof lookupHostedMemberIdentityByPhoneNumber>>> {
+  try {
+    return await lookupHostedMemberIdentityByPhoneNumber(input);
+  } catch (error) {
+    if (isLocalHostedDomainRootAuthorityMismatch(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
+  return (
+    process.env.HOSTED_CRYPTO_ENV === "local"
+    && error instanceof Error
+    && error.message === "Hosted domain root envelope authority signature verification failed."
+  );
 }
 
 function normalizeHostedLinqPartText(value: unknown): string | null {
