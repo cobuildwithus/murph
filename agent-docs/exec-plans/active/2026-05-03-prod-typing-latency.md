@@ -72,6 +72,7 @@ Updated: 2026-05-06
 - 2026-05-06 container lifecycle decision: renew the Cloudflare container activity timeout during long runner invocations and ignore stale activity-expiry callbacks that arrive right after recent runner work, so a queued expiry cannot destroy the warm shell/cache immediately after a live reply.
 - 2026-05-06 urgent deploy decision: let the manual deploy workflow override runner idle TTL and have `cf:deploy:immediate` use a 12 hour TTL for repeated live iMessage probes while the production latency incident is being debugged.
 - 2026-05-06 provider timing decision: emit metadata-only Codex app-server timing trace stages (`spawn-ready`, initialize, thread start/resume, turn start/completion, shutdown) so live logs can split the remaining assistant pass latency without storing prompts, messages, identifiers, paths, or provider payloads.
+- 2026-05-06 automation timing decision: emit metadata-only assistant automation pass timing stages around diagnostics, maintenance, recovery, scan, cron, status refresh, and outbox summary so the remaining warm-path gap can be isolated without storing prompts, messages, identifiers, paths, or provider payloads.
 
 ## Current evidence
 
@@ -86,6 +87,7 @@ Updated: 2026-05-06
 - The first immediate rollout for the active-input patch was blocked by Cloudflare rejecting the optional native hosted-email send binding for the workflow token. That deploy did not update the live Worker/container version.
 - The latest live iMessage probes after the fast-send deploy proved the `outbox_sending` pre-send checkpoint was gone, but both back-to-back probes still cold-restored the base workspace and Cloudflare observability showed container/DO reset and lifecycle network-loss events around the same window.
 - Those same probes spent roughly 11-12.5s inside the assistant automation pass after restore/import, so the next deploy must preserve warm container state and expose provider-stage timings before another live message is sent.
+- After the warm-retention deploy, live probes restored in roughly 0.3s with base/hot cache hits, but the second warm probe still took roughly 13.8s append-to-send. The Codex app-server trace was roughly 2.1s, while the assistant automation pass was roughly 8.5s, so the remaining bottleneck is inside the automation/send envelope rather than snapshot restore.
 
 ## Verification
 
@@ -115,3 +117,8 @@ Updated: 2026-05-06
   - `pnpm --dir packages/assistant-runtime typecheck`
   - `pnpm --dir packages/assistant-engine typecheck`
   - `git diff --check -- packages/assistant-engine/src/assistant/automation.ts packages/assistant-runtime/src/hosted-runtime/mailbox-import.ts packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/src/hosted-runtime/maintenance.ts packages/assistant-runtime/src/hosted-runtime/models.ts packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts`
+  - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-automation-runtime.test.ts --testNamePattern "timing traces|store-backed input source|no-canonical-write"`
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-events.test.ts --testNamePattern "timing"`
+  - `pnpm --dir packages/assistant-engine typecheck`
+  - `pnpm --dir packages/assistant-runtime typecheck`
+  - `git diff --check -- packages/assistant-engine/src/assistant/automation/run-loop.ts packages/assistant-runtime/src/hosted-runtime/events.ts packages/assistant-engine/test/assistant-automation-runtime.test.ts packages/assistant-runtime/test/hosted-runtime-events.test.ts`

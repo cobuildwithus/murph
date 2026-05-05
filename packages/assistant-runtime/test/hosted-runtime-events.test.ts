@@ -490,6 +490,75 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("captures hosted automation pass timing without raw identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_automation_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_automation_timing",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        providerSessionId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-automation-pass-timing.v1",
+          type: "assistant.automation.pass_timing",
+          automationPassApplyCanonicalWrites: true,
+          automationPassDrainOutbox: false,
+          automationPassElapsedMs: 123,
+          automationPassProgressed: true,
+          automationPassRepliesReplied: 1,
+          automationPassScanNumber: 7,
+          automationPassStage: "scan-finished",
+          automationPassTotalElapsedMs: 456,
+          cwd: "/tmp/raw-path",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_automation_timing",
+      level: "info",
+      message: "Hosted assistant automation pass timing captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        automationPassApplyCanonicalWrites: true,
+        automationPassDrainOutbox: false,
+        automationPassElapsedMs: 123,
+        automationPassProgressed: true,
+        automationPassRepliesReplied: 1,
+        automationPassScanNumber: 7,
+        automationPassStage: "scan-finished",
+        automationPassTotalElapsedMs: 456,
+        automationPassTraceType: "pass",
+        providerTraceKind: "automation.pass_timing",
+        requestId: "req_123",
+        schema: "murph.assistant-automation-pass-timing.v1",
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+  });
+
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
