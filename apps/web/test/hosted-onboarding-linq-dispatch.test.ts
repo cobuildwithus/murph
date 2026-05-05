@@ -243,6 +243,10 @@ type HostedMemberIdentityFixture = {
   }) => Promise<unknown>;
 };
 
+type HostedMemberEmailAuthorizationFixture = {
+  findUnique?: MockedFunction;
+};
+
 type HostedMemberRoutingFixture = {
   findFirst?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
   findUnique?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
@@ -271,6 +275,7 @@ type PrismaFixtureBase = {
   hostedInvite?: HostedInviteFixture;
   hostedLinqDailyState?: HostedLinqDailyStateFixture;
   hostedMember?: HostedMemberFixture;
+  hostedMemberEmailAuthorization?: HostedMemberEmailAuthorizationFixture;
   hostedMemberIdentity?: HostedMemberIdentityFixture;
   hostedMemberRouting?: HostedMemberRoutingFixture;
   hostedWebhookReceipt?: HostedWebhookReceiptFixture;
@@ -1393,6 +1398,123 @@ https://join.example.test/join/code_first_text`);
       mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
     );
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("stores iMessage email handles as pending Linq contact claims instead of verified emails", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_email_handle",
+      inviteCode: "code_email_handle",
+      memberId: "member_email",
+      sentAt: null,
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_email_handle",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_email",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          sender_handle: {
+            handle: "Buddy@iCloud.com",
+            id: "handle_sender_email",
+            service: "iMessage",
+          },
+        },
+        eventId: "evt_email_handle",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      inviteCode: "code_email_handle",
+      joinUrl: "https://join.example.test/join/code_email_handle",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(prismaMocks.hostedMemberEmailAuthorization.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          phoneLookupKey: null,
+          phoneNumberEncrypted: null,
+        }),
+      }),
+    );
+    expect(prismaMocks.hostedMemberRouting.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          pendingLinqParticipantContactKind: "email",
+          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+        }),
+        update: expect.objectContaining({
+          pendingLinqParticipantContactKind: "email",
+          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+        }),
+      }),
+    );
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          joinUrl: "https://join.example.test/join/code_email_handle",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
   });
 
   it("sends first-contact signup links even when inbound Linq parts exceed mailbox limits", async () => {

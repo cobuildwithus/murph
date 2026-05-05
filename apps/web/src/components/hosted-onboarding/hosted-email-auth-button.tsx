@@ -31,13 +31,15 @@ export function HostedEmailAuthButton({
   active = false,
   disableSignup = false,
   inline = false,
-  onActivate,
+  inviteCode,
+  onActivate = () => undefined,
   onCompleted,
 }: {
   active?: boolean;
   disableSignup?: boolean;
   inline?: boolean;
-  onActivate: () => void;
+  inviteCode?: string | null;
+  onActivate?: () => void;
   onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
 }) {
   const { createWallet } = useCreateWallet();
@@ -159,6 +161,7 @@ export function HostedEmailAuthButton({
       await loginWithCode({ code: submittedCode });
       const result = await completeHostedPrivyAuth({
         ...authSession,
+        inviteCode,
       });
       if (onCompleted) {
         await onCompleted(result);

@@ -10,10 +10,13 @@ import {
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
+  resolveHostedLinqParticipantContact,
+  resolveHostedLinqParticipantEmailAddress,
   resolveHostedLinqParticipantPhoneNumber,
   resolveHostedLinqRecipientPhoneNumber,
   summarizeHostedLinqMessage,
 } from "./linq";
+import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import {
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -33,6 +36,8 @@ type HostedLinqMessageReceivedEvent = ReturnType<typeof requireHostedLinqMessage
 export type HostedOnboardingLinqMessageContext = {
   messageEvent: HostedLinqMessageReceivedEvent;
   occurredAt: string;
+  participantContact: HostedLinqParticipantContact | null;
+  participantEmailAddress: string | null;
   participantPhoneNumber: string | null;
   recipientPhoneNumber: string | null;
   summary: ReturnType<typeof summarizeHostedLinqMessage>;
@@ -52,6 +57,8 @@ export function resolveHostedOnboardingLinqMessageContext(
   return {
     messageEvent,
     occurredAt: resolveHostedLinqOccurredAt(messageEvent),
+    participantContact: resolveHostedLinqParticipantContact(messageEvent),
+    participantEmailAddress: resolveHostedLinqParticipantEmailAddress(messageEvent),
     participantPhoneNumber: resolveHostedLinqParticipantPhoneNumber(messageEvent),
     recipientPhoneNumber: resolveHostedLinqRecipientPhoneNumber(messageEvent),
     summary: summarizeHostedLinqMessage(messageEvent),
@@ -179,12 +186,15 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   chatId: string;
   memberId: string;
   occurredAt: string;
+  participantContact?: HostedLinqParticipantContact | null;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
   await upsertHostedMemberPendingLinqBindingTx({
     linqChatId: input.chatId,
     memberId: input.memberId,
+    participantContact: input.participantContact ?? null,
+    participantContactObservedAt: new Date(input.occurredAt),
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
   });

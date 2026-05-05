@@ -25,6 +25,7 @@ import { cn } from "@/src/lib/utils";
 import { HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 import { requestHostedBillingCheckout } from "./client-api";
+import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
@@ -133,6 +134,19 @@ export function JoinInvitePhoneVerificationIsland({
   verificationMode: HostedInviteVerificationMode;
 }) {
   const router = useRouter();
+  if (verificationMode === "invite_email") {
+    return (
+      <HostedEmailAuthButton
+        active
+        inline
+        inviteCode={inviteCode}
+        onCompleted={async () => {
+          router.refresh();
+        }}
+      />
+    );
+  }
+
   const resolvedPhoneAuthTarget =
     verificationMode === "invite_phone"
       ? phoneAuthTarget

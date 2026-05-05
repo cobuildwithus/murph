@@ -21,6 +21,7 @@ export {
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
+  upsertHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-linq";
 export {
   syncHostedMemberTelegramRoutingBinding,
@@ -84,6 +85,7 @@ export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
     linqRecipientPhone: null,
     memberId: input.memberId,
     pendingLinqChatId: null,
+    pendingLinqParticipantContact: null,
     pendingLinqRecipientPhone: null,
     prisma: input.prisma,
     telegramThreadId: null,
@@ -121,6 +123,26 @@ export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
     ? await projectHostedMemberRoutingLookup(
         routingRecord,
         "telegramUserLookupKey",
+        input.prisma,
+      )
+    : null;
+}
+
+export async function lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey(input: {
+  lookupKey: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberRoutingLookup | null> {
+  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      pendingLinqParticipantContactLookupKey: input.lookupKey,
+    },
+    select: hostedMemberRoutingLookupSelect,
+  });
+
+  return routingRecord
+    ? await projectHostedMemberRoutingLookup(
+        routingRecord,
+        "pendingLinqParticipantContactLookupKey",
         input.prisma,
       )
     : null;

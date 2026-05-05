@@ -42,7 +42,7 @@ export type HostedInvitePhoneAuthTarget =
       kind: "manual";
     };
 
-export type HostedInviteVerificationMode = "invite_phone" | "manual_phone";
+export type HostedInviteVerificationMode = "invite_email" | "invite_phone" | "manual_phone";
 
 export interface HostedPrivyCompletionPayload {
   inviteCode: string;

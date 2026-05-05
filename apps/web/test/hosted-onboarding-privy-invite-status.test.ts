@@ -310,6 +310,58 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
+  it("uses email verification for pending Linq email participant contacts", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: null,
+                privyUserId: null,
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: null,
+                walletAddress: null,
+              })),
+              maskedPhoneNumberHint: null,
+              phoneLookupKey: null,
+              phoneNumberVerifiedAt: null,
+            }),
+            routing: await createRouting({
+              pendingLinqChatId: "chat_email",
+              pendingLinqParticipantContact: "buddy@icloud.com",
+              pendingLinqParticipantContactKind: "email",
+              pendingLinqParticipantContactLookupKey: "hbidx:email:v1:member_123",
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    const status = await getHostedInviteStatus({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(status).toMatchObject({
+      messagingSetupRequired: false,
+      stage: "verify",
+    });
+    expect(status.invite).toEqual({
+      code: "invite-code",
+      expiresAt: "2026-04-07T12:00:00.000Z",
+      phoneAuthTarget: {
+        kind: "manual",
+      },
+      phoneHint: null,
+      verificationMode: "invite_email",
+    });
+  });
+
   it("does not expose the stored phone after the invite is already active", async () => {
     const prisma = {
       hostedInvite: {
@@ -570,12 +622,20 @@ async function createRouting(input?: {
   linqChatId?: string | null;
   linqRecipientPhone?: string | null;
   pendingLinqChatId?: string | null;
+  pendingLinqParticipantContact?: string | null;
+  pendingLinqParticipantContactKind?: string | null;
+  pendingLinqParticipantContactLookupKey?: string | null;
   pendingLinqRecipientPhone?: string | null;
   telegramUserLookupKey?: string | null;
 }) {
   return {
     createdAt: NOW,
     memberId: "member_123",
+    pendingLinqParticipantContactKind: input?.pendingLinqParticipantContactKind ?? null,
+    pendingLinqParticipantContactLookupKey: input?.pendingLinqParticipantContactLookupKey ?? null,
+    pendingLinqParticipantContactObservedAt: input?.pendingLinqParticipantContact
+      ? NOW
+      : null,
     telegramUserLookupKey: input?.telegramUserLookupKey ?? null,
     updatedAt: NOW,
     ...(await buildHostedMemberRoutingPrivateColumns({
@@ -583,6 +643,7 @@ async function createRouting(input?: {
       linqRecipientPhone: input?.linqRecipientPhone ?? null,
       memberId: "member_123",
       pendingLinqChatId: input?.pendingLinqChatId ?? null,
+      pendingLinqParticipantContact: input?.pendingLinqParticipantContact ?? null,
       pendingLinqRecipientPhone: input?.pendingLinqRecipientPhone ?? null,
       telegramThreadId: null,
       telegramUserId: null,

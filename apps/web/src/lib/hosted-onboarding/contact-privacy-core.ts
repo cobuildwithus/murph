@@ -141,6 +141,17 @@ export function hostedPhoneLookupKeyMatchesValue(
   });
 }
 
+export function hostedEmailLookupKeyMatchesValue(
+  address: string | null | undefined,
+  expectedLookupKey: string | null | undefined,
+): boolean {
+  return hostedLookupKeyMatchesValue({
+    expectedLookupKey,
+    kind: "email",
+    normalizedValue: normalizeHostedEmailAddress(address),
+  });
+}
+
 export function parseHostedBlindIndex(value: string | null | undefined): HostedBlindIndexParts | null {
   if (typeof value !== "string") {
     return null;

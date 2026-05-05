@@ -212,6 +212,16 @@ export function remapHostedPrivyCompletionLagError(error: unknown): unknown {
     });
   }
 
+  if (error.code === "PRIVY_EMAIL_REQUIRED") {
+    return hostedOnboardingError({
+      code: "PRIVY_EMAIL_NOT_READY",
+      message:
+        "Your verified email address has not reached the server-side Privy session yet. Wait a moment and try again.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+
   if (error.code === "PRIVY_WALLET_REQUIRED") {
     return hostedOnboardingError({
       code: "PRIVY_WALLET_NOT_READY",

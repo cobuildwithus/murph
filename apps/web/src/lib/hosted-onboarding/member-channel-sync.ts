@@ -30,6 +30,10 @@ export function resolveHostedMemberChannelsForSnapshot(input: {
       phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
     },
     routing: {
+      linqChatId: input.member.routing?.linqChatId ?? null,
+      pendingLinqChatId: input.member.routing?.pendingLinqChatId ?? null,
+      pendingLinqParticipantContact:
+        input.member.routing?.pendingLinqParticipantContact ?? null,
       telegramThreadId: input.member.routing?.telegramThreadId ?? null,
       telegramUserId: input.member.routing?.telegramUserId ?? null,
     },

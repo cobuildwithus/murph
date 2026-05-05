@@ -269,6 +269,120 @@ describe("completeHostedPrivyVerification", () => {
     });
   });
 
+  it("binds a verified email identity onto an invite-bound Linq email contact", async () => {
+    const pendingEmailAddress = "linq-handle@example.com";
+    const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;
+    const privyEmailVerifiedAtSeconds = 1742990400;
+    const verifiedEmailVerifiedAt = new Date(privyEmailVerifiedAtSeconds * 1000);
+    const inviteMember = makeMember({
+      id: "member_linq_email_invite",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const inviteMemberWithRouting = {
+      ...inviteMember,
+      identity: {
+        createdAt: NOW,
+        maskedPhoneNumberHint: null,
+        memberId: inviteMember.id,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+        privyUserId: null,
+        updatedAt: NOW,
+        walletAddress: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+      routing: {
+        linqChatIdEncrypted: null,
+        linqRecipientPhoneEncrypted: null,
+        memberId: inviteMember.id,
+        pendingLinqChatIdEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-routing.pending-linq-chat-id",
+          memberId: inviteMember.id,
+          value: "linq_chat_email_123",
+        }),
+        pendingLinqParticipantContactEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-routing.pending-linq-participant-contact",
+          memberId: inviteMember.id,
+          value: pendingEmailAddress,
+        }),
+        pendingLinqParticipantContactKind: "email",
+        pendingLinqParticipantContactLookupKey: pendingEmailLookupKey,
+        pendingLinqParticipantContactObservedAt: NOW,
+        pendingLinqRecipientPhoneEncrypted: null,
+        telegramUserIdEncrypted: null,
+        telegramUserLookupKey: null,
+      },
+    };
+    const invite = makeInvite(inviteMemberWithRouting);
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...inviteMember,
+          ...data,
+        })),
+      },
+    });
+
+    const result = await completeHostedPrivyVerification({
+      identity: makeIdentity({
+        email: {
+          address: "Linq-Handle@example.com",
+          verifiedAt: privyEmailVerifiedAtSeconds,
+        },
+        phone: null,
+        wallet: null,
+      }),
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      inviteCode: "invite-code",
+      joinUrl: "https://join.example.test/join/invite-code",
+      memberId: inviteMember.id,
+      messagingSetupRequired: false,
+      stage: "checkout",
+    });
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        memberId: inviteMember.id,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+      }),
+      update: expect.objectContaining({
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+      }),
+    }));
+    expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        memberId: inviteMember.id,
+        verifiedEmailLookupKey: pendingEmailLookupKey,
+        verifiedEmailVerifiedAt,
+      }),
+      update: expect.objectContaining({
+        verifiedEmailLookupKey: pendingEmailLookupKey,
+        verifiedEmailVerifiedAt,
+      }),
+    }));
+  });
+
   it("rejects invite verification when the current identity-side wallet conflicts with the verified Privy wallet", async () => {
     const inviteMember = makeMember();
     const invite = makeInvite(inviteMember);
@@ -1874,19 +1988,25 @@ async function readMemberIdentity(member: unknown) {
         : null;
   const phoneLookupKey =
     typeof identity.phoneLookupKey === "string" ? identity.phoneLookupKey : null;
-  const phoneNumber =
-    phoneLookupKey === SECONDARY_PHONE_LOOKUP_KEY
-      ? SECONDARY_PHONE_NUMBER
-      : DEFAULT_PHONE_NUMBER;
 
-  if (!memberId || !phoneLookupKey) {
+  if (!memberId) {
     return null;
   }
+
+  const phoneNumber = phoneLookupKey === null
+    ? null
+    : phoneLookupKey === SECONDARY_PHONE_LOOKUP_KEY
+      ? SECONDARY_PHONE_NUMBER
+      : DEFAULT_PHONE_NUMBER;
 
   return {
     createdAt: identity.createdAt instanceof Date ? identity.createdAt : NOW,
     maskedPhoneNumberHint:
-      typeof identity.maskedPhoneNumberHint === "string" ? identity.maskedPhoneNumberHint : "*** 4567",
+      typeof identity.maskedPhoneNumberHint === "string"
+        ? identity.maskedPhoneNumberHint
+        : phoneLookupKey
+          ? "*** 4567"
+          : null,
     memberId,
     phoneNumberEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.phone-number",

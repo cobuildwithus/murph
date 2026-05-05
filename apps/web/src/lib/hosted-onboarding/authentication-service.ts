@@ -20,6 +20,7 @@ import {
   updateHostedMemberPendingActivationTimeZoneIfActivationPending,
 } from "./hosted-member-store";
 import {
+  projectHostedMemberRoutingState,
   syncHostedMemberTelegramRoutingBinding,
 } from "./hosted-member-routing-store";
 import {
@@ -78,9 +79,21 @@ export async function completeHostedPrivyVerification(input: {
     const member = invite
       ? await (async () => {
           const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
+          const inviteRouting = invite.member.routing
+            ? await projectHostedMemberRoutingState(invite.member.routing, prisma)
+            : null;
+          const pendingEmailContact =
+            inviteRouting?.pendingLinqParticipantContact?.kind === "email"
+              ? inviteRouting.pendingLinqParticipantContact
+              : null;
           return reconcileHostedPrivyIdentityOnMember({
-            expectedPhoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-            expectedPhoneLookupKey: inviteIdentity.phoneLookupKey ?? undefined,
+            expectedEmailLookupKey: pendingEmailContact?.lookupKey,
+            expectedPhoneHint: pendingEmailContact
+              ? undefined
+              : readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
+            expectedPhoneLookupKey: pendingEmailContact
+              ? undefined
+              : inviteIdentity.phoneLookupKey ?? undefined,
             identity: input.identity,
             member: invite.member,
             prisma,

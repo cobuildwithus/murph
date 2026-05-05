@@ -7,6 +7,7 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
+  readHostedLinqConversationMessageContact,
 } from "@murphai/hosted-execution";
 import {
   createHostedAssistantConversationIdentifierBlind,
@@ -821,10 +822,11 @@ function createHostedConversationAssistantInputConversation(
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
   if (isHostedLinqConversationMessageWake(wake)) {
+    const contact = readHostedLinqConversationMessageContact(wake.message);
     return {
       accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
-        wake.message.phoneLookupKey,
+        contact.lookupKey,
       ),
       actorId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -883,7 +885,7 @@ function readHostedConversationAssistantIdentifierSecret(
   wake: HostedExecutionConversationMessageWake,
 ): string {
   if (isHostedLinqConversationMessageWake(wake)) {
-    return wake.message.phoneLookupKey;
+    return readHostedLinqConversationMessageContact(wake.message).lookupKey;
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {

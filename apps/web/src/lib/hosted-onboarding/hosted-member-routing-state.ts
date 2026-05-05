@@ -4,6 +4,10 @@ import {
 } from "@prisma/client";
 
 import { readHostedMemberRoutingPrivateState } from "./member-private-codecs";
+import {
+  normalizeHostedLinqParticipantContactKind,
+  type HostedLinqParticipantContactClaim,
+} from "./linq-participant-contact";
 import type { HostedOnboardingReadClient } from "./shared";
 
 export const hostedMemberRoutingStateSelect =
@@ -12,6 +16,10 @@ export const hostedMemberRoutingStateSelect =
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
+    pendingLinqParticipantContactEncrypted: true,
+    pendingLinqParticipantContactKind: true,
+    pendingLinqParticipantContactLookupKey: true,
+    pendingLinqParticipantContactObservedAt: true,
     pendingLinqRecipientPhoneEncrypted: true,
     telegramUserLookupKey: true,
     telegramUserIdEncrypted: true,
@@ -27,6 +35,10 @@ export const hostedMemberRoutingLookupSelect =
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
+    pendingLinqParticipantContactEncrypted: true,
+    pendingLinqParticipantContactKind: true,
+    pendingLinqParticipantContactLookupKey: true,
+    pendingLinqParticipantContactObservedAt: true,
     pendingLinqRecipientPhoneEncrypted: true,
     telegramUserLookupKey: true,
     telegramUserIdEncrypted: true,
@@ -50,6 +62,7 @@ export interface HostedMemberRoutingStateSnapshot {
   linqRecipientPhone: string | null;
   memberId: string;
   pendingLinqChatId: string | null;
+  pendingLinqParticipantContact: HostedLinqParticipantContactClaim | null;
   pendingLinqRecipientPhone: string | null;
   telegramThreadId: string | null;
   telegramUserId: string | null;
@@ -63,6 +76,7 @@ export interface HostedMemberRoutingLookupSnapshot {
 }
 
 export type HostedMemberRoutingLookupMatch =
+  | "pendingLinqParticipantContactLookupKey"
   | "telegramUserLookupKey"
   | "telegramUserId";
 
@@ -90,6 +104,12 @@ export async function projectHostedMemberRoutingState(
     linqRecipientPhone: privateState.linqRecipientPhone,
     memberId: routing.memberId,
     pendingLinqChatId: privateState.pendingLinqChatId,
+    pendingLinqParticipantContact: projectHostedPendingLinqParticipantContact({
+      kind: routing.pendingLinqParticipantContactKind,
+      lookupKey: routing.pendingLinqParticipantContactLookupKey,
+      observedAt: routing.pendingLinqParticipantContactObservedAt,
+      value: privateState.pendingLinqParticipantContact,
+    }),
     pendingLinqRecipientPhone: privateState.pendingLinqRecipientPhone,
     telegramThreadId: privateState.telegramThreadId,
     telegramUserId: privateState.telegramUserId,
@@ -112,5 +132,24 @@ export async function projectHostedMemberRoutingLookup(
       linqChatId: routingState.linqChatId,
       memberId: routingState.memberId,
     },
+  };
+}
+
+function projectHostedPendingLinqParticipantContact(input: {
+  kind: string | null;
+  lookupKey: string | null;
+  observedAt: Date | null;
+  value: string | null;
+}): HostedLinqParticipantContactClaim | null {
+  const kind = normalizeHostedLinqParticipantContactKind(input.kind);
+  if (!kind || !input.lookupKey || !input.value) {
+    return null;
+  }
+
+  return {
+    kind,
+    lookupKey: input.lookupKey,
+    observedAt: input.observedAt,
+    value: input.value,
   };
 }

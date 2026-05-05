@@ -26,6 +26,8 @@ const HOSTED_MEMBER_ROUTING_PENDING_LINQ_CHAT_FIELD =
   "hosted-member-routing.pending-linq-chat-id";
 const HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD =
   "hosted-member-routing.pending-linq-recipient-phone";
+const HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD =
+  "hosted-member-routing.pending-linq-participant-contact";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD = "hosted-member-routing.telegram-user-id";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA =
   "murph.hosted-member-routing.telegram.v1";
@@ -47,6 +49,7 @@ export interface HostedMemberRoutingPrivateState {
   linqChatId: string | null;
   linqRecipientPhone: string | null;
   pendingLinqChatId: string | null;
+  pendingLinqParticipantContact: string | null;
   pendingLinqRecipientPhone: string | null;
   telegramThreadId: string | null;
   telegramUserId: string | null;
@@ -166,6 +169,7 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
   linqRecipientPhone: string | null;
   memberId: string;
   pendingLinqChatId: string | null;
+  pendingLinqParticipantContact?: string | null;
   pendingLinqRecipientPhone: string | null;
   prisma?: HostedWebEncryptionPrismaClient;
   telegramThreadId: string | null;
@@ -195,6 +199,10 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
     HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD,
     input.pendingLinqRecipientPhone,
   );
+  const pendingLinqParticipantContactEncrypted = await encryptPrivateField(
+    HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD,
+    input.pendingLinqParticipantContact,
+  );
   const telegramUserIdEncrypted = await encryptPrivateField(
     HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
     buildHostedMemberRoutingTelegramPrivateValue({
@@ -207,6 +215,7 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
     linqChatIdEncrypted,
     linqRecipientPhoneEncrypted,
     pendingLinqChatIdEncrypted,
+    pendingLinqParticipantContactEncrypted,
     pendingLinqRecipientPhoneEncrypted,
     telegramUserIdEncrypted,
   } as const;
@@ -219,6 +228,7 @@ export async function readHostedMemberRoutingPrivateState(
     | "linqRecipientPhoneEncrypted"
     | "memberId"
     | "pendingLinqChatIdEncrypted"
+    | "pendingLinqParticipantContactEncrypted"
     | "pendingLinqRecipientPhoneEncrypted"
     | "telegramUserIdEncrypted"
   >,
@@ -229,6 +239,7 @@ export async function readHostedMemberRoutingPrivateState(
     linqChatId,
     linqRecipientPhone,
     pendingLinqChatId,
+    pendingLinqParticipantContact,
     pendingLinqRecipientPhone,
   ] = await Promise.all([
     readHostedMemberRoutingTelegramPrivateState({
@@ -254,6 +265,12 @@ export async function readHostedMemberRoutingPrivateState(
       value: routing.pendingLinqChatIdEncrypted,
     }),
     decryptHostedWebNullableString({
+      field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD,
+      memberId: routing.memberId,
+      prisma,
+      value: routing.pendingLinqParticipantContactEncrypted,
+    }),
+    decryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD,
       memberId: routing.memberId,
       prisma,
@@ -265,6 +282,7 @@ export async function readHostedMemberRoutingPrivateState(
     linqChatId,
     linqRecipientPhone,
     pendingLinqChatId,
+    pendingLinqParticipantContact,
     pendingLinqRecipientPhone,
     telegramThreadId: telegramState.telegramThreadId,
     telegramUserId: telegramState.telegramUserId,

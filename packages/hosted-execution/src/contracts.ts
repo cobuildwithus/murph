@@ -210,10 +210,58 @@ export interface HostedExecutionLinqConversationMessage {
   service?: string | null;
 }
 
-export interface HostedExecutionLinqConversationMessagePayload {
+export const HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS = [
+  "email",
+  "phone",
+] as const;
+
+export type HostedExecutionLinqConversationContactKind =
+  (typeof HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS)[number];
+
+interface HostedExecutionLinqConversationMessagePayloadBase {
   channel: "linq";
   linqMessage: HostedExecutionLinqConversationMessage;
-  phoneLookupKey: string;
+}
+
+export type HostedExecutionLinqConversationMessagePayload =
+  HostedExecutionLinqConversationMessagePayloadBase
+  & (
+    | {
+        contactKind: HostedExecutionLinqConversationContactKind;
+        contactLookupKey: string;
+        phoneLookupKey?: string | null;
+      }
+    | {
+        contactKind?: undefined;
+        contactLookupKey?: undefined;
+        phoneLookupKey: string;
+      }
+  );
+
+export function readHostedLinqConversationMessageContact(
+  payload: HostedExecutionLinqConversationMessagePayload,
+): {
+  kind: HostedExecutionLinqConversationContactKind;
+  lookupKey: string;
+} {
+  if (
+    typeof payload.contactLookupKey === "string"
+    && isHostedLinqConversationContactKind(payload.contactKind)
+  ) {
+    return {
+      kind: payload.contactKind,
+      lookupKey: payload.contactLookupKey,
+    };
+  }
+
+  if (typeof payload.phoneLookupKey === "string" && payload.phoneLookupKey.length > 0) {
+    return {
+      kind: "phone",
+      lookupKey: payload.phoneLookupKey,
+    };
+  }
+
+  throw new TypeError("Hosted Linq conversation message requires a contact lookup key.");
 }
 
 export interface HostedExecutionTelegramConversationMessagePayload {
@@ -369,6 +417,14 @@ export function isHostedConversationMessageChannel(
 ): channel is HostedExecutionConversationMessageChannel {
   return HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS.includes(
     channel as HostedExecutionConversationMessageChannel,
+  );
+}
+
+export function isHostedLinqConversationContactKind(
+  kind: unknown,
+): kind is HostedExecutionLinqConversationContactKind {
+  return HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS.includes(
+    kind as HostedExecutionLinqConversationContactKind,
   );
 }
 

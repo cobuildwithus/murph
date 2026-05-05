@@ -158,6 +158,8 @@ describe("hosted execution wake builders", () => {
 
     expect(wake.message).toEqual({
       channel: "linq",
+      contactKind: "phone",
+      contactLookupKey: "phone_lookup_123",
       linqMessage: {
         chatId: "chat_123",
         from: "+15551234567",
@@ -178,6 +180,53 @@ describe("hosted execution wake builders", () => {
     expect(wake.message).not.toHaveProperty("linqMessageId");
     expect(wake.message.linqMessage).not.toBe(linqMessage);
     expect(wake.message.linqMessage.parts).not.toBe(linqMessage.parts);
+  });
+
+  it("preserves Linq email contact lookup metadata alongside the legacy phone lookup field", () => {
+    const linqMessage = {
+      chatId: "chat_email_123",
+      from: "buddy@example.test",
+      isFromMe: false,
+      messageId: "msg_email_123",
+      parts: [
+        {
+          type: "text" as const,
+          value: "hello",
+        },
+      ],
+      service: "iMessage",
+    };
+
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      contactKind: "email",
+      contactLookupKey: "hbidx:email:v1:test",
+      eventId: "linq-email-1",
+      linqMessage,
+      occurredAt,
+      phoneLookupKey: null,
+      userId: "user_123",
+    });
+
+    expect(wake.message).toEqual({
+      channel: "linq",
+      contactKind: "email",
+      contactLookupKey: "hbidx:email:v1:test",
+      linqMessage: {
+        chatId: "chat_email_123",
+        from: "buddy@example.test",
+        isFromMe: false,
+        messageId: "msg_email_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+        service: "iMessage",
+      },
+      phoneLookupKey: null,
+    });
+    expect(wake.message.linqMessage).not.toBe(linqMessage);
   });
 
   it("deep-copies telegram attachment arrays and attachment entries", () => {
