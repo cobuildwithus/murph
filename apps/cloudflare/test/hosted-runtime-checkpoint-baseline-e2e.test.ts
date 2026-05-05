@@ -43,6 +43,7 @@ const BASELINE_ARTIFACT_COUNT = 100;
 const BASELINE_ASSISTANT_MESSAGE_COUNT = 300;
 const BASELINE_TRANSCRIPT_RELATIVE_PATH =
   ".runtime/operations/assistant/transcripts/session_checkpoint_baseline.jsonl";
+const OVER_BUDGET_CODEX_HOME_BYTES = 17 * 1024 * 1024;
 const BASELINE_RUNTIME = {
   forwardedEnv: {
     HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
@@ -234,6 +235,142 @@ describe("hosted runtime checkpoint baseline", () => {
       process.stdout.write(`hosted-checkpoint-baseline ${JSON.stringify(metrics)}\n`);
     }
   });
+
+  it("reproduces Codex home over-budget import checkpoint fallback", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-codex-budget-"));
+    const operatorHomeRoot = `${vaultRoot}-operator-home`;
+    cleanupPaths.push(vaultRoot, operatorHomeRoot);
+    await writeSyntheticVaultMetadata(vaultRoot);
+    await seedHostedCheckpointBaselineWorkspace({
+      artifactCount: BASELINE_ARTIFACT_COUNT,
+      assistantMessageCount: BASELINE_ASSISTANT_MESSAGE_COUNT,
+      vaultRoot,
+    });
+    await seedOverBudgetCodexHome({
+      byteLength: OVER_BUDGET_CODEX_HOME_BYTES,
+      operatorHomeRoot,
+    });
+
+    const artifactPutCalls: BaselineArtifactPutCall[] = [];
+    const artifactPutBytesByHash = new Map<string, Uint8Array>();
+    const baseBundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [
+        {
+          root: vaultRoot,
+          rootKey: "vault",
+        },
+      ],
+    });
+    if (!baseBundle) {
+      throw new Error("Synthetic checkpoint Codex budget base bundle could not be created.");
+    }
+    const baseBundleHash = sha256HostedBundleHex(baseBundle);
+    artifactPutBytesByHash.set(baseBundleHash, baseBundle);
+    const existingBaseSnapshotRef = createSnapshotBundleRef({
+      hash: baseBundleHash,
+      size: baseBundle.byteLength,
+    });
+    const existingBrowserVaultReplicaRef = createBrowserVaultReplicaRef(baseBundleHash);
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeLogRequests: HostedRuntimeLogRequest[] = [];
+    const request = createWorkspaceInvocationRequest({
+      attemptId: "attempt_synthetic_checkpoint_codex_budget",
+    });
+    const platform = createBaselinePlatform({
+      artifactPutCalls,
+      artifactPutBytesByHash,
+      mailboxPort: createBaselineMailboxPort({
+        fetchRequests,
+        items: [
+          createMailboxItem({
+            id: "mailbox_item_checkpoint_codex_budget_001",
+            laneSeq: "1",
+          }),
+        ],
+      }),
+      runtimeLogRequests,
+      workspacePort: createBaselineWorkspacePort({
+        checkpointRequests,
+        workspace: createWorkspaceState({
+          browserVaultReplicaRef: existingBrowserVaultReplicaRef,
+          snapshotRef: existingBaseSnapshotRef,
+          version: request.workspaceVersion,
+        }),
+      }),
+    });
+    const bridgeOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform,
+      readCurrentLease: () => ({
+        attemptId: request.attemptId,
+        leaseGeneration: request.leaseGeneration,
+        userId: request.userId,
+        workspaceVersion: request.workspaceVersion,
+      }),
+      request,
+      runtime: BASELINE_RUNTIME,
+      vaultRoot,
+    });
+
+    const result = await runHostedWorkspaceRuntimeJobInProcess({
+      request,
+      runtime: BASELINE_RUNTIME,
+    }, {
+      ...bridgeOptions,
+      async importItem() {
+        return { status: "imported" };
+      },
+      platform,
+      vaultRoot,
+    });
+
+    const snapshotRef = checkpointRequests[0]?.snapshotRef ?? null;
+    const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
+    const fallbackLog = findFirstRuntimeLogEntry(
+      runtimeLogRequests,
+      "checkpoint.hot_state_fallback",
+    );
+    const snapshotLog = findFirstRuntimeLogEntry(
+      runtimeLogRequests,
+      "checkpoint.snapshot_finished",
+    );
+    const codexDiagnosticLog = findFirstRuntimeLogEntry(
+      runtimeLogRequests,
+      "workspace.codex_home_snapshot",
+    );
+    const fallbackBudgetActual = readRedactedJsonNumber(fallbackLog, "budgetActual");
+    const fallbackBudgetLimit = readRedactedJsonNumber(fallbackLog, "budgetLimit");
+
+    expect(result.status).toBe("idle");
+    expect(checkpointRequests[0]?.reason).toBe("import");
+    expect(hotSnapshotRef).toBeNull();
+    expect(fallbackLog?.redactedJson).toMatchObject({
+      budgetClass: "inline_bytes",
+      checkpointReason: "import",
+      fallbackReason: "budget_exceeded",
+    });
+    expect(fallbackBudgetActual).toBeGreaterThan(fallbackBudgetLimit ?? 0);
+    expect(snapshotLog?.redactedJson).toMatchObject({
+      checkpointReason: "import",
+      snapshotMode: "full",
+    });
+    expect(codexDiagnosticLog?.redactedJson).toMatchObject({
+      codexHomeSnapshotCandidateCount: expect.any(Number),
+      codexHomeSnapshotIncludedCount: expect.any(Number),
+    });
+
+    if (process.env.HOSTED_CHECKPOINT_BASELINE_LOG === "1") {
+      process.stdout.write(`hosted-checkpoint-codex-budget ${JSON.stringify({
+        artifactPutBytes: artifactPutCalls.reduce((total, call) => total + call.byteLength, 0),
+        artifactPutCalls: artifactPutCalls.length,
+        fallbackBudgetActual,
+        fallbackBudgetLimit,
+        mailboxFetchCalls: fetchRequests.length,
+        workspaceCheckpointCalls: checkpointRequests.length,
+      })}\n`);
+    }
+  });
 });
 
 interface BaselineArtifactPutCall {
@@ -283,6 +420,18 @@ async function writeSyntheticVaultMetadata(vaultRoot: string): Promise<void> {
       vaultId: "vault_01ARZ3NDEKTSV4RRFFQ69G5FAV",
     }, null, 2)}\n`,
     "utf8",
+  );
+}
+
+async function seedOverBudgetCodexHome(input: {
+  byteLength: number;
+  operatorHomeRoot: string;
+}): Promise<void> {
+  const rolloutsDirectory = path.join(input.operatorHomeRoot, ".codex-hosted", "rollouts");
+  await mkdir(rolloutsDirectory, { recursive: true });
+  await writeFile(
+    path.join(rolloutsDirectory, "over-budget-rollout.jsonl"),
+    Buffer.alloc(input.byteLength, "x"),
   );
 }
 
@@ -482,4 +631,25 @@ function countRuntimeLogEntries(
   return requests.reduce((count, request) =>
     count + request.entries.filter((entry) => entry.eventCode === eventCode).length,
   0);
+}
+
+function findFirstRuntimeLogEntry(
+  requests: readonly HostedRuntimeLogRequest[],
+  eventCode: string,
+): HostedRuntimeLogRequest["entries"][number] | null {
+  for (const request of requests) {
+    const entry = request.entries.find((candidate) => candidate.eventCode === eventCode);
+    if (entry) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function readRedactedJsonNumber(
+  entry: HostedRuntimeLogRequest["entries"][number] | null,
+  key: string,
+): number | null {
+  const value = entry?.redactedJson?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
