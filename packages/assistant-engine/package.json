@@ -27,6 +27,10 @@
       "types": "./dist/assistant-channel-adapters.d.ts",
       "default": "./dist/assistant-channel-adapters.js"
     },
+    "./assistant-channel-runtime": {
+      "types": "./dist/assistant-channel-runtime.d.ts",
+      "default": "./dist/assistant-channel-runtime.js"
+    },
     "./assistant-cron": {
       "types": "./dist/assistant-cron.d.ts",
       "default": "./dist/assistant-cron.js"

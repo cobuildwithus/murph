@@ -1,7 +1,7 @@
 import { Container, type OutboundHandlerContext, type StopParams } from "@cloudflare/containers";
 import {
   type HostedAssistantWorkspaceRuntimeJobResult,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,

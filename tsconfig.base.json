@@ -115,6 +115,9 @@
       "@murphai/runtime-state/node/assistant-usage": [
         "packages/runtime-state/src/node/assistant-usage.ts"
       ],
+      "@murphai/runtime-state/node/assistant-runtime-issues": [
+        "packages/runtime-state/src/node/assistant-runtime-issues.ts"
+      ],
       "@murphai/runtime-state/node/assistant-state-fs": [
         "packages/runtime-state/src/node/assistant-state-fs.ts"
       ],
@@ -258,6 +261,9 @@
       ],
       "@murphai/assistant-engine/assistant-channel-adapters": [
         "packages/assistant-engine/src/assistant-channel-adapters.ts"
+      ],
+      "@murphai/assistant-engine/assistant-channel-runtime": [
+        "packages/assistant-engine/src/assistant-channel-runtime.ts"
       ],
       "@murphai/assistant-engine/assistant/*": [
         "packages/assistant-engine/src/assistant/*.ts"

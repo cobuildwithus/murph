@@ -31,6 +31,11 @@
       "import": "./dist/hosted-runtime-contracts.js",
       "default": "./dist/hosted-runtime-contracts.js"
     },
+    "./hosted-runtime-worker-contracts": {
+      "types": "./dist/hosted-runtime-worker-contracts.d.ts",
+      "import": "./dist/hosted-runtime-worker-contracts.js",
+      "default": "./dist/hosted-runtime-worker-contracts.js"
+    },
     "./hosted-provider-effects": {
       "types": "./dist/hosted-provider-effects.d.ts",
       "import": "./dist/hosted-provider-effects.js",
