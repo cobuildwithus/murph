@@ -400,7 +400,10 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     inputId: primaryAutoReplyInputId(context),
     details: 'assistant provider turn started',
   })
-  const activeTurnHooks = input.inputSource
+  const activeTurnHooks = shouldUseAssistantAutoReplyActiveTurnInputHooks({
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    executionContext: input.executionContext,
+  }) && input.inputSource
     ? createAssistantAutoReplyActiveTurnInputHooks({
         context,
         onAcceptedContext(nextContext) {
@@ -1144,6 +1147,16 @@ async function executeAssistantAutoReply(input: {
   } finally {
     watchdog.dispose()
   }
+}
+
+function shouldUseAssistantAutoReplyActiveTurnInputHooks(input: {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
+}): boolean {
+  return !(
+    input.executionContext?.hosted != null &&
+    input.deliveryDispatchMode === 'queue-only'
+  )
 }
 
 interface AssistantAutoReplyActiveTurnPendingAcceptance {
