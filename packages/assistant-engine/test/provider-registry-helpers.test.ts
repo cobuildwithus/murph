@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexAppServerMocks = vi.hoisted(() => ({
   executeCodexAppServerTurn: vi.fn(),
+  readCodexAppServerTurnFailureContext: vi.fn(),
 }))
 const diagnosticsMocks = vi.hoisted(() => ({
   recordAssistantDiagnosticEvent: vi.fn(),
@@ -13,6 +14,8 @@ const turnsMocks = vi.hoisted(() => ({
 vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
   executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
+  readCodexAppServerTurnFailureContext:
+    codexAppServerMocks.readCodexAppServerTurnFailureContext,
 }))
 vi.mock('../src/assistant/diagnostics.ts', () => ({
   recordAssistantDiagnosticEvent:
@@ -54,6 +57,7 @@ import type {
 
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
+  codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
   diagnosticsMocks.recordAssistantDiagnosticEvent.mockReset()
   turnsMocks.appendAssistantTurnReceiptEvent.mockReset()
   vi.restoreAllMocks()
@@ -1319,6 +1323,118 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.providerContinuation).toEqual({
       kind: 'thread-start',
     })
+  })
+
+  it('starts a fresh thread when resumed Codex history has invalid tool output', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.193.output: Invalid input"}}',
+    )
+
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(expectedError)
+      .mockResolvedValueOnce({
+        finalMessage: 'final after invalid resume fallback',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'fresh-thread-after-invalid-output',
+        stderr: '',
+        stdout: '',
+        threadId: 'fresh-thread-after-invalid-output',
+        turnId: 'turn-fallback-invalid-output',
+      })
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: [],
+      providerActionCount: 0,
+      providerSessionId: 'corrupt-thread',
+      providerTurnId: 'turn-invalid-output',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      activeTurnMessages: [
+        {
+          content: 'initial prompt',
+          role: 'user',
+        },
+        {
+          content: 'draft before invalid resume',
+          role: 'assistant',
+        },
+      ],
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resumeProviderSessionId: 'corrupt-thread',
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      prompt: expect.not.stringContaining('Active turn so far:'),
+      resumeSessionId: 'corrupt-thread',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      prompt: expect.stringContaining('Active turn so far:'),
+      resumeSessionId: undefined,
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+    ).toContain('draft before invalid resume')
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+    expect(attempt.result.providerContinuation).toEqual({
+      kind: 'thread-start',
+    })
+    expect(attempt.result.providerSessionId).toBe('fresh-thread-after-invalid-output')
+  })
+
+  it('does not fresh-thread retry invalid resumed output after provider actions', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.193.output: Invalid input"}}',
+    )
+    const rawEvents = [{ method: 'turn/completed' }]
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(
+      expectedError,
+    )
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: rawEvents,
+      providerActionCount: 1,
+      providerSessionId: 'corrupt-thread',
+      providerTurnId: 'turn-invalid-output',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resumeProviderSessionId: 'corrupt-thread',
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt).toMatchObject({
+      error: expectedError,
+      metadata: {
+        activityLabels: [],
+        executedToolCount: 0,
+        providerActionCount: 1,
+        rawToolEvents: [],
+      },
+      ok: false,
+      providerSessionId: 'corrupt-thread',
+      providerTurnId: 'turn-invalid-output',
+      rawEvents,
+    })
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
   })
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {
