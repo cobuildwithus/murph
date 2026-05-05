@@ -257,6 +257,86 @@ describe("applyStripeCheckoutCompleted", () => {
     }));
   });
 
+  it("activates Pulse Trial checkout when Stripe omits subscription current-period fields", async () => {
+    const subscriptionWithoutPeriod = makePulseTrialSubscription();
+    delete subscriptionWithoutPeriod.current_period_end;
+    delete subscriptionWithoutPeriod.current_period_start;
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        {
+          ...makePulseTrialCheckoutSession(),
+          subscription: "sub_123",
+        } as never,
+        {} as never,
+        undefined,
+        subscriptionWithoutPeriod as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+    });
+
+    const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
+    expect(writeInput).toEqual(expect.objectContaining({
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+      currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
+      currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
+      stripeSubscriptionId: "sub_123",
+    }));
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
+      dispatchContext: expect.objectContaining({
+        sourceEventId: "checkout.session:cs_trial_123",
+      }),
+      memberId: "member_123",
+      prisma: {},
+      skipIfBillingAlreadyActive: false,
+    });
+  });
+
+  it("activates Pulse Trial checkout when Stripe current-period metadata is inconsistent", async () => {
+    const subscriptionWithInconsistentPeriod = makePulseTrialSubscription();
+    subscriptionWithInconsistentPeriod.current_period_start = 1_744_502_400;
+    subscriptionWithInconsistentPeriod.current_period_end = 1_745_020_800;
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        {
+          ...makePulseTrialCheckoutSession(),
+          subscription: "sub_123",
+        } as never,
+        {} as never,
+        undefined,
+        subscriptionWithInconsistentPeriod as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+    });
+
+    const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
+    expect(writeInput).toEqual(expect.objectContaining({
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+      currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
+      currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
+      stripeSubscriptionId: "sub_123",
+    }));
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
+      dispatchContext: expect.objectContaining({
+        sourceEventId: "checkout.session:cs_trial_123",
+      }),
+      memberId: "member_123",
+      prisma: {},
+      skipIfBillingAlreadyActive: false,
+    });
+  });
+
   it.each([
     [
       "wrong trial policy",
@@ -296,6 +376,21 @@ describe("applyStripeCheckoutCompleted", () => {
         subscription: {
           ...makePulseTrialSubscription(),
           customer: "cus_other",
+        },
+      },
+    ],
+    [
+      "missing session customer",
+      {
+        customer: null,
+      },
+    ],
+    [
+      "missing subscription customer",
+      {
+        subscription: {
+          ...makePulseTrialSubscription(),
+          customer: null,
         },
       },
     ],

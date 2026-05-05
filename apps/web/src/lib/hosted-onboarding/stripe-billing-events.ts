@@ -167,15 +167,17 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   const currentPeriodEnd = readHostedStripeSubscriptionDate(subscription, "current_period_end");
   const currentTrialStartedAt = readHostedStripeSubscriptionDate(subscription, "trial_start");
   const currentTrialEndsAt = readHostedStripeSubscriptionDate(subscription, "trial_end");
+  const currentPeriodSnapshot = buildHostedPulseTrialCheckoutCurrentPeriodSnapshot({
+    currentPeriodEnd,
+    currentPeriodStart,
+    currentTrialEndsAt,
+    currentTrialStartedAt,
+  });
 
   if (
-    !currentPeriodStart ||
-    !currentPeriodEnd ||
     !currentTrialStartedAt ||
     !currentTrialEndsAt ||
-    currentTrialStartedAt.getTime() >= currentTrialEndsAt.getTime() ||
-    currentPeriodStart.getTime() > currentTrialStartedAt.getTime() ||
-    currentPeriodEnd.getTime() < currentTrialEndsAt.getTime()
+    currentTrialStartedAt.getTime() >= currentTrialEndsAt.getTime()
   ) {
     return {
       activatedMemberId: null,
@@ -190,8 +192,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     currentBillingPhase: "trial",
     currentBillingPlanCode: "launch_monthly",
     currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-    currentPeriodEnd,
-    currentPeriodStart,
+    ...currentPeriodSnapshot,
     currentTrialEndsAt,
     currentTrialStartedAt,
     dispatchContext: input.dispatchContext,
@@ -239,6 +240,44 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   return {
     activatedMemberId: activation.activated ? updatedMember.core.id : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+  };
+}
+
+function buildHostedPulseTrialCheckoutCurrentPeriodSnapshot(input: {
+  currentPeriodEnd: Date | null;
+  currentPeriodStart: Date | null;
+  currentTrialEndsAt: Date | null;
+  currentTrialStartedAt: Date | null;
+}): {
+  currentPeriodEnd: Date | null;
+  currentPeriodStart: Date | null;
+} {
+  if (
+    !input.currentPeriodStart ||
+    !input.currentPeriodEnd ||
+    !input.currentTrialStartedAt ||
+    !input.currentTrialEndsAt
+  ) {
+    return {
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+    };
+  }
+
+  if (
+    input.currentPeriodStart.getTime() >= input.currentPeriodEnd.getTime() ||
+    input.currentPeriodStart.getTime() > input.currentTrialStartedAt.getTime() ||
+    input.currentPeriodEnd.getTime() < input.currentTrialEndsAt.getTime()
+  ) {
+    return {
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+    };
+  }
+
+  return {
+    currentPeriodEnd: input.currentPeriodEnd,
+    currentPeriodStart: input.currentPeriodStart,
   };
 }
 
@@ -833,7 +872,9 @@ function isValidPulseTrialCheckoutSubscription(input: {
   return Boolean(
     sessionSubscriptionId &&
     input.subscription.id === sessionSubscriptionId &&
-    (!sessionCustomerId || !subscriptionCustomerId || sessionCustomerId === subscriptionCustomerId) &&
+    sessionCustomerId &&
+    subscriptionCustomerId &&
+    sessionCustomerId === subscriptionCustomerId &&
     input.subscription.status === "trialing" &&
     trialEnd &&
     trialEnd.getTime() > input.eventCreatedAt.getTime(),
