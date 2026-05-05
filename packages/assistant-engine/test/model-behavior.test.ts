@@ -424,7 +424,17 @@ describe('assistant experiment onboarding guidance', () => {
       'do not silently treat a user-provided time as session one',
     )
     expect(prompt).toContain(
-      'vault-cli automation save <title> --slug experiment-first-prep-<experiment-slug>-<YYYY-MM-DD> --schedule-kind at --schedule-at <ISO timestamp>',
+      'vault-cli automation save <title> --slug experiment-first-prep-<experiment-slug>-<YYYY-MM-DD> --instructions "<scheduled instructions>" --schedule-kind at --schedule-at <ISO timestamp>',
+    )
+    expect(prompt).toContain(
+      'Include the current route fields, not just `--channel`',
+    )
+    expect(prompt).toContain('`--delivery-target`, `--identity-id`, `--participant-id`, and/or `--thread-id`')
+    expect(prompt).toContain(
+      'For iMessage, use the internal channel `linq` and preserve the bound participant/thread route fields.',
+    )
+    expect(prompt).toContain(
+      'Do not create a scheduled first-session prep reminder with only a bare channel',
     )
     expect(prompt).toContain(
       'Use generic tags by default: `assistant`, `scheduled`, `experiment`, and `first-session-prep`.',
@@ -433,7 +443,10 @@ describe('assistant experiment onboarding guidance', () => {
       'Add protocol-specific tags only when they are necessary and non-sensitive.',
     )
     expect(prompt).toContain(
-      'read `vault-cli experiment show <id> --format json` and `vault-cli commons protocol show <key-or-route> --format json` before sending',
+      'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <firstSessionDate> --format json` before sending',
+    )
+    expect(prompt).toContain(
+      'skip if the experiment is inactive, completed intervention sessions are already present',
     )
     expect(prompt).toContain(
       'Protocol `assistantPolicy.askBeforeCreatingAutomations` applies to recurring or post-session support',
@@ -459,10 +472,10 @@ describe('assistant notification decision guidance', () => {
       'For first-session prep automations, do not call `experiment followup due`',
     )
     expect(prompt).toContain(
-      'read `vault-cli experiment show <id> --format json` and `vault-cli commons protocol show <key-or-route> --format json` directly',
+      'read `vault-cli experiment show <id> --format json`, `vault-cli commons protocol show <key-or-route> --format json`, and `vault-cli experiment progress <id> --as-of <firstSessionDate> --format json` directly',
     )
     expect(prompt).toContain(
-      'skip if the run is inactive, the first session has already been logged, the reminder was cancelled or moved, or the saved plan no longer matches the scheduled first session',
+      'skip if the run is inactive, completed intervention sessions are already present, the reminder was cancelled or moved, or the saved plan no longer matches the scheduled first session',
     )
     expect(prompt).toContain('Send the prep reminder when those direct checks pass.')
     expect(prompt).toContain(
