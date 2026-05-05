@@ -10,6 +10,7 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 
 import {
+  hydrateHostedExecutionDefaultTarget,
   readHostedAssistantExecutionDefaultTarget,
 } from "../src/hosted-runtime/context.ts";
 import {
@@ -22,6 +23,10 @@ const HOSTED_ASSISTANT_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
+} as const;
+const HOSTED_ASSISTANT_RUNTIME_ENV = {
+  ...HOSTED_ASSISTANT_ENV,
+  [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: "hosted-openai",
 } as const;
 
 test("hosted assistant default target follows the effective Codex provider id", async () => {
@@ -41,6 +46,59 @@ test("hosted assistant default target follows the effective Codex provider id", 
   });
 });
 
+test("hosted assistant injected env overrides a stale saved platform profile", async () => {
+  await withTemporaryHostedAssistantEnv(async () => {
+    await ensureHostedAssistantOperatorDefaults({
+      allowMissing: false,
+      env: {
+        ...HOSTED_ASSISTANT_ENV,
+        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.5",
+      },
+    });
+
+    const staleSavedTarget = await readHostedAssistantExecutionDefaultTarget();
+    assert.equal(staleSavedTarget?.model, "openai/gpt-5.5");
+
+    const envTarget = await readHostedAssistantExecutionDefaultTarget({
+      runtimeEnv: HOSTED_ASSISTANT_RUNTIME_ENV,
+    });
+
+    assert.equal(envTarget?.model, "gpt-5.5");
+    assert.equal(envTarget?.modelProvider, "hosted-openai");
+
+    const restoredTarget = await readHostedAssistantExecutionDefaultTarget();
+    assert.equal(restoredTarget?.model, "gpt-5.5");
+    assert.equal(restoredTarget?.modelProvider, "openai");
+  });
+});
+
+test("hosted assistant hydration applies runtime env over stale saved platform profile", async () => {
+  await withTemporaryHostedAssistantEnv(async () => {
+    await ensureHostedAssistantOperatorDefaults({
+      allowMissing: false,
+      env: {
+        ...HOSTED_ASSISTANT_ENV,
+        HOSTED_ASSISTANT_MODEL: "openai/gpt-5.5",
+      },
+    });
+
+    const hydrated = await hydrateHostedExecutionDefaultTarget(
+      {
+        hosted: {
+          memberId: "member-hosted-target-regression",
+          userEnvKeys: [],
+        },
+      },
+      {
+        runtimeEnv: HOSTED_ASSISTANT_RUNTIME_ENV,
+      },
+    );
+
+    assert.equal(hydrated.hosted?.defaultTarget?.model, "gpt-5.5");
+    assert.equal(hydrated.hosted?.defaultTarget?.modelProvider, "hosted-openai");
+  });
+});
+
 async function withTemporaryHostedAssistantEnv(
   run: () => Promise<void>,
 ): Promise<void> {
@@ -53,6 +111,7 @@ async function withTemporaryHostedAssistantEnv(
 
   try {
     process.env.HOME = operatorHomeRoot;
+    delete process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV];
     for (const [key, value] of Object.entries(HOSTED_ASSISTANT_ENV)) {
       process.env[key] = value;
     }

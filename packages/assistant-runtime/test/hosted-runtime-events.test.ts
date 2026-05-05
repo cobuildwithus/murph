@@ -766,6 +766,9 @@ describe("executeHostedMailboxEvent", () => {
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       executionContext,
+      {
+        runtimeEnv: {},
+      },
     );
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
       actorId: "hid_linq_actor_123",

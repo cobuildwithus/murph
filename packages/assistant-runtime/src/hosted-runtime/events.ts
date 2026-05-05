@@ -244,6 +244,9 @@ export async function executeHostedMailboxEvent(input: {
   );
   const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
     input.executionContext,
+    {
+      runtimeEnv: input.runtimeEnv,
+    },
   );
   const mailboxEffect = await handleHostedMailboxEvent({
     wake: input.wake,

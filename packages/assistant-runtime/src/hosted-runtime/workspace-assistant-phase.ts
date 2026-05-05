@@ -246,22 +246,27 @@ export async function runHostedWorkspaceAssistantPhase(
       status: issueDeviceConnectLink ? "available" : "unavailable",
     });
   }
-  const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget({
-    hosted: {
-      channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-        effectsPort: input.runtime.platform.effectsPort,
-        forwardedEnv: input.runtime.forwardedEnv,
-        platformEnv: input.runtime.platformEnv,
-        signal: typingAbortController.signal,
-        userEnv: input.runtime.userEnv,
-      }),
-      deviceConnectProviders,
-      ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
-      memberId: input.request.userId,
-      ...(stripeCustomerId ? { stripeCustomerId } : {}),
-      userEnvKeys: Object.keys(input.runtime.userEnv),
+  const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
+    {
+      hosted: {
+        channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+          effectsPort: input.runtime.platform.effectsPort,
+          forwardedEnv: input.runtime.forwardedEnv,
+          platformEnv: input.runtime.platformEnv,
+          signal: typingAbortController.signal,
+          userEnv: input.runtime.userEnv,
+        }),
+        deviceConnectProviders,
+        ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
+        memberId: input.request.userId,
+        ...(stripeCustomerId ? { stripeCustomerId } : {}),
+        userEnvKeys: Object.keys(input.runtime.userEnv),
+      },
     },
-  });
+    {
+      runtimeEnv: input.runtimeEnv,
+    },
+  );
 
   try {
     const systemMailboxPreparation = await prepareHostedSystemMailboxItemForCheckpoint({
