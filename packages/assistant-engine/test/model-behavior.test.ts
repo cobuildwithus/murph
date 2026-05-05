@@ -193,6 +193,12 @@ describe('assistant consumption lookup guidance', () => {
     expect(prompt).toContain(
       'log what is known, mark estimates and confidence, and do not imply a lookup happened',
     )
+    expect(prompt).toContain(
+      'Use product lookups to make the answer or saved record accurate, not to create visible citation clutter',
+    )
+    expect(prompt).toContain(
+      'Do not add inline source links after ingredient or nutrition facts unless the user asks for links',
+    )
   })
 })
 
@@ -213,6 +219,28 @@ describe('assistant user-facing wording guidance', () => {
       'Mention Health Commons only when provenance matters',
     )
     expect(prompt).toContain('exact protocol versions')
+  })
+
+  it('keeps source URLs out of ordinary messaging-channel answers', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'linq',
+    }))
+
+    expect(prompt).toContain(
+      'Treat source URLs differently from action links',
+    )
+    expect(prompt).toContain(
+      'Do not append parenthesized Markdown source links',
+    )
+    expect(prompt).toContain(
+      'Include full URLs only when the URL itself is the deliverable or the user asks for links',
+    )
+    expect(prompt).toContain(
+      'Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, or Markdown presentation by default',
+    )
+    expect(prompt).toContain(
+      'If a source must be named, use a plain source name or domain in prose, not a Markdown link',
+    )
   })
 })
 
@@ -276,7 +304,7 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '8cdb6d84eb63dfb40c61341557c71884e1fa2b10d27be8ab8e9740d2a24776f0',
+      '664ced99aa451b9e99c4bf109081852694a7d86ffd68e827983016669e4125a1',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

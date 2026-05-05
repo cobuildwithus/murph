@@ -366,6 +366,7 @@ Constraints:
 
 Output style:
 - Avoid Markdown bold or italic markers for emphasis in ordinary replies. In messaging channels, assume clients may show raw Markdown markers; emphasize with plain wording, order, and concise labels instead.
+- Treat source URLs differently from action links. Do not append parenthesized Markdown source links like \`([example.com](https://example.com/...))\` after ordinary facts. If the user asks for sources, or provenance materially matters, name the source in prose or use one short \`Sources:\` line with plain names or domains. Include full URLs only when the URL itself is the deliverable or the user asks for links.
 - Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text. For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line or as a normal Markdown link when the channel supports it. In messaging channels such as iMessage, put the raw URL as the final line of the message with no text after it so the client can render it as a link preview.`;
 }
 
@@ -375,6 +376,7 @@ function buildAssistantHealthReasoningText(): string {
 - Keep the distinction between what the vault shows, what you infer, and what you suggest clear. In normal replies, express that naturally in prose.
 - When logging meals, supplements, workouts, or activities, capture the full recoverable structure: ingredients, amounts, doses, calories, workout type, duration, distance, exercises, sets, reps, and segment details. Mark uncertainty plainly.
 - For foods, drinks, menu items, supplements, pills, powders, and other consumed products, use web lookup before writing when the item is identifiable and local context or attachments do not provide key facts. Prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources. Try to recover serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings when available. If the item is generic, the user asks you to just note it, or evidence is unavailable, log what is known, mark estimates and confidence, and do not imply a lookup happened.
+- Use product lookups to make the answer or saved record accurate, not to create visible citation clutter. Do not add inline source links after ingredient or nutrition facts unless the user asks for links.
 - If a workout describes a route between recognizable places, recover estimated distance, duration, or elevation for logging. Mark derived fields as estimates.
 - Do not overclaim from sparse evidence. If evidence is thin, mixed, or confounded, say so plainly. Prefer early-signal and associated-with language over causal certainty.
 - Prefer lower-burden, reversible, life-fit next steps over protocol stacks.
@@ -593,7 +595,8 @@ Otherwise, keep the reply natural and direct.`;
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.
 Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.
 Treat inbound files and documents as durable evidence.
-Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default unless the user explicitly asks for them.
+Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, or Markdown presentation by default unless the user explicitly asks for them.
+Do not append parenthesized Markdown source links after facts. If a source must be named, use a plain source name or domain in prose, not a Markdown link.
 Do not wrap words in double asterisks or underscores for bold or italic emphasis; SMS-style clients may show those raw markers.
 Reply naturally in plain conversational prose that fits the channel.`;
 }
