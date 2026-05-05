@@ -75,6 +75,21 @@ export async function incrementHostedLinqOutboundDailyState(input: {
   });
 }
 
+export async function readHostedLinqDailyState(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+}): Promise<HostedLinqDailyState | null> {
+  return input.prisma.hostedLinqDailyState.findUnique({
+    where: {
+      memberId_dayUtc: {
+        dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
+        memberId: input.memberId,
+      },
+    },
+  });
+}
+
 export async function claimHostedLinqOnboardingLinkNotice(input: {
   memberId: string;
   occurredAt: Date | string;

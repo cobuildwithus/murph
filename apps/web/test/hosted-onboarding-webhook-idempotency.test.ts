@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMemberHomeLinqRoute: vi.fn(),
+  readHostedLinqDailyState: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
@@ -26,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -75,6 +78,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
   incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
+  readHostedLinqDailyState: mocks.readHostedLinqDailyState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
@@ -104,6 +108,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
+    mocks.readHostedLinqDailyState.mockResolvedValue(null);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue({
       dayUtc: new Date("2026-03-26T00:00:00.000Z"),
       inboundCount: 1,
@@ -244,6 +250,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0],
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
@@ -375,6 +384,44 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("does not count or wake duplicate active-member Linq event ids", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_evt_123",
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody(),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-webhook-event",
+    });
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 });
 

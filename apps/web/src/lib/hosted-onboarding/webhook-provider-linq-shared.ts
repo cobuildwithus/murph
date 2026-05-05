@@ -82,7 +82,9 @@ export function buildSignupLinkResponse(input: {
   chatId: string;
   inviteCode: string;
   inviteId: string;
+  memberId: string;
   messageId: string;
+  occurredAt: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   const joinUrl = buildHostedInviteUrl(input.inviteCode);
@@ -92,6 +94,8 @@ export function buildSignupLinkResponse(input: {
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
         inviteId: input.inviteId,
+        memberId: input.memberId,
+        occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "invite_signup",
@@ -114,17 +118,21 @@ export function buildActiveMemberDirectPlan(
 
 export function buildAiUsageQuotaReplyResponse(input: {
   chatId: string;
+  memberId: string;
   message: string;
   messageId: string;
   noticeCode: string;
+  occurredAt: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
+        memberId: input.memberId,
         message: input.message,
         noticeCode: input.noticeCode,
+        occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "ai_usage_quota",
@@ -166,13 +174,17 @@ export function buildConversationHomeRedirectResponse(input: {
 
 export function buildQuotaReplyResponse(input: {
   chatId: string;
+  memberId: string;
   messageId: string;
+  occurredAt: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
+        memberId: input.memberId,
+        occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "daily_quota",

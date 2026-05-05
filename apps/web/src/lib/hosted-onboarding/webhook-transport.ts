@@ -8,6 +8,10 @@ import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { buildHostedInviteUrl } from "./invite-service";
 import {
+  claimHostedLinqOnboardingLinkNotice,
+  claimHostedLinqQuotaReplyNotice,
+} from "./linq-daily-state";
+import {
   buildHostedDailyQuotaReply,
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,
@@ -27,24 +31,41 @@ export type HostedLinqConversationHomeRedirectPayload = {
 
 export type HostedLinqDailyQuotaPayload = {
   chatId: string;
+  memberId: string;
+  occurredAt: string;
   replyToMessageId: string | null;
   template: "daily_quota";
 };
 
 export type HostedLinqAiUsageQuotaPayload = {
   chatId: string;
+  memberId: string;
   message: string;
   noticeCode: string;
+  occurredAt: string;
   replyToMessageId: string | null;
   template: "ai_usage_quota";
 };
 
-export type HostedLinqInviteMessagePayload = {
+export type HostedLinqInviteSignupMessagePayload = {
+  chatId: string;
+  inviteId: string;
+  memberId: string;
+  occurredAt: string;
+  replyToMessageId: string | null;
+  template: "invite_signup";
+};
+
+export type HostedLinqInviteSigninMessagePayload = {
   chatId: string;
   inviteId: string;
   replyToMessageId: string | null;
-  template: "invite_signup" | "invite_signin";
+  template: "invite_signin";
 };
+
+export type HostedLinqInviteMessagePayload =
+  | HostedLinqInviteSigninMessagePayload
+  | HostedLinqInviteSignupMessagePayload;
 
 export type HostedLinqMessagePayload =
   | HostedLinqAiUsageQuotaPayload
@@ -69,13 +90,17 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
   | {
       chatId: string;
       message: string;
+      memberId: string;
       noticeCode: string;
+      occurredAt: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "ai_usage_quota";
     }
   | {
       chatId: string;
+      memberId: string;
+      occurredAt: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "daily_quota";
@@ -83,6 +108,8 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
   | {
       chatId: string;
       inviteId: string;
+      memberId: string;
+      occurredAt: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "invite_signup";
@@ -109,6 +136,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       prisma: input.prisma,
       signal: input.signal,
     });
+    await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
 
     if (isHostedInviteLinqMessagePayload(effect.payload)) {
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
@@ -334,8 +362,10 @@ function buildHostedWebhookLinqMessagePayload(
     case "ai_usage_quota":
       return {
         chatId: input.chatId,
+        memberId: input.memberId,
         message: input.message,
         noticeCode: input.noticeCode,
+        occurredAt: input.occurredAt,
         replyToMessageId,
         template: input.template,
       };
@@ -350,6 +380,8 @@ function buildHostedWebhookLinqMessagePayload(
     case "daily_quota":
       return {
         chatId: input.chatId,
+        memberId: input.memberId,
+        occurredAt: input.occurredAt,
         replyToMessageId,
         template: input.template,
       };
@@ -357,8 +389,37 @@ function buildHostedWebhookLinqMessagePayload(
       return {
         chatId: input.chatId,
         inviteId: input.inviteId,
+        memberId: input.memberId,
+        occurredAt: input.occurredAt,
         replyToMessageId,
         template: input.template,
       };
+  }
+}
+
+async function markHostedLinqNoticeSentForSideEffect(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  switch (effect.payload.template) {
+    case "invite_signup":
+      await claimHostedLinqOnboardingLinkNotice({
+        memberId: effect.payload.memberId,
+        occurredAt: effect.payload.occurredAt,
+        prisma,
+      });
+      return;
+    case "invite_signin":
+      return;
+    case "ai_usage_quota":
+    case "daily_quota":
+      await claimHostedLinqQuotaReplyNotice({
+        memberId: effect.payload.memberId,
+        occurredAt: effect.payload.occurredAt,
+        prisma,
+      });
+      return;
+    case "conversation_home_redirect":
+      return;
   }
 }
