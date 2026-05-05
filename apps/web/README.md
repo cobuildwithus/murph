@@ -110,6 +110,10 @@ Required:
 - `DATABASE_URL`
 - `HOSTED_DEVICE_ROUTING_INDEX_KEY`
 
+Required for production migrations:
+
+- `DIRECT_DATABASE_URL`
+
 Required for the hosted device-sync lane:
 
 - `JUNCTION_API_KEY`
@@ -420,14 +424,15 @@ pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 ```
 
-Production Vercel builds from `main` run `prisma migrate deploy` immediately
-before `next build` through `pnpm --dir apps/web build`. The build hook is
-intentionally non-mutating for local builds, CI verification, preview deploys,
-and non-main production deploys; keep that branch/environment gate in place so
-schema drift fails the deploy before new Prisma Client code can serve traffic.
-Because a successful migration cannot roll back automatically if a later build
-step fails, production migrations must stay backward compatible with the
-currently deployed app and use expand/contract sequencing for breaking changes.
+Production Vercel builds from `main` do not run `prisma migrate deploy` inside
+`pnpm --dir apps/web build`. Apply production migrations as a separate deploy
+step from a clean checkout of the commit being deployed. The migration wrapper
+uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel production, and
+rejects known pooled Postgres ports such as `6432` and `6543`; keep
+`DATABASE_URL` available for app runtime traffic. Because a successful
+migration cannot roll back automatically if a later deploy step fails,
+production migrations must stay backward compatible with the currently deployed
+app and use expand/contract sequencing for breaking changes.
 
 The hosted schema now includes the canonical member slices, hosted email
 authorization, device-sync web ownership models, the anonymized hosted
