@@ -98,10 +98,17 @@ const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
   "token",
 ] as const;
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
+  "authorizationHeaderValue",
+  "bodyJson",
   "failureAssistantProviderErrorBodyMessage",
   "failureAssistantProviderErrorMessage",
   "failureAssistantProviderErrorStatusText",
+  "messageContent",
+  "messageText",
+  "payload",
+  "payloadValue",
   "safeErrorMessage",
+  "tokenPreview",
 ]);
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
@@ -132,6 +139,23 @@ const SAFE_REDACTED_METADATA_KEY_SUFFIXES = [
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 48;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
+const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([
+  "at",
+  "attemptId",
+  "checkpointVersion",
+  "component",
+  "errorCode",
+  "eventCode",
+  "leaseGeneration",
+  "level",
+  "mailboxLane",
+  "mailboxSeqEnd",
+  "mailboxSeqStart",
+  "outboxIntentRef",
+  "phase",
+  "redactedJson",
+  "workspaceVersion",
+]);
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "committedSeq",
   "events",
@@ -1202,7 +1226,9 @@ function assertNoForbiddenRuntimeLogKeys(
   label: string,
 ): void {
   for (const key of Object.keys(record)) {
-    assertAllowedRedactedKey(key, `${label}.${key}`);
+    if (!HOSTED_RUNTIME_LOG_ENTRY_KEYS.has(key)) {
+      throw new TypeError(`${label}.${key} is not allowed in hosted runtime log entries.`);
+    }
   }
 }
 

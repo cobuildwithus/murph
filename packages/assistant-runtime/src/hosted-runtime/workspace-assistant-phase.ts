@@ -195,6 +195,9 @@ const HOSTED_RUNTIME_ERROR_DESCRIPTION_KEY_PARTS = [
   "reason",
   "status",
 ] as const;
+const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
+  "localPathPreview",
+]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
@@ -1032,6 +1035,10 @@ function redactHostedRuntimeLogString(key: string, value: string): string | unde
 }
 
 function isHostedRuntimeLogKeyAllowed(key: string): boolean {
+  if (HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES.has(key)) {
+    return true;
+  }
+
   const normalized = key.toLowerCase();
   return !HOSTED_RUNTIME_BLOCKED_LOG_KEY_PARTS.some((part) =>
     normalized.includes(part)
