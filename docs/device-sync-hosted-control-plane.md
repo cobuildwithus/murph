@@ -222,9 +222,11 @@ This keeps control-plane truth in web while still allowing hosted execution to c
 
 ## Webhook Dirty Coalescing
 
-Provider webhook traces remain exact and per delivery. Accepted webhook traces write sparse audit signals and upsert `device_sync_dirty_connection`. The dirty row increments `dirty_revision` for every accepted webhook and widens compact resource/window metadata. Webhook freshness does not append hosted mailbox items and does not start Vercel Workflows.
+Provider webhook traces remain exact and per delivery. Accepted webhook traces write sparse audit signals and upsert `device_sync_dirty_connection`. The dirty row increments `dirty_revision` for every accepted webhook and widens compact resource/window metadata. The steady-state architecture does not use per-webhook hosted mailbox items or Vercel Workflows for freshness.
 
 When a connection transitions from clean to dirty, webhook ingress sends a best-effort user-level runner nudge. That nudge contains no work payload; it only tells Cloudflare that the user may have pending durable work. Additional webhooks while already dirty update the aggregate without another ingress nudge. If a post-commit nudge is missed, the dirty row remains pending and the device-sync dirty sweeper can nudge the runner later.
+
+During the first dual-deploy rollout, web also writes one temporary legacy `device-sync.wake` mailbox item on the same clean-to-dirty transition. Its event ID is revision-based, so it is bounded by dirty transitions rather than webhook count, and workflow start is best-effort after durable acceptance. This adapter lets an older Cloudflare deploy import a coarse device-sync command until both deploys understand dirty-state pulling. It should be removed after the hosted runner drains `device_sync_dirty_connection` directly in production.
 
 For accepted webhooks, provider trace completion means durable audit and dirty acceptance committed. Internal wake delivery is not allowed to force provider retry after that transaction commits. Existing connection-established and disconnect wakes remain immediate lifecycle commands because they are explicit lifecycle commands, not high-cardinality freshness hints.
 

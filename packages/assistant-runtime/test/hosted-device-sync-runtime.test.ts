@@ -1304,6 +1304,67 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("legacy device-sync wake hints do not require dirty-pending routes during staggered deploys", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+    let dirtyPendingFetches = 0;
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "legacy-dirty-pending",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_legacy_wake",
+        externalAccountId: connected.account.externalAccountId,
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createSnapshotOnlyDeviceSyncPort(snapshot),
+          async fetchDirtyStates() {
+            dirtyPendingFetches += 1;
+            throw new Error("dirty-pending should not be fetched for legacy device-sync wakes");
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_legacy_wake",
+          eventId: "evt_device_sync_legacy_wake",
+          hint: {
+            jobs: [
+              {
+                availableAt: "2026-04-04T10:05:00.000Z",
+                dedupeKey: "wake:legacy-resource-sync",
+                kind: "resource-sync",
+              },
+            ],
+          },
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.equal(dirtyPendingFetches, 0);
+      assert.equal(state.pendingDirtyAck, null);
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      assert.equal(jobs[0]?.dedupeKey, "wake:legacy-resource-sync");
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("device-sync wake hints do not patch next reconcile when the hint is unchanged", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
