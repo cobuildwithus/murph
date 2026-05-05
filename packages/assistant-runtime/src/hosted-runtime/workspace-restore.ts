@@ -2,9 +2,17 @@ import { chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  HostedExecutionBundleRef,
+} from "@murphai/hosted-execution/contracts";
+import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotHotRef,
+} from "@murphai/hosted-execution/parsers";
+import {
+  clearHostedAssistantRuntimeHotState,
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
@@ -45,17 +53,49 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
   const restored = await createHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
   const snapshotRef = input.workspace?.snapshotRef ?? null;
+  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
+  const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
 
-  if (!snapshotRef) {
+  if (!baseSnapshotRef && !hotSnapshotRef) {
     return {
       ...restored,
       mode: "null-bootstrap",
     };
   }
 
-  const bundle = await input.platform.artifactStore.get(snapshotRef.hash);
+  if (baseSnapshotRef) {
+    await restoreHostedWorkspaceRuntimeBundle({
+      platform: input.platform,
+      ref: baseSnapshotRef,
+      restored,
+    });
+  }
+
+  if (hotSnapshotRef) {
+    await clearHostedAssistantRuntimeHotState({
+      vaultRoot: restored.vaultRoot,
+    });
+    await restoreHostedWorkspaceRuntimeBundle({
+      platform: input.platform,
+      ref: hotSnapshotRef,
+      restored,
+    });
+  }
+
+  return {
+    ...restored,
+    mode: "snapshot",
+  };
+}
+
+async function restoreHostedWorkspaceRuntimeBundle(input: {
+  platform: HostedRuntimePlatform;
+  ref: HostedExecutionBundleRef;
+  restored: HostedRestoredExecutionContext;
+}): Promise<void> {
+  const bundle = await input.platform.artifactStore.get(input.ref.hash);
   if (!bundle) {
-    throw new HostedWorkspaceRuntimeSnapshotRestoreError(snapshotRef.hash);
+    throw new HostedWorkspaceRuntimeSnapshotRestoreError(input.ref.hash);
   }
 
   await restoreHostedBundleRoots({
@@ -65,16 +105,11 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     bytes: bundle,
     expectedKind: "vault",
     roots: {
-      [HOSTED_OPERATOR_HOME_ROOT_KEY]: restored.operatorHomeRoot,
-      vault: restored.vaultRoot,
+      [HOSTED_OPERATOR_HOME_ROOT_KEY]: input.restored.operatorHomeRoot,
+      vault: input.restored.vaultRoot,
     },
     shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
   });
-
-  return {
-    ...restored,
-    mode: "snapshot",
-  };
 }
 
 function shouldRestoreHostedAssistantInputEvidenceArtifact(input: {

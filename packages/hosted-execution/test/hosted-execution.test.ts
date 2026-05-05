@@ -29,11 +29,17 @@ import {
   HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
 } from "../src/contracts.ts";
 import {
+  HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+} from "../src/bundles.ts";
+import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
 import {
+  buildHostedExecutionLayeredSnapshotRef,
   parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotHotRef,
 } from "../src/parsers.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
@@ -98,6 +104,54 @@ describe("hosted execution coverage gaps", () => {
       ...ref,
       runtimeRootKeyId: undefined,
     })).toThrow(/runtimeRootKeyId/u);
+  });
+
+  it("parses latest-hot layered snapshot refs without losing old full refs", () => {
+    const base = {
+      hash: "a".repeat(64),
+      key: "cloudflare-workspace-snapshots/base.bundle",
+      size: 100,
+      updatedAt: "2026-05-04T00:00:00.000Z",
+    };
+    const hot = {
+      hash: "b".repeat(64),
+      key: "cloudflare-workspace-hot-state/hot.bundle",
+      size: 42,
+      updatedAt: "2026-05-04T00:01:00.000Z",
+    };
+    const layered = buildHostedExecutionLayeredSnapshotRef({
+      base,
+      hot,
+    });
+
+    expect(layered).toEqual({
+      base,
+      hot,
+      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+    });
+    expect(parseHostedExecutionSnapshotRef(base)).toEqual(base);
+    expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(base))).toEqual(base);
+    expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(base))).toBeNull();
+    expect(parseHostedExecutionSnapshotRef(layered)).toEqual(layered);
+    expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(layered))).toEqual(base);
+    expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(layered))).toEqual(hot);
+    expect(parseHostedExecutionSnapshotRef({
+      base: null,
+      hot: null,
+      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+    })).toEqual({
+      base: null,
+      hot: null,
+      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+    });
+    expect(() => parseHostedExecutionSnapshotRef({
+      hot,
+      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+    })).toThrow(/base is required/u);
+    expect(() => parseHostedExecutionSnapshotRef({
+      base,
+      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+    })).toThrow(/hot is required/u);
   });
 
   it("parses hosted AI usage billing mode with a disabled default", () => {

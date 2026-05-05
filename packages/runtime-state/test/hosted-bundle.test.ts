@@ -18,6 +18,7 @@ import {
   hasHostedBundleArtifactPath,
   HOSTED_BUNDLE_SCHEMA,
   listHostedBundleArtifacts,
+  clearHostedAssistantRuntimeHotState,
   materializeHostedExecutionArtifacts,
   readHostedBundleTextFile,
   restoreHostedBundleRoots,
@@ -26,6 +27,7 @@ import {
   ASSISTANT_STATE_DIRECTORY_MODE,
   ASSISTANT_STATE_FILE_MODE,
   sha256HostedBundleHex,
+  snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
   writeHostedBundleTextFile,
@@ -1506,6 +1508,109 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "tmp", "scratch.txt"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".git", "objects", "skip"), "utf8"));
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted assistant hot-state snapshots restore as authoritative latest state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-state-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-state-restore-"));
+
+  try {
+    const baseVaultRoot = path.join(workspaceRoot, "base-vault");
+    const baseAssistantRoot = resolveAssistantStatePaths(baseVaultRoot).assistantStateRoot;
+    await mkdir(path.join(baseAssistantRoot, "outbox"), { recursive: true });
+    await mkdir(path.join(baseVaultRoot, "raw", "inbox"), { recursive: true });
+    await writeFile(path.join(baseVaultRoot, "note.md"), "base note\n", "utf8");
+    await writeFile(
+      path.join(baseAssistantRoot, "outbox", "intent-a.json"),
+      "{\"intent\":\"old\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(baseVaultRoot, "raw", "inbox", "large.pdf"), "raw evidence\n", "utf8");
+
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      vaultRoot: baseVaultRoot,
+    });
+
+    const hotVaultRoot = path.join(workspaceRoot, "hot-vault");
+    const hotAssistantRoot = resolveAssistantStatePaths(hotVaultRoot).assistantStateRoot;
+    await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(hotAssistantRoot, "diagnostics"), { recursive: true });
+    await writeFile(
+      path.join(hotAssistantRoot, "sessions", "session.json"),
+      "{\"session\":\"latest\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(hotAssistantRoot, "diagnostics", "debug.json"),
+      "{\"debug\":true}\n",
+      "utf8",
+    );
+    await writeFile(path.join(hotVaultRoot, "note.md"), "hot note should not be captured\n", "utf8");
+
+    const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+      vaultRoot: hotVaultRoot,
+    });
+    assert.equal(hotSnapshot.fileCount, 1);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/sessions/session.json",
+        root: "vault",
+      }),
+      "{\"session\":\"latest\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        expectedKind: "vault",
+        path: "note.md",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/diagnostics/debug.json",
+        root: "vault",
+      }),
+      null,
+    );
+
+    const restored = await restoreHostedExecutionContext({
+      bundle: baseSnapshot.bundle,
+      workspaceRoot: restoreRoot,
+    });
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent-a.json"), "utf8"),
+      "{\"intent\":\"old\"}\n",
+    );
+
+    await clearHostedAssistantRuntimeHotState({
+      vaultRoot: restored.vaultRoot,
+    });
+    await restoreHostedBundleRoots({
+      bytes: hotSnapshot.bundle,
+      expectedKind: "vault",
+      roots: {
+        vault: restored.vaultRoot,
+      },
+    });
+
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent-a.json"), "utf8"),
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"), "utf8"),
+      "{\"session\":\"latest\"}\n",
+    );
+    assert.equal(await readFile(path.join(restored.vaultRoot, "note.md"), "utf8"), "base note\n");
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });

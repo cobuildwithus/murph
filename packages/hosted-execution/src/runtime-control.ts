@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionBundleRefState,
+  HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -266,7 +266,7 @@ export interface HostedWorkspaceState {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
-  snapshotRef: HostedExecutionBundleRefState;
+  snapshotRef: HostedExecutionSnapshotRefState;
   updatedAt: string;
   userId: string;
   version: string;
@@ -304,7 +304,7 @@ export interface HostedWorkspaceCheckpointRequest {
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
   redactedStatus?: HostedRuntimeRedactedJson | null;
-  snapshotRef: HostedExecutionBundleRefState;
+  snapshotRef: HostedExecutionSnapshotRefState;
 }
 
 export interface HostedWorkspaceCheckpointResponse {
@@ -350,6 +350,7 @@ export type HostedRuntimeLogPhase = (typeof HOSTED_RUNTIME_LOG_PHASES)[number];
 export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.cas_conflict",
   "checkpoint.committed",
+  "checkpoint.snapshot_finished",
   "assistant.device_connect",
   "assistant.automation_detail",
   "assistant.pass_finished",

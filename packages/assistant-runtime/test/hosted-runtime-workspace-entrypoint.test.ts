@@ -5,11 +5,12 @@ import path from "node:path";
 
 import { initializeVault } from "@murphai/core";
 import {
-  sha256HostedBundleHex,
-  snapshotHostedBundleRoots,
-  writeHostedBundleTextFile,
   resolveAssistantStatePaths,
   resolveRuntimePaths,
+  sha256HostedBundleHex,
+  snapshotHostedAssistantRuntimeHotState,
+  snapshotHostedBundleRoots,
+  writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -25,6 +26,13 @@ import {
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedExecutionBundleRef,
+} from "@murphai/hosted-execution/contracts";
+import {
+  buildHostedExecutionLayeredSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+} from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -163,8 +171,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
       assert.equal(checkpointRequests[0]?.leaseGeneration, "7");
       assert.equal(checkpointRequests[0]?.reason, "import");
+      const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(
+        checkpointRequests[0]?.snapshotRef ?? null,
+      );
       assert.equal(
-        checkpointRequests[0]?.snapshotRef?.key,
+        baseSnapshotRef?.key,
         "users/bundles/member-synthetic/workspace-entrypoint.bundle.json",
       );
       assert.deepEqual(result, {
@@ -768,6 +779,112 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
       await rm(sourceVaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("restores base snapshots and authoritative latest hot state before mailbox import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
+    const sourceHotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-hot-"));
+    const events: string[] = [];
+    const artifactGetCalls: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const baseAssistantRoot = resolveAssistantStatePaths(sourceBaseVaultRoot).assistantStateRoot;
+      await mkdir(path.join(baseAssistantRoot, "outbox"), { recursive: true });
+      await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
+      await writeFile(
+        path.join(baseAssistantRoot, "outbox", "intent-old.json"),
+        "{\"intent\":\"old\"}\n",
+        "utf8",
+      );
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+
+      const hotAssistantRoot = resolveAssistantStatePaths(sourceHotVaultRoot).assistantStateRoot;
+      await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
+      await writeFile(
+        path.join(hotAssistantRoot, "sessions", "session-latest.json"),
+        "{\"session\":\"latest\"}\n",
+        "utf8",
+      );
+      const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+        vaultRoot: sourceHotVaultRoot,
+      });
+      const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+      const artifactBytesByHash = new Map([
+        [baseHash, baseBundle],
+        [hotHash, hotSnapshot.bundle],
+      ]);
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            workspaceVersion: "9",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Snapshot should not run while validating restore.");
+          },
+          async importItem() {
+            throw new Error("Mailbox import should not run without mailbox items.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            artifactGetCalls,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+                  base: createBundleRef({
+                    hash: baseHash,
+                    key: "users/bundles/member-synthetic/base.bundle.json",
+                    size: baseBundle.byteLength,
+                  }),
+                  hot: createBundleRef({
+                    hash: hotHash,
+                    key: "users/bundles/member-synthetic/hot.bundle.json",
+                    size: hotSnapshot.bundle.byteLength,
+                  }),
+                }),
+                version: "9",
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(artifactGetCalls, [baseHash, hotHash]);
+      assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
+      await assert.rejects(
+        readFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent-old.json"), "utf8"),
+      );
+      assert.equal(
+        await readFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"), "utf8"),
+        "{\"session\":\"latest\"}\n",
+      );
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
+      await rm(sourceHotVaultRoot, { force: true, recursive: true });
     }
   });
 
@@ -1608,7 +1725,7 @@ function createBundleRef(input: {
   hash: string;
   key: string;
   size: number;
-}): NonNullable<HostedWorkspaceState["snapshotRef"]> {
+}): HostedExecutionBundleRef {
   return {
     hash: input.hash,
     key: input.key,
