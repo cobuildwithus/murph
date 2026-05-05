@@ -159,3 +159,65 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
 
   assert.deepEqual(mocks.startTelegramTypingIndicator.mock.calls[0]?.[1]?.env, telegramEnv);
 });
+
+test("hosted typing prefers provider effects when available", async () => {
+  const sendLinqChatAction = vi.fn(async () => undefined);
+  const sendTelegramChatAction = vi.fn(async () => undefined);
+  const typing = createHostedAssistantChannelTypingDependencies({
+    effectsPort: {
+      sendLinqChatAction,
+      sendTelegramChatAction,
+    },
+    forwardedEnv: {},
+    platformEnv: {},
+    userEnv: {},
+  });
+
+  await typing.startLinqTyping?.({
+    target: "linq_chat_123",
+  });
+  await typing.startTelegramTyping?.({
+    target: "telegram_chat_123",
+  });
+
+  assert.deepEqual(sendLinqChatAction.mock.calls, [[{
+    action: "typing",
+    target: "linq_chat_123",
+  }]]);
+  assert.deepEqual(sendTelegramChatAction.mock.calls, [[{
+    action: "typing",
+    target: "telegram_chat_123",
+  }]]);
+  assert.equal(mocks.startLinqTypingIndicator.mock.calls.length, 0);
+  assert.equal(mocks.startTelegramTypingIndicator.mock.calls.length, 0);
+});
+
+test("hosted Linq mark-read prefers provider effects when available", async () => {
+  const markLinqRead = vi.fn(async () => undefined);
+
+  await markHostedConversationReadBestEffort({
+    effectsPort: {
+      markLinqRead,
+    },
+    forwardedEnv: {},
+    userEnv: {},
+    wake: buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup",
+      userId: "member_123",
+    }),
+  });
+
+  assert.deepEqual(markLinqRead.mock.calls, [[{
+    chatId: "chat_123",
+  }]]);
+  assert.equal(mocks.markLinqChatRead.mock.calls.length, 0);
+});

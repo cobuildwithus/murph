@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHostedTelegramAttachmentDownloadDriver,
+  createHostedTelegramEffectsAttachmentDownloadDriver,
 } from "../src/hosted-runtime/events/telegram.ts";
 
 const originalFetch = globalThis.fetch;
@@ -147,5 +148,55 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
       "Hosted Telegram attachment download failed with 502 Bad Gateway.",
     );
     assert.equal(String(fetchMock.mock.calls[0]?.[0]), "https://files.telegram.example/bottelegram-token/photos/cat.jpg");
+  });
+});
+
+describe("createHostedTelegramEffectsAttachmentDownloadDriver", () => {
+  it("returns null until both Telegram file effects are available", () => {
+    assert.equal(createHostedTelegramEffectsAttachmentDownloadDriver({
+      effectsPort: null,
+    }), null);
+    assert.equal(createHostedTelegramEffectsAttachmentDownloadDriver({
+      effectsPort: {
+        async getTelegramFile() {
+          return null;
+        },
+      },
+    }), null);
+  });
+
+  it("adapts Telegram file effects to the inbox driver shape", async () => {
+    const getTelegramFile = vi.fn(async () => ({
+      file_id: "file_123",
+      file_path: "photos/cat.jpg",
+    }));
+    const downloadTelegramFile = vi.fn(async () => ({
+      bytesBase64: Buffer.from(Uint8Array.from([1, 2, 3])).toString("base64"),
+      contentType: null,
+      fileName: "cat.jpg",
+      sha256: "sha256",
+    }));
+
+    const driver = createHostedTelegramEffectsAttachmentDownloadDriver({
+      effectsPort: {
+        downloadTelegramFile,
+        getTelegramFile,
+      },
+    });
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).resolves.toEqual({
+      file_id: "file_123",
+      file_path: "photos/cat.jpg",
+    });
+    await expect(driver.downloadFile("photos/cat.jpg")).resolves.toEqual(
+      Uint8Array.from([1, 2, 3]),
+    );
+    expect(getTelegramFile).toHaveBeenCalledWith({
+      fileId: "file_123",
+    });
+    expect(downloadTelegramFile).toHaveBeenCalledWith({
+      filePath: "photos/cat.jpg",
+    });
   });
 });

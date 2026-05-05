@@ -1604,6 +1604,114 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(sendRequest.url).toBe("http://results.worker/send");
   });
 
+  it("routes provider effects through the internal effects port with active lease headers", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url.endsWith("/telegram/send")) {
+        return new Response(JSON.stringify({
+          providerMessageId: "telegram_message_123",
+          target: "telegram_chat_123",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    await expect(platform.effectsPort.sendTelegram!({
+      message: "hello",
+      target: "telegram_chat_123",
+    })).resolves.toEqual({
+      cleanupTargetAliases: null,
+      providerMessageId: "telegram_message_123",
+      providerMessageIds: null,
+      providerThreadId: null,
+      target: "telegram_chat_123",
+      targetKind: null,
+    });
+    await platform.effectsPort.sendLinqChatAction!({
+      action: "typing",
+      target: "linq_chat_123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[0], "telegram send");
+    const linqRequest = requireFetchRequest(fetchMock.mock.calls[1], "linq action");
+    expect(telegramRequest.url).toBe("http://results.worker/telegram/send");
+    expect(linqRequest.url).toBe("http://results.worker/linq/chat-action");
+    expect(telegramRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect(telegramRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(telegramRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(telegramRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+    await expect(telegramRequest.json()).resolves.toEqual({
+      message: "hello",
+      target: "telegram_chat_123",
+    });
+  });
+
+  it("preserves structured Telegram ambiguity details from provider effect failures", async () => {
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({
+        cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
+        code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
+        error: "Telegram delivery outcome is ambiguous.",
+        providerMessageIds: ["1001"],
+        target: "telegram_chat_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 502,
+      })) as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    await expect(platform.effectsPort.sendTelegram!({
+      message: "hello",
+      target: "telegram_chat_123",
+    })).rejects.toMatchObject({
+      cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
+      code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
+      providerMessageId: "1001",
+      providerMessageIds: ["1001"],
+      status: 502,
+      target: "telegram_chat_123",
+    });
+  });
+
   it("preserves HTTP status on hosted raw email read failures", async () => {
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",

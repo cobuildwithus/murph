@@ -36,7 +36,10 @@ import {
   createHostedLinqAttachmentDownloadDriver,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
 } from "./linq.ts";
-import { createHostedTelegramAttachmentDownloadDriver } from "./telegram.ts";
+import {
+  createHostedTelegramAttachmentDownloadDriver,
+  createHostedTelegramEffectsAttachmentDownloadDriver,
+} from "./telegram.ts";
 import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -238,12 +241,16 @@ async function normalizeHostedConversationMessageWake(input: {
   if (isHostedTelegramConversationMessageWake(input.wake)) {
     return normalizeHostedTelegramConversationCapture({
       accountId: "bot",
-      downloadDriver: createHostedTelegramAttachmentDownloadDriver(
-        buildHostedTelegramChannelEnv({
-          forwardedEnv: input.runtime.forwardedEnv,
-          platformEnv: input.runtime.platformEnv,
-        }),
-      ),
+      downloadDriver:
+        createHostedTelegramEffectsAttachmentDownloadDriver({
+          effectsPort: input.runtime.platform.effectsPort,
+        })
+        ?? createHostedTelegramAttachmentDownloadDriver(
+          buildHostedTelegramChannelEnv({
+            forwardedEnv: input.runtime.forwardedEnv,
+            platformEnv: input.runtime.platformEnv,
+          }),
+        ),
       externalId: input.wake.eventId,
       message: input.wake.message.telegramMessage,
       occurredAt: input.wake.occurredAt,

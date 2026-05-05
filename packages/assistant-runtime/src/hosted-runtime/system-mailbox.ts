@@ -344,6 +344,7 @@ function buildHostedSystemMailboxExecutionContext(input: {
   return {
     hosted: {
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+        effectsPort: input.runtime.platform.effectsPort,
         forwardedEnv: input.runtime.forwardedEnv,
         platformEnv: input.runtime.platformEnv,
         userEnv: input.runtime.userEnv,

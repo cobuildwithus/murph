@@ -51,15 +51,121 @@ export interface HostedRuntimeBrowserVaultReplicaPort {
   }): Promise<HostedBrowserVaultReplicaRef>;
 }
 
+export type HostedRuntimeProviderTargetKind = "explicit" | "participant" | "thread";
+
+export interface HostedRuntimeTelegramSendRequest {
+  idempotencyKey?: string | null;
+  message: string;
+  replyToMessageId?: string | null;
+  target: string;
+}
+
+export interface HostedRuntimeTelegramCleanupMessage {
+  messageId: string;
+  target: string;
+}
+
+export interface HostedRuntimeTelegramSendResponse {
+  cleanupMessages?: HostedRuntimeTelegramCleanupMessage[] | null;
+  cleanupTargetAliases?: string[] | null;
+  providerMessageId?: string | null;
+  providerMessageIds?: string[] | null;
+  providerThreadId?: string | null;
+  target?: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
+export interface HostedRuntimeTelegramChatActionRequest {
+  action: "typing";
+  target: string;
+}
+
+export interface HostedRuntimeTelegramFile {
+  file_id: string;
+  file_path?: string;
+  file_size?: number;
+  file_unique_id?: string;
+  [key: string]: unknown;
+}
+
+export interface HostedRuntimeTelegramGetFileRequest {
+  fileId: string;
+}
+
+export interface HostedRuntimeTelegramDownloadFileRequest {
+  filePath: string;
+}
+
+export interface HostedRuntimeProviderFileResponse {
+  bytesBase64: string;
+  contentType: string | null;
+  fileName: string | null;
+  sha256: string;
+}
+
+export interface HostedRuntimeLinqSendRequest {
+  fromPhoneNumber?: string | null;
+  idempotencyKey?: string | null;
+  message: string;
+  replyToMessageId?: string | null;
+  target: string;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
+export interface HostedRuntimeLinqSendResponse {
+  providerMessageId?: string | null;
+  providerMessageIds?: string[] | null;
+  providerThreadId?: string | null;
+  target?: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
+export interface HostedRuntimeLinqChatActionRequest {
+  action: "typing";
+  target: string;
+}
+
+export interface HostedRuntimeLinqMarkReadRequest {
+  chatId: string;
+}
+
+export interface HostedRuntimeLinqDeleteMessagesRequest {
+  messageIds: readonly string[];
+}
+
 type HostedRuntimeEffectsPortBase = {
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<void>;
+  deleteLinqMessages?(
+    request: HostedRuntimeLinqDeleteMessagesRequest,
+  ): Promise<void>;
+  downloadTelegramFile?(
+    request: HostedRuntimeTelegramDownloadFileRequest,
+  ): Promise<HostedRuntimeProviderFileResponse | null>;
+  getTelegramFile?(
+    request: HostedRuntimeTelegramGetFileRequest,
+  ): Promise<HostedRuntimeTelegramFile | null>;
+  markLinqRead?(
+    request: HostedRuntimeLinqMarkReadRequest,
   ): Promise<void>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
+  sendLinq?(
+    request: HostedRuntimeLinqSendRequest,
+  ): Promise<HostedRuntimeLinqSendResponse | void>;
+  sendLinqChatAction?(
+    request: HostedRuntimeLinqChatActionRequest,
+  ): Promise<void>;
+  sendTelegram?(
+    request: HostedRuntimeTelegramSendRequest,
+  ): Promise<HostedRuntimeTelegramSendResponse | void>;
+  sendTelegramChatAction?(
+    request: HostedRuntimeTelegramChatActionRequest,
+  ): Promise<void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
   ): Promise<HostedAssistantDeliveryRecord>;

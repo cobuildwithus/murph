@@ -15,6 +15,7 @@ import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
   normalizeAssistantDeliveryError,
+  sendLinqMessage,
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
   shouldDispatchAssistantOutboxIntent,
@@ -272,10 +273,34 @@ async function deliverHostedCommittedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryLiveNow(input);
-          const result = await sendTelegramMessage(request, {
-            env: input.telegramEnv,
-            signal: input.signal ?? undefined,
-          });
+          const result = input.effectsPort.sendTelegram
+            ? await input.effectsPort.sendTelegram({
+                idempotencyKey: request.idempotencyKey ?? null,
+                message: request.message,
+                replyToMessageId: request.replyToMessageId ?? null,
+                target: request.target,
+              })
+            : await sendTelegramMessage(request, {
+                env: input.telegramEnv,
+                signal: input.signal ?? undefined,
+              });
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
+        sendLinq: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          const result = input.effectsPort.sendLinq
+            ? await input.effectsPort.sendLinq({
+                fromPhoneNumber: request.fromPhoneNumber ?? null,
+                idempotencyKey: request.idempotencyKey ?? null,
+                message: request.message,
+                replyToMessageId: request.replyToMessageId ?? null,
+                target: request.target,
+                targetKind: request.targetKind ?? null,
+              })
+            : await sendLinqMessage(request, {
+                signal: input.signal ?? undefined,
+              });
           await assertHostedDeliveryLiveNow(input);
           return result;
         },

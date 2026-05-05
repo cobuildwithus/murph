@@ -170,6 +170,7 @@ export async function runHostedWorkspaceAssistantPhase(
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget({
     hosted: {
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+        effectsPort: input.runtime.platform.effectsPort,
         forwardedEnv: input.runtime.forwardedEnv,
         platformEnv: input.runtime.platformEnv,
         signal: typingAbortController.signal,
@@ -588,6 +589,7 @@ async function drainHostedPostCheckpointDeliveryCleanup(input: {
     checkpoint: input.providerCleanupCheckpoint ?? {
       nextWakeAt: null,
     },
+    effectsPort: input.input.runtime.platform.effectsPort,
     env: input.input.runtimeEnv,
     signal: input.input.signal ?? null,
     vaultRoot: input.input.restored.vaultRoot,
