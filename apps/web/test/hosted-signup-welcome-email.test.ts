@@ -100,7 +100,7 @@ describe("hosted signup welcome email", () => {
         "Best thing to do right now is connect your wearable.",
       );
       expect(payload.text).toContain(
-        "Shoot Murph a text at +15550100099 to start your first experiment.",
+        "Shoot Murph a text at (+1) 555-010-0099 to start your first experiment.",
       );
       expect(payload.text).not.toContain(
         "connect your wearable and start your first experiment",
