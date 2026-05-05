@@ -332,6 +332,51 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
   });
 
+  it("regenerates local hosted crypto state instead of reusing persisted test state", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_CRYPTO_ENV: "test",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+          "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nTEST_AUTHORITY\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+        HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+          "projects/test/locations/global/keyRings/ring/cryptoKeys/web-wrap",
+        HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: existingAuthorityPrivateJwkJson,
+        HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "test-wrap-key",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
+      },
+      oidcIdentity,
+      createEnvelopeKey: () => "generated-envelope",
+      createJwkPair: () => ({
+        privateJwkJson: generatedPrivateJwkJson,
+        publicJwkJson: generatedPublicJwkJson,
+      }),
+      createSigningKey: () => ({
+        privateJwkJson: generatedAuthorityPrivateJwkJson,
+        publicKeyPem: generatedAuthorityPublicPem,
+      }),
+    });
+
+    expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1",
+    );
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
+      generatedAuthorityPublicPem,
+    );
+    expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
+      generatedAuthorityPrivateJwkJson,
+    );
+    expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
+    expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
+  });
+
   it("regenerates local authority signing keys when persisted local state is mismatched", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -976,6 +1021,24 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).toContain('HOSTED_CRYPTO_ENV="local"');
     expect(text).toContain('HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY="local-wrap-key"');
     expect(text).toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=");
+    expect(text).not.toContain("LINQ_API_TOKEN");
+  });
+
+  it("does not persist test crypto state for later hosted-local dev reuse", () => {
+    const text = buildHostedLocalStateEnvFileText({
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: generatedPrivateJwkJson,
+      HOSTED_CRYPTO_ENV: "test",
+      HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+        "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "test-wrap-key",
+      HOSTED_DEVICE_ROUTING_INDEX_KEY: "device-routing-key",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
+      LINQ_API_TOKEN: "remote-linq-token",
+    });
+
+    expect(text).not.toContain("HOSTED_CRYPTO_");
+    expect(text).not.toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
+    expect(text).toContain('HOSTED_DEVICE_ROUTING_INDEX_KEY="device-routing-key"');
     expect(text).not.toContain("LINQ_API_TOKEN");
   });
 });

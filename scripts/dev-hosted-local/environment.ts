@@ -350,19 +350,12 @@ function normalizePublicKeyPem(value: string): string {
 }
 
 function resolveExistingHostedLocalKeySource(source: Record<string, string>): Record<string, string> {
-  return isLocalHostedCryptoState(source) ? source : {};
+  return isPersistedHostedLocalGeneratedCryptoState(source) ? source : {};
 }
 
-function isLocalHostedCryptoState(source: Record<string, string | undefined>): boolean {
+function isPersistedHostedLocalGeneratedCryptoState(source: Record<string, string | undefined>): boolean {
   const hostedCryptoEnv = normalizeOptionalString(source.HOSTED_CRYPTO_ENV)?.toLowerCase();
-  return hostedCryptoEnv === "local"
-    || normalizeOptionalString(source.HOSTED_CRYPTO_GCP_KMS_API_ROOT) === HOSTED_LOCAL_KMS_API_ROOT
-    || normalizeOptionalString(source.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME)
-      === HOSTED_LOCAL_WEB_WRAP_KEY_NAME
-    || Boolean(
-      normalizeOptionalString(source.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK)
-      && normalizeOptionalString(source.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY),
-    );
+  return hostedCryptoEnv === "local";
 }
 
 function stripHostedLocalGeneratedStateEnv(env: Record<string, string | undefined>): void {
@@ -699,7 +692,18 @@ export function buildHostedLocalStateEnvFileText(
   source: Readonly<Record<string, string | undefined>>,
 ): string {
   const entries = new Map<string, string>();
+  const shouldPersistGeneratedCryptoState =
+    isPersistedHostedLocalGeneratedCryptoState(source);
   for (const key of HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES) {
+    if (
+      !shouldPersistGeneratedCryptoState
+      && (
+        key.startsWith("HOSTED_CRYPTO_")
+        || key.startsWith("HOSTED_WEB_CALLBACK_SIGNING_")
+      )
+    ) {
+      continue;
+    }
     const value = source[key]?.trim();
     if (!value) {
       continue;
