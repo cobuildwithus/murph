@@ -39,8 +39,10 @@ const signupFollowupQuestionText =
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
+const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
+const itOutsideFastDeployGate = fastDeployGate ? it.skip : it;
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
@@ -238,7 +240,9 @@ describe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("does not repeat the signup welcome after the first inbound Linq greeting", async () => {
+  itOutsideFastDeployGate(
+    "does not repeat the signup welcome after the first inbound Linq greeting",
+    async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(duplicateWelcomeUserId),
       memberId: duplicateWelcomeUserId,
@@ -334,9 +338,13 @@ describe("hosted local Linq first-contact e2e", () => {
     );
     expect(firstInboundPromptText).toContain("User message:\nSource: linq");
     expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
-  }, 300_000);
+    },
+    300_000,
+  );
 
-  it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {
+  itOutsideFastDeployGate(
+    "keeps Linq context when two messages arrive before hosted completion catches up",
+    async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(fastReplyUserId),
       memberId: fastReplyUserId,
@@ -436,9 +444,13 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(newReplySends).toHaveLength(1);
     const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
     expect(groupedReplyText).toBe(HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT);
-  }, 300_000);
+    },
+    300_000,
+  );
 
-  it("keeps replying when the member answers again immediately after the assistant reply", async () => {
+  itOutsideFastDeployGate(
+    "keeps replying when the member answers again immediately after the assistant reply",
+    async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(postAssistantReplyUserId),
       memberId: postAssistantReplyUserId,
@@ -566,7 +578,9 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(assistantProviderResponseRequests.every((request) =>
       request.method === "POST"
     )).toBe(true);
-  }, 300_000);
+    },
+    300_000,
+  );
 });
 
 function countAssistantProviderResponsesApiRequests(): number {

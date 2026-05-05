@@ -31,6 +31,7 @@ const cacheablePrefixFloor = 8_000;
 const maxRecordedResponsesApiRequestBodies = 9;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
+const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
@@ -80,7 +81,7 @@ describe("hosted local Codex Gateway prefix e2e", () => {
     const completionOutcomes: Array<Record<string, unknown>> = [];
     const turnResponseRequestRanges: Array<{ count: number; startIndex: number }> = [];
     const turnResponseRequestCounts: number[] = [];
-    const turns = [
+    const fullTurns = [
       {
         inboundText: "First cache-prefix probe. Please acknowledge this briefly.",
         replyText: "First probe acknowledged.",
@@ -94,6 +95,7 @@ describe("hosted local Codex Gateway prefix e2e", () => {
         replyText: "Third probe acknowledged.",
       },
     ] as const;
+    const turns = fastDeployGate ? fullTurns.slice(0, 2) : fullTurns;
 
     for (const [index, turn] of turns.entries()) {
       const responseRequestCountBeforeTurn = countAssistantProviderResponsesApiRequests();
@@ -187,10 +189,12 @@ describe("hosted local Codex Gateway prefix e2e", () => {
       diagnostic.prefix01Length,
       JSON.stringify(diagnostic),
     ).toBeGreaterThan(cacheablePrefixFloor);
-    expect(
-      diagnostic.prefix12Length,
-      JSON.stringify(diagnostic),
-    ).toBeGreaterThan(cacheablePrefixFloor);
+    if (turns.length > 2) {
+      expect(
+        diagnostic.prefix12Length,
+        JSON.stringify(diagnostic),
+      ).toBeGreaterThan(cacheablePrefixFloor);
+    }
   }, 420_000);
 });
 
