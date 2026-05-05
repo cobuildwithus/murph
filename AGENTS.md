@@ -65,6 +65,7 @@ Always read these before repo code/docs/test/config work:
 - Use `agent-docs/operations/agent-workflow-routing.md` to classify task type, ledger/plan needs, audit requirements, verification, and commit path.
 - Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default. Preserve unrelated ledger or working-tree edits.
 - Preserve unrelated working-tree edits in the current checkout. Do not overwrite, discard, or revert work you did not make.
+- Before pushing `main` or another shared default branch, fetch and reconcile with ordinary Git history operations (`pull --rebase`, fast-forward, or a normal merge) when possible. Do not manufacture sibling-history merge commits with low-level commands such as `git commit-tree`/`git update-ref` just to work around a dirty checkout; if unrelated dirty work blocks a safe pull or rebase, stop and report the blocker.
 - Use `agent-docs/operations/completion-workflow.md` for mandatory completion audits. Required local Codex audit subagents are repo-policy pre-authorized; run them when the routed task class requires them.
 - Always run the verification required by `agent-docs/operations/verification-and-runtime.md` unless the user explicitly asks not to. If a required check is blocked by a credibly unrelated pre-existing failure, report the command, failing target, and why the current diff did not cause it.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
