@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 
 import {
   HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS,
-  normalizeHostedAiUsageAllowancePricedModelId,
+  isHostedAiUsageAllowancePricedModelId,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -204,7 +204,7 @@ export function listHostedDeployEnvironmentInvariantErrors(
     errors.push(
       `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );
-  } else if (!normalizeHostedAiUsageAllowancePricedModelId(hostedAssistantModel)) {
+  } else if (!isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)) {
     errors.push(
       `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );

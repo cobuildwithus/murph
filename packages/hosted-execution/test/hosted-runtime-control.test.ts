@@ -23,6 +23,7 @@ import {
   buildHostedMailboxPayloadSecureBoxAad,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  normalizeHostedAiUsageAllowancePricedModelId,
 } from "../src/runtime-control.ts";
 import {
   parseHostedMailboxFetchRequest,
@@ -137,6 +138,14 @@ describe("hosted runtime control contracts", () => {
       sequence: "7",
       table: "hosted_mailbox_item",
     });
+  });
+
+  it("normalizes hosted AI usage priced model aliases without accepting unpriced models", () => {
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5-2026-04-23")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
   });
 
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
