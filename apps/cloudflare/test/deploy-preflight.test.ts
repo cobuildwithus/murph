@@ -30,6 +30,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_WEB_BASE_URL: "https://app.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
     HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
+    OPENAI_API_KEY: "openai-key",
     ...overrides,
   };
 }
@@ -60,6 +61,7 @@ describe("deploy preflight helpers", () => {
       "HOSTED_CRYPTO_ENV",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
       "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+      "OPENAI_API_KEY",
     ]);
   });
 
@@ -90,8 +92,15 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK OPENAI_API_KEY",
     );
+  });
+
+  it("requires OpenAI API key for direct OpenAI hosted assistant deploys", () => {
+    expect(listMissingHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      OPENAI_API_KEY: undefined,
+      VERCEL_AI_API_KEY: "legacy-vercel-key",
+    }), { deployWorker: true })).toContain("OPENAI_API_KEY");
   });
 
   it("allows production deploys only when the hosted web origin matches the explicit production origin", () => {

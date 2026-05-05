@@ -700,6 +700,7 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
     ...requiredHostedCryptoWorkerVars,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
+    OPENAI_API_KEY: "openai-key",
   };
 }
 
