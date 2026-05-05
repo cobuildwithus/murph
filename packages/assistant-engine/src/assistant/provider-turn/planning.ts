@@ -33,6 +33,7 @@ import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
 } from '../provider-binding.js'
+import { listAssistantTranscriptEntries } from '../store.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -403,12 +404,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
     resumeProviderSessionId === null ||
     threadInstructionsFingerprint === null ||
     storedThreadInstructionsFingerprint !== threadInstructionsFingerprint
+  const conversationMessages = await resolveAssistantTranscriptConversationMessages({
+    promptProfile: input.profile.promptProfile,
+    resumeProviderSessionId,
+    session: input.session,
+    threadScope: input.profile.threadScope,
+    vault: input.input.vault,
+  })
 
   return {
     assistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
+    conversationMessages,
     continuityContext: null,
     diagnosticsPolicy,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
@@ -442,6 +451,31 @@ export function buildAssistantThreadInstructionsFingerprint(
     metadata.staticPromptHash,
     metadata.stableRouteCapabilityPromptHash,
   ].join(':')
+}
+
+async function resolveAssistantTranscriptConversationMessages(input: {
+  promptProfile: AssistantProviderTurnPromptProfile
+  resumeProviderSessionId: string | null
+  session: Pick<AssistantSession, 'sessionId' | 'turnCount'>
+  threadScope: AssistantProviderThreadScope
+  vault: string
+}): Promise<AssistantRouteTurnPlan['conversationMessages']> {
+  if (
+    input.promptProfile !== 'conversation' ||
+    input.resumeProviderSessionId !== null ||
+    input.session.turnCount <= 0 ||
+    input.threadScope !== 'session-thread'
+  ) {
+    return undefined
+  }
+
+  const transcript = await listAssistantTranscriptEntries(
+    input.vault,
+    input.session.sessionId,
+  )
+  const messages = selectAssistantReplayMessages(transcript, 12)
+
+  return messages.length > 0 ? messages : undefined
 }
 
 function resolveAssistantSupportedExperimentProtocols() {
