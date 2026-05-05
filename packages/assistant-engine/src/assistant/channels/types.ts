@@ -59,6 +59,7 @@ export interface AssistantChannelDependencies {
     | void
   >
   sendLinq?: (input: {
+    directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
     message: string

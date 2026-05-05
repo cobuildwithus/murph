@@ -1331,6 +1331,94 @@ describe("handleRunnerOutboundRequest", () => {
     expect(init?.method).toBe("POST");
   });
 
+  it("recovers stale Linq threads inside the Worker-owned send effect", async () => {
+    const fetchMock = vi.fn(async (
+      input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/chats/stale-chat/messages")) {
+        return new Response(JSON.stringify({
+          message: "Chat not found",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/phone_numbers")) {
+        return new Response(JSON.stringify({
+          phone_numbers: [
+            { phone_number: "+15550000" },
+          ],
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          chat: {
+            id: "recovered-chat",
+            message: {
+              id: "recovered-message",
+            },
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(null, {
+        status: 500,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH}`, {
+        body: JSON.stringify({
+          directRecipientPhoneNumber: "+15550001",
+          message: "hello",
+          target: "stale-chat",
+          targetKind: "thread",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        LINQ_API_TOKEN: "linq-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toEqual({
+      providerMessageId: "recovered-message",
+      providerThreadId: "recovered-chat",
+      target: "recovered-chat",
+    });
+    expect(JSON.stringify(payload)).not.toContain("linq-token");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.linqapp.com/api/partner/v3/chats/stale-chat/messages",
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "https://api.linqapp.com/api/partner/v3/phone_numbers",
+    );
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
+      "https://api.linqapp.com/api/partner/v3/chats",
+    );
+  });
+
   it("routes Linq lightweight effects without echoing provider tokens", async () => {
     const fetchMock = vi.fn(async () => new Response(null, {
       status: 204,

@@ -68,6 +68,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   vi.useRealTimers()
 })
 
@@ -741,6 +742,7 @@ describe('assistant channels runtime seam', () => {
   })
 
   it('recovers Linq thread sends when the stored chat id is stale', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
       'Chat not found',
@@ -752,9 +754,8 @@ describe('assistant channels runtime seam', () => {
         status: 404,
       },
     )
-    const sendLinq = vi
-      .fn()
-      .mockRejectedValueOnce(missingChatError)
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+    runtimeMocks.createLinqChat
       .mockRejectedValueOnce(
         new VaultCliError(
           'LINQ_API_REQUEST_FAILED',
@@ -769,9 +770,8 @@ describe('assistant channels runtime seam', () => {
         ),
       )
       .mockResolvedValueOnce({
-        providerMessageId: '  recovered-message  ',
-        providerThreadId: '  recovered-chat  ',
-        target: '  recovered-chat  ',
+        chatId: '  recovered-chat  ',
+        messageId: '  recovered-message  ',
       })
     runtimeMocks.probeLinqApi.mockResolvedValue({
       ok: true,
@@ -789,9 +789,7 @@ describe('assistant channels runtime seam', () => {
           message: 'hello again',
           replyToMessageId: ' reply-9 ',
         },
-        {
-          sendLinq,
-        },
+        {},
       ),
     ).resolves.toMatchObject({
       channel: 'linq',
@@ -806,33 +804,80 @@ describe('assistant channels runtime seam', () => {
       env: process.env,
       fetchImplementation: undefined,
     })
-    expect(sendLinq).toHaveBeenNthCalledWith(1, {
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith(
+      {
+        chatId: 'stale-chat',
+        idempotencyKey: 'idem-stale-thread',
+        message: 'hello again',
+        replyToMessageId: 'reply-9',
+      },
+      {
+        env: process.env,
+        fetchImplementation: undefined,
+      },
+    )
+    expect(runtimeMocks.createLinqChat).toHaveBeenNthCalledWith(1, {
+      from: '+15550000',
+      idempotencyKey: 'idem-stale-thread',
+      message: 'hello again',
+      to: ['+15550001'],
+    }, {
+      env: process.env,
+      fetchImplementation: undefined,
+    })
+    expect(runtimeMocks.createLinqChat).toHaveBeenNthCalledWith(2, {
+      from: '+15550002',
+      idempotencyKey: 'idem-stale-thread',
+      message: 'hello again',
+      to: ['+15550001'],
+    }, {
+      env: process.env,
+      fetchImplementation: undefined,
+    })
+  })
+
+  it('passes direct recipient context to injected Linq sends', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'sent-message',
+      providerThreadId: 'stale-chat',
+      target: 'stale-chat',
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: '+15550001',
+          bindingDelivery: createAssistantBindingDelivery('thread', 'stale-chat'),
+          explicitTarget: null,
+          idempotencyKey: 'idem-stale-thread',
+          identityId: null,
+          message: 'hello again',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: 'sent-message',
+      providerThreadId: 'stale-chat',
+      target: 'stale-chat',
+    })
+
+    expect(runtimeMocks.probeLinqApi).not.toHaveBeenCalled()
+    expect(sendLinq).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: '+15550001',
       fromPhoneNumber: null,
       idempotencyKey: 'idem-stale-thread',
       message: 'hello again',
-      replyToMessageId: 'reply-9',
-      target: ' stale-chat ',
+      replyToMessageId: null,
+      target: 'stale-chat',
       targetKind: 'thread',
-    })
-    expect(sendLinq).toHaveBeenNthCalledWith(2, {
-      fromPhoneNumber: '+15550000',
-      idempotencyKey: 'idem-stale-thread',
-      message: 'hello again',
-      replyToMessageId: 'reply-9',
-      target: '+15550001',
-      targetKind: 'participant',
-    })
-    expect(sendLinq).toHaveBeenNthCalledWith(3, {
-      fromPhoneNumber: '+15550002',
-      idempotencyKey: 'idem-stale-thread',
-      message: 'hello again',
-      replyToMessageId: 'reply-9',
-      target: '+15550001',
-      targetKind: 'participant',
     })
   })
 
   it('keeps stale Linq thread recovery confirmation-pending when no new chat id is returned', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
       'Chat not found',
@@ -844,12 +889,10 @@ describe('assistant channels runtime seam', () => {
         status: 404,
       },
     )
-    const sendLinq = vi
-      .fn()
-      .mockRejectedValueOnce(missingChatError)
-      .mockResolvedValueOnce({
-        providerMessageId: '  recovered-message  ',
-      })
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+    runtimeMocks.createLinqChat.mockResolvedValue({
+      messageId: '  recovered-message  ',
+    })
     runtimeMocks.probeLinqApi.mockResolvedValue({
       ok: true,
       phoneNumbers: ['+15550000'],
@@ -865,9 +908,7 @@ describe('assistant channels runtime seam', () => {
         message: 'hello again',
         replyToMessageId: ' reply-9 ',
       },
-      {
-        sendLinq,
-      },
+      {},
     ).then(
       () => null,
       (error: unknown) => error,
@@ -923,6 +964,7 @@ describe('assistant channels runtime seam', () => {
   })
 
   it('falls back to the original stale-chat error when Linq sender probing or recovery fails', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
       'Chat not found',
@@ -934,9 +976,7 @@ describe('assistant channels runtime seam', () => {
         status: 404,
       },
     )
-    const sendLinq = vi
-      .fn()
-      .mockRejectedValueOnce(missingChatError)
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
     runtimeMocks.probeLinqApi.mockRejectedValue(
       new VaultCliError(
         'LINQ_API_REQUEST_FAILED',
@@ -962,20 +1002,19 @@ describe('assistant channels runtime seam', () => {
           message: 'hello again',
           replyToMessageId: ' reply-9 ',
         },
-        {
-          sendLinq,
-        },
+        {},
       ),
     ).rejects.toBe(missingChatError)
 
-    expect(sendLinq).toHaveBeenCalledTimes(1)
-    expect(sendLinq).toHaveBeenCalledWith({
-      fromPhoneNumber: null,
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
+      chatId: 'stale-chat',
       idempotencyKey: 'idem-stale-thread',
       message: 'hello again',
       replyToMessageId: 'reply-9',
-      target: 'stale-chat',
-      targetKind: 'explicit',
+    }, {
+      env: process.env,
+      fetchImplementation: undefined,
     })
   })
 

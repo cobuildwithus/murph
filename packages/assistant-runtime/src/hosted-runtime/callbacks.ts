@@ -291,6 +291,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
           await assertHostedDeliveryLiveNow(input);
           const result = input.effectsPort.sendLinq
             ? await input.effectsPort.sendLinq({
+                directRecipientPhoneNumber: request.directRecipientPhoneNumber ?? null,
                 fromPhoneNumber: request.fromPhoneNumber ?? null,
                 idempotencyKey: request.idempotencyKey ?? null,
                 message: request.message,

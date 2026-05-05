@@ -696,6 +696,7 @@ describe("hosted runtime callbacks", () => {
     }));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: "+15550001",
         fromPhoneNumber: null,
         idempotencyKey: "assistant-outbox:intent_123",
         message: "hello from hosted",
@@ -726,6 +727,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(sendLinq).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
