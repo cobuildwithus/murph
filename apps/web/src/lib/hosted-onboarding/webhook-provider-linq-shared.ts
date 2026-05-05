@@ -112,6 +112,31 @@ export function buildActiveMemberDirectPlan(
   return plan;
 }
 
+export function buildAiUsageQuotaReplyResponse(input: {
+  chatId: string;
+  message: string;
+  messageId: string;
+  noticeCode: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        chatId: input.chatId,
+        message: input.message,
+        noticeCode: input.noticeCode,
+        replyToMessageId: input.messageId,
+        sourceEventId: input.sourceEventId,
+        template: "ai_usage_quota",
+      }),
+    ],
+    response: {
+      ok: true,
+      reason: "sent-ai-usage-quota-reply",
+    },
+  });
+}
+
 export function buildConversationHomeRedirectResponse(input: {
   chatId: string;
   homeRecipientPhone: string;
