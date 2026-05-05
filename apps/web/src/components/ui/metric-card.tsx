@@ -45,6 +45,10 @@ export function MetricCard({
   baseline,
   className,
 }: MetricCardProps) {
+  const footer = [baseline, expected ? `expected ${expected}` : null]
+    .filter((item): item is string => Boolean(item))
+    .join(" · ");
+
   return (
     <div
       className={cn(
@@ -64,13 +68,14 @@ export function MetricCard({
           {arrows[direction ?? "neutral"]} {delta}
         </span>
       </div>
-      {(baseline || expected) && (
-        <span className="text-xs text-muted-foreground">
-          {baseline}
-          {baseline && expected && " · "}
-          {expected && `expected ${expected}`}
+      {footer ? (
+        <span
+          className="block min-w-0 max-w-full truncate text-xs text-muted-foreground"
+          title={footer}
+        >
+          {footer}
         </span>
-      )}
+      ) : null}
     </div>
   );
 }
