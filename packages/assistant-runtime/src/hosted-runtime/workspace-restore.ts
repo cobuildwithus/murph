@@ -12,12 +12,15 @@ import {
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
-  assertHostedWorkspaceSnapshotProviderContinuityComplete,
   clearHostedAssistantRuntimeHotState,
   hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
+  repairHostedWorkspaceSnapshotProviderContinuity,
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
+import {
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 
 import {
   createHostedArtifactResolver,
@@ -70,11 +73,13 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       platform: input.platform,
       ref: baseSnapshotRef,
     });
-    assertHostedWorkspaceSnapshotProviderContinuityComplete({
+    const baseRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
       bundle: baseBundle,
+      platform: input.platform,
+      snapshotLayer: "base",
     });
     await restoreHostedWorkspaceRuntimeBundle({
-      bundle: baseBundle,
+      bundle: baseRepair.bundle,
       platform: input.platform,
       ref: baseSnapshotRef,
       restored,
@@ -86,19 +91,23 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       platform: input.platform,
       ref: hotSnapshotRef,
     });
-    assertHostedWorkspaceSnapshotProviderContinuityComplete({
+    const hotRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
       bundle: hotBundle,
+      platform: input.platform,
+      snapshotLayer: "hot",
     });
+    const hotBundleRepaired =
+      hotRepair.removedMalformedSessionCount > 0 || hotRepair.scrubbedSessionCount > 0;
     await clearHostedAssistantRuntimeHotState({
-      operatorHomeRoot: hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-        bundle: hotBundle,
+      operatorHomeRoot: hotBundleRepaired || hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+        bundle: hotRepair.bundle,
       })
         ? restored.operatorHomeRoot
         : null,
       vaultRoot: restored.vaultRoot,
     });
     await restoreHostedWorkspaceRuntimeBundle({
-      bundle: hotBundle,
+      bundle: hotRepair.bundle,
       platform: input.platform,
       ref: hotSnapshotRef,
       restored,
@@ -109,6 +118,40 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     ...restored,
     mode: "snapshot",
   };
+}
+
+async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
+  bundle: Uint8Array | ArrayBuffer;
+  platform: HostedRuntimePlatform;
+  snapshotLayer: "base" | "hot";
+}): Promise<{
+  bundle: Uint8Array | ArrayBuffer;
+  removedMalformedSessionCount: number;
+  scrubbedSessionCount: number;
+}> {
+  const repair = repairHostedWorkspaceSnapshotProviderContinuity({
+    bundle: input.bundle,
+  });
+  if (repair.removedMalformedSessionCount === 0 && repair.scrubbedSessionCount === 0) {
+    return repair;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "workspace",
+      eventCode: "workspace.legacy_codex_resume_repaired",
+      level: "warn",
+      phase: "restore",
+      redactedJson: {
+        nativeResumeDisabled: true,
+        removedMalformedSessionCount: repair.removedMalformedSessionCount,
+        scrubbedSessionCount: repair.scrubbedSessionCount,
+        snapshotLayer: input.snapshotLayer,
+      },
+    },
+    platform: input.platform,
+  });
+  return repair;
 }
 
 async function restoreHostedWorkspaceRuntimeBundle(input: {

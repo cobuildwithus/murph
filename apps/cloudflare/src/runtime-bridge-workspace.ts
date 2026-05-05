@@ -31,6 +31,7 @@ import type {
 import {
   HostedAssistantRuntimeHotStateIncompleteError,
   HostedAssistantRuntimeHotStateBudgetExceededError,
+  HostedWorkspaceSnapshotContinuityIncompleteError,
   sha256HostedBundleHex,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedExecutionContext,
@@ -231,7 +232,23 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(in
       error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
       || error instanceof HostedAssistantRuntimeHotStateIncompleteError
     ) {
-      return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
+      await writeHostedCheckpointHotStateFallbackLog({
+        error,
+        platform: input.platform,
+        request: input.request,
+      });
+      try {
+        return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
+      } catch (fullError) {
+        if (fullError instanceof HostedWorkspaceSnapshotContinuityIncompleteError) {
+          await writeHostedCheckpointFullFallbackContinuityFailedLog({
+            error: fullError,
+            platform: input.platform,
+            request: input.request,
+          });
+        }
+        throw fullError;
+      }
     }
     throw error;
   }
@@ -535,6 +552,98 @@ async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
   } catch (logError) {
     console.warn("Hosted checkpoint optional sidecar degradation log write failed.", {
       errorName: logError instanceof Error ? logError.name : typeof logError,
+    });
+  }
+}
+
+async function writeHostedCheckpointHotStateFallbackLog(input: {
+  error: HostedAssistantRuntimeHotStateBudgetExceededError | HostedAssistantRuntimeHotStateIncompleteError;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+}): Promise<void> {
+  console.warn("Hosted checkpoint hot-state fallback triggered.", {
+    errorName: input.error.name,
+  });
+  if (!input.platform.logPort) {
+    return;
+  }
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointReason: input.request.reason,
+    errorName: input.error.name,
+    fallbackReason:
+      input.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
+        ? "budget_exceeded"
+        : "continuity_incomplete",
+    ...(input.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
+      ? {
+          budgetActual: input.error.actual,
+          budgetClass: input.error.budget,
+          budgetLimit: input.error.limit,
+        }
+      : {
+          continuityReason: input.error.reason,
+        }),
+  };
+
+  try {
+    await input.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: input.request.attemptId,
+          component: "workspace",
+          eventCode: "checkpoint.hot_state_fallback",
+          leaseGeneration: input.request.leaseGeneration,
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: input.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted checkpoint hot-state fallback log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+async function writeHostedCheckpointFullFallbackContinuityFailedLog(input: {
+  error: HostedWorkspaceSnapshotContinuityIncompleteError;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+}): Promise<void> {
+  console.warn("Hosted checkpoint full fallback continuity failed.", {
+    continuityReason: input.error.reason,
+  });
+  if (!input.platform.logPort) {
+    return;
+  }
+
+  try {
+    await input.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: input.request.attemptId,
+          component: "workspace",
+          eventCode: "checkpoint.codex_continuity_missing_after_full_fallback",
+          leaseGeneration: input.request.leaseGeneration,
+          level: "error",
+          phase: "checkpoint",
+          redactedJson: {
+            checkpointReason: input.request.reason,
+            continuityReason: input.error.reason,
+            errorName: input.error.name,
+          },
+          workspaceVersion: input.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted checkpoint full fallback continuity failure log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
     });
   }
 }

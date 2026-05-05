@@ -16,6 +16,7 @@ import {
 import {
   isHostedBundleArtifactEntry,
   parseHostedBundleArchive,
+  serializeHostedBundleArchive,
   type HostedBundleArtifactRef,
 } from "./hosted-bundle.ts";
 import {
@@ -85,6 +86,17 @@ export interface HostedAssistantRuntimeHotStateSnapshot {
   codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   fileCount: number;
   inlineBytes: number;
+}
+
+export interface HostedWorkspaceSnapshotProviderContinuityAnalysis {
+  hasCodexProviderContinuity: boolean;
+  hasProviderResumeState: boolean;
+}
+
+export interface HostedWorkspaceSnapshotProviderContinuityRepair {
+  bundle: Uint8Array | ArrayBuffer;
+  removedMalformedSessionCount: number;
+  scrubbedSessionCount: number;
 }
 
 interface HostedAssistantRuntimeHotStateBudgetMetrics {
@@ -227,7 +239,10 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
       })
     : null;
   await ensureAssistantStateDirectory(assistantStateRoot);
-  await assertHostedAssistantRuntimeHotStatePreBundleBudget({ vaultRoot });
+  await assertHostedAssistantRuntimeHotStatePreBundleBudget({
+    operatorHomeRoot: codexHomeSnapshotRoot,
+    vaultRoot,
+  });
 
   const bundle = await snapshotHostedBundleRoots({
     kind: "vault",
@@ -310,6 +325,25 @@ export function hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity(in
     return false;
   }
 
+  return analyzeHostedWorkspaceSnapshotProviderContinuity({
+    bundle: input.bundle,
+  }).hasCodexProviderContinuity;
+}
+
+export function assertHostedWorkspaceSnapshotProviderContinuityComplete(input: {
+  bundle: Uint8Array | ArrayBuffer;
+  createError?: (reason: "codex_home_missing") => Error;
+}): void {
+  const analysis = analyzeHostedWorkspaceSnapshotProviderContinuity(input);
+  if (analysis.hasProviderResumeState && !analysis.hasCodexProviderContinuity) {
+    throw input.createError?.("codex_home_missing")
+      ?? new HostedWorkspaceSnapshotContinuityIncompleteError("codex_home_missing");
+  }
+}
+
+export function analyzeHostedWorkspaceSnapshotProviderContinuity(input: {
+  bundle: Uint8Array | ArrayBuffer;
+}): HostedWorkspaceSnapshotProviderContinuityAnalysis {
   const archive = parseHostedBundleArchive(input.bundle);
   if (archive.kind !== "vault") {
     throw new Error(
@@ -317,28 +351,95 @@ export function hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity(in
     );
   }
 
-  return hostedWorkspaceSnapshotIncludesCodexSessionState({
-    bundle: input.bundle,
-  });
-}
+  let hasProviderResumeState = false;
+  let hasCodexProviderContinuity = false;
+  for (const file of archive.files) {
+    const normalizedPath = normalizeWorkspaceSnapshotRelativePath(file.path);
+    if (
+      file.root === WORKSPACE_OPERATOR_HOME_ROOT
+      && isHostedCodexProviderContinuityRelativePath(normalizedPath)
+    ) {
+      hasCodexProviderContinuity = true;
+    }
 
-export function hostedAssistantRuntimeHotStateIncludesCodexHome(input: {
-  bundle?: Uint8Array | ArrayBuffer | null;
-}): boolean {
-  return hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity(input);
-}
+    if (
+      file.root === "vault"
+      && !isHostedBundleArtifactEntry(file)
+      && hasWorkspaceSnapshotPathPrefix(
+        normalizedPath,
+        `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
+      )
+    ) {
+      const text = Buffer.from(file.contentsBase64, "base64").toString("utf8");
+      hasProviderResumeState ||= assistantSessionTextContainsProviderResumeState(text);
+    }
 
-export function assertHostedWorkspaceSnapshotProviderContinuityComplete(input: {
-  bundle: Uint8Array | ArrayBuffer;
-  createError?: (reason: "codex_home_missing") => Error;
-}): void {
-  if (
-    hostedWorkspaceSnapshotContainsProviderResumeState(input)
-    && !hostedWorkspaceSnapshotIncludesCodexSessionState(input)
-  ) {
-    throw input.createError?.("codex_home_missing")
-      ?? new HostedWorkspaceSnapshotContinuityIncompleteError("codex_home_missing");
+    if (hasProviderResumeState && hasCodexProviderContinuity) {
+      break;
+    }
   }
+
+  return {
+    hasCodexProviderContinuity,
+    hasProviderResumeState,
+  };
+}
+
+export function repairHostedWorkspaceSnapshotProviderContinuity(input: {
+  bundle: Uint8Array | ArrayBuffer;
+}): HostedWorkspaceSnapshotProviderContinuityRepair {
+  const analysis = analyzeHostedWorkspaceSnapshotProviderContinuity(input);
+  if (!analysis.hasProviderResumeState || analysis.hasCodexProviderContinuity) {
+    return {
+      bundle: input.bundle,
+      removedMalformedSessionCount: 0,
+      scrubbedSessionCount: 0,
+    };
+  }
+
+  const archive = parseHostedBundleArchive(input.bundle);
+  let removedMalformedSessionCount = 0;
+  let scrubbedSessionCount = 0;
+  const files = archive.files.flatMap((file) => {
+    if (
+      file.root !== "vault"
+      || isHostedBundleArtifactEntry(file)
+      || !hasWorkspaceSnapshotPathPrefix(
+        normalizeWorkspaceSnapshotRelativePath(file.path),
+        `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
+      )
+    ) {
+      return [file];
+    }
+
+    const text = Buffer.from(file.contentsBase64, "base64").toString("utf8");
+    const scrubbed = scrubAssistantSessionProviderResumeState(text);
+    if (!scrubbed.changed) {
+      return [file];
+    }
+
+    if (scrubbed.text === null) {
+      removedMalformedSessionCount += 1;
+      return [];
+    }
+
+    scrubbedSessionCount += 1;
+    return [
+      {
+        ...file,
+        contentsBase64: Buffer.from(scrubbed.text, "utf8").toString("base64"),
+      },
+    ];
+  });
+
+  return {
+    bundle: serializeHostedBundleArchive({
+      ...archive,
+      files,
+    }),
+    removedMalformedSessionCount,
+    scrubbedSessionCount,
+  };
 }
 
 export async function restoreHostedExecutionContext(input: {
@@ -412,11 +513,23 @@ export async function materializeHostedExecutionArtifacts(input: {
 }
 
 async function assertHostedAssistantRuntimeHotStatePreBundleBudget(input: {
+  operatorHomeRoot?: string | null;
   vaultRoot: string;
 }): Promise<void> {
   const metrics = await collectHostedAssistantRuntimeHotStateBudgetMetrics({
+    shouldIncludeRelativePath: shouldIncludeHostedAssistantRuntimeHotStateRelativePath,
     root: input.vaultRoot,
   });
+  if (input.operatorHomeRoot) {
+    const operatorHomeMetrics = await collectHostedAssistantRuntimeHotStateBudgetMetrics({
+      optional: true,
+      shouldIncludeRelativePath: shouldIncludeHostedAssistantRuntimeHotStateOperatorHomeRelativePath,
+      root: input.operatorHomeRoot,
+    });
+    metrics.fileCount += operatorHomeMetrics.fileCount;
+    metrics.inlineBytes += operatorHomeMetrics.inlineBytes;
+    metrics.minimumBundleBytes += operatorHomeMetrics.minimumBundleBytes;
+  }
   assertHostedAssistantRuntimeHotStateBudget({
     bundleBytes: metrics.minimumBundleBytes,
     fileCount: metrics.fileCount,
@@ -473,12 +586,26 @@ async function hostedAssistantRuntimeHotStateHasProviderResumeState(input: {
 }
 
 async function collectHostedAssistantRuntimeHotStateBudgetMetrics(input: {
+  optional?: boolean;
   relativeDirectory?: string;
   root: string;
+  shouldIncludeRelativePath: (relativePath: string) => boolean;
 }): Promise<HostedAssistantRuntimeHotStateBudgetMetrics> {
   const relativeDirectory = input.relativeDirectory ?? "";
   const directoryPath = relativeDirectory ? path.join(input.root, relativeDirectory) : input.root;
-  const entries = await readdir(directoryPath, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(directoryPath, { withFileTypes: true });
+  } catch (error) {
+    if (input.optional) {
+      return {
+        fileCount: 0,
+        inlineBytes: 0,
+        minimumBundleBytes: 0,
+      };
+    }
+    throw error;
+  }
   const metrics: HostedAssistantRuntimeHotStateBudgetMetrics = {
     fileCount: 0,
     inlineBytes: 0,
@@ -490,15 +617,17 @@ async function collectHostedAssistantRuntimeHotStateBudgetMetrics(input: {
       ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
       : entry.name;
 
-    if (!shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath)) {
+    if (!input.shouldIncludeRelativePath(relativePath)) {
       continue;
     }
 
     const absolutePath = path.join(directoryPath, entry.name);
     if (entry.isDirectory()) {
       const childMetrics = await collectHostedAssistantRuntimeHotStateBudgetMetrics({
+        optional: input.optional,
         relativeDirectory: path.join(relativeDirectory, entry.name),
         root: input.root,
+        shouldIncludeRelativePath: input.shouldIncludeRelativePath,
       });
       metrics.fileCount += childMetrics.fileCount;
       metrics.inlineBytes += childMetrics.inlineBytes;
@@ -636,33 +765,6 @@ function assertHostedAssistantRuntimeHotStateBudget(input: {
   }
 }
 
-function hostedWorkspaceSnapshotContainsProviderResumeState(input: {
-  bundle: Uint8Array | ArrayBuffer;
-}): boolean {
-  const archive = parseHostedBundleArchive(input.bundle);
-  if (archive.kind !== "vault") {
-    throw new Error(
-      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
-    );
-  }
-
-  return archive.files.some((file) => {
-    if (
-      file.root !== "vault"
-      || isHostedBundleArtifactEntry(file)
-      || !hasWorkspaceSnapshotPathPrefix(
-        normalizeWorkspaceSnapshotRelativePath(file.path),
-        `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
-      )
-    ) {
-      return false;
-    }
-
-    const text = Buffer.from(file.contentsBase64, "base64").toString("utf8");
-    return assistantSessionTextContainsProviderResumeState(text);
-  });
-}
-
 function assistantSessionTextContainsProviderResumeState(text: string): boolean {
   let parsed: unknown;
   try {
@@ -677,21 +779,55 @@ function assistantSessionTextContainsProviderResumeState(text: string): boolean 
   );
 }
 
-function hostedWorkspaceSnapshotIncludesCodexSessionState(input: {
-  bundle: Uint8Array | ArrayBuffer;
-}): boolean {
-  const archive = parseHostedBundleArchive(input.bundle);
-  if (archive.kind !== "vault") {
-    throw new Error(
-      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
-    );
+function scrubAssistantSessionProviderResumeState(text: string): {
+  changed: boolean;
+  text: string | null;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {
+      changed: true,
+      text: null,
+    };
   }
 
-  return archive.files.some((file) =>
-    file.root === WORKSPACE_OPERATOR_HOME_ROOT
-    && hasWorkspaceSnapshotPathPrefix(
-      normalizeWorkspaceSnapshotRelativePath(file.path),
+  if (!isRecord(parsed)) {
+    return {
+      changed: false,
+      text,
+    };
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = { ...parsed };
+  if (recordStringProperty(next, "providerSessionId") !== null) {
+    delete next.providerSessionId;
+    changed = true;
+  }
+
+  if (recordStringProperty(recordProperty(next, "resumeState"), "providerSessionId") !== null) {
+    next.resumeState = null;
+    changed = true;
+  }
+
+  return {
+    changed,
+    text: changed ? `${JSON.stringify(next)}\n` : text,
+  };
+}
+
+function isHostedCodexProviderContinuityRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+  return (
+    hasWorkspaceSnapshotPathPrefix(
+      normalizedRelativePath,
       `${HOSTED_CODEX_HOME_RELATIVE_PATH}/sessions`,
+    )
+    || hasWorkspaceSnapshotPathPrefix(
+      normalizedRelativePath,
+      `${HOSTED_CODEX_HOME_RELATIVE_PATH}/rollouts`,
     )
   );
 }
