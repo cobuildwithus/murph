@@ -18,7 +18,7 @@ const HOSTED_WEB_CALLBACK_SIGNING_ALGORITHM: EcdsaParams = {
   name: "ECDSA",
   hash: "SHA-256",
 };
-const DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
+const DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS = 60_000;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
