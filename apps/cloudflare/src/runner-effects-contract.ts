@@ -135,6 +135,10 @@ export function parseHostedRunnerLinqSendRequest(
 ): HostedRuntimeLinqSendRequest {
   const record = requireRecord(value, "Hosted Linq send request");
   return {
+    directRecipientPhoneNumber: readOptionalString(
+      record.directRecipientPhoneNumber,
+      "directRecipientPhoneNumber",
+    ),
     fromPhoneNumber: readOptionalString(record.fromPhoneNumber, "fromPhoneNumber"),
     idempotencyKey: readOptionalString(record.idempotencyKey, "idempotencyKey"),
     message: readRequiredString(record.message, "message"),

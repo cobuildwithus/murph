@@ -104,6 +104,7 @@ export interface HostedRuntimeProviderFileResponse {
 }
 
 export interface HostedRuntimeLinqSendRequest {
+  directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   message: string;

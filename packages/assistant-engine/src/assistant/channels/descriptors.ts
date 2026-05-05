@@ -95,17 +95,22 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     })) ?? null
   },
   async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, message, replyToMessageId }) {
-    const send = dependencies.sendLinq ?? sendLinqMessage
     let delivered
+    const request = {
+      fromPhoneNumber: deliverySource?.kind === 'linq' ? deliverySource.fromPhoneNumber : null,
+      idempotencyKey: idempotencyKey ?? null,
+      target: candidate.target,
+      targetKind: candidate.kind,
+      message,
+      replyToMessageId: replyToMessageId ?? null,
+    }
     try {
-      delivered = await send({
-        fromPhoneNumber: deliverySource?.kind === 'linq' ? deliverySource.fromPhoneNumber : null,
-        idempotencyKey: idempotencyKey ?? null,
-        target: candidate.target,
-        targetKind: candidate.kind,
-        message,
-        replyToMessageId: replyToMessageId ?? null,
-      })
+      delivered = dependencies.sendLinq
+        ? await dependencies.sendLinq({
+            ...request,
+            directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
+          })
+        : await sendLinqMessage(request)
     } catch (error) {
       const recovered = await maybeRecoverMissingLinqDirectThread({
         actorId,
@@ -232,6 +237,8 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   | null
 > {
   if (
+    input.dependencies.sendLinq
+    ||
     !looksLikeMissingLinqChatError(input.error)
     || (input.candidate.kind !== 'thread' && input.candidate.kind !== 'explicit')
   ) {
@@ -250,11 +257,10 @@ async function maybeRecoverMissingLinqDirectThread(input: {
     return null
   }
 
-  const send = input.dependencies.sendLinq ?? sendLinqMessage
   for (const sender of senders) {
     let delivered
     try {
-      delivered = await send({
+      delivered = await sendLinqMessage({
         fromPhoneNumber: sender,
         idempotencyKey: input.idempotencyKey ?? null,
         target: recipient,
@@ -314,10 +320,14 @@ async function resolveLinqSenderPhoneNumbers(input: {
       env: input.env,
       fetchImplementation: input.fetchImplementation,
     })
-    return probed.phoneNumbers
-      .map((phoneNumber) => phoneNumber?.trim() ?? '')
-      .filter((phoneNumber) => phoneNumber.startsWith('+'))
+    return normalizeLinqSenderPhoneNumbers(probed.phoneNumbers)
   } catch {
     return []
   }
+}
+
+function normalizeLinqSenderPhoneNumbers(phoneNumbers: readonly unknown[]): string[] {
+  return phoneNumbers
+    .map((phoneNumber) => typeof phoneNumber === 'string' ? phoneNumber.trim() : '')
+    .filter((phoneNumber) => phoneNumber.startsWith('+'))
 }

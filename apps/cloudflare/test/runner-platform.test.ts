@@ -1618,6 +1618,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (request.url.endsWith("/linq/send")) {
+        return new Response(JSON.stringify({
+          providerMessageId: "linq_message_123",
+          providerThreadId: "linq_chat_123",
+          target: "linq_chat_123",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
 
       return new Response(JSON.stringify({ ok: true }), {
         headers: {
@@ -1655,12 +1667,26 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       action: "typing",
       target: "linq_chat_123",
     });
+    await expect(platform.effectsPort.sendLinq!({
+      directRecipientPhoneNumber: "+15550001",
+      message: "hello",
+      target: "stale-chat",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      providerMessageId: "linq_message_123",
+      providerMessageIds: null,
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: null,
+    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const telegramRequest = requireFetchRequest(fetchMock.mock.calls[0], "telegram send");
     const linqRequest = requireFetchRequest(fetchMock.mock.calls[1], "linq action");
+    const linqSendRequest = requireFetchRequest(fetchMock.mock.calls[2], "linq send");
     expect(telegramRequest.url).toBe("http://results.worker/telegram/send");
     expect(linqRequest.url).toBe("http://results.worker/linq/chat-action");
+    expect(linqSendRequest.url).toBe("http://results.worker/linq/send");
     expect(telegramRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
@@ -1670,6 +1696,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(telegramRequest.json()).resolves.toEqual({
       message: "hello",
       target: "telegram_chat_123",
+    });
+    await expect(linqSendRequest.json()).resolves.toEqual({
+      directRecipientPhoneNumber: "+15550001",
+      message: "hello",
+      target: "stale-chat",
+      targetKind: "thread",
     });
   });
 
