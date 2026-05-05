@@ -169,9 +169,10 @@ test.sequential(
         'control-token-for-tests',
       )
       assert.equal(
-        spawnedProcess.env.DEVICE_SYNC_SECRET,
-        'control-token-for-tests',
+        spawnedProcess.env.DEVICE_SYNC_SECRET !== 'control-token-for-tests',
+        true,
       )
+      assert.match(spawnedProcess.env.DEVICE_SYNC_SECRET ?? '', /^[a-f0-9]{64}$/u)
 
       const launcherState = JSON.parse(
         await readFile(
@@ -189,6 +190,10 @@ test.sequential(
         path.join(vaultRoot, '.runtime/operations/device-sync/control-token'),
         'utf8',
       )
+      const persistedEncryptionSecret = await readFile(
+        path.join(vaultRoot, '.runtime/operations/device-sync/encryption-secret'),
+        'utf8',
+      )
       const launcherDirectoryStats = await stat(
         path.join(vaultRoot, '.runtime/operations/device-sync'),
       )
@@ -198,14 +203,20 @@ test.sequential(
       const controlTokenStats = await stat(
         path.join(vaultRoot, '.runtime/operations/device-sync/control-token'),
       )
+      const encryptionSecretStats = await stat(
+        path.join(vaultRoot, '.runtime/operations/device-sync/encryption-secret'),
+      )
 
       assert.equal(persistedLauncherState.pid, 4242)
       assert.equal(persistedLauncherState.baseUrl, 'http://localhost:8788')
       assert.equal('controlToken' in persistedLauncherState, false)
       assert.equal(persistedControlToken.trim(), 'control-token-for-tests')
+      assert.match(persistedEncryptionSecret.trim(), /^[a-f0-9]{64}$/u)
+      assert.equal(persistedEncryptionSecret.trim(), spawnedProcess.env.DEVICE_SYNC_SECRET)
       assert.equal(launcherDirectoryStats.mode & 0o777, 0o700)
       assert.equal(launcherStateStats.mode & 0o777, 0o600)
       assert.equal(controlTokenStats.mode & 0o777, 0o600)
+      assert.equal(encryptionSecretStats.mode & 0o777, 0o600)
       assert.deepEqual(healthCheckAuthorizations, [
         null,
         'Bearer control-token-for-tests',

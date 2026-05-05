@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { chmodSync, lstatSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   readVersionedJsonStateFile,
@@ -21,6 +21,7 @@ import {
 import { isMissingFileError } from './process.js'
 
 const MANAGED_CONTROL_TOKEN_FILE_NAME = 'control-token'
+const MANAGED_ENCRYPTION_SECRET_FILE_NAME = 'encryption-secret'
 const DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE = 0o700
 const DEVICE_DAEMON_RUNTIME_FILE_MODE = 0o600
 
@@ -135,6 +136,20 @@ export async function writeManagedControlToken(
   await dependencies.chmod(controlTokenPath, DEVICE_DAEMON_RUNTIME_FILE_MODE)
 }
 
+export async function writeManagedEncryptionSecret(
+  paths: DeviceDaemonPaths,
+  encryptionSecret: string,
+  dependencies: Pick<DeviceDaemonDependencies, 'mkdir' | 'writeFile' | 'chmod'>,
+): Promise<void> {
+  const encryptionSecretPath = resolveManagedEncryptionSecretPath(paths)
+  await ensurePrivateDeviceDaemonDirectory(
+    path.dirname(encryptionSecretPath),
+    dependencies,
+  )
+  await dependencies.writeFile(encryptionSecretPath, `${encryptionSecret}\n`)
+  await dependencies.chmod(encryptionSecretPath, DEVICE_DAEMON_RUNTIME_FILE_MODE)
+}
+
 export async function removeManagedControlToken(
   paths: DeviceDaemonPaths,
   dependencies: Pick<DeviceDaemonDependencies, 'removeFile'>,
@@ -150,8 +165,79 @@ export function resolveManagedControlToken(paths: DeviceDaemonPaths): string | n
   }
 }
 
+export function resolveManagedEncryptionSecret(paths: DeviceDaemonPaths): string | null {
+  const encryptionSecretPath = resolveManagedEncryptionSecretPath(paths)
+  try {
+    ensurePrivateManagedEncryptionSecretPath(encryptionSecretPath)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+
+    throw normalizeManagedEncryptionSecretError(error)
+  }
+
+  try {
+    const secret = readFileSync(encryptionSecretPath, 'utf8').trim()
+    if (secret.length === 0) {
+      throw new VaultCliError(
+        'DEVICE_SYNC_SECRET_INVALID',
+        'Managed device sync encryption secret is empty.',
+      )
+    }
+    return secret
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+
+    throw normalizeManagedEncryptionSecretError(error)
+  }
+}
+
 function resolveManagedControlTokenPath(paths: DeviceDaemonPaths): string {
   return path.join(path.dirname(paths.launcherStatePath), MANAGED_CONTROL_TOKEN_FILE_NAME)
+}
+
+function resolveManagedEncryptionSecretPath(paths: DeviceDaemonPaths): string {
+  return path.join(path.dirname(paths.launcherStatePath), MANAGED_ENCRYPTION_SECRET_FILE_NAME)
+}
+
+function ensurePrivateManagedEncryptionSecretPath(encryptionSecretPath: string): void {
+  const directoryPath = path.dirname(encryptionSecretPath)
+  const directoryStats = lstatSync(directoryPath)
+  if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
+    throw new VaultCliError(
+      'DEVICE_SYNC_SECRET_INVALID',
+      'Managed device sync encryption secret directory is invalid.',
+    )
+  }
+  if ((directoryStats.mode & 0o777) !== DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE) {
+    chmodSync(directoryPath, DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE)
+  }
+
+  const secretStats = lstatSync(encryptionSecretPath)
+  if (!secretStats.isFile() || secretStats.isSymbolicLink()) {
+    throw new VaultCliError(
+      'DEVICE_SYNC_SECRET_INVALID',
+      'Managed device sync encryption secret file is invalid.',
+    )
+  }
+
+  if ((secretStats.mode & 0o777) !== DEVICE_DAEMON_RUNTIME_FILE_MODE) {
+    chmodSync(encryptionSecretPath, DEVICE_DAEMON_RUNTIME_FILE_MODE)
+  }
+}
+
+function normalizeManagedEncryptionSecretError(error: unknown): Error {
+  if (error instanceof VaultCliError) {
+    return error
+  }
+
+  return new VaultCliError(
+    'DEVICE_SYNC_SECRET_INVALID',
+    'Managed device sync encryption secret is invalid or unavailable.',
+  )
 }
 
 function parseDeviceDaemonStateRecord(value: unknown): DeviceDaemonStateRecord {
