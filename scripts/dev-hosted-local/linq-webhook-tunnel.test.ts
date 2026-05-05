@@ -187,6 +187,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
       env: {
         HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS:
           " +15550000001, +15550000002 ",
+        HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "+15550000003",
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
@@ -209,6 +210,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
     await expect(resolveHostedLocalLinqWebhookSetup({
       config,
       env: {
+        HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "+15550000003",
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
@@ -225,6 +227,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
         linqWebhookPublicUrl: "https://manual.example.test",
       },
       env: {
+        HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "+15550000003",
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
@@ -237,6 +240,22 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
       tunnelConfigPath: null,
       tunnelName: null,
     });
+  });
+
+  it("requires a local inbound allowlist before enabling Linq webhook handling", async () => {
+    const { resolveHostedLocalLinqWebhookSetup } = await import("./linq-webhook-tunnel.ts");
+
+    await expect(resolveHostedLocalLinqWebhookSetup({
+      config: {
+        ...config,
+        linqWebhookPublicUrl: "https://manual.example.test",
+      },
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      },
+      fileExists: async () => false,
+    })).rejects.toThrow("HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS must be set");
   });
 
   it("fails when the tunnel is required but the config is absent", async () => {

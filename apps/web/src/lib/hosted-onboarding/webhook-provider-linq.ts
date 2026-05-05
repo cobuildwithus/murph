@@ -30,6 +30,7 @@ import {
 import {
   type HostedLinqMessageReceivedEvent,
   type HostedLinqWebhookEvent,
+  shouldIgnoreHostedLinqForLocalInboundGuard,
 } from "./linq";
 import {
   resolveHostedLinqActiveRouteDecision,
@@ -84,6 +85,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   if (!participantContact) {
     return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-contact");
+  }
+
+  if (shouldIgnoreHostedLinqForLocalInboundGuard({
+    isFromMe: summary.isFromMe,
+    participantContact,
+  })) {
+    return buildIgnoredLinqWebhookPlan("local-inbound-not-allowlisted");
   }
 
   const existingMemberLookup = participantContact.kind === "phone"

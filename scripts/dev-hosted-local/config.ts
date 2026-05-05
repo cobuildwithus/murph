@@ -146,6 +146,7 @@ export function printHelp(): void {
       `  MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG=${DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG}  Repo-local cloudflared config for the Linq webhook tunnel`,
       `  MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME=${DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME}  cloudflared named tunnel to run for local Linq webhooks`,
       "  MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...  Explicit public Linq webhook URL or HTTPS origin",
+      "  HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...  Comma-separated sender phone allowlist for local Linq webhooks",
       "  MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 Skip Linq webhook subscription registration while still using the tunnel public URL",
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",
       "  MURPH_DEV_WEB_HOST=localhost        Hosted web listen host",

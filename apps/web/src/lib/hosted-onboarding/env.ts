@@ -32,6 +32,7 @@ export interface HostedOnboardingEnvironment {
   linqApiBaseUrl: string;
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
+  linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
@@ -70,6 +71,8 @@ export function readHostedOnboardingEnvironment(
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
+    linqLocalAllowedInboundPhoneNumbers:
+      readHostedLinqLocalAllowedInboundPhoneNumbers(source, isProduction),
     linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
       readEnv(source, "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER"),
       1000,
@@ -322,6 +325,41 @@ function readHostedLinqConversationPhoneNumbers(
     return [];
   }
 
+  return readHostedLinqPhoneNumberList(
+    configured,
+    "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS",
+    true,
+  );
+}
+
+function readHostedLinqLocalAllowedInboundPhoneNumbers(
+  source: HostedOnboardingEnvSource,
+  isProduction: boolean,
+): string[] | undefined {
+  const configured = readEnv(source, "HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS");
+
+  if (!configured) {
+    return undefined;
+  }
+
+  if (isProduction) {
+    throw new TypeError(
+      "HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS is local-development only and must not be configured in production.",
+    );
+  }
+
+  return readHostedLinqPhoneNumberList(
+    configured,
+    "HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS",
+    false,
+  );
+}
+
+function readHostedLinqPhoneNumberList(
+  configured: string,
+  envName: string,
+  includeInvalidValue: boolean,
+): string[] {
   const values = configured
     .split(/[\n,]+/u)
     .map((value) => value.trim())
@@ -332,9 +370,8 @@ function readHostedLinqConversationPhoneNumbers(
     const recipientPhone = normalizePhoneNumber(value);
 
     if (!recipientPhone) {
-      throw new TypeError(
-        `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS contains an invalid phone number: ${JSON.stringify(value)}.`,
-      );
+      const suffix = includeInvalidValue ? `: ${JSON.stringify(value)}` : "";
+      throw new TypeError(`${envName} contains an invalid phone number${suffix}.`);
     }
 
     if (!recipientPhones.includes(recipientPhone)) {

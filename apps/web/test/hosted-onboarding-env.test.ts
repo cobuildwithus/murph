@@ -59,6 +59,8 @@ describe("readHostedOnboardingEnvironment", () => {
       LINQ_API_TOKEN: "linq-token",
       LINQ_API_BASE_URL: "https://linq.example.test/api",
       HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS: "+15550000001, +1 (555) 000-0002",
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+        "+1 (555) 000-0003, +15550000003",
       HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER: "250",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       TELEGRAM_BOT_USERNAME: "murph_bot",
@@ -70,6 +72,9 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqConversationPhoneNumbers).toEqual([
       "+15550000001",
       "+15550000002",
+    ]);
+    expect(environment.linqLocalAllowedInboundPhoneNumbers).toEqual([
+      "+15550000003",
     ]);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(250);
     expect(environment.privyAppId).toBe("cm_app_123");
@@ -118,6 +123,15 @@ describe("readHostedOnboardingEnvironment", () => {
 
     expect(environment.linqApiToken).toBeNull();
     expect(environment.linqApiBaseUrl).toBe("https://api.linqapp.com/api/partner/v3");
+  });
+
+  it("rejects the local Linq inbound allowlist in production", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment(createProcessEnv({
+        HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "+15550000003",
+        NODE_ENV: "production",
+      })),
+    ).toThrow(/local-development only/u);
   });
 
   it("requires contact privacy keys even outside production", () => {
