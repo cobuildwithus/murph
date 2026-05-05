@@ -9,7 +9,8 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionBundlePayload,
-  HostedExecutionBundleRefState,
+  HostedExecutionLayeredSnapshotRef as SharedHostedExecutionLayeredSnapshotRef,
+  HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
 import type {
   HostedExecutionLogLevel,
@@ -348,7 +349,8 @@ export type HostedExecutionSystemWake = Exclude<
 >;
 
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
-export type HostedExecutionSnapshotRef = HostedExecutionBundleRefState;
+export type HostedExecutionLayeredSnapshotRef = SharedHostedExecutionLayeredSnapshotRef;
+export type HostedExecutionSnapshotRef = HostedExecutionSnapshotRefState;
 
 export interface HostedExecutionRedactedLogEntry {
   component: string;

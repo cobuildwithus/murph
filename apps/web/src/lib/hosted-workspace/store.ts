@@ -20,14 +20,15 @@ import type {
   HostedRuntimeRedactedValue,
   HostedWorkspaceCheckpointReason,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  HostedBrowserVaultReplicaRef,
-  HostedExecutionBundleRef,
-} from "@murphai/hosted-execution/contracts";
 import {
   parseHostedBrowserVaultReplicaRef,
-  parseHostedExecutionBundleRef,
+  parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedBrowserVaultReplicaRef,
+  HostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/contracts";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
@@ -209,7 +210,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     "Hosted workspace checkpoint reason",
   );
   const userId = requireNonEmptyString(input.userId, "Hosted workspace userId");
-  const snapshotRef = parseHostedExecutionBundleRef(
+  const snapshotRef = parseHostedExecutionSnapshotRef(
     input.snapshotRef,
     "Hosted workspace snapshotRef",
   );
@@ -280,7 +281,7 @@ export async function checkpointHostedWorkspaceTx(input: {
 function assertHostedWorkspaceBrowserVaultReplicaCheckpointInvariant(input: {
   browserVaultReplicaRef: HostedBrowserVaultReplicaRef | null | undefined;
   browserVaultReplicaRefPresent: boolean;
-  snapshotRef: HostedExecutionBundleRef | null;
+  snapshotRef: HostedExecutionSnapshotRef;
 }): void {
   if (!input.snapshotRef) {
     if (input.browserVaultReplicaRef) {
@@ -291,15 +292,23 @@ function assertHostedWorkspaceBrowserVaultReplicaCheckpointInvariant(input: {
     return;
   }
 
-  if (!input.browserVaultReplicaRefPresent || !input.browserVaultReplicaRef) {
-    throw new TypeError(
-      "Hosted workspace checkpoint requires a browser-vault replica ref for non-empty snapshots.",
-    );
+  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
+  if (!baseSnapshotRef) {
+    if (input.browserVaultReplicaRef) {
+      throw new TypeError(
+        "Hosted workspace checkpoint cannot persist a browser-vault replica without a base snapshot.",
+      );
+    }
+    return;
   }
 
-  if (input.browserVaultReplicaRef.sourceBundleHash !== input.snapshotRef.hash) {
+  if (!input.browserVaultReplicaRef) {
+    return;
+  }
+
+  if (input.browserVaultReplicaRef.sourceBundleHash !== baseSnapshotRef.hash) {
     throw new TypeError(
-      "Hosted workspace checkpoint browser-vault replica sourceBundleHash must match snapshot hash.",
+      "Hosted workspace checkpoint browser-vault replica sourceBundleHash must match snapshot base hash.",
     );
   }
 }
