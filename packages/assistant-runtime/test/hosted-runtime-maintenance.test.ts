@@ -116,6 +116,7 @@ const DEVICE_SYNC_CONFIG = {
 } as const;
 
 function createHostedAutomationRuntime(input: {
+  deviceSync?: HostedTimerRuntime["resolvedConfig"]["deviceSync"];
   platform?: Partial<HostedAutomationRuntime["platform"]>;
 } = {}): HostedAutomationRuntime & HostedTimerRuntime {
   return {
@@ -138,7 +139,7 @@ function createHostedAutomationRuntime(input: {
         emailSendReady: false,
         telegramBotConfigured: false,
       },
-      deviceSync: null,
+      deviceSync: input.deviceSync ?? null,
     },
   };
 }
@@ -1421,6 +1422,46 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+  });
+
+  it("skips device-sync when the caller is handling active input latency", async () => {
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 1),
+      getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+
+    const result = await runHostedAssistantRuntimeTimerLane({
+      wake: {
+        eventId: "evt_skip_device_sync",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_123",
+      runtime: createHostedAutomationRuntime({
+        deviceSync: DEVICE_SYNC_CONFIG,
+      }),
+      skipDeviceSync: true,
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(result).toMatchObject({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+    });
+    expect(service.runSchedulerOnce).not.toHaveBeenCalled();
+    expect(service.drainWorker).not.toHaveBeenCalled();
   });
 
   it("logs skipped automation when the hosted assistant is not configured", async () => {

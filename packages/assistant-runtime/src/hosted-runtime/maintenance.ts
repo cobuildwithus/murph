@@ -130,6 +130,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   >;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
+  skipDeviceSync?: boolean;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
@@ -143,17 +144,24 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     );
   }
 
-  const deviceSyncResult = await runHostedDeviceSyncPass(
-    input.wake,
-    input.vaultRoot,
-    input.runtime.resolvedConfig.deviceSync,
-    input.runtime.platform.deviceSyncPort,
-    input.runtime.commitTimeoutMs,
-    {
-      platformEnv: input.runtime.platformEnv,
-      runtimeLogPlatform: input.runtime.platform,
-    },
-  );
+  const deviceSyncResult = input.skipDeviceSync === true
+    ? {
+        nextWakeAt: null,
+        postCheckpointRecord: null,
+        processedJobs: 0,
+        skipped: true,
+      }
+    : await runHostedDeviceSyncPass(
+        input.wake,
+        input.vaultRoot,
+        input.runtime.resolvedConfig.deviceSync,
+        input.runtime.platform.deviceSyncPort,
+        input.runtime.commitTimeoutMs,
+        {
+          platformEnv: input.runtime.platformEnv,
+          runtimeLogPlatform: input.runtime.platform,
+        },
+      );
 
   const assistantResult = assistantAutomation.shouldRun
     ? await runHostedAssistantAutomation(

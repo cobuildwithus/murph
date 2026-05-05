@@ -504,6 +504,7 @@ export async function runHostedWorkspaceAssistantPhase(
         resolvedConfig: input.runtime.resolvedConfig,
       },
       signal: input.signal ?? undefined,
+      skipDeviceSync: input.initialMailboxImport.importResult.importedCount > 0,
       vaultRoot: input.restored.vaultRoot,
       wake,
     });
