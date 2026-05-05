@@ -17,10 +17,10 @@ import {
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
-  readHostedMemberSnapshot,
 } from "./hosted-member-store";
 import {
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
+  readHostedMemberHomeLinqRoute,
 } from "./hosted-member-routing-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
@@ -128,18 +128,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
-    const member = await readHostedMemberSnapshot({
+    const homeRoute = await readHostedMemberHomeLinqRoute({
       memberId: existingMember.id,
       prisma: input.prisma,
     });
 
-    if (!member) {
-      return buildIgnoredLinqWebhookPlan("missing-member");
-    }
-
     const routeDecision = resolveHostedLinqActiveRouteDecision({
-      homeChatId: member.routing?.linqChatId ?? null,
-      homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+      homeChatId: homeRoute?.linqChatId ?? null,
+      homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
       incomingChatId: summary.chatId,
       incomingRecipientPhone: recipientPhoneNumber,
     });
@@ -164,8 +160,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       occurredAt,
       prisma: input.prisma,
       recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
-        homeChatId: member.routing?.linqChatId ?? null,
-        homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+        homeChatId: homeRoute?.linqChatId ?? null,
+        homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
         incomingChatId: summary.chatId,
         incomingRecipientPhone: recipientPhoneNumber,
       }),

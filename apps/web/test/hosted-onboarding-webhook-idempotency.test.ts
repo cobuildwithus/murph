@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  readHostedMemberHomeLinqRoute: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   nudgeHostedRunnerUserBestEffort: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey:
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
+  readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
@@ -135,6 +137,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       runId: "workflow_run_123",
     });
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey.mockResolvedValue(null);
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue(null);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });
@@ -306,12 +309,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         suspendedAt: null,
       },
     });
-    mocks.readHostedMemberSnapshot.mockResolvedValue({
-      id: "member_123",
-      routing: {
-        linqChatId: "chat_123",
-        linqRecipientPhone: "+15550000000",
-      },
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -358,6 +359,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 });
 
