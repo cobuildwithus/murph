@@ -277,7 +277,16 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
   assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
   assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Strava"));
-  assert.ok(sourceHeadingIndex(markup, "Strava") < sourceHeadingIndex(markup, "Whoop"));
+  assert.ok(sourceHeadingIndex(markup, "Strava") < sourceHeadingIndex(markup, "Withings"));
+  assert.ok(sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"));
+  assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
+  assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Dexcom"));
+  assert.ok(
+    sourceHeadingIndex(markup, "Dexcom (G6 and older)") < sourceHeadingIndex(markup, "Freestyle Libre"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Freestyle Libre") < sourceHeadingIndex(markup, "Abbott LibreView"),
+  );
 
   for (const source of sources) {
     assert.match(markup, new RegExp(escapeRegExp(source.name)));
@@ -353,6 +362,18 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       logo,
     },
     {
+      id: "freestyle-libre",
+      name: "Freestyle Libre",
+      description: "Glucose.",
+      logo,
+    },
+    {
+      id: "abbott-libreview",
+      name: "Abbott LibreView",
+      description: "Glucose reports.",
+      logo,
+    },
+    {
       connected: true,
       id: "oura",
       name: "Oura",
@@ -362,6 +383,24 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
     {
       id: "garmin",
       name: "Garmin",
+      description: "Training.",
+      logo,
+    },
+    {
+      id: "dexcom",
+      name: "Dexcom",
+      description: "Glucose.",
+      logo,
+    },
+    {
+      id: "dexcom-g6-and-older",
+      name: "Dexcom (G6 and older)",
+      description: "Legacy glucose.",
+      logo,
+    },
+    {
+      id: "polar",
+      name: "Polar",
       description: "Training.",
       logo,
     },
@@ -376,7 +415,17 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
 
   assert.deepEqual(
     sortConnectSourcesByConnectionState(sources).map((source) => source.id),
-    ["strava", "oura", "garmin", "whoop"],
+    [
+      "strava",
+      "oura",
+      "garmin",
+      "whoop",
+      "dexcom",
+      "dexcom-g6-and-older",
+      "freestyle-libre",
+      "abbott-libreview",
+      "polar",
+    ],
   );
 });
 
