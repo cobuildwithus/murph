@@ -114,8 +114,19 @@ export async function executeCodexAssistantTurnAttempt(
     workingDirectory: input.workingDirectory,
   } as const
 
-  let result
+  let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
   let providerContinuation
+  const runFreshThreadFallback = async () => {
+    return await executeCodexAppServerTurn({
+      ...baseAppServerInput,
+      prompt: resolveAssistantProviderPrompt({
+        ...input,
+        resumeProviderSessionId: null,
+      }),
+      resumeSessionId: undefined,
+    })
+  }
+
   try {
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
@@ -130,24 +141,27 @@ export async function executeCodexAssistantTurnAttempt(
       resumeSessionId: input.resumeProviderSessionId,
     })
   } catch (error) {
+    const failureContext = readCodexAppServerTurnFailureContext(error)
     if (
       input.resumeProviderSessionId &&
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_CODEX_RESUME_STALE'
     ) {
-      result = await executeCodexAppServerTurn({
-        ...baseAppServerInput,
-        prompt: resolveAssistantProviderPrompt({
-          ...input,
-          resumeProviderSessionId: null,
-        }),
-        resumeSessionId: undefined,
-      })
+      result = await runFreshThreadFallback()
+      providerContinuation = {
+        kind: 'thread-start' as const,
+      }
+    } else if (
+      input.resumeProviderSessionId &&
+      error instanceof VaultCliError &&
+      failureContext?.providerActionCount === 0 &&
+      isCodexInvalidOutputResumeFailure(error)
+    ) {
+      result = await runFreshThreadFallback()
       providerContinuation = {
         kind: 'thread-start' as const,
       }
     } else {
-      const failureContext = readCodexAppServerTurnFailureContext(error)
       const rawEvents = failureContext?.jsonEvents ?? []
       const usage = rawEvents.length > 0
         ? extractCodexAssistantProviderUsage({
@@ -218,6 +232,13 @@ function hasCodexAssistantProviderUsageData(
     usage.outputTokens !== null ||
     usage.reasoningTokens !== null ||
     usage.totalTokens !== null
+  )
+}
+
+function isCodexInvalidOutputResumeFailure(error: VaultCliError): boolean {
+  return (
+    error.code === 'ASSISTANT_CODEX_FAILED' &&
+    /\binput\.\d+\.output:\s*Invalid input\b/iu.test(error.message)
   )
 }
 
