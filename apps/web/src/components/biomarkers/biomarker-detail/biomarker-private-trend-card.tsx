@@ -140,6 +140,7 @@ export function BiomarkerPrivateTrendCard({
           value={formatMetricValue(trend.latest.value, biomarker.valuePrecision)}
           unit={biomarker.unit}
           delta={avg7 !== null && avg7 !== 0 ? `${Math.abs(((trend.latest.value - avg7) / avg7) * 100).toFixed(1)}%` : ""}
+          deltaTone="neutral"
           direction={avg7 !== null && avg7 !== 0 ? (Math.abs(((trend.latest.value - avg7) / avg7) * 100) < 1 ? "neutral" : trend.latest.value > avg7 ? "up" : "down") : "neutral"}
           baseline={`${formatChipLabel(trend.latest.sourceLabel)} · ${formatDateLabel(trend.latest.date)}`}
         />
@@ -148,6 +149,7 @@ export function BiomarkerPrivateTrendCard({
           value={avg7 !== null ? formatMetricValue(avg7, biomarker.valuePrecision) : "---"}
           unit={biomarker.unit}
           delta={pctChange !== null ? `${Math.abs(pctChange).toFixed(1)}%` : ""}
+          deltaTone="neutral"
           direction={pctDirection}
           baseline={avg30 !== null ? `30d avg: ${formatMetricValue(avg30, biomarker.valuePrecision)}${abbreviateUnit(biomarker.unit)}` : undefined}
         />
@@ -291,7 +293,7 @@ function resolvePrivateTrend(input: {
     latest: {
       confidence: latest.confidence,
       date: latest.date,
-      sourceLabel: panel.sources.length === 1 ? panel.sources[0]?.displayName ?? latest.sourceLabel : latest.sourceLabel,
+      sourceLabel: latest.sourceLabel,
       value: latest.value,
     },
     series: panel.primary?.series.map((point) => ({ date: point.date, value: point.value })) ?? [],

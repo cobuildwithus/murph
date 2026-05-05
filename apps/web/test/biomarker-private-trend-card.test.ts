@@ -130,6 +130,22 @@ test("renders private trend values from the browser-vault selector", () => {
         value: 56,
         valueLabel: "56",
       })],
+      sourceHealthRows: [
+        {
+          activityDays: 0,
+          bodyStateDays: 0,
+          conflictCount: 0,
+          firstDate: "2026-03-23",
+          lastDate: "2026-04-29",
+          latestRecordedAt: "2026-04-29",
+          provider: "oura",
+          providerDisplayName: "Oura Ring",
+          recoveryDays: 12,
+          selectedMetrics: 12,
+          sleepNights: 0,
+          stalenessVsNewestDays: 0,
+        },
+      ],
     })),
     dataVersion: "sha256:browser-vault-private-card-test",
     error: null,
@@ -144,10 +160,66 @@ test("renders private trend values from the browser-vault selector", () => {
 
   assert.match(markup, /Latest/u);
   assert.match(markup, />56</u);
-  assert.match(markup, /WHOOP/u);
+  assert.match(markup, /Wearable Summary/u);
+  assert.doesNotMatch(markup, /Oura Ring/u);
+  assert.doesNotMatch(markup, /WHOOP/u);
   assert.match(markup, /7-day average/u);
   assert.match(markup, /30d avg/u);
+  assert.match(markup, /text-muted-foreground">↓/u);
+  assert.doesNotMatch(markup, /text-amber-600">↓/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
+});
+
+test("does not label glucose values with an unrelated sole wearable source", () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("blood-glucose");
+  assert.ok(biomarker);
+  const metricRows = metricRowsForTest({
+    biomarkerKey: biomarker.key,
+    metricKey: "glucose",
+    rows: [
+      ["2026-04-23", 80],
+      ["2026-04-24", 79],
+      ["2026-04-25", 81],
+      ["2026-04-26", 78],
+      ["2026-04-27", 80],
+    ],
+    sourceLabel: "CGM import",
+    unit: "mg/dL",
+  });
+
+  mocks.useBrowserVault.mockReturnValue({
+    client: createBrowserVaultQueryClient(createReplica({
+      metricRows,
+      sourceHealthRows: [
+        {
+          activityDays: 0,
+          bodyStateDays: 0,
+          conflictCount: 0,
+          firstDate: "2026-03-23",
+          lastDate: "2026-04-29",
+          latestRecordedAt: "2026-04-29",
+          provider: "whoop",
+          providerDisplayName: "WHOOP",
+          recoveryDays: 12,
+          selectedMetrics: 12,
+          sleepNights: 0,
+          stalenessVsNewestDays: 0,
+        },
+      ],
+    })),
+    dataVersion: "sha256:browser-vault-private-card-test",
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerPrivateTrendCard, { biomarker }),
+  );
+
+  assert.match(markup, /CGM Import/u);
+  assert.doesNotMatch(markup, /WHOOP/u);
 });
 
 test("keeps chart rows from becoming private current values without a selector row", () => {
@@ -212,7 +284,7 @@ test("renders private trend values for catalog-supported biomarker keys", () => 
 
     mocks.useBrowserVault.mockReturnValue({
       client: createBrowserVaultQueryClient(createReplica({
-        metricRows: metricRows({
+        metricRows: metricRowsForTest({
           biomarkerKey: biomarker.key,
           metricKey: scenario.metricKey,
           rows: scenario.rows,
@@ -319,7 +391,7 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
 });
 
 function restingHeartRateRows(rows: readonly (readonly [string, number])[]): BrowserVaultMetricRow[] {
-  return metricRows({
+  return metricRowsForTest({
     biomarkerKey: "biomarker:resting-heart-rate",
     metricKey: "resting-heart-rate",
     rows,
@@ -327,10 +399,11 @@ function restingHeartRateRows(rows: readonly (readonly [string, number])[]): Bro
   });
 }
 
-function metricRows(input: {
+function metricRowsForTest(input: {
   biomarkerKey: string;
   metricKey: string;
   rows: readonly (readonly [string, number])[];
+  sourceLabel?: string;
   unit: string;
 }): BrowserVaultMetricRow[] {
   return input.rows.map(([date, value]) => ({
@@ -347,7 +420,7 @@ function metricRows(input: {
     rowSchema: "murph.browser-vault.metric-row.v1",
     sourceFamily: "derived",
     sourceKind: "wearable-summary",
-    sourceLabel: "Wearable summary",
+    sourceLabel: input.sourceLabel ?? "Wearable summary",
     statistic: "value",
     unit: input.unit,
     value,
