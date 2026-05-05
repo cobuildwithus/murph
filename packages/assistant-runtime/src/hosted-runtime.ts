@@ -29,9 +29,6 @@ import type {
   HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
 import {
-  prefetchHostedMailboxPrefix,
-} from "./hosted-runtime/mailbox-import.ts";
-import {
   createEmptyHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "./hosted-runtime/mailbox-state.ts";
@@ -364,17 +361,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal: livenessAbortController.signal,
         },
       );
-    const initialMailboxPrefetchStateHint = createHostedMailboxPrefetchStateHint(
-      workspaceRead.workspace,
-    );
-    const initialMailboxPrefetch = initialMailboxPrefetchStateHint
-      ? prefetchHostedMailboxPrefix({
-          limitPerLane: mailboxBudget.fetchLimitPerLane,
-          mailboxPort: guardedMailboxPort,
-          requestId: `${requestId}:prefetch`,
-          state: initialMailboxPrefetchStateHint,
-        })
-      : null;
     const restored = await raceHostedRuntimeLiveness(
       restoreHostedWorkspaceRuntimeJobWorkspace({
         platform: guardedRuntime.platform,
@@ -401,7 +387,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         checkpointRequestBuilder,
         checkpointReason: "import",
         input: baseRunnerInput,
-        prefetch: initialMailboxPrefetch,
         requestId,
       }),
       livenessAbortController.signal,
@@ -517,55 +502,6 @@ function raceHostedRuntimeLiveness<T>(
       },
     );
   });
-}
-
-function createHostedMailboxPrefetchStateHint(
-  workspace: HostedWorkspaceState | null,
-): HostedMailboxImportState | null {
-  const state = createEmptyHostedMailboxImportState();
-  if (!workspace) {
-    return state;
-  }
-
-  const redactedStatus = workspace?.redactedStatus ?? null;
-  if (!redactedStatus) {
-    return null;
-  }
-
-  const conversationSeq = readHostedMailboxSeqHint(
-    redactedStatus.hostedMailboxConversationImportedSeq,
-  );
-  const systemSeq = readHostedMailboxSeqHint(
-    redactedStatus.hostedMailboxSystemImportedSeq,
-  );
-  if (conversationSeq === null || systemSeq === null) {
-    return null;
-  }
-
-  return {
-    ...state,
-    watermarks: {
-      ...state.watermarks,
-      conversation: conversationSeq,
-      system: systemSeq,
-    },
-  };
-}
-
-function readHostedMailboxSeqHint(value: unknown): string | null {
-  if (typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    return value;
-  }
-
-  if (
-    typeof value === "number"
-    && Number.isSafeInteger(value)
-    && value >= 0
-  ) {
-    return String(value);
-  }
-
-  return null;
 }
 
 function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {
