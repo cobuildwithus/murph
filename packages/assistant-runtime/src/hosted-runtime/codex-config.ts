@@ -335,7 +335,44 @@ function isHostedLocalCodexTestHostname(hostname: string): boolean {
   return normalized === "127.0.0.1"
     || normalized === "localhost"
     || normalized === "::1"
-    || normalized === "host.docker.internal";
+    || normalized === "host.docker.internal"
+    || normalized === "host.containers.internal"
+    || isHostedLocalCodexPrivateIpv4Host(normalized);
+}
+
+function isHostedLocalCodexPrivateIpv4Host(hostname: string): boolean {
+  const parts = parseHostedLocalCodexIpv4Parts(hostname);
+  if (!parts) {
+    return false;
+  }
+
+  const [first, second] = parts;
+  return first === 10
+    || first === 127
+    || first === 169 && second === 254
+    || first === 172 && second >= 16 && second <= 31
+    || first === 192 && second === 168;
+}
+
+function parseHostedLocalCodexIpv4Parts(value: string): [number, number, number, number] | null {
+  const rawParts = value.split(".");
+  if (rawParts.length !== 4) {
+    return null;
+  }
+
+  const parts = rawParts.map((part) => {
+    if (!/^\d{1,3}$/u.test(part)) {
+      return Number.NaN;
+    }
+
+    return Number(part);
+  });
+
+  if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return null;
+  }
+
+  return parts as [number, number, number, number];
 }
 
 function normalizeHostedCodexUrlHostname(hostname: string): string {

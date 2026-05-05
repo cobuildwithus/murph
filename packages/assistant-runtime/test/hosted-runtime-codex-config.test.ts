@@ -166,6 +166,23 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.doesNotMatch(config, /https:\/\/ai-gateway\.vercel\.sh\/v1/u);
 });
 
+test("hosted Codex runtime config accepts a Linux Docker bridge model provider override", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+        "http://172.17.0.1:4567/v1",
+      NODE_ENV: "test",
+      VERCEL_AI_API_KEY: "secret-vercel-key",
+    },
+  });
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
+});
+
 test("hosted Codex runtime config installs a local E2E app-server stub when configured", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
