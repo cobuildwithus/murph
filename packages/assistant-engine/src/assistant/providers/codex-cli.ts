@@ -29,15 +29,80 @@ import {
   type AssistantProviderUsage,
 } from './types.js'
 import { normalizeNullableString } from '../shared.js'
+import { isSensitiveAssistantFieldName } from '../redaction.js'
 import type {
   AssistantModelImagePart,
   AssistantUserMessageContentPart,
 } from '../content-types.js'
+import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type {
   CodexAppServerImageInput,
+  CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
 } from '../../assistant-codex.js'
 import { fileURLToPath } from 'node:url'
+
+const CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
+  'murph.assistant-codex-invalid-output-diagnostics.v1'
+const CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
+  'assistant.codex.invalid_output_resume_failure'
+const CODEX_INVALID_OUTPUT_FALLBACK_TRACE_TYPE =
+  'assistant.codex.invalid_output_resume_fallback'
+const CODEX_INVALID_OUTPUT_RECENT_EVENT_LIMIT = 12
+const CODEX_INVALID_OUTPUT_DETAIL_ARRAY_LIMIT = 12
+const SAFE_CODEX_DIAGNOSTIC_TOKEN_PATTERN = /^[A-Za-z0-9_.-]{1,80}$/u
+const SAFE_CODEX_DIAGNOSTIC_METHODS = new Set([
+  'initialize',
+  'thread/resume',
+  'thread/start',
+  'turn/completed',
+  'turn/interrupt',
+  'turn/start',
+  'turn/started',
+  'turn/steer',
+])
+const SAFE_CODEX_DIAGNOSTIC_STRUCTURAL_TOKENS = new Set([
+  'array',
+  'boolean',
+  'cancelled',
+  'canceled',
+  'command.execution',
+  'completed',
+  'dynamic.tool.call',
+  'error',
+  'failed',
+  'file.change',
+  'function_call',
+  'function_call_output',
+  'image',
+  'in_progress',
+  'input_image',
+  'input_text',
+  'interrupted',
+  'message',
+  'null',
+  'number',
+  'object',
+  'other',
+  'reasoning',
+  'running',
+  'string',
+  'succeeded',
+  'undefined',
+  'unknown',
+])
+const SAFE_CODEX_DIAGNOSTIC_STRUCTURAL_KEYS = new Set([
+  'content',
+  'id',
+  'image_url',
+  'kind',
+  'method',
+  'output',
+  'params',
+  'status',
+  'text',
+  'type',
+])
 
 export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
   supportedUserMessageContentTypes: ['text', 'image'],
@@ -156,7 +221,41 @@ export async function executeCodexAssistantTurnAttempt(
       error instanceof VaultCliError &&
       isCodexInvalidOutputResumeFailure(error)
     ) {
-      result = await runFreshThreadFallback()
+      emitCodexInvalidOutputTraceEvent({
+        onTraceEvent: input.onTraceEvent,
+        rawEvent: buildCodexInvalidOutputResumeFailureTraceEvent({
+          error,
+          failureContext,
+          resumeProviderSessionId: input.resumeProviderSessionId,
+        }),
+      })
+
+      try {
+        result = await runFreshThreadFallback()
+      } catch (fallbackError) {
+        emitCodexInvalidOutputTraceEvent({
+          onTraceEvent: input.onTraceEvent,
+          rawEvent: buildCodexInvalidOutputFallbackTraceEvent({
+            error,
+            failureContext,
+            fallbackError,
+            fallbackResult: 'failed',
+            resumeProviderSessionId: input.resumeProviderSessionId,
+          }),
+        })
+        throw fallbackError
+      }
+
+      emitCodexInvalidOutputTraceEvent({
+        onTraceEvent: input.onTraceEvent,
+        rawEvent: buildCodexInvalidOutputFallbackTraceEvent({
+          error,
+          failureContext,
+          fallbackResult: 'succeeded',
+          result,
+          resumeProviderSessionId: input.resumeProviderSessionId,
+        }),
+      })
       providerContinuation = {
         kind: 'thread-start' as const,
       }
@@ -239,6 +338,467 @@ function isCodexInvalidOutputResumeFailure(error: VaultCliError): boolean {
     error.code === 'ASSISTANT_CODEX_FAILED' &&
     /\binput\.\d+\.output:\s*Invalid input\b/iu.test(error.message)
   )
+}
+
+type CodexInvalidOutputTraceScalar = boolean | number | string | null
+type CodexInvalidOutputTraceValue =
+  | CodexInvalidOutputTraceScalar
+  | readonly (number | string)[]
+type CodexInvalidOutputTraceRawEvent = Record<string, CodexInvalidOutputTraceValue>
+
+interface CodexInvalidOutputEventShapeSummary {
+  eventKinds: string[]
+  eventMethods: string[]
+  eventStatuses: string[]
+  outputArrayLengths: number[]
+  outputKinds: string[]
+  outputObjectKeys: string[]
+  outputPartTypes: string[]
+  outputStringLengths: number[]
+  paramKeys: string[]
+}
+
+function buildCodexInvalidOutputResumeFailureTraceEvent(input: {
+  error: VaultCliError
+  failureContext: CodexAppServerTurnFailureContext | null
+  resumeProviderSessionId: string
+}): CodexInvalidOutputTraceRawEvent {
+  return {
+    ...buildCodexInvalidOutputBaseTraceEvent(input),
+    codexInvalidOutputFallbackAttempted: true,
+    codexInvalidOutputPhase: 'resume-failed',
+    codexInvalidOutputTraceType: 'failure',
+    providerTraceKind: 'codex.invalid_output_resume_failure',
+    schema: CODEX_INVALID_OUTPUT_TRACE_SCHEMA,
+    type: CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE,
+  }
+}
+
+function buildCodexInvalidOutputFallbackTraceEvent(input: {
+  error: VaultCliError
+  failureContext: CodexAppServerTurnFailureContext | null
+  fallbackError?: unknown
+  fallbackResult: 'failed' | 'succeeded'
+  resumeProviderSessionId: string
+  result?: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
+}): CodexInvalidOutputTraceRawEvent {
+  const base = buildCodexInvalidOutputBaseTraceEvent(input)
+  const fallbackErrorCode = input.fallbackError
+    ? readCodexDiagnosticErrorCode(input.fallbackError)
+    : null
+  const fallbackErrorMessageLength = input.fallbackError
+    ? readCodexDiagnosticErrorMessageLength(input.fallbackError)
+    : null
+  const freshSessionId = normalizeNullableString(input.result?.sessionId)
+
+  return {
+    ...base,
+    codexInvalidOutputFallbackErrorCode: fallbackErrorCode,
+    codexInvalidOutputFallbackErrorMessageLength: fallbackErrorMessageLength,
+    codexInvalidOutputFallbackErrorMessagePresent:
+      input.fallbackError ? fallbackErrorMessageLength !== null : null,
+    codexInvalidOutputFallbackEventCount: input.result?.jsonEvents.length ?? null,
+    codexInvalidOutputFallbackProviderActionCount:
+      input.result?.providerActionCount ?? null,
+    codexInvalidOutputFallbackResult: input.fallbackResult,
+    codexInvalidOutputFallbackSessionChanged:
+      freshSessionId && input.resumeProviderSessionId
+        ? freshSessionId !== input.resumeProviderSessionId
+        : null,
+    codexInvalidOutputFallbackSessionPresent: freshSessionId !== null,
+    codexInvalidOutputFallbackTurnPresent:
+      normalizeNullableString(input.result?.turnId) !== null,
+    codexInvalidOutputPhase:
+      input.fallbackResult === 'succeeded' ? 'fallback-succeeded' : 'fallback-failed',
+    codexInvalidOutputTraceType: 'fallback',
+    providerTraceKind: 'codex.invalid_output_resume_fallback',
+    schema: CODEX_INVALID_OUTPUT_TRACE_SCHEMA,
+    type: CODEX_INVALID_OUTPUT_FALLBACK_TRACE_TYPE,
+  }
+}
+
+function buildCodexInvalidOutputBaseTraceEvent(input: {
+  error: VaultCliError
+  failureContext: CodexAppServerTurnFailureContext | null
+  resumeProviderSessionId: string
+}): CodexInvalidOutputTraceRawEvent {
+  const failureContext = input.failureContext
+  const errorInputIndex = readCodexInvalidOutputInputIndex(input.error.message)
+  const summary = summarizeCodexInvalidOutputEventShapes(
+    failureContext?.jsonEvents ?? [],
+  )
+  const resumeSessionId = normalizeNullableString(input.resumeProviderSessionId)
+  const failureSessionId = normalizeNullableString(failureContext?.providerSessionId)
+
+  return {
+    codexInvalidOutputErrorCode: readCodexDiagnosticErrorCode(input.error),
+    codexInvalidOutputErrorField:
+      errorInputIndex !== null ? `input.${errorInputIndex}.output` : null,
+    codexInvalidOutputErrorKind:
+      errorInputIndex !== null ? 'invalid-input-output' : 'invalid-output',
+    codexInvalidOutputErrorMessageLength:
+      readCodexDiagnosticErrorMessageLength(input.error),
+    codexInvalidOutputFailureEventCount: failureContext?.jsonEvents.length ?? null,
+    codexInvalidOutputFailureEventKinds: summary.eventKinds,
+    codexInvalidOutputFailureEventMethods: summary.eventMethods,
+    codexInvalidOutputFailureEventStatuses: summary.eventStatuses,
+    codexInvalidOutputFailureOutputArrayLengths: summary.outputArrayLengths,
+    codexInvalidOutputFailureOutputKinds: summary.outputKinds,
+    codexInvalidOutputFailureOutputObjectKeys: summary.outputObjectKeys,
+    codexInvalidOutputFailureOutputPartTypes: summary.outputPartTypes,
+    codexInvalidOutputFailureOutputStringLengths: summary.outputStringLengths,
+    codexInvalidOutputFailureParamKeys: summary.paramKeys,
+    codexInvalidOutputFailureProviderActionCount:
+      failureContext?.providerActionCount ?? null,
+    codexInvalidOutputFailureSessionPresent: failureSessionId !== null,
+    codexInvalidOutputFailureTurnPresent:
+      normalizeNullableString(failureContext?.providerTurnId) !== null,
+    codexInvalidOutputInputIndex: errorInputIndex,
+    codexInvalidOutputResumeMatchesFailureSession:
+      resumeSessionId && failureSessionId ? resumeSessionId === failureSessionId : null,
+    codexInvalidOutputResumeSessionPresent: resumeSessionId !== null,
+  }
+}
+
+function emitCodexInvalidOutputTraceEvent(input: {
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  rawEvent: CodexInvalidOutputTraceRawEvent
+}): void {
+  if (!input.onTraceEvent) {
+    return
+  }
+
+  try {
+    input.onTraceEvent({
+      providerSessionId: null,
+      rawEvent: input.rawEvent,
+      updates: [],
+    })
+  } catch {
+    // Diagnostic traces are best-effort and must not affect assistant turns.
+  }
+}
+
+function readCodexInvalidOutputInputIndex(message: string): number | null {
+  const match = /\binput\.(\d+)\.output:\s*Invalid input\b/iu.exec(message)
+  if (!match?.[1]) {
+    return null
+  }
+
+  const value = Number.parseInt(match[1], 10)
+  return Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+function readCodexDiagnosticErrorCode(error: unknown): string | null {
+  if (error instanceof VaultCliError) {
+    return normalizeSafeCodexDiagnosticToken(error.code)
+  }
+
+  const record = asDiagnosticRecord(error)
+  return normalizeSafeCodexDiagnosticToken(readDiagnosticString(record, 'code'))
+}
+
+function readCodexDiagnosticErrorMessageLength(error: unknown): number | null {
+  if (error instanceof Error) {
+    return error.message.length
+  }
+
+  if (typeof error === 'string') {
+    return error.length
+  }
+
+  return null
+}
+
+function summarizeCodexInvalidOutputEventShapes(
+  events: readonly unknown[],
+): CodexInvalidOutputEventShapeSummary {
+  const summary: CodexInvalidOutputEventShapeSummary = {
+    eventKinds: [],
+    eventMethods: [],
+    eventStatuses: [],
+    outputArrayLengths: [],
+    outputKinds: [],
+    outputObjectKeys: [],
+    outputPartTypes: [],
+    outputStringLengths: [],
+    paramKeys: [],
+  }
+
+  for (const event of events.slice(-CODEX_INVALID_OUTPUT_RECENT_EVENT_LIMIT)) {
+    summarizeCodexInvalidOutputEventShape(event, summary)
+  }
+
+  return summary
+}
+
+function summarizeCodexInvalidOutputEventShape(
+  event: unknown,
+  summary: CodexInvalidOutputEventShapeSummary,
+): void {
+  const record = asDiagnosticRecord(event)
+  appendUniqueDiagnosticString(
+    summary.eventMethods,
+    describeCodexDiagnosticEventMethod(record),
+  )
+  collectCodexDiagnosticStructuralTokens(record, summary)
+  collectCodexDiagnosticOutputShapes(event, summary, 0)
+
+  const params = asDiagnosticRecord(record?.params)
+  if (!params) {
+    return
+  }
+
+  appendUniqueDiagnosticString(
+    summary.paramKeys,
+    summarizeDiagnosticKeySet(Object.keys(params)),
+  )
+
+  const turn = asDiagnosticRecord(params.turn)
+  appendUniqueDiagnosticString(
+    summary.eventStatuses,
+    normalizeSafeCodexDiagnosticStructuralToken(
+      readDiagnosticString(turn, 'status') ?? readDiagnosticString(params, 'status'),
+    ),
+  )
+}
+
+function describeCodexDiagnosticEventMethod(
+  record: Record<string, unknown> | null,
+): string | null {
+  const method = normalizeSafeCodexDiagnosticMethod(readDiagnosticString(record, 'method'))
+  if (method) {
+    return method
+  }
+
+  if (!record) {
+    return 'unknown'
+  }
+
+  if ('error' in record) {
+    return 'rpc.error'
+  }
+
+  if ('result' in record) {
+    return 'rpc.response'
+  }
+
+  return 'unknown'
+}
+
+function collectCodexDiagnosticStructuralTokens(
+  record: Record<string, unknown> | null,
+  summary: CodexInvalidOutputEventShapeSummary,
+): void {
+  if (!record) {
+    return
+  }
+
+  for (const source of [
+    record,
+    asDiagnosticRecord(record.params),
+    asDiagnosticRecord(asDiagnosticRecord(record.params)?.event),
+    asDiagnosticRecord(asDiagnosticRecord(record.params)?.item),
+    asDiagnosticRecord(asDiagnosticRecord(record.params)?.turn),
+  ]) {
+    if (!source) {
+      continue
+    }
+    for (const key of ['kind', 'status', 'type'] as const) {
+      appendUniqueDiagnosticString(
+        summary.eventKinds,
+        normalizeSafeCodexDiagnosticStructuralToken(readDiagnosticString(source, key)),
+      )
+    }
+  }
+}
+
+function collectCodexDiagnosticOutputShapes(
+  value: unknown,
+  summary: CodexInvalidOutputEventShapeSummary,
+  depth: number,
+): void {
+  if (depth > 4) {
+    return
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value.slice(0, CODEX_INVALID_OUTPUT_DETAIL_ARRAY_LIMIT)) {
+      collectCodexDiagnosticOutputShapes(entry, summary, depth + 1)
+    }
+    return
+  }
+
+  const record = asDiagnosticRecord(value)
+  if (!record) {
+    return
+  }
+
+  for (const [key, entry] of Object.entries(record)) {
+    if (key === 'output') {
+      summarizeCodexDiagnosticOutputValue(entry, summary)
+      continue
+    }
+    collectCodexDiagnosticOutputShapes(entry, summary, depth + 1)
+  }
+}
+
+function summarizeCodexDiagnosticOutputValue(
+  value: unknown,
+  summary: CodexInvalidOutputEventShapeSummary,
+): void {
+  const kind = resolveCodexDiagnosticValueKind(value)
+  appendUniqueDiagnosticString(summary.outputKinds, kind)
+
+  if (typeof value === 'string') {
+    appendUniqueDiagnosticNumber(summary.outputStringLengths, value.length)
+    return
+  }
+
+  if (Array.isArray(value)) {
+    appendUniqueDiagnosticNumber(summary.outputArrayLengths, value.length)
+    for (const entry of value.slice(0, CODEX_INVALID_OUTPUT_DETAIL_ARRAY_LIMIT)) {
+      const partType = normalizeSafeCodexDiagnosticStructuralToken(
+        readDiagnosticString(asDiagnosticRecord(entry), 'type'),
+      )
+      appendUniqueDiagnosticString(
+        summary.outputPartTypes,
+        partType ?? resolveCodexDiagnosticValueKind(entry),
+      )
+    }
+    return
+  }
+
+  const record = asDiagnosticRecord(value)
+  if (record) {
+    appendUniqueDiagnosticString(
+      summary.outputObjectKeys,
+      summarizeDiagnosticKeySet(Object.keys(record)),
+    )
+  }
+}
+
+function resolveCodexDiagnosticValueKind(value: unknown): string {
+  if (Array.isArray(value)) {
+    return 'array'
+  }
+
+  if (value === null) {
+    return 'null'
+  }
+
+  const valueType = typeof value
+  switch (valueType) {
+    case 'boolean':
+    case 'number':
+    case 'string':
+    case 'undefined':
+      return valueType
+    case 'object':
+      return 'object'
+    case 'bigint':
+    case 'function':
+    case 'symbol':
+      return 'other'
+  }
+}
+
+function summarizeDiagnosticKeySet(keys: readonly string[]): string | null {
+  const normalizedKeys = keys
+    .map((key) => classifyCodexDiagnosticKey(key))
+    .slice(0, 8)
+  if (normalizedKeys.length === 0) {
+    return null
+  }
+
+  return normalizedKeys.join(',')
+}
+
+function appendUniqueDiagnosticString(
+  output: string[],
+  value: string | null,
+): void {
+  if (
+    !value ||
+    output.includes(value) ||
+    output.length >= CODEX_INVALID_OUTPUT_DETAIL_ARRAY_LIMIT
+  ) {
+    return
+  }
+
+  output.push(value)
+}
+
+function appendUniqueDiagnosticNumber(output: number[], value: number): void {
+  if (
+    !Number.isFinite(value) ||
+    output.includes(value) ||
+    output.length >= CODEX_INVALID_OUTPUT_DETAIL_ARRAY_LIMIT
+  ) {
+    return
+  }
+
+  output.push(value)
+}
+
+function normalizeSafeCodexDiagnosticToken(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  if (!normalized || !SAFE_CODEX_DIAGNOSTIC_TOKEN_PATTERN.test(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
+function normalizeSafeCodexDiagnosticMethod(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim()
+  if (!normalized) {
+    return null
+  }
+
+  return SAFE_CODEX_DIAGNOSTIC_METHODS.has(normalized) ? normalized : 'other'
+}
+
+function normalizeSafeCodexDiagnosticStructuralToken(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeSafeCodexDiagnosticToken(value)
+  if (!normalized) {
+    return null
+  }
+
+  return SAFE_CODEX_DIAGNOSTIC_STRUCTURAL_TOKENS.has(normalized)
+    ? normalized
+    : 'other'
+}
+
+function classifyCodexDiagnosticKey(key: string): string {
+  if (isSensitiveAssistantFieldName(key)) {
+    return '[sensitive-key]'
+  }
+
+  const normalized = normalizeSafeCodexDiagnosticToken(key)
+  if (!normalized) {
+    return '[key]'
+  }
+
+  return SAFE_CODEX_DIAGNOSTIC_STRUCTURAL_KEYS.has(normalized) ? normalized : '[key]'
+}
+
+function readDiagnosticString(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): string | null {
+  const value = record?.[key]
+  return typeof value === 'string' ? value : null
+}
+
+function asDiagnosticRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 export function resolveCodexAssistantLabel(

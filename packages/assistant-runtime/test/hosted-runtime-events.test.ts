@@ -49,6 +49,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   executeHostedMailboxEvent,
+  emitHostedAssistantProviderTraceLog,
 } from "../src/hosted-runtime/events.ts";
 import { emitHostedAssistantContextTraceLog } from "../src/hosted-runtime/context-diagnostics.ts";
 
@@ -144,6 +145,134 @@ describe("executeHostedMailboxEvent", () => {
     expect(entry?.redacted).not.toHaveProperty("sessionTurnCount");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-session-id");
+  });
+
+  it("captures hosted Codex invalid-output diagnostics without raw identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_invalid_output",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: Object.fromEntries(
+        Array.from({ length: 60 }, (_value, index) => [
+          `context${index}`,
+          `value-${index}`,
+        ]),
+      ),
+      event: {
+        providerSessionId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-invalid-output-diagnostics.v1",
+          type: "assistant.codex.invalid_output_resume_failure",
+          providerTraceKind: "codex.invalid_output_resume_failure",
+          codexInvalidOutputTraceType: "failure",
+          codexInvalidOutputPhase: "resume-failed",
+          codexInvalidOutputInputIndex: 193,
+          codexInvalidOutputErrorField: "input.193.output",
+          codexInvalidOutputErrorCode: "ASSISTANT_CODEX_FAILED",
+          codexInvalidOutputErrorKind: "invalid-input-output",
+          codexInvalidOutputErrorMessageLength: 96,
+          codexInvalidOutputErrorPreview: "raw HbA1c 9.1 should not persist",
+          codexInvalidOutputFallbackAttempted: true,
+          codexInvalidOutputResumeSessionPresent: true,
+          codexInvalidOutputFailureSessionPresent: true,
+          codexInvalidOutputFailureTurnPresent: true,
+          codexInvalidOutputResumeMatchesFailureSession: true,
+          codexInvalidOutputFailureProviderActionCount: 2,
+          codexInvalidOutputFailureEventCount: 3,
+          codexInvalidOutputFailureEventMethods: [
+            "turn/started",
+            "turn/completed",
+            "private HbA1c 9.1",
+          ],
+          codexInvalidOutputFailureEventStatuses: ["failed", "private symptom"],
+          codexInvalidOutputFailureOutputKinds: ["array", "private health"],
+          codexInvalidOutputFailureOutputObjectKeys: [
+            "[key],text,type",
+            "HbA1c,patientName",
+          ],
+          codexInvalidOutputFailureOutputArrayLengths: [2],
+          codexInvalidOutputFailureOutputPartTypes: [
+            "input_text",
+            "input_image",
+            "https://example.invalid/raw-part-type",
+          ],
+          codexInvalidOutputFailureParamKeys: [
+            "[key]",
+            "output,HbA1c",
+          ],
+          providerSessionId: "raw-provider-session-id",
+        },
+        updates: [],
+      },
+      wake,
+    });
+
+    expect(entry).toEqual(
+      expect.objectContaining({
+        component: "runtime.provider",
+        eventId: "evt_codex_invalid_output",
+        level: "info",
+        message: "Hosted assistant Codex invalid-output diagnostics captured.",
+        phase: "wake.running",
+        redacted: expect.objectContaining({
+          codexInvalidOutputErrorCode: "ASSISTANT_CODEX_FAILED",
+          codexInvalidOutputErrorField: "input.193.output",
+          codexInvalidOutputErrorKind: "invalid-input-output",
+          codexInvalidOutputErrorMessageLength: 96,
+          codexInvalidOutputFallbackAttempted: true,
+          codexInvalidOutputFailureEventMethods: [
+            "turn/started",
+            "turn/completed",
+          ],
+          codexInvalidOutputFailureEventStatuses: ["failed"],
+          codexInvalidOutputFailureOutputObjectKeys: ["[key],text,type"],
+          codexInvalidOutputFailureOutputArrayLengths: [2],
+          codexInvalidOutputFailureOutputKinds: ["array"],
+          codexInvalidOutputFailureOutputPartTypes: [
+            "input_text",
+            "input_image",
+          ],
+          codexInvalidOutputFailureParamKeys: ["[key]"],
+          codexInvalidOutputFailureProviderActionCount: 2,
+          codexInvalidOutputInputIndex: 193,
+          codexInvalidOutputPhase: "resume-failed",
+          codexInvalidOutputTraceType: "failure",
+          providerTraceKind: "codex.invalid_output_resume_failure",
+          schema: "murph.assistant-codex-invalid-output-diagnostics.v1",
+        }),
+      }),
+    );
+    expect(entry?.redacted).not.toHaveProperty("providerSessionId");
+    expect(entry?.redacted).not.toHaveProperty("codexInvalidOutputErrorPreview");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("HbA1c");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("patientName");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("example.invalid");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime.provider",
+        message: "Hosted assistant Codex invalid-output diagnostics captured.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
   });
 
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
@@ -243,7 +372,7 @@ describe("executeHostedMailboxEvent", () => {
       executionContext,
       runtime,
       runtimeEnv: {
-        VERCEL_AI_API_KEY: "secret",
+        OPENAI_API_KEY: "secret",
       },
       vaultRoot: "/tmp/assistant-runtime-events",
     });
@@ -252,7 +381,7 @@ describe("executeHostedMailboxEvent", () => {
       "/tmp/assistant-runtime-events",
       wake,
       {
-        VERCEL_AI_API_KEY: "secret",
+        OPENAI_API_KEY: "secret",
       },
       runtime.resolvedConfig,
     );
@@ -447,7 +576,7 @@ describe("executeHostedMailboxEvent", () => {
           approvalPolicy: "never" as const,
           codexCommand: null,
           model: "gpt-5.5",
-          modelProvider: "vercel-ai-gateway",
+          modelProvider: "openai",
           oss: false,
           profile: null,
           reasoningEffort: "medium" as const,
