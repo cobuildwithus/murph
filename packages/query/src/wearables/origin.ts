@@ -27,6 +27,11 @@ export function resolveWearablePublicSourceProvider(input: {
     return provider;
   }
 
+  const sourceInstanceId = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceInstanceId);
+  if (sourceInstanceId) {
+    return sourceInstanceId;
+  }
+
   return "unknown";
 }
 

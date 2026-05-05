@@ -1246,6 +1246,11 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
     }),
     makeEntity({
       attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceInstanceId: "source-junction-unmapped-steps",
+          version: 1,
+        },
         dayKey: "2026-04-06",
         externalRef: makeExternalRef({
           resourceId: "junction-unknown-steps",
@@ -1300,9 +1305,9 @@ test("public wearable surfaces present Junction-backed Garmin as Garmin", () => 
   assert.equal(sourceHealth[0]?.providerDisplayName, "Garmin");
   assert.equal(sourceHealth[0]?.notes.some((note) => /\bjunction\b/iu.test(note)), false);
 
-  const unknownDay = summarizeWearableDay(vault, "2026-04-06");
-  assert.deepEqual(unknownDay?.providers, ["unknown"]);
-  assert.equal(unknownDay?.activity?.steps.selection.provider, "unknown");
+  const rawSourceDay = summarizeWearableDay(vault, "2026-04-06");
+  assert.deepEqual(rawSourceDay?.providers, ["source-junction-unmapped-steps"]);
+  assert.equal(rawSourceDay?.activity?.steps.selection.provider, "source-junction-unmapped-steps");
 
   const garminSleep = summarizeWearableSleep(vault, { providers: ["garmin"] })
     .find((night) => night.date === "2026-04-07");
