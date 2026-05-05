@@ -157,14 +157,20 @@ This local runtime remains the only place that writes wearable facts into the va
 
 These are internet-facing and provider-facing only. `:provider` is resolved through the shared provider-manifest registry, not an app-local provider list. Current configured providers include `junction`, `oura`, `strava`, and `whoop`; Junction-backed source providers such as Garmin are selected by connect target/source-provider metadata rather than by adding a separate hosted provider route.
 
+### Hosted browser-facing connection routes
+
+- `POST /api/connect-sources/:sourceId/start`
+- `GET /device-sync/connect/complete`
+
+These are the only browser-facing wearable connection start and completion routes. The start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP plus Junction-backed Garmin/Oura/Strava targets when those providers are configured. Successful hosted provider callbacks should redirect to the completion page so the user can continue into the text-Murph flow.
+
 ### Hosted settings-authenticated routes
 
 - `GET /api/settings/device-sync`
 - `GET /api/settings/device-sync/connections/:connectionId/status`
-- `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-These are the browser-facing wearable-management routes. They resolve direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so the UI can expose direct WHOOP plus Junction-backed Garmin/Oura/Strava targets when those providers are configured. Ordinary reads should come from durable hosted metadata in Postgres. Live execution/runtime inspection belongs only on explicit operational routes.
+These are read/manage wearable routes for the hosted settings page. Ordinary reads should come from durable hosted metadata in Postgres. Live execution/runtime inspection belongs only on explicit operational routes.
 
 ### Hosted assertion-authenticated browser bridge routes
 

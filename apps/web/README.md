@@ -463,11 +463,15 @@ Notes:
 
 ## Main routes
 
+Browser-facing wearable connection start/completion routes:
+
+- `POST /api/connect-sources/:sourceId/start`
+- `GET /device-sync/connect/complete`
+
 Hosted settings-authenticated wearable routes:
 
 - `GET /api/settings/device-sync`
 - `GET /api/settings/device-sync/connections/:connectionId/status`
-- `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 - `POST /api/settings/email/sync`
 
