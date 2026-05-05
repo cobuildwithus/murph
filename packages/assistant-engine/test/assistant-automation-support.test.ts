@@ -522,6 +522,8 @@ describe('assistant auto-reply failure observability', () => {
           providerSessionId: 'provider-session-1',
           retryable: false,
           status: '429',
+          upstreamErrorMessage:
+            `provider failed at ${syntheticHomePath}/detail with api_key=super-secret-token`,
         },
         details: {
           retryable: true,
@@ -548,6 +550,8 @@ describe('assistant auto-reply failure observability', () => {
       providerSessionId: 'provider-session-1',
       retryable: false,
       status: '429',
+      upstreamErrorMessage:
+        'provider failed at <HOME_DIR>/detail with api_key=[REDACTED]',
     })
     expect(snapshot.message).toContain('[REDACTED]')
     expect(snapshot.message).toContain('<HOME_DIR>')

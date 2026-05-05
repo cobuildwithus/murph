@@ -310,6 +310,8 @@ describe("executeHostedMailboxEvent", () => {
           codexResumeFailureCodexTurnStatus: "failed",
           codexResumeFailureErrorCode: "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
           codexResumeFailureErrorKind: "rpc-failed",
+          codexResumeFailureErrorMessage:
+            "Codex app-server turn failed. status failed. Authorization: Bearer raw-token-value",
           codexResumeFailureErrorMessageLength: 251,
           codexResumeFailureErrorMessagePresent: true,
           codexResumeFailureErrorPhrases: [
@@ -372,6 +374,8 @@ describe("executeHostedMailboxEvent", () => {
           codexResumeFailureCodexTurnStatus: "failed",
           codexResumeFailureErrorCode: "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
           codexResumeFailureErrorKind: "rpc-failed",
+          codexResumeFailureErrorMessage:
+            "Codex app-server turn failed. status failed. Authorization=Bearer [redacted]",
           codexResumeFailureErrorMessageLength: 251,
           codexResumeFailureErrorMessagePresent: true,
           codexResumeFailureErrorPhrases: [
@@ -404,6 +408,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(entry?.redacted).not.toHaveProperty("providerSessionId");
     expect(entry?.redacted).not.toHaveProperty("codexResumeFailureErrorPreview");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-token-value");
     expect(JSON.stringify(entry?.redacted)).not.toContain("privateField");
     expect(JSON.stringify(entry?.redacted)).not.toContain("privateName");
     expect(JSON.stringify(entry?.redacted)).not.toContain("example.invalid");

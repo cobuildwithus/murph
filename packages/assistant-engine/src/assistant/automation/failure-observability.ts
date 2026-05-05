@@ -59,6 +59,8 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
 ])
 
 const SAFE_FAILURE_TOP_LEVEL_KEYS = new Set(['outboxIntentId'])
+const SAFE_FAILURE_DIAGNOSTIC_TEXT_KEY_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u
 
 export function describeAssistantAutoReplyFailure(
   error: unknown,
@@ -279,7 +281,7 @@ function pickFailureContext(
 
   return Object.fromEntries(
     Object.entries(value).flatMap(([key, entryValue]) => {
-      if (!SAFE_FAILURE_CONTEXT_KEYS.has(key)) {
+      if (!isSafeFailureContextKey(key)) {
         return []
       }
 
@@ -287,6 +289,11 @@ function pickFailureContext(
       return sanitizedValue === undefined ? [] : [[key, sanitizedValue]]
     }),
   )
+}
+
+function isSafeFailureContextKey(key: string): boolean {
+  return SAFE_FAILURE_CONTEXT_KEYS.has(key) ||
+    SAFE_FAILURE_DIAGNOSTIC_TEXT_KEY_PATTERN.test(key)
 }
 
 function sanitizeFailureContextValue(value: unknown): unknown {

@@ -29,7 +29,10 @@ import {
   type AssistantProviderUsage,
 } from './types.js'
 import { normalizeNullableString } from '../shared.js'
-import { isSensitiveAssistantFieldName } from '../redaction.js'
+import {
+  isSensitiveAssistantFieldName,
+  sanitizeAssistantPortableStateString,
+} from '../redaction.js'
 import type {
   AssistantModelImagePart,
   AssistantUserMessageContentPart,
@@ -54,6 +57,7 @@ const CODEX_RESUME_FAILURE_TRACE_TYPE =
   'assistant.codex.resume_failure'
 const CODEX_INVALID_OUTPUT_RECENT_EVENT_LIMIT = 12
 const CODEX_INVALID_OUTPUT_DETAIL_ARRAY_LIMIT = 12
+const CODEX_DIAGNOSTIC_ERROR_MESSAGE_MAX_LENGTH = 2048
 const SAFE_CODEX_DIAGNOSTIC_TOKEN_PATTERN = /^[A-Za-z0-9_.-]{1,80}$/u
 const SAFE_CODEX_DIAGNOSTIC_METHODS = new Set([
   'initialize',
@@ -409,6 +413,7 @@ function buildCodexResumeFailureTraceEvent(input: {
   )
   const resumeSessionId = normalizeNullableString(input.resumeProviderSessionId)
   const failureSessionId = normalizeNullableString(failureContext?.providerSessionId)
+  const errorMessage = readCodexDiagnosticErrorMessage(input.error)
   const errorMessageLength = readCodexDiagnosticErrorMessageLength(input.error)
 
   return {
@@ -422,11 +427,13 @@ function buildCodexResumeFailureTraceEvent(input: {
       ),
     codexResumeFailureErrorCode: readCodexDiagnosticErrorCode(input.error),
     codexResumeFailureErrorKind: classifyCodexResumeFailureErrorKind(input.error),
+    codexResumeFailureErrorMessage:
+      sanitizeCodexDiagnosticErrorMessage(errorMessage),
     codexResumeFailureErrorMessageLength: errorMessageLength,
     codexResumeFailureErrorMessagePresent: errorMessageLength !== null,
     codexResumeFailureErrorPhrases:
       collectCodexResumeFailureErrorPhrases(
-        readCodexDiagnosticErrorMessage(input.error) ?? '',
+        errorMessage ?? '',
       ),
     codexResumeFailureEventCount: failureContext?.jsonEvents.length ?? null,
     codexResumeFailureEventKinds: summary.eventKinds,
@@ -453,6 +460,22 @@ function buildCodexResumeFailureTraceEvent(input: {
     schema: CODEX_RESUME_FAILURE_TRACE_SCHEMA,
     type: CODEX_RESUME_FAILURE_TRACE_TYPE,
   }
+}
+
+function sanitizeCodexDiagnosticErrorMessage(value: string | null): string | null {
+  if (!value) {
+    return null
+  }
+
+  const redacted = sanitizeAssistantPortableStateString(
+    value
+      .replace(/\r\n?/gu, '\n')
+      .replace(/\+\d[\d().\s-]{7,}\d/gu, '[phone]')
+      .replace(/(^|[\s(])\/[^\s)]+/gu, '$1[path]'),
+    CODEX_DIAGNOSTIC_ERROR_MESSAGE_MAX_LENGTH,
+  )
+
+  return normalizeNullableString(redacted)
 }
 
 function buildCodexInvalidOutputResumeFailureTraceEvent(input: {

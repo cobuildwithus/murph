@@ -18,6 +18,7 @@ import {
   extractHostedAssistantNotificationRedactedDetails,
   isHostedConversationMessageWake,
   sanitizeHostedExecutionStructuredLogDetails,
+  sanitizeHostedExecutionStructuredLogText,
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
@@ -216,6 +217,9 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
   "codexResumeFailureOutputArrayLengths",
   "codexResumeFailureOutputStringLengths",
 ] as const;
+const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_MAX_LENGTH = 2048;
+const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_KEY_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
 
 export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
@@ -502,7 +506,7 @@ export function emitHostedAssistantProviderTraceLog(input: {
   }
 
   const redactedDiagnostic =
-    sanitizeHostedExecutionStructuredLogDetails(diagnostic.details) ?? {};
+    sanitizeHostedAssistantProviderDiagnosticDetails(diagnostic.details);
   const redactedContext =
     sanitizeHostedExecutionStructuredLogDetails(input.details ?? {}) ?? {};
   const redactedDetails = {
@@ -562,6 +566,27 @@ function readHostedAssistantProviderDiagnosticTrace(
   }
 
   return null;
+}
+
+function sanitizeHostedAssistantProviderDiagnosticDetails(
+  details: HostedExecutionStructuredLogDetails,
+): HostedExecutionStructuredLogDetails {
+  const sanitized = sanitizeHostedExecutionStructuredLogDetails(details) ?? {};
+
+  for (const [key, value] of Object.entries(details)) {
+    if (!isHostedAssistantProviderDiagnosticTextKey(key) || typeof value !== "string") {
+      continue;
+    }
+
+    const text = sanitizeHostedExecutionStructuredLogText(value);
+    if (!text || text.length > HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_MAX_LENGTH) {
+      continue;
+    }
+
+    sanitized[key] = text;
+  }
+
+  return sanitized;
 }
 
 function readHostedAssistantProviderPlanDiagnosticTrace(
@@ -818,6 +843,11 @@ function readHostedAssistantCodexResumeFailureDiagnosticTrace(
   );
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
+    "codexResumeFailureErrorMessage",
+    readHostedAssistantProviderDiagnosticText(record, "codexResumeFailureErrorMessage"),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
     "codexResumeFailureCodexFailureStage",
     readHostedAssistantProviderDiagnosticAllowedString(
       record,
@@ -1012,6 +1042,33 @@ function readHostedAssistantProviderDiagnosticAllowedString(
 
   const stringValue = readHostedAssistantProviderPlanString(record, key);
   return stringValue && allowedValues.has(stringValue) ? stringValue : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticText(
+  record: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+  if (!isHostedAssistantProviderDiagnosticTextKey(key) || typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = sanitizeHostedExecutionStructuredLogText(value);
+  return normalized
+    && normalized.length <= HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_MAX_LENGTH
+    ? normalized
+    : undefined;
+}
+
+function isHostedAssistantProviderDiagnosticTextKey(key: string): boolean {
+  return HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_KEY_PATTERN.test(key);
 }
 
 function readHostedAssistantCodexInvalidOutputField(
