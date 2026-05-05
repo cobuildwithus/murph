@@ -177,7 +177,7 @@ run_timed_step() {
 
   verify_log "start ${label}"
   if "$@"; then
-    verify_log "done ${label} (${SECONDS}s total, $((SECONDS - started_at))s step)"
+    verify_log "done ${label} ($((SECONDS - started_at))s step, ${SECONDS}s since command start)"
     return 0
   else
     step_status=$?
@@ -337,12 +337,12 @@ run_command_with_retry() {
 
     if "$@"; then
       step_elapsed=$((SECONDS - started_at))
-      verify_log "done ${label} (${step_elapsed}s step, $((SECONDS - total_started_at))s total)"
+      verify_log "done ${label} (${step_elapsed}s step, $((SECONDS - total_started_at))s across attempts)"
       return 0
     fi
 
     step_elapsed=$((SECONDS - started_at))
-    verify_log "failed ${label} (${step_elapsed}s step, $((SECONDS - total_started_at))s total)"
+    verify_log "failed ${label} (${step_elapsed}s step, $((SECONDS - total_started_at))s across attempts)"
 
     if [[ "$attempt" -ge "$max_attempts" ]]; then
       return 1
@@ -401,10 +401,14 @@ run_package_command_without_node_v8_coverage_with_retry() {
 run_app_verify_command_with_retry() {
   local app_dir="$1"
   local skip_cloudflare_typecheck="${2:-0}"
+  local health_commons_generated_prepared="${3:-0}"
   local env_args=(env -u NODE_V8_COVERAGE)
 
   if [[ "$app_dir" == "apps/cloudflare" && "$skip_cloudflare_typecheck" == "1" ]]; then
     env_args+=(MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK=1)
+  fi
+  if [[ "$health_commons_generated_prepared" == "1" ]]; then
+    env_args+=(MURPH_HEALTH_COMMONS_GENERATED_PREPARED=1)
   fi
 
   run_command_with_retry \
@@ -483,16 +487,17 @@ run_test_packages_common() {
 
 run_test_apps() {
   local skip_cloudflare_typecheck="${1:-0}"
+  local health_commons_generated_prepared="${2:-0}"
 
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
 
     # App verification should not emit V8 coverage into the repo coverage workspace.
-    run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" &
+    run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
     register_background_pid "$hosted_web_verify_pid"
-    run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" &
+    run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" &
     local cloudflare_verify_pid="$!"
     pids+=("$cloudflare_verify_pid")
     register_background_pid "$cloudflare_verify_pid"
@@ -504,8 +509,8 @@ run_test_apps() {
     return 0
   fi
 
-  run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck"
-  run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck"
+  run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared"
+  run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared"
 }
 
 prepare_repo_vitest_runtime_artifacts() {
@@ -825,7 +830,7 @@ run_test_packages_coverage() {
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   else
-    run_timed_step "Health Commons generated catalog" generate_health_commons_catalog_with_retry
+    verify_log "skip Health Commons generated catalog; prepared runtime artifacts already covered it"
   fi
   run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared"
 }
@@ -857,19 +862,19 @@ run_test_coverage() {
     register_background_pid "$smoke_pid"
 
     if [[ "$acceptance_early_cloudflare_verify" == "1" ]]; then
-      run_app_verify_command_with_retry "apps/cloudflare" "$acceptance_typechecked" &
+      run_app_verify_command_with_retry "apps/cloudflare" "$acceptance_typechecked" 1 &
       local cloudflare_verify_pid="$!"
       register_background_pid "$cloudflare_verify_pid"
 
       wait_for_background_jobs "$coverage_pid" "$smoke_pid" "$cloudflare_verify_pid"
-      run_app_verify_command_with_retry "apps/web" "$acceptance_typechecked"
+      run_app_verify_command_with_retry "apps/web" "$acceptance_typechecked" 1
     else
       wait_for_background_jobs "$coverage_pid" "$smoke_pid"
-      run_timed_step "App verification" run_test_apps "$acceptance_typechecked"
+      run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1
     fi
   else
     run_timed_step "Package coverage suite" run_test_packages_coverage 0 "$acceptance_typechecked"
-    run_timed_step "App verification" run_test_apps "$acceptance_typechecked"
+    run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1
     run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage
   fi
 }
