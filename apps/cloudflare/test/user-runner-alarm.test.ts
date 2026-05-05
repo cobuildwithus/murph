@@ -28,6 +28,10 @@ import { createTestSqlStorage } from "./sql-storage.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
 const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
+const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
+  HOSTED_ASSISTANT_PROVIDER: "openai",
+  OPENAI_API_KEY: "test-openai-key",
+} as const;
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -1484,7 +1488,7 @@ function createRunnerHarness(options: {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       })),
       bucket,
-      {},
+      TEST_RUNNER_RUNTIME_ENV_SOURCE,
       options.runnerContainerNamespace ?? null,
     ),
     sql,
@@ -1605,7 +1609,7 @@ function createRunnerCryptoContextHarness(
         : { HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: String(options.maxEventAttempts) }),
     })),
     new MemoryEncryptedR2Bucket(),
-    {},
+    TEST_RUNNER_RUNTIME_ENV_SOURCE,
     {
       getByName(name: string) {
         expect(name).toBe("member_123");
