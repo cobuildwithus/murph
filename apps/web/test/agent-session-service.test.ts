@@ -137,7 +137,7 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         async persistStoredConnectionTokenBundle() {
           return;
         },
-        async withConnectionRefreshLock<TResult>(
+        async withConnectionMutationLock<TResult>(
           _connectionId: string,
           callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
         ): Promise<TResult> {
@@ -263,7 +263,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         async getStoredConnectionAccountForUser() {
           return createProviderConfigStoredConnectionRecord();
         },
-        async withConnectionRefreshLock<TResult>(
+        async withConnectionMutationLock<TResult>(
           _connectionId: string,
           callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
         ): Promise<TResult> {
@@ -816,7 +816,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           ...account,
         };
       },
-      async withConnectionRefreshLock<TResult>(
+      async withConnectionMutationLock<TResult>(
         _connectionId: string,
         callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
       ): Promise<TResult> {

@@ -172,8 +172,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.listConnectionsForUser(userId);
   }
 
-  async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
-    return this.connections.getConnectionForUser(userId, connectionId);
+  async getConnectionForUser(
+    userId: string,
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<PublicDeviceSyncAccount | null> {
+    return this.connections.getConnectionForUser(userId, connectionId, tx);
   }
 
   async getStoredConnectionAccountForUser(
@@ -329,13 +333,13 @@ export class PrismaDeviceSyncControlPlaneStore
     connectionId: string,
     patch: HostedLocalHeartbeatPatch,
   ): Promise<PublicDeviceSyncAccount | null> {
-    return this.withConnectionRefreshLock(
+    return this.withConnectionMutationLock(
       connectionId,
       async (tx) => this.localHeartbeats.updateConnectionFromLocalHeartbeat(userId, connectionId, patch, tx),
     );
   }
 
-  async withConnectionRefreshLock<TResult>(
+  async withConnectionMutationLock<TResult>(
     connectionId: string,
     callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
   ): Promise<TResult> {

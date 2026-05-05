@@ -235,7 +235,7 @@ function createAuthorityHarness(input: {
       },
     },
     syncDurableConnectionState,
-    withConnectionRefreshLock: vi.fn(async (
+    withConnectionMutationLock: vi.fn(async (
       _connectionId: string,
       callback: (tx: { deviceConnection: { findFirst: typeof findFirst; update: typeof update } }) => Promise<unknown>,
     ) =>
@@ -483,7 +483,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         tokenBundle: null,
       }),
     );
-    expect(harness.store.getConnectionForUser).toHaveBeenCalledWith("user_123", "conn_123");
+    expect(harness.store.getConnectionForUser).toHaveBeenCalledWith("user_123", "conn_123", expect.any(Object));
     expect(harness.storedAccount).toBeNull();
 
     const retokenizedResponse = await applyHostedDeviceSyncRuntimeResult({

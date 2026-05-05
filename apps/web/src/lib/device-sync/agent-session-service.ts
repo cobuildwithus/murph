@@ -160,7 +160,7 @@ export class HostedDeviceSyncAgentSessionService {
     const now = toIsoTimestamp(new Date());
     const forceRefresh = options.force === true;
 
-    const result = await this.store.withConnectionRefreshLock<HostedTokenRefreshLockResult>(connectionId, async (tx) => {
+    const result = await this.store.withConnectionMutationLock<HostedTokenRefreshLockResult>(connectionId, async (tx) => {
       const record = await tx.deviceConnection.findFirst({
         where: {
           id: connectionId,

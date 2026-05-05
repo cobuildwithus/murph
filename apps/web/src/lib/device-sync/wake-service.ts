@@ -102,67 +102,92 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   }
 
   const now = toIsoTimestamp(new Date());
-  const disconnectLocalState = {
-    lastErrorCode: warning?.code ?? null,
-    lastErrorMessage: warning?.message ?? null,
-    lastSyncCompletedAt: existing.lastSyncCompletedAt,
-    lastSyncErrorAt: existing.lastSyncErrorAt,
-    lastSyncStartedAt: existing.lastSyncStartedAt,
-    lastWebhookAt: existing.lastWebhookAt,
-    nextReconcileAt: null,
-  } as const;
-  const connection: PublicDeviceSyncAccount = {
-    ...existing,
-    accessTokenExpiresAt: null,
-    lastErrorCode: disconnectLocalState.lastErrorCode,
-    lastErrorMessage: disconnectLocalState.lastErrorMessage,
-    nextReconcileAt: null,
-    setupExpiresAt: null,
-    setupPhase: null,
-    status: "disconnected",
-    updatedAt: now,
-  };
+  const disconnectResult = await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const freshExisting = await input.store.getConnectionForUser(input.userId, input.connectionId, tx);
 
-  const hint = {
-    reason: "user_disconnect",
-    ...(warning ? { revokeWarning: warning } : {}),
-  } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
-  const wake = buildHostedDeviceSyncWake({
-    connectionId: input.connectionId,
-    hint,
-    occurredAt: now,
-    provider: existing.provider,
-    source: "disconnect",
-    userId: input.userId,
-  });
-  await persistHostedDeviceSyncWake({
-    wake,
-    store: input.store,
-    persist: async (tx) => {
-      await input.store.syncDurableConnectionState(connection, tx);
-      await input.store.persistStoredConnectionTokenBundle({
-        connectionId: input.connectionId,
-        externalAccountId: storedAccount?.externalAccountId ?? null,
-        provider: existing.provider,
-        tokenBundle: null,
-        tx,
+    if (!freshExisting) {
+      throw deviceSyncError({
+        code: "CONNECTION_NOT_FOUND",
+        message: "Hosted device-sync connection was not found for the current user.",
+        retryable: false,
+        httpStatus: 404,
       });
-      await input.store.createSignal({
-        userId: input.userId,
-        connectionId: input.connectionId,
-        provider: existing.provider,
-        kind: "disconnected",
-        occurredAt: now,
-        reason: normalizeNullableString(hint.reason),
-        revokeWarning: warning ?? null,
-        createdAt: now,
-        tx,
-      });
-    },
+    }
+
+    const freshStoredAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    const freshStoredTokenBundle = buildStoredTokenBundle(freshStoredAccount);
+
+    if (freshExisting.status === "disconnected" && !freshStoredTokenBundle) {
+      return {
+        connection: freshExisting,
+        mailboxItemId: null,
+      };
+    }
+
+    const disconnectedConnection: PublicDeviceSyncAccount = {
+      ...freshExisting,
+      accessTokenExpiresAt: null,
+      lastErrorCode: warning?.code ?? null,
+      lastErrorMessage: warning?.message ?? null,
+      nextReconcileAt: null,
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "disconnected",
+      updatedAt: now,
+    };
+    const hint = {
+      reason: "user_disconnect",
+      ...(warning ? { revokeWarning: warning } : {}),
+    } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
+    const wake = buildHostedDeviceSyncWake({
+      connectionId: input.connectionId,
+      hint,
+      occurredAt: now,
+      provider: freshExisting.provider,
+      source: "disconnect",
+      userId: input.userId,
+    });
+
+    await input.store.syncDurableConnectionState(disconnectedConnection, tx);
+    await input.store.persistStoredConnectionTokenBundle({
+      connectionId: input.connectionId,
+      externalAccountId: freshStoredAccount?.externalAccountId ?? null,
+      provider: freshExisting.provider,
+      tokenBundle: null,
+      tx,
+    });
+    await input.store.createSignal({
+      userId: input.userId,
+      connectionId: input.connectionId,
+      provider: freshExisting.provider,
+      kind: "disconnected",
+      occurredAt: now,
+      reason: normalizeNullableString(hint.reason),
+      revokeWarning: warning ?? null,
+      createdAt: now,
+      tx,
+    });
+    const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+      envelope: wake,
+      tx,
+    });
+
+    return {
+      connection: disconnectedConnection,
+      mailboxItemId: mailboxAppend.item.id,
+    };
   });
+
+  if (disconnectResult.mailboxItemId) {
+    await startHostedDeviceSyncWakeWorkflow(disconnectResult.mailboxItemId);
+  }
 
   return {
-    connection,
+    connection: disconnectResult.connection,
     ...(warning ? { warning } : {}),
   };
 }
@@ -387,6 +412,12 @@ async function persistHostedDeviceSyncWake(input: {
     });
   }
 
+  await startHostedDeviceSyncWakeWorkflow(mailboxItemId);
+
+  await input.complete?.();
+}
+
+async function startHostedDeviceSyncWakeWorkflow(mailboxItemId: string): Promise<void> {
   try {
     await startHostedWebhookNudgeWorkflow({
       mailboxItemId,
@@ -401,8 +432,6 @@ async function persistHostedDeviceSyncWake(input: {
       retryable: true,
     });
   }
-
-  await input.complete?.();
 }
 
 async function persistHostedDeviceSyncWebhookAccepted(input: {
