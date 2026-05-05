@@ -11,6 +11,11 @@ import {
   shouldRunHostedWebProductionMigrations,
   type HostedWebProductionMigrationEnvironment,
 } from "../scripts/run-production-migrations";
+import {
+  hostedWebPrismaMigrateDeployCommand,
+  runHostedWebPrismaMigrateDeploy,
+  resolveHostedWebMigrationDatabaseUrl,
+} from "../scripts/run-prisma-migrate-deploy";
 
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
@@ -101,6 +106,84 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("uses DIRECT_DATABASE_URL for Prisma migrations when it is configured", () => {
+    assert.deepEqual(
+      resolveHostedWebMigrationDatabaseUrl({
+        DATABASE_URL: "postgresql://runtime.example.com:5432/app",
+        DIRECT_DATABASE_URL: "postgresql://direct.example.com:5432/app",
+      }),
+      {
+        source: "DIRECT_DATABASE_URL",
+        url: "postgresql://direct.example.com:5432/app",
+      },
+    );
+  });
+
+  test("requires DIRECT_DATABASE_URL for Vercel production migrations", () => {
+    assert.throws(
+      () =>
+        resolveHostedWebMigrationDatabaseUrl({
+          VERCEL: "1",
+          VERCEL_ENV: "production",
+          DATABASE_URL: "postgresql://runtime.example.com:5432/app",
+        }),
+      /DIRECT_DATABASE_URL is required/u,
+    );
+  });
+
+  test("rejects known pooled Postgres endpoints for Prisma migrations", () => {
+    assert.throws(
+      () =>
+        resolveHostedWebMigrationDatabaseUrl({
+          DIRECT_DATABASE_URL: "postgresql://pool.example.com:6432/app",
+        }),
+      /known pooled Postgres port 6432/u,
+    );
+  });
+
+  test("rejects the other known pooled Postgres endpoint for Prisma migrations", () => {
+    assert.throws(
+      () =>
+        resolveHostedWebMigrationDatabaseUrl({
+          DIRECT_DATABASE_URL: "postgresql://pool.example.com:6543/app",
+        }),
+      /known pooled Postgres port 6543/u,
+    );
+  });
+
+  test("passes the selected direct migration URL to the Prisma child process", async () => {
+    const calls: Array<{
+      args: readonly string[];
+      command: string;
+      databaseUrl: string | undefined;
+      directDatabaseUrl: string | undefined;
+    }> = [];
+
+    await runHostedWebPrismaMigrateDeploy(
+      {
+        DATABASE_URL: "postgresql://runtime.example.com:5432/app",
+        DIRECT_DATABASE_URL: "postgresql://direct.example.com:5432/app",
+      },
+      async (command, args, environment) => {
+        calls.push({
+          args,
+          command,
+          databaseUrl: environment.DATABASE_URL,
+          directDatabaseUrl: environment.DIRECT_DATABASE_URL,
+        });
+      },
+    );
+
+    assert.deepEqual(calls, [
+      {
+        command: hostedWebPrismaMigrateDeployCommand.command,
+        args: hostedWebPrismaMigrateDeployCommand.args,
+        databaseUrl: "postgresql://direct.example.com:5432/app",
+        directDatabaseUrl: "postgresql://direct.example.com:5432/app",
+      },
+    ]);
+  });
+
   test("keeps production migrations out of the package build hook", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
@@ -122,6 +205,17 @@ describe("hosted web production migration guard", () => {
       hookScript,
       "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     );
-    assert.equal(scripts["prisma:migrate:deploy"], "prisma migrate deploy");
+    assert.equal(
+      scripts["prisma:migrate:deploy"],
+      "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
+    );
+    assert.deepEqual(hostedWebPrismaMigrateDeployCommand.args, [
+      "--dir",
+      "apps/web",
+      "exec",
+      "prisma",
+      "migrate",
+      "deploy",
+    ]);
   });
 });

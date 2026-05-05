@@ -31,7 +31,7 @@ export async function runHostedWebProductionMigrationsIfNeeded(
     return "skipped";
   }
 
-  console.log("Applying pending hosted web Prisma migrations before production build.");
+  console.log("Applying pending hosted web Prisma migrations.");
   await runCommand(
     hostedWebProductionMigrationCommand.command,
     hostedWebProductionMigrationCommand.args,
