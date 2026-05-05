@@ -7,6 +7,7 @@ import { runForegroundCommand } from "./process.ts";
 export type HostedLocalE2eScenarioName =
   | "all"
   | "checkpoint-baseline"
+  | "codex-gateway-prefix"
   | "device-connect"
   | "mailbox-platform-env"
   | "linq-first-contact"
@@ -18,6 +19,7 @@ export type HostedLocalE2eScenarioName =
 export interface HostedLocalE2eScenario {
   aliases?: readonly HostedLocalE2eScenarioName[];
   file: string;
+  manualOnly?: boolean;
   name: Exclude<HostedLocalE2eScenarioName, "all">;
   requiresParserToolchain?: boolean;
 }
@@ -26,6 +28,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
     name: "checkpoint-baseline",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",
+    manualOnly: true,
+    name: "codex-gateway-prefix",
   },
   {
     file: "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
@@ -64,7 +71,7 @@ export function resolveHostedLocalE2eScenarios(
 ): readonly HostedLocalE2eScenario[] {
   const normalized = (scenarioName?.trim() || "all") as HostedLocalE2eScenarioName;
   if (normalized === "all") {
-    return hostedLocalE2eScenarios;
+    return hostedLocalE2eScenarios.filter((scenario) => scenario.manualOnly !== true);
   }
   const scenario = hostedLocalE2eScenarios.find(
     (entry) => entry.name === normalized || entry.aliases?.includes(normalized),
@@ -80,6 +87,10 @@ export function resolveHostedLocalE2eScenarios(
     );
   }
   return [scenario];
+}
+
+export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[] {
+  return hostedLocalE2eScenarios;
 }
 
 export async function runHostedLocalE2eSuite(

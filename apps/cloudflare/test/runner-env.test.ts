@@ -5,6 +5,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   readHostedRuntimeCommitTimeoutConfigValue,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
@@ -202,6 +203,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       LINQ_API_BASE_URL: "http://localhost:4011",
@@ -214,6 +216,8 @@ describe("buildHostedRunnerContainerEnv", () => {
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         "http://host.docker.internal:4111/v1",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+        "http://host.docker.internal:4222/v1",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
       TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
@@ -226,6 +230,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
@@ -236,6 +241,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
@@ -329,6 +335,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("preserves hosted automation runner secrets while dropping operator-only keys", () => {
     expect(filterHostedRunnerSecrets({
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "member-token",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://evil.example.test:1234",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
@@ -350,11 +357,12 @@ describe("buildHostedRunnerContainerEnv", () => {
       {
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "member-token",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://evil.example.test:1234",
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
       {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:
-          `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV},${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV},LINQ_WEBHOOK_SECRET`,
+          `${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV},${HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV},${HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV},LINQ_WEBHOOK_SECRET`,
       },
     )).toEqual({});
   });

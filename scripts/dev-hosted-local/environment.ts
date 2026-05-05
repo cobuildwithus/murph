@@ -8,6 +8,7 @@ import {
   DEFAULT_STRIPE_ENV_FILE,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
@@ -150,6 +151,10 @@ export function mergeCloudflareLocalEnv(input: {
     overrides: normalizedOverrides,
   });
   stripStaleHostedLocalCodexAppServerStubEnv({
+    env: resolvedExisting,
+    overrides: normalizedOverrides,
+  });
+  stripStaleHostedLocalCodexModelProviderBaseUrlEnv({
     env: resolvedExisting,
     overrides: normalizedOverrides,
   });
@@ -441,6 +446,17 @@ function stripStaleHostedLocalCodexAppServerStubEnv(input: {
   }
 
   delete input.env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV];
+}
+
+function stripStaleHostedLocalCodexModelProviderBaseUrlEnv(input: {
+  env: Record<string, string | undefined>;
+  overrides: Record<string, string | undefined>;
+}): void {
+  if (input.overrides[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim()) {
+    return;
+  }
+
+  delete input.env[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV];
 }
 
 function stripStaleHostedLocalOidcJwksOverride(input: {

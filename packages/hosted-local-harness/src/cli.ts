@@ -7,7 +7,11 @@ import type { HostedLocalDevConfig } from "../../../scripts/dev-hosted-local/typ
 import { startHostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
 import type { HostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
 import { resolveHostedLocalDevConfig } from "../../../scripts/dev-hosted-local/config.ts";
-import { runHostedLocalE2eSuite, resolveHostedLocalE2eScenarios } from "./e2e.ts";
+import {
+  listHostedLocalE2eScenarios,
+  resolveHostedLocalE2eScenarios,
+  runHostedLocalE2eSuite,
+} from "./e2e.ts";
 import { listHostedLocalProfiles, applyHostedLocalProfile } from "./profiles.ts";
 import { runDoctorCommand, runForegroundCommand } from "./process.ts";
 import {
@@ -434,8 +438,9 @@ function printE2eHelp(stdout: NodeJS.WritableStream): void {
 }
 
 function printE2eScenarios(stdout: NodeJS.WritableStream): void {
-  for (const scenario of resolveHostedLocalE2eScenarios("all")) {
-    stdout.write(`${scenario.name}\t${scenario.file}\n`);
+  for (const scenario of listHostedLocalE2eScenarios()) {
+    const suffix = scenario.manualOnly ? "\tmanual" : "";
+    stdout.write(`${scenario.name}\t${scenario.file}${suffix}\n`);
   }
 }
 

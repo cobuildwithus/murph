@@ -511,6 +511,35 @@ describe("hosted local dev stack", () => {
     expect(cloudflareEnv.NODE_ENV).toBe("test");
   });
 
+  it("preserves test NODE_ENV for the local E2E Codex model provider base URL override", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 107 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 108 }));
+
+    const environmentModule = await import("./environment.ts");
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL: "http://127.0.0.1:4222/v1",
+        NODE_ENV: "test",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
+    expect(resolveInput?.overrides).toMatchObject({
+      HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL: "http://127.0.0.1:4222/v1",
+      NODE_ENV: "test",
+    });
+
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.NODE_ENV).toBe("test");
+  });
+
   it("scrubs pulled hosted crypto material unless remote hosted crypto keys are explicitly enabled", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))

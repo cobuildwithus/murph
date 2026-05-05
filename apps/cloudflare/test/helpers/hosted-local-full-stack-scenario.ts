@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
 import { promisify } from "node:util";
 
@@ -9,6 +9,9 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
   DEFAULT_DATABASE_URL,
@@ -109,6 +112,8 @@ export interface HostedLocalFullStackScenario {
 export async function startHostedLocalFullStackScenario(input: {
   additionalEnv?: NodeJS.ProcessEnv;
   assistantProviderMode?: HostedLocalAssistantProviderMode;
+  assistantProviderMaxResponsesApiRequestBodies?: number;
+  assistantProviderRecorder?: boolean;
   assistantProviderResponses?: readonly string[];
   assistantProviderStubModelId?: string;
   localDatabaseUrl?: string;
@@ -138,9 +143,12 @@ export async function startHostedLocalFullStackScenario(input: {
   let harness: HostedLocalDevHarness | null = null;
 
   try {
-    if (assistantProviderMode === "stub") {
+    if (assistantProviderMode === "stub" || input.assistantProviderRecorder === true) {
       assistantProviderServer = await startAssistantProviderStubServer({
-        fallbackResponseText: null,
+        fallbackResponseText: input.assistantProviderRecorder === true
+          ? "Local recorder fallback response."
+          : null,
+        maxResponsesApiRequestBodies: input.assistantProviderMaxResponsesApiRequestBodies,
         modelId: input.assistantProviderStubModelId,
         onRequest: (request) => {
           assistantProviderRequests.push(request);
@@ -153,11 +161,21 @@ export async function startHostedLocalFullStackScenario(input: {
 
     oidcFixture = await startHostedLocalOidcFixture();
     const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
-      baseEnvironment,
+      {
+        ...baseEnvironment,
+        ...(input.additionalEnv ?? {}),
+      },
       assistantProviderMode,
       assistantProviderBaseUrl,
       input.scenarioLabel,
     );
+    const assistantProviderRecorderEnv =
+      assistantProviderMode === "live" && assistantProviderBaseUrl
+        ? {
+            [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: assistantProviderBaseUrl,
+            NODE_ENV: "test",
+          }
+        : {};
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
     const usePreparedRunnerBundle = baseEnvironment.MURPH_DEV_SKIP_RUNNER_BUNDLE === "1";
@@ -170,6 +188,7 @@ export async function startHostedLocalFullStackScenario(input: {
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       ...(input.additionalEnv ?? {}),
+      ...assistantProviderRecorderEnv,
       DATABASE_URL: localDatabaseUrl,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRequiredEnvProfile(
         baseEnvironment.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
@@ -223,7 +242,8 @@ export async function startHostedLocalFullStackScenario(input: {
       ): Promise<string> => {
         const status = await scenarioHarness.readUserStatus(userId).catch(() => null);
         const assistantProviderRequestLog = assistantProviderRequests.map((request) => ({
-          body: request.body,
+          bodyBytes: Buffer.byteLength(request.body, "utf8"),
+          bodySha256: createHash("sha256").update(request.body).digest("hex").slice(0, 16),
           method: request.method,
           url: request.url,
         }));

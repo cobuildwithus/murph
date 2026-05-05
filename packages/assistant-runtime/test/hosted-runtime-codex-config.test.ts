@@ -16,6 +16,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
 } from "../src/hosted-runtime/launch-spec.ts";
@@ -143,6 +144,26 @@ test("hosted Codex runtime config preserves explicit model and reasoning env", a
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /model = "gpt-explicit"/u);
   assert.match(config, /model_reasoning_effort = "high"/u);
+});
+
+test("hosted Codex runtime config accepts a local test-only model provider base URL override", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+        "http://host.docker.internal:4567/v1",
+      NODE_ENV: "test",
+      VERCEL_AI_API_KEY: "secret-vercel-key",
+    },
+  });
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
+  assert.match(config, /request_max_retries = 0/u);
+  assert.match(config, /stream_max_retries = 0/u);
+  assert.doesNotMatch(config, /https:\/\/ai-gateway\.vercel\.sh\/v1/u);
 });
 
 test("hosted Codex runtime config installs a local E2E app-server stub when configured", async () => {
@@ -305,6 +326,71 @@ test("hosted Codex runtime config rejects the local E2E app-server stub for non-
   );
 });
 
+test("hosted Codex runtime config rejects the model provider base URL override outside test mode", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            "http://127.0.0.1:4123/v1",
+          VERCEL_AI_API_KEY: "secret-vercel-key",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes("test-only"),
+  );
+});
+
+test("hosted Codex runtime config rejects non-local model provider base URL overrides", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            "http://provider.example.test/v1",
+          NODE_ENV: "test",
+          VERCEL_AI_API_KEY: "secret-vercel-key",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes("local test host"),
+  );
+});
+
+test("hosted Codex runtime config rejects https model provider base URL overrides", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            "https://127.0.0.1:4123/v1",
+          NODE_ENV: "test",
+          VERCEL_AI_API_KEY: "secret-vercel-key",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes("must use http"),
+  );
+});
+
 test("hosted Codex runtime config rejects the local E2E app-server stub outside test mode", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
@@ -407,6 +493,31 @@ test("hosted runtime launch env policy does not forward local Codex bridge confi
   );
 });
 
+test("hosted runtime launch env policy forwards the test-only model provider base URL override", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    HOSTED_RUNTIME_ENV_KEY_NAMES.includes(
+      HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+        "http://127.0.0.1:4111/v1",
+      NODE_ENV: "test",
+      VERCEL_AI_API_KEY: "gateway-key",
+    })[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
+    "http://127.0.0.1:4111/v1",
+  );
+});
+
 test("hosted Codex runtime config fails closed without the configured model credential env", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
@@ -470,6 +581,12 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'base_url = "https://ai-gateway.vercel.sh/v1"',
       'env_key = "VERCEL_AI_API_KEY"',
       'wire_api = "responses"',
+      "",
+      "[skills]",
+      "include_instructions = false",
+      "",
+      "[skills.bundled]",
+      "enabled = false",
       "",
       "[shell_environment_policy]",
       'inherit = "none"',
