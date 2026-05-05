@@ -1740,6 +1740,181 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("active-turn refresh still checkpoints accepted input and reply intent when optional lanes degrade", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_active_turn_degraded_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+    });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn_degraded",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          events.push(`import:${item.item.laneSeq}`);
+          if (item.item.laneSeq === "2") {
+            return {
+              afterCheckpoint: async () => {
+                events.push("optional:active-turn-projection");
+                throw Object.assign(new Error("active-turn projection unavailable"), {
+                  code: "ACTIVE_TURN_PROJECTION_UNAVAILABLE",
+                });
+              },
+              status: "imported",
+            };
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: {
+          ...createPlatform({
+            mailboxPort,
+            workspacePort,
+          }),
+          logPort: {
+            async write() {
+              events.push("optional:log");
+              throw new Error("log export unavailable");
+            },
+          },
+        },
+        requestId: "request_synthetic_runner_active_turn_degraded",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_active_turn_degraded",
+          leaseGeneration: "4",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase(input) {
+          events.push("assistant:start");
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_active_turn_degraded_late",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+
+          const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
+          if (typeof refreshMailbox !== "function") {
+            throw new Error("Expected hosted mailbox refresh to be installed.");
+          }
+          events.push("refresh:start");
+          const refresh = await refreshMailbox({
+            requestId: "request_synthetic_runner_active_turn_degraded_input",
+          });
+          events.push("refresh:done");
+          assert.deepEqual(refresh, {
+            progressed: true,
+            reason: "ingested_input",
+          });
+
+          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
+          if (typeof checkpointActiveTurnInput !== "function") {
+            throw new Error("Expected hosted active-turn checkpoint to be installed.");
+          }
+          await checkpointActiveTurnInput({
+            acceptedInputIds: ["request-1", "request-2"],
+            providerRequestOrdinal: 1,
+            requestId: "request_synthetic_runner_active_turn_degraded_input",
+            sessionId: "session_synthetic",
+            turnId: "turn_synthetic",
+            vault: vaultRoot,
+          });
+          events.push("accepted");
+
+          return {
+            checkpointReason: "outbox_intent",
+            progressed: true,
+            redactedStatus: {
+              hostedOutboxIntentCheckpointed: true,
+            },
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.progressed, true);
+      assert.equal(result.latestWorkspace?.version, "4");
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "active_turn_input",
+        "active_turn_acceptance",
+        "outbox_intent",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1", "2", "3"],
+      );
+      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
+        acceptedInputCount: 2,
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "2",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+        providerRequestOrdinal: 1,
+      });
+      assert.deepEqual(checkpointRequests[3]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "2",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+        hostedOutboxIntentCheckpointed: true,
+      });
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+      ]);
+      assert.deepEqual(events, [
+        "import:1",
+        "optional:log",
+        "assistant:start",
+        "refresh:start",
+        "import:2",
+        "optional:log",
+        "optional:active-turn-projection",
+        "optional:log",
+        "refresh:done",
+        "accepted",
+      ]);
+    } finally {
+      warn.mockRestore();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("suppresses runtime logs for idle active-turn mailbox refresh polls", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
