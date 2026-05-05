@@ -31,6 +31,31 @@ Success means:
 - A stale trial phase never falls back to the normal monthly Pulse allowance.
 - No Cloudflare/runtime enforcement wiring is added by this plan. Cloudflare already checks the signed web usage gate before hosted runner invocation, so this plan treats the web gate response shape, denial reason, notice, and `retryAfter` as runtime-facing API.
 
+## Clean Target Model
+
+Keep the implementation in three layers:
+
+1. Product plan: Pulse and Edge only. This controls Stripe prices and normal monthly hosted AI allowance.
+2. Checkout offer: `standard` or `pulse_trial_7d`. This controls Checkout Session construction and Stripe metadata.
+3. Billing phase: `trial` or `paid`. This is persisted on the current billing ref and is the only phase signal the allowance resolver trusts.
+
+The runtime allowance path should not call Stripe, parse Checkout metadata, or infer trial state from price ids. It should read the hosted member's persisted billing ref and fail closed when the phase fields are missing or inconsistent for a trial offer.
+
+The core state machine is:
+
+| Event | Current state | New state | Notes |
+| --- | --- | --- | --- |
+| Standard Checkout completed | inactive/incomplete | unchanged entitlement | Bind refs only; paid activation still waits for `invoice.paid`. |
+| Pulse Trial Checkout completed | inactive/incomplete | active + `trial` | Only after metadata, ownership, subscription, and freshness checks pass. |
+| Initial zero-dollar trial invoice paid | active + `trial` | active + `trial` | Ignore for paid entitlement and paid allowance. |
+| Trial subscription update reports `active` before paid invoice | active + `trial` | active + `trial` | Refresh matching refs/dates only; do not promote phase. |
+| First real paid invoice after trial | active + `trial` or inactive | active + `paid` | This is the only trial-to-paid transition. |
+| Standard paid invoice | inactive/incomplete | active + `paid` | Existing paid behavior continues. |
+| Payment failure, cancellation, unpaid, paused, or past due | active | existing inactive policy + no paid allowance | Preserve immutable trial-redemption fields. |
+| Usage gate during expired stale trial | active + `trial` | deny | No calendar fallback, no monthly Pulse allowance. |
+
+This lets the implementation avoid a background trial-expiration job. Stripe webhooks reconcile the billing result, while the usage gate denies stale trial access at decision time.
+
 ## Current Local Baseline
 
 The current local checkout already has the right foundation:
@@ -73,6 +98,7 @@ Do not add:
 - A separate hosted entitlement system.
 - Runtime usage-gate enforcement wiring in Cloudflare or assistant runtime. Existing Cloudflare gate enforcement is in scope only as a contract to preserve and test.
 - A no-payment-method trial flow. Keep card collection up front so the trial can convert automatically.
+- A cron or queue whose only job is to expire trials. Stale trial denial belongs in the allowance resolver; Stripe webhook reconciliation handles conversion or failure.
 
 ## Product Surface
 
@@ -141,13 +167,20 @@ Reject `checkoutOffer: "standard"` at the public route if it is sent explicitly.
 Add small offer and phase primitives near the existing billing-plan module unless the implementation discovers a stronger local owner:
 
 ```ts
-export const HOSTED_BILLING_CHECKOUT_OFFERS = [
+export const HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS = [
+  "pulse_trial_7d",
+] as const;
+
+export type HostedPublicBillingCheckoutOffer =
+  (typeof HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS)[number];
+
+export const HOSTED_INTERNAL_BILLING_CHECKOUT_OFFERS = [
   "standard",
   "pulse_trial_7d",
 ] as const;
 
 export type HostedBillingCheckoutOffer =
-  (typeof HOSTED_BILLING_CHECKOUT_OFFERS)[number];
+  (typeof HOSTED_INTERNAL_BILLING_CHECKOUT_OFFERS)[number];
 
 export const HOSTED_BILLING_PHASES = [
   "trial",
@@ -161,9 +194,18 @@ export const HOSTED_PULSE_TRIAL_DAYS = 7;
 export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 2_500_000n;
 export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
   "pulse-trial-2026-05-05-v1";
+
+export const HOSTED_PULSE_TRIAL_POLICIES = {
+  [HOSTED_PULSE_TRIAL_POLICY_VERSION]: {
+    durationDays: HOSTED_PULSE_TRIAL_DAYS,
+    usageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+  },
+} as const;
 ```
 
 Keep the offer registry separate from `HOSTED_BILLING_PLAN_CODES` so every plan-dependent call site continues to mean "paid hosted plan", not "checkout marketing variant".
+
+Use the public offer parser only at the browser/API boundary. After validation, resolve to the internal offer type and use that internal value for metadata, idempotency, tests, and billing writes.
 
 ## Data Model
 
@@ -209,6 +251,8 @@ ALTER TABLE "hosted_member_billing_ref"
 ```
 
 `pulseTrialRedeemedAt` is the one-trial-only marker. It is intentionally not a `current*` field and must not be cleared when subscriptions are canceled, replaced, or converted to paid. Do not store an extra raw Stripe subscription id for redemption; the current encrypted subscription ref remains the Stripe binding for the active subscription.
+
+Set `pulseTrialRedeemedAt` and `pulseTrialPolicyVersion` only from a valid Pulse Trial Checkout completion in the same transaction that grants trial access. All later billing writes must preserve existing non-null redemption fields. The usage resolver should look up the persisted policy version in the server policy table; if the policy version is unknown, deny rather than guessing a limit.
 
 Do not add a new index in the first implementation. All planned reads are by member id through the existing one-to-one billing ref. Add an index only if a later reconciliation job needs to scan trial expirations.
 
@@ -272,6 +316,8 @@ const checkoutMetadata = {
 ```
 
 Do not include member email, phone, wallet, or other sensitive identity values in Stripe metadata.
+
+Treat trial metadata as audit and reconciliation context, not as the usage allowance source of truth. The allowance resolver should use persisted billing-ref fields and the server-side policy table keyed by `pulseTrialPolicyVersion`.
 
 ### Stripe Request
 
@@ -428,8 +474,10 @@ type HostedStripeSubscriptionBillingSnapshot = {
 Rules:
 
 - If `subscription.status === "trialing"` and metadata says `pulse_trial_7d`, write phase `trial`.
-- If `subscription.status === "active"` and the current billing ref is not a trial subscription, write phase `paid`.
-- If the current billing ref is a trial subscription, subscription events may refresh matching refs and period/trial dates, but only `invoice.paid` for a non-trial paid invoice may transition phase from `trial` to `paid`.
+- If `subscription.status === "active"` and the matching billing ref is already phase `paid`, preserve phase `paid` and refresh the matching paid period markers.
+- If `subscription.status === "active"` and the matching billing ref is phase `trial`, refresh matching refs and period/trial dates only; do not promote to `paid`.
+- If `subscription.status === "active"` and the matching billing ref has no trial offer/redeemed marker, write phase `paid`.
+- Only `invoice.paid` for an accepted non-trial paid invoice may transition the same subscription from phase `trial` to phase `paid`.
 - If the subscription is canceled, unpaid, incomplete, paused, or past due, clear `currentBillingPhase` only when the write is fresh and the current subscription id matches. Preserve Stripe refs and event freshness.
 - Preserve `currentCheckoutOffer` from metadata when present. If invoice or subscription events lack the offer but the current billing ref already has `pulse_trial_7d` for the same subscription, preserve it.
 - Preserve `pulseTrialRedeemedAt` and `pulseTrialPolicyVersion` across subscription changes. Preserve current trial start/end history while the same subscription is still current, even after conversion to paid, unless the subscription id changes.
@@ -439,6 +487,7 @@ Rules:
 When the trial converts, `invoice.paid` should:
 
 - ignore the initial zero-dollar trial invoice for entitlement purposes when the canonical subscription is still `trialing` or the invoice represents the initial trial invoice; do not activate as paid and do not transition phase to `paid`
+- accept a trial conversion invoice only after resolving the canonical subscription, confirming it matches the invoice subscription, confirming the subscription is `active`, and confirming the invoice is not the subscription-create trial invoice
 - remain the paid-cycle source of truth
 - write `billingStatus = active`
 - write `currentBillingPhase = "paid"`
@@ -459,6 +508,19 @@ When the first paid invoice after trial fails:
 ## Usage Allowance Semantics
 
 Add trial awareness to the existing allowance period resolver. Do not create a new budget table.
+
+The resolver should make decisions from local persisted state only:
+
+- hosted member billing status
+- billing ref plan code
+- billing ref phase
+- billing ref offer
+- trial start/end fields
+- paid period start/end fields
+- immutable trial-redemption marker for legacy-compatibility checks
+- server-side trial policy table keyed by `pulseTrialPolicyVersion`
+
+It should not retrieve Stripe objects or parse Stripe metadata on the hot path.
 
 ### Normal Paid Behavior
 
@@ -489,10 +551,11 @@ If `currentCheckoutOffer === "pulse_trial_7d"` and phase is missing, malformed, 
 For active Pulse Trial:
 
 ```ts
+trialPolicy = requireHostedPulseTrialPolicy(pulseTrialPolicyVersion);
 billingPlanCode = "launch_monthly";
 billingPhase = "trial";
 checkoutOffer = "pulse_trial_7d";
-limitUsdMicros = 2_500_000n;
+limitUsdMicros = trialPolicy.usageLimitUsdMicros;
 periodStart = currentTrialStartedAt;
 periodEnd = currentTrialEndsAt;
 ```
@@ -504,6 +567,7 @@ The resolver should require:
 - phase is `trial`
 - offer is `pulse_trial_7d`
 - plan is Pulse
+- `pulseTrialPolicyVersion` resolves to a known server-side policy
 - `currentTrialStartedAt` and `currentTrialEndsAt` are present
 - trial start is before trial end
 - the usage/check time is inside the trial interval
@@ -525,6 +589,8 @@ if (
   deny without falling back to calendar Pulse;
 }
 ```
+
+Also deny when phase is `trial` but `currentTrialEndsAt` is missing or malformed. Missing trial boundaries are an invalid entitlement state, not permission to use a calendar fallback.
 
 The denied response should use an explicit runtime-facing reason:
 
@@ -576,8 +642,9 @@ Implement in this order to keep the diff reviewable:
 9. Extend subscription and invoice billing snapshots to write phase transitions without letting subscription events promote trial to paid.
 10. Make `resolveHostedAiUsageAllowancePeriod` phase-aware and stale-trial aware before period upsert/carryover.
 11. Add stale trial, initial trial invoice, subscription-before-paid-invoice, duplicate-redemption, and ownership-conflict tests.
-12. Update the join page to replace the Free card with Pulse Trial and move GitHub to a secondary link only after the backend trial path is guarded and tested. If the rollout needs multiple deploys, hide the CTA behind a server-side enablement flag until the backend deploy is live.
-13. Update durable current-state docs after the behavior lands: `ARCHITECTURE.md`, `apps/web/README.md`, and any testing map entry that names the new verification surface.
+12. Add a server-side enablement flag for rendering the Pulse Trial CTA.
+13. Update the join page to replace the Free card with Pulse Trial and move GitHub to a secondary link, with the CTA hidden or disabled until the backend trial path is deployed and tested.
+14. Update durable current-state docs after the behavior lands: `ARCHITECTURE.md`, `apps/web/README.md`, and any testing map entry that names the new verification surface.
 
 ## Test Plan
 
@@ -619,7 +686,10 @@ Focused tests to add or update:
   - trial subscription writes phase `trial`
   - initial zero-dollar trial invoice does not activate paid access or transition phase to `paid`
   - subscription `active` event before the first real paid invoice does not transition trial phase to `paid`
+  - subscription `active` event after real paid conversion preserves phase `paid`
   - conversion invoice writes phase `paid`
+  - conversion invoice is rejected when the invoice subscription and canonical subscription disagree
+  - conversion invoice is rejected when it is the initial subscription-create trial invoice
   - trial conversion invoice skips duplicate activation when the member is already trial-active
   - payment failure after trial does not grant active paid allowance
   - stale older subscription event cannot overwrite fresher paid state
@@ -630,6 +700,8 @@ Focused tests to add or update:
   - member-provided credentials still do not count against trial allowance
   - trial usage over 2.50 USD is denied
   - expired trial with stale billing phase is denied before period upsert and does not fall back to 10.00 USD
+  - trial phase with unknown `pulseTrialPolicyVersion` is denied before period upsert
+  - trial phase with missing trial end is denied before period upsert
   - stale trial denial returns `trial_expired_pending_billing`, future `retryAfter`, and a user notice
   - phase missing/malformed for `pulse_trial_7d` denies instead of using calendar Pulse
   - paid conversion uses the normal Pulse allowance in a distinct paid period
