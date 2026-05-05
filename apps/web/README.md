@@ -424,10 +424,9 @@ pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 ```
 
-Production Vercel builds from `main` do not run `prisma migrate deploy` inside
-`pnpm --dir apps/web build`. Apply production migrations as a separate deploy
-step from a clean checkout of the commit being deployed. The migration wrapper
-uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel production, and
+Production Vercel builds from `main` run `prisma migrate deploy` before
+`next build` through `pnpm --dir apps/web build`. The migration wrapper uses
+`DIRECT_DATABASE_URL` when it is set, requires it in Vercel production, and
 rejects known pooled Postgres ports such as `6432` and `6543`; keep
 `DATABASE_URL` available for app runtime traffic. Because a successful
 migration cannot roll back automatically if a later deploy step fails,

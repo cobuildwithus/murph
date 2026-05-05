@@ -184,7 +184,7 @@ describe("hosted web production migration guard", () => {
     ]);
   });
 
-  test("keeps production migrations out of the package build hook", async () => {
+  test("keeps the production migration hook before next build", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
     ) as {
@@ -195,11 +195,16 @@ describe("hosted web production migration guard", () => {
     const buildScript = scripts.build ?? "";
     const hookScript = scripts["migrate:production:prebuild"] ?? "";
 
-    assert.doesNotMatch(buildScript, /pnpm migrate:production:prebuild/u);
+    assert.match(buildScript, /pnpm migrate:production:prebuild/u);
+    assert.match(buildScript, /pnpm prisma:generate/u);
     assert.match(buildScript, /next build/u);
     assert.ok(
-      buildScript.indexOf("pnpm prisma:generate") < buildScript.indexOf("next build"),
-      "non-mutating build prep must finish before next build",
+      buildScript.indexOf("pnpm prisma:generate") < buildScript.indexOf("pnpm migrate:production:prebuild"),
+      "non-mutating build prep must finish before production migrations run",
+    );
+    assert.ok(
+      buildScript.indexOf("pnpm migrate:production:prebuild") < buildScript.indexOf("next build"),
+      "production migration hook must run before next build",
     );
     assert.equal(
       hookScript,
