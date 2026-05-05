@@ -58,6 +58,10 @@ const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   "assistant.codex.app_server_timing";
+const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA =
+  "murph.assistant-automation-pass-timing.v1";
+const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_TYPE =
+  "assistant.automation.pass_timing";
 const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -129,6 +133,19 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "thread-started",
   "turn-completed",
   "turn-started",
+]);
+const HOSTED_ASSISTANT_AUTOMATION_PASS_TIMING_STAGE_VALUES = new Set([
+  "complete",
+  "cron-finished",
+  "cron-status-finished",
+  "diagnostic-recorded",
+  "outbox-drain-finished",
+  "outbox-summary-finished",
+  "recovery-finished",
+  "runtime-maintenance-finished",
+  "scan-finished",
+  "state-read",
+  "status-refresh-finished",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
@@ -590,6 +607,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     };
   }
 
+  const automationPassTimingDiagnostic =
+    readHostedAssistantAutomationPassTimingTrace(event);
+  if (automationPassTimingDiagnostic) {
+    return {
+      details: automationPassTimingDiagnostic,
+      message: "Hosted assistant automation pass timing captured.",
+    };
+  }
+
   return null;
 }
 
@@ -1015,6 +1041,92 @@ function readHostedAssistantCodexAppServerTimingTrace(
     "codexTimingTurnIdPresent",
     readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingTurnIdPresent"),
   );
+
+  return details;
+}
+
+function readHostedAssistantAutomationPassTimingTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA
+    || type !== ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const stage = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "automationPassStage",
+    HOSTED_ASSISTANT_AUTOMATION_PASS_TIMING_STAGE_VALUES,
+  );
+  if (!stage) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    automationPassStage: stage,
+    automationPassTraceType: "pass",
+    providerTraceKind: "automation.pass_timing",
+    schema: ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA,
+  };
+
+  for (const key of [
+    "automationPassApplyCanonicalWrites",
+    "automationPassCheckpointRequired",
+    "automationPassDrainOutbox",
+    "automationPassOutboxNextAttemptPresent",
+    "automationPassProgressed",
+    "automationPassRecoveryProgressed",
+    "automationPassStateProgressed",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of [
+    "automationPassCronFailed",
+    "automationPassCronProcessed",
+    "automationPassCronSucceeded",
+    "automationPassElapsedMs",
+    "automationPassOutboxAttempted",
+    "automationPassOutboxFailed",
+    "automationPassOutboxQueued",
+    "automationPassOutboxSent",
+    "automationPassRecoveryConsidered",
+    "automationPassRecoveryFailed",
+    "automationPassRecoveryReplied",
+    "automationPassRecoverySkipped",
+    "automationPassRepliesConsidered",
+    "automationPassRepliesFailed",
+    "automationPassRepliesReplied",
+    "automationPassRepliesSkipped",
+    "automationPassRoutingConsidered",
+    "automationPassRoutingFailed",
+    "automationPassRoutingRouted",
+    "automationPassRoutingSkipped",
+    "automationPassScanNumber",
+    "automationPassScanReplyConsidered",
+    "automationPassScanReplyFailed",
+    "automationPassScanReplyReplied",
+    "automationPassScanReplySkipped",
+    "automationPassTotalElapsedMs",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
 
   return details;
 }

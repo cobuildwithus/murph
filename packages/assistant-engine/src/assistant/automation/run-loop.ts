@@ -75,6 +75,23 @@ type AssistantAutomationLoopStateSnapshot = Pick<
 
 const SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN =
   /^[A-Za-z0-9_.:-]{1,96}$/u
+const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA =
+  'murph.assistant-automation-pass-timing.v1'
+const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_TYPE =
+  'assistant.automation.pass_timing'
+
+type AssistantAutomationPassTimingStage =
+  | 'complete'
+  | 'cron-finished'
+  | 'cron-status-finished'
+  | 'diagnostic-recorded'
+  | 'outbox-drain-finished'
+  | 'outbox-summary-finished'
+  | 'recovery-finished'
+  | 'runtime-maintenance-finished'
+  | 'scan-finished'
+  | 'state-read'
+  | 'status-refresh-finished'
 
 export interface RunAssistantAutomationInput {
   applyCanonicalWrites?: boolean
@@ -100,6 +117,50 @@ export interface RunAssistantAutomationInput {
 export interface RunAssistantAutomationPassInput
   extends Omit<RunAssistantAutomationInput, 'once' | 'onInboxEvent' | 'startDaemon'> {
   scanNumber?: number
+}
+
+function createAssistantAutomationPassTimingEmitter(
+  input: RunAssistantAutomationPassInput,
+): ((
+  stage: AssistantAutomationPassTimingStage,
+  details?: Record<string, boolean | number | null>,
+) => void) {
+  const trace = input.onTraceEvent
+  const totalStartedAt = Date.now()
+  let stageStartedAt = totalStartedAt
+  const scanNumber =
+    typeof input.scanNumber === 'number'
+    && Number.isSafeInteger(input.scanNumber)
+    && input.scanNumber >= 0
+      ? input.scanNumber
+      : null
+
+  return (stage, details = {}) => {
+    if (!trace) {
+      return
+    }
+
+    const now = Date.now()
+    const elapsedMs = Math.max(0, now - stageStartedAt)
+    const totalElapsedMs = Math.max(0, now - totalStartedAt)
+    stageStartedAt = now
+
+    trace({
+      providerSessionId: null,
+      rawEvent: {
+        schema: ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA,
+        type: ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_TYPE,
+        automationPassApplyCanonicalWrites: input.applyCanonicalWrites ?? true,
+        automationPassDrainOutbox: input.drainOutbox ?? true,
+        automationPassElapsedMs: elapsedMs,
+        automationPassScanNumber: scanNumber,
+        automationPassStage: stage,
+        automationPassTotalElapsedMs: totalElapsedMs,
+        ...details,
+      },
+      updates: [],
+    })
+  }
 }
 
 export async function runAssistantAutomation(
@@ -802,6 +863,7 @@ function normalizeLocalAssistantInputSize(value: unknown): number | null {
 export async function runAssistantAutomationPass(
   input: RunAssistantAutomationPassInput,
 ): Promise<AssistantAutomationPassResult> {
+  const emitTiming = createAssistantAutomationPassTimingEmitter(input)
   const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
@@ -828,6 +890,7 @@ export async function runAssistantAutomationPass(
       automationScans: 1,
     },
   })
+  emitTiming('diagnostic-recorded')
   await maybeRunAssistantRuntimeMaintenance({
     vault: input.vault,
   }).catch((error) => {
@@ -836,6 +899,7 @@ export async function runAssistantAutomationPass(
       operation: 'runtime maintenance',
     })
   })
+  emitTiming('runtime-maintenance-finished')
 
   const outboxResult = input.drainOutbox ?? true
     ? await drainAssistantOutbox({
@@ -848,7 +912,14 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
+  emitTiming('outbox-drain-finished', {
+    automationPassOutboxAttempted: outboxResult.attempted,
+    automationPassOutboxSent: outboxResult.sent,
+    automationPassOutboxFailed: outboxResult.failed,
+    automationPassOutboxQueued: outboxResult.queued,
+  })
   let state = await readAssistantAutomationState(input.vault)
+  emitTiming('state-read')
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
   const recovery = applyCanonicalWrites
@@ -871,6 +942,13 @@ export async function runAssistantAutomationPass(
         ...createEmptyAutoReplyScanResult(),
         progressed: false,
       }
+  emitTiming('recovery-finished', {
+    automationPassRecoveryConsidered: recovery.considered,
+    automationPassRecoveryFailed: recovery.failed,
+    automationPassRecoveryProgressed: recovery.progressed,
+    automationPassRecoveryReplied: recovery.replied,
+    automationPassRecoverySkipped: recovery.skipped,
+  })
 
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
@@ -896,6 +974,16 @@ export async function runAssistantAutomationPass(
       })
     },
   })
+  emitTiming('scan-finished', {
+    automationPassRoutingConsidered: scanResult.routing.considered,
+    automationPassRoutingFailed: scanResult.routing.failed,
+    automationPassRoutingRouted: scanResult.routing.routed,
+    automationPassRoutingSkipped: scanResult.routing.skipped,
+    automationPassScanReplyConsidered: scanResult.replies.considered,
+    automationPassScanReplyFailed: scanResult.replies.failed,
+    automationPassScanReplyReplied: scanResult.replies.replied,
+    automationPassScanReplySkipped: scanResult.replies.skipped,
+  })
   const cronResult = applyCanonicalWrites
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
@@ -910,6 +998,11 @@ export async function runAssistantAutomationPass(
         processed: 0,
         succeeded: 0,
       }
+  emitTiming('cron-finished', {
+    automationPassCronFailed: cronResult.failed,
+    automationPassCronProcessed: cronResult.processed,
+    automationPassCronSucceeded: cronResult.succeeded,
+  })
 
   await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
     warnAssistantBestEffortFailure({
@@ -917,20 +1010,40 @@ export async function runAssistantAutomationPass(
       operation: 'status snapshot refresh',
     })
   })
+  emitTiming('status-refresh-finished')
 
   const stateProgressed = didAssistantAutomationStateProgress(
     stateBeforeScan,
     state,
   )
   const cronStatus = await getAssistantCronStatus(input.vault)
+  emitTiming('cron-status-finished')
   const cronNextRunAt = applyCanonicalWrites ? cronStatus.nextRunAt : null
   const outboxNextAttemptAt = input.drainOutbox ?? true
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
     : null
+  emitTiming('outbox-summary-finished', {
+    automationPassOutboxNextAttemptPresent: outboxNextAttemptAt !== null,
+  })
   const replies = mergeAssistantAutoReplyScanResults(
     recovery,
     scanResult.replies,
   )
+  const progressed =
+    stateProgressed ||
+    outboxResult.attempted > 0 ||
+    cronResult.processed > 0 ||
+    recovery.progressed ||
+    replies.checkpointRequired === true
+  emitTiming('complete', {
+    automationPassCheckpointRequired: replies.checkpointRequired === true,
+    automationPassProgressed: progressed,
+    automationPassRepliesConsidered: replies.considered,
+    automationPassRepliesFailed: replies.failed,
+    automationPassRepliesReplied: replies.replied,
+    automationPassRepliesSkipped: replies.skipped,
+    automationPassStateProgressed: stateProgressed,
+  })
 
   return {
     cronProcessed: cronResult.processed,
@@ -941,12 +1054,7 @@ export async function runAssistantAutomationPass(
       outboxNextAttemptAt,
     ),
     outboxAttempted: outboxResult.attempted,
-    progressed:
-      stateProgressed ||
-      outboxResult.attempted > 0 ||
-      cronResult.processed > 0 ||
-      recovery.progressed ||
-      replies.checkpointRequired === true,
+    progressed,
     replies,
     routing: scanResult.routing,
   }
