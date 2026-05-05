@@ -498,6 +498,16 @@ describe('assistant codex runtime', () => {
         ],
       }),
     )
+    expect(onTraceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          codexTimingStage: 'turn-completed',
+          schema: 'murph.assistant-codex-app-server-timing.v1',
+          type: 'assistant.codex.app_server_timing',
+        }),
+        updates: [],
+      }),
+    )
   })
 
   it('keeps one Codex app-server process open and steers late input into the active turn', async () => {

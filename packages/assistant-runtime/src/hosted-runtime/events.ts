@@ -54,6 +54,10 @@ const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA =
   "murph.assistant-codex-resume-failure-diagnostics.v1";
 const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_TYPE =
   "assistant.codex.resume_failure";
+const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
+  "murph.assistant-codex-app-server-timing.v1";
+const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
+  "assistant.codex.app_server_timing";
 const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -116,6 +120,15 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES = new Set([
   "status-failed",
   "timeout",
   "usage-limit",
+]);
+const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
+  "initialized",
+  "shutdown",
+  "spawn-ready",
+  "thread-resumed",
+  "thread-started",
+  "turn-completed",
+  "turn-started",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
@@ -568,6 +581,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     };
   }
 
+  const appServerTimingDiagnostic =
+    readHostedAssistantCodexAppServerTimingTrace(event);
+  if (appServerTimingDiagnostic) {
+    return {
+      details: appServerTimingDiagnostic,
+      message: "Hosted assistant Codex app-server timing captured.",
+    };
+  }
+
   return null;
 }
 
@@ -932,6 +954,67 @@ function readHostedAssistantCodexResumeFailureDiagnosticTrace(
       readHostedAssistantProviderDiagnosticNumberArray(record, key),
     );
   }
+
+  return details;
+}
+
+function readHostedAssistantCodexAppServerTimingTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA
+    || type !== ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const stage = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "codexTimingStage",
+    HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES,
+  );
+  if (!stage) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    codexTimingStage: stage,
+    codexTimingTraceType: "app-server",
+    providerTraceKind: "codex.app_server_timing",
+    schema: ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
+  };
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTimingElapsedMs",
+    readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingElapsedMs"),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTimingProviderActionCount",
+    readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingProviderActionCount"),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTimingProviderSessionIdPresent",
+    readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingProviderSessionIdPresent"),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTimingTotalElapsedMs",
+    readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingTotalElapsedMs"),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTimingTurnIdPresent",
+    readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingTurnIdPresent"),
+  );
 
   return details;
 }

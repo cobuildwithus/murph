@@ -423,6 +423,73 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
+  it("captures hosted Codex app-server timing without raw identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_codex_timing",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        providerSessionId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingElapsedMs: 8123,
+          codexTimingProviderActionCount: 1,
+          codexTimingProviderSessionIdPresent: true,
+          codexTimingStage: "turn-completed",
+          codexTimingTotalElapsedMs: 11042,
+          codexTimingTurnIdPresent: true,
+          cwd: "/tmp/raw-path",
+          threadId: "raw-thread-id",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_codex_timing",
+      level: "info",
+      message: "Hosted assistant Codex app-server timing captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexTimingElapsedMs: 8123,
+        codexTimingProviderActionCount: 1,
+        codexTimingProviderSessionIdPresent: true,
+        codexTimingStage: "turn-completed",
+        codexTimingTotalElapsedMs: 11042,
+        codexTimingTraceType: "app-server",
+        codexTimingTurnIdPresent: true,
+        providerTraceKind: "codex.app_server_timing",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-app-server-timing.v1",
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+  });
+
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",

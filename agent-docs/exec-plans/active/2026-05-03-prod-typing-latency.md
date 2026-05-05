@@ -69,6 +69,9 @@ Updated: 2026-05-06
 - 2026-05-06 nudge scan/send decision: carry freshly imported assistant input ids into the auto-reply input source so active nudges can avoid a full input-event directory scan, and fast-dispatch idempotent delivery effects before the runner checkpoint so Linq sends are not blocked on the pre-send snapshot.
 - 2026-05-06 assistant timing decision: persist coarse elapsed fields on `assistant.pass_finished` for readiness, device sync, assistant automation, and automation pass substeps; no prompts, messages, identifiers, provider payloads, or paths are logged.
 - 2026-05-06 deploy unblock decision: make the optional native hosted-email send binding explicitly disableable and have `cf:deploy:immediate` omit it so urgent iMessage/runtime hotfixes can deploy with a Cloudflare token that lacks send-email bind permission; ordinary deploys keep the existing default.
+- 2026-05-06 container lifecycle decision: renew the Cloudflare container activity timeout during long runner invocations and ignore stale activity-expiry callbacks that arrive right after recent runner work, so a queued expiry cannot destroy the warm shell/cache immediately after a live reply.
+- 2026-05-06 urgent deploy decision: let the manual deploy workflow override runner idle TTL and have `cf:deploy:immediate` use a 12 hour TTL for repeated live iMessage probes while the production latency incident is being debugged.
+- 2026-05-06 provider timing decision: emit metadata-only Codex app-server timing trace stages (`spawn-ready`, initialize, thread start/resume, turn start/completion, shutdown) so live logs can split the remaining assistant pass latency without storing prompts, messages, identifiers, paths, or provider payloads.
 
 ## Current evidence
 
@@ -81,6 +84,8 @@ Updated: 2026-05-06
 - The next live warm probe showed base restore at 0ms but still spent about 2.4s restoring hot state, about 2.6s on the pre-assistant import checkpoint, and about 2.4s on the pre-send outbox checkpoint; the patch under test removes the hot restore/materialize repeat and the pre-assistant import checkpoint from the active nudge path.
 - The post-hot-cache live probe showed restore at roughly 0.3s and deferred import working, but end-to-end send still waited on assistant invocation plus an `outbox_sending` checkpoint before the provider call. The current patch under test targets both: fresh-input scan bypass for nudge auto-reply and idempotent fast delivery before the receipt checkpoint.
 - The first immediate rollout for the active-input patch was blocked by Cloudflare rejecting the optional native hosted-email send binding for the workflow token. That deploy did not update the live Worker/container version.
+- The latest live iMessage probes after the fast-send deploy proved the `outbox_sending` pre-send checkpoint was gone, but both back-to-back probes still cold-restored the base workspace and Cloudflare observability showed container/DO reset and lifecycle network-loss events around the same window.
+- Those same probes spent roughly 11-12.5s inside the assistant automation pass after restore/import, so the next deploy must preserve warm container state and expose provider-stage timings before another live message is sent.
 
 ## Verification
 

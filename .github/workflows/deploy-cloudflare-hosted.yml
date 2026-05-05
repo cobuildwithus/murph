@@ -28,6 +28,11 @@ on:
         options:
           - gradual
           - immediate
+      runner_idle_ttl_ms:
+        description: Optional runner container idle TTL override in milliseconds
+        required: false
+        default: ""
+        type: string
       hosted_email_send_binding:
         description: Render the optional native hosted-email send binding
         required: true
@@ -325,7 +330,7 @@ jobs:
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
       HOSTED_CRYPTO_ENV: ${{ vars.HOSTED_CRYPTO_ENV }}
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT || 'production' }}
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME }}
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG }}
@@ -624,6 +629,7 @@ jobs:
             echo "- Environment: \`${{ inputs.environment }}\`"
             echo "- Deploy strategy: \`direct\`"
             echo "- Container rollout: \`${{ inputs.container_rollout }}\`"
+            echo "- Runner idle TTL override: \`${{ inputs.runner_idle_ttl_ms || 'environment default' }}\`"
             echo "- Worker name: \`${CF_WORKER_NAME}\`"
             echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
             echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"
