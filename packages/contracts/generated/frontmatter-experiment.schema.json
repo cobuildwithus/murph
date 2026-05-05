@@ -379,6 +379,32 @@
             "stabilize"
           ]
         },
+        "expectedDirections": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "biomarkerKey": {
+                "type": "string",
+                "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "increase",
+                  "decrease",
+                  "stabilize"
+                ]
+              }
+            },
+            "required": [
+              "biomarkerKey",
+              "direction"
+            ],
+            "additionalProperties": false
+          }
+        },
         "notes": {
           "type": "array",
           "items": {

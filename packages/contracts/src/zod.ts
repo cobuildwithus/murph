@@ -1289,14 +1289,37 @@ export const experimentRunPlanSchema = z
   })
   .strict();
 
+export const experimentExpectedDirectionSchema = z
+  .object({
+    biomarkerKey: healthCommonsKeySchema,
+    direction: z.enum(EXPERIMENT_SIGNAL_DIRECTIONS),
+  })
+  .strict();
+
+export const experimentExpectedDirectionsSchema = z.array(experimentExpectedDirectionSchema).max(50);
+
 export const experimentAnalysisPlanSchema = z
   .object({
     primaryBiomarkerKey: healthCommonsKeySchema.optional(),
     secondaryBiomarkerKeys: uniqueArray(healthCommonsKeySchema, { uniqueItems: true }).optional(),
     desiredDirection: z.enum(EXPERIMENT_SIGNAL_DIRECTIONS).optional(),
+    expectedDirections: experimentExpectedDirectionsSchema.optional(),
     notes: z.array(boundedString(1, 4000)).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((analysisPlan, context) => {
+    const seen = new Set<string>();
+    for (const [index, entry] of (analysisPlan.expectedDirections ?? []).entries()) {
+      if (seen.has(entry.biomarkerKey)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Duplicate expected direction.",
+          path: ["expectedDirections", index, "biomarkerKey"],
+        });
+      }
+      seen.add(entry.biomarkerKey);
+    }
+  });
 
 export const experimentAssistantSupportSchema = z
   .object({

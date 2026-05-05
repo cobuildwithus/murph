@@ -699,6 +699,9 @@ export function registerExperimentCommands(
       desiredDirection: experimentSignalDirectionSchema
         .optional()
         .describe('Expected direction for the primary biomarker.'),
+      expectedDirection: repeatableTextOptionSchema(
+        'Per-biomarker expected direction as biomarker:key=increase|decrease|stabilize. Repeat --expected-direction for multiple biomarkers.',
+      ),
       analysisNote: repeatableTextOptionSchema(
         'Analysis plan note. Repeat --analysis-note for multiple values.',
       ),
@@ -796,6 +799,10 @@ export function registerExperimentCommands(
           'secondary-biomarker-key',
         ),
         desiredDirection: options.desiredDirection,
+        expectedDirection: normalizeRepeatableFlagOption(
+          options.expectedDirection,
+          'expected-direction',
+        ),
         analysisNote: normalizeRepeatableFlagOption(
           options.analysisNote,
           'analysis-note',

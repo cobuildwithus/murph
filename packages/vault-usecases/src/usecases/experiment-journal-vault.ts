@@ -7,6 +7,7 @@ import {
   eventSourceSchema,
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
+  experimentExpectedDirectionsSchema,
   effectiveProtocolSnapshotSchema,
   experimentOutcomeSchema,
   experimentFrontmatterSchema,
@@ -296,6 +297,7 @@ export interface ApplyExperimentOnboardingRecordInput {
   primaryBiomarkerKey?: string
   secondaryBiomarkerKey?: readonly string[]
   desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
+  expectedDirection?: readonly string[]
   analysisNote?: readonly string[]
   onboardingCompletedAt?: string
   setupAnswer?: readonly string[]
@@ -2150,6 +2152,14 @@ function buildAnalysisPlanForOnboardingApply(
     patch.desiredDirection = experimentSignalDirectionSchema.parse(input.desiredDirection)
   }
 
+  const expectedDirections = normalizeExpectedDirectionEntriesOption(
+    input.expectedDirection,
+    existing?.expectedDirections,
+  )
+  if (expectedDirections !== undefined) {
+    patch.expectedDirections = expectedDirections
+  }
+
   const notes = normalizeTextListOption(input.analysisNote, 'analysis-note')
   if (notes !== undefined) {
     patch.notes = notes
@@ -2599,6 +2609,51 @@ function normalizeHealthCommonsKeyListOption(
   }
 
   return normalized.map((entry) => normalizeHealthCommonsKeyOption(entry, optionName))
+}
+
+function normalizeExpectedDirectionEntriesOption(
+  values: readonly string[] | undefined,
+  existing: ExperimentAnalysisPlanValue['expectedDirections'] | undefined,
+) {
+  const normalized = normalizeTextListOption(values, 'expected-direction')
+  if (normalized === undefined) {
+    return undefined
+  }
+
+  const next = new Map<string, z.infer<typeof experimentSignalDirectionSchema>>()
+  for (const entry of existing ?? []) {
+    next.set(entry.biomarkerKey, entry.direction)
+  }
+
+  for (const entry of normalized) {
+    const delimiterIndex = entry.lastIndexOf('=')
+    if (delimiterIndex <= 0 || delimiterIndex === entry.length - 1) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--expected-direction must use biomarker:key=increase|decrease|stabilize.',
+      )
+    }
+
+    const biomarkerKey = normalizeHealthCommonsKeyOption(
+      entry.slice(0, delimiterIndex),
+      'expected-direction',
+    )
+    const direction = experimentSignalDirectionSchema.safeParse(
+      entry.slice(delimiterIndex + 1).trim(),
+    )
+    if (!direction.success) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--expected-direction values must be increase, decrease, or stabilize.',
+      )
+    }
+
+    next.set(biomarkerKey, direction.data)
+  }
+
+  return experimentExpectedDirectionsSchema.parse(
+    [...next].map(([biomarkerKey, direction]) => ({ biomarkerKey, direction })),
+  )
 }
 
 function normalizeSha256RevisionOption(value: string, optionName: string) {

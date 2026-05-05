@@ -713,7 +713,7 @@ function buildExpectedEffect(
 ): BrowserVaultExperimentExpectedEffect {
   const exactEffect = context.expectedEffects.find((effect) => effect.biomarkerKey === biomarkerKey);
   const direction =
-    exactEffect?.direction ?? readAnalysisPlanExpectedDirection(context.entity.attributes);
+    exactEffect?.direction ?? readAnalysisPlanExpectedDirection(context.entity.attributes, biomarkerKey);
 
   return {
     caveats: exactEffect?.caveats ?? [],
@@ -1097,9 +1097,32 @@ function readExpectedEffectConfidence(
 
 function readAnalysisPlanExpectedDirection(
   attributes: JsonRecord,
+  biomarkerKey: string,
 ): BrowserVaultExperimentExpectedDirection | null {
   const analysisPlan = readRecord(attributes.analysisPlan);
+  const explicitDirection = readAnalysisPlanExpectedDirections(analysisPlan).find(
+    (entry) => entry.biomarkerKey === biomarkerKey,
+  )?.direction ?? null;
+  if (explicitDirection) {
+    return explicitDirection;
+  }
+
+  if (readString(analysisPlan?.primaryBiomarkerKey) !== biomarkerKey) {
+    return null;
+  }
+
   return readExpectedDirection(analysisPlan?.desiredDirection);
+}
+
+function readAnalysisPlanExpectedDirections(
+  analysisPlan: JsonRecord | null,
+): Array<{ biomarkerKey: string; direction: BrowserVaultExperimentExpectedDirection }> {
+  return readArray(analysisPlan?.expectedDirections).flatMap((value) => {
+    const record = readRecord(value);
+    const biomarkerKey = readString(record?.biomarkerKey);
+    const direction = readExpectedDirection(record?.direction);
+    return biomarkerKey && direction ? [{ biomarkerKey, direction }] : [];
+  });
 }
 
 function readExpectedDirection(value: unknown): BrowserVaultExperimentExpectedDirection | null {

@@ -640,6 +640,47 @@ test("represents unsupported biomarkers instead of dropping them", () => {
   );
 });
 
+test("uses explicit per-biomarker directions without inheriting the primary direction", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          analysisPlan: {
+            primaryBiomarkerKey: "biomarker:hrv-rmssd",
+            secondaryBiomarkerKeys: [
+              "biomarker:resting-heart-rate",
+              "biomarker:sleep-efficiency",
+            ],
+            desiredDirection: "increase",
+            expectedDirections: [
+              { biomarkerKey: "biomarker:hrv-rmssd", direction: "increase" },
+              { biomarkerKey: "biomarker:resting-heart-rate", direction: "decrease" },
+            ],
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({ date: "2026-04-01", metricKey: "hrv-rmssd", unit: "ms", value: 60 }),
+        metricRow({ date: "2026-04-08", metricKey: "hrv-rmssd", unit: "ms", value: 65 }),
+        metricRow({ date: "2026-04-01", metricKey: "resting-heart-rate", unit: "bpm", value: 50 }),
+        metricRow({ date: "2026-04-08", metricKey: "resting-heart-rate", unit: "bpm", value: 48 }),
+        metricRow({ date: "2026-04-01", metricKey: "sleep-efficiency", unit: "%", value: 90 }),
+        metricRow({ date: "2026-04-08", metricKey: "sleep-efficiency", unit: "%", value: 91 }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.biomarkers[0]?.expectedEffect.direction, "increase");
+  assert.equal(result.biomarkers[0]?.movedAsExpected, true);
+  assert.equal(result.biomarkers[1]?.expectedEffect.direction, "decrease");
+  assert.equal(result.biomarkers[1]?.movedAsExpected, true);
+  assert.equal(result.biomarkers[2]?.expectedEffect.direction, null);
+  assert.equal(result.biomarkers[2]?.movedAsExpected, null);
+});
+
 test("keeps supported biomarkers with no browser points as no_data", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({

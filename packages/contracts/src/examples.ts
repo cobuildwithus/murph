@@ -824,6 +824,11 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
       primaryBiomarkerKey: "biomarker:sleep-onset-latency",
       secondaryBiomarkerKeys: ["biomarker:sleep-efficiency", "biomarker:resting-heart-rate"],
       desiredDirection: "decrease",
+      expectedDirections: [
+        { biomarkerKey: "biomarker:sleep-onset-latency", direction: "decrease" },
+        { biomarkerKey: "biomarker:sleep-efficiency", direction: "increase" },
+        { biomarkerKey: "biomarker:resting-heart-rate", direction: "decrease" },
+      ],
       notes: ["Compare the 7-day baseline against the 14-day intervention window."],
     },
     onboarding: {
@@ -1304,6 +1309,13 @@ analysisPlan:
     - biomarker:sleep-efficiency
     - biomarker:resting-heart-rate
   desiredDirection: decrease
+  expectedDirections:
+    - biomarkerKey: biomarker:sleep-onset-latency
+      direction: decrease
+    - biomarkerKey: biomarker:sleep-efficiency
+      direction: increase
+    - biomarkerKey: biomarker:resting-heart-rate
+      direction: decrease
   notes:
     - Compare the 7-day baseline against the 14-day intervention window.
 onboarding:
