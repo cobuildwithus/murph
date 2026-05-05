@@ -128,14 +128,18 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
+  preferredInputIds?: readonly string[] | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   skipDeviceSync?: boolean;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
+  const startedAt = Date.now();
+  const readinessStartedAt = Date.now();
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
     skipAssistantAutomation: input.skipAssistantAutomation ?? false,
   });
+  const readinessElapsedMs = elapsedSince(readinessStartedAt);
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
 
   if (!assistantAutomation.configured) {
@@ -144,6 +148,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     );
   }
 
+  const deviceSyncStartedAt = Date.now();
   const deviceSyncResult = input.skipDeviceSync === true
     ? {
         nextWakeAt: null,
@@ -162,7 +167,9 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
           runtimeLogPlatform: input.runtime.platform,
         },
       );
+  const deviceSyncElapsedMs = elapsedSince(deviceSyncStartedAt);
 
+  const assistantStartedAt = Date.now();
   const assistantResult = assistantAutomation.shouldRun
     ? await runHostedAssistantAutomation(
         input.vaultRoot,
@@ -170,18 +177,29 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.executionContext,
         input.wake,
         input.runtime,
+        input.preferredInputIds ?? [],
         input.signal,
       )
     : {
         nextWakeAt: null,
         progressed: false,
         redactedLogEntries: [],
+        timings: undefined,
       };
+  const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
   const nextWakeAt = assistantResult.nextWakeAt
     ?? (assistantResult.progressed ? new Date().toISOString() : null);
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
   return {
+    assistantAutomationAfterStateElapsedMs:
+      assistantResult.timings?.afterStateElapsedMs ?? null,
+    assistantAutomationBeforeStateElapsedMs:
+      assistantResult.timings?.beforeStateElapsedMs ?? null,
+    assistantAutomationElapsedMs,
+    assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
+    assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
+    deviceSyncElapsedMs,
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
     nextWakeAt: earliestHostedMaintenanceWakeAt(
@@ -193,7 +211,9 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     ),
     parserProcessed: 0,
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
+    readinessElapsedMs,
     ...(redactedLogEntries.length === 0 ? {} : { redactedLogEntries }),
+    totalElapsedMs: elapsedSince(startedAt),
   };
 }
 
@@ -203,24 +223,35 @@ export async function runHostedAssistantAutomation(
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
+  preferredInputIds: readonly string[] = [],
   signal?: AbortSignal,
 ): Promise<{
   nextWakeAt: string | null;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
+  timings?: {
+    afterStateElapsedMs: number;
+    beforeStateElapsedMs: number;
+    passElapsedMs: number;
+    totalElapsedMs: number;
+  };
 }> {
+  const startedAt = Date.now();
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices();
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;
   const inputSource = createHostedAssistantInputSource({
+    preferredInputIds,
     requestId,
     runtime,
     vaultRoot,
     wake,
   });
+  const beforeStateStartedAt = Date.now();
   const beforeState = await readAssistantAutomationState(vaultRoot);
+  const beforeStateElapsedMs = elapsedSince(beforeStateStartedAt);
   redactedLogEntries.push(emitHostedRuntimeRedactedLog({
     component: "runtime",
     details: {
@@ -235,6 +266,7 @@ export async function runHostedAssistantAutomation(
     phase: "wake.running",
   }));
   try {
+    const passStartedAt = Date.now();
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
@@ -285,7 +317,10 @@ export async function runHostedAssistantAutomation(
       inputSource,
       vault: vaultRoot,
     });
+    const passElapsedMs = elapsedSince(passStartedAt);
+    const afterStateStartedAt = Date.now();
     const afterState = await readAssistantAutomationState(vaultRoot);
+    const afterStateElapsedMs = elapsedSince(afterStateStartedAt);
     const replies = result.replies ?? {
       considered: 0,
       failed: 0,
@@ -330,6 +365,12 @@ export async function runHostedAssistantAutomation(
       nextWakeAt: result.nextWakeAt,
       progressed: result.progressed,
       redactedLogEntries,
+      timings: {
+        afterStateElapsedMs,
+        beforeStateElapsedMs,
+        passElapsedMs,
+        totalElapsedMs: elapsedSince(startedAt),
+      },
     };
   } catch (error) {
     if (
@@ -383,6 +424,10 @@ function buildHostedAssistantAutomationEventCountLogDetails(
   }
   details.automationEventTypeCount = counts.size;
   return details;
+}
+
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
 }
 
 function emitHostedRuntimeRedactedLog(

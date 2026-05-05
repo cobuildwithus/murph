@@ -18,6 +18,7 @@ export {
   markAssistantAutoReplyLinqCleanupQueued,
 } from './automation/evidence.js'
 export {
+  compareAssistantInputCursors,
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   createAssistantInputEventId,
   listAssistantInputEvents,
@@ -40,6 +41,7 @@ export {
   normalizeAssistantInputFileName,
 } from './attachment-file-name.js'
 export {
+  assistantInputCandidateFromStoredEvent,
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,

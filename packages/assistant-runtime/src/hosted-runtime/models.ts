@@ -154,12 +154,20 @@ export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
 }
 
 export interface HostedMaintenanceMetrics {
+  assistantAutomationAfterStateElapsedMs?: number | null;
+  assistantAutomationBeforeStateElapsedMs?: number | null;
+  assistantAutomationElapsedMs?: number | null;
+  assistantAutomationPassElapsedMs?: number | null;
+  assistantAutomationTotalElapsedMs?: number | null;
+  deviceSyncElapsedMs?: number | null;
   deviceSyncProcessed: number;
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;
   parserProcessed: number;
   postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
+  readinessElapsedMs?: number | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
+  totalElapsedMs?: number | null;
 }
 
 export type HostedWorkspaceArtifactMaterializer = (

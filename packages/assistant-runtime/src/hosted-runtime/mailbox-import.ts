@@ -39,6 +39,7 @@ export type HostedMailboxItemImportOutcome =
     }
   | {
       status: "imported" | "skipped";
+      assistantInputId?: string | null;
       reasonCode?: string | null;
       afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
     };
@@ -61,6 +62,7 @@ export interface HostedMailboxResolvedImportItem {
 }
 
 export interface HostedMailboxImportLoopResult {
+  assistantInputIds?: string[];
   blocked: HostedMailboxImportLoopBlockedItem[];
   fetchedCount: number;
   importedCount: number;
@@ -160,6 +162,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   });
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
   let nextState = input.state;
+  const assistantInputIds: string[] = [];
   let importedCount = 0;
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let nextRetryAt: string | null = null;
@@ -315,11 +318,17 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       seq: item.laneSeq,
       status: outcome.status,
     });
-    importedCount += outcome.status === "imported" ? 1 : 0;
+    if (outcome.status === "imported") {
+      importedCount += 1;
+      if (outcome.assistantInputId) {
+        assistantInputIds.push(outcome.assistantInputId);
+      }
+    }
     expectedSeqByLane[lane] += 1n;
   }
 
   return {
+    assistantInputIds,
     blocked,
     fetchedCount: fetched.items.length,
     importedCount,

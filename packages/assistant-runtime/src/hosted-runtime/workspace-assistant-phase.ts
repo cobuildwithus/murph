@@ -495,6 +495,7 @@ export async function runHostedWorkspaceAssistantPhase(
 
     const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
       executionContext,
+      preferredInputIds: input.initialMailboxImport.importResult.assistantInputIds ?? [],
       requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
       runtime: {
         commitTimeoutMs: input.runtime.commitTimeoutMs,
@@ -525,9 +526,6 @@ export async function runHostedWorkspaceAssistantPhase(
         vault: input.restored.vaultRoot,
       });
     }
-    const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
-      vaultRoot: input.restored.vaultRoot,
-    });
     const systemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
@@ -536,6 +534,66 @@ export async function runHostedWorkspaceAssistantPhase(
     );
     await prepareHostedAssistantDeliverySideEffectsForCheckpoint({
       assistantDeliveryEffects: deliveryEffects,
+      vaultRoot: input.restored.vaultRoot,
+    });
+
+    if (
+      shouldFastDispatchAssistantDeliveryEffects({
+        assistantMetrics,
+        deliveryEffects,
+        input,
+      })
+    ) {
+      const postDelivery = await drainHostedPostCheckpointDeliveryCleanup({
+        assistantDeliveryEffects: deliveryEffects,
+        baseNextWakeAt: resolveEarliestHostedWorkspaceWakeAt(
+          assistantMetrics.nextWakeAt,
+          systemMailboxWakeAt,
+        ),
+        checkpointReason: "outbox_receipt",
+        input,
+        providerCleanupCheckpoint,
+        redactedStatus: null,
+        wake,
+      });
+      const nextWakeAt = postDelivery.nextWakeAt ?? null;
+      const progressed = assistantMetricsProgressed({
+        ...assistantMetrics,
+        nextWakeAt,
+      }, deliveryEffects.length)
+        || consumedScheduledWorkspaceWake(input)
+        || terminalLinqCleanupDue;
+      await writeHostedAssistantAutomationDetailRuntimeLogs({
+        assistantMetrics,
+        input,
+      });
+      await writeHostedAssistantPassRuntimeLog({
+        assistantMetrics,
+        deliveryEffectCount: deliveryEffects.length,
+        input,
+        nextWakeAt,
+        progressed,
+        systemMailboxWakeAt,
+      });
+      return {
+        checkpointReason: postDelivery.checkpointReason,
+        ...(progressed || providerCleanupDue ? { nextWakeAt } : {}),
+        progressed: progressed || providerCleanupDue,
+        redactedStatus: {
+          ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
+            deliveryEffectCount: deliveryEffects.length,
+            nextWakeAt,
+            outboxTerminalizedSendingCount: 0,
+            progressed: progressed || providerCleanupDue,
+            systemMailboxPrepared: 0,
+            systemMailboxRetryableFailed: 0,
+          }),
+          ...(postDelivery.redactedStatus ?? {}),
+        },
+      };
+    }
+
+    const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
     const nextWakeAt = resolveEarliestHostedWorkspaceWakeAt(
@@ -840,14 +898,26 @@ async function writeHostedAssistantPassRuntimeLog(input: {
       phase: "invoke",
       redactedJson: {
         automationLogCount: input.assistantMetrics.redactedLogEntries?.length ?? 0,
+        assistantAutomationAfterStateElapsedMs:
+          input.assistantMetrics.assistantAutomationAfterStateElapsedMs ?? null,
+        assistantAutomationBeforeStateElapsedMs:
+          input.assistantMetrics.assistantAutomationBeforeStateElapsedMs ?? null,
+        assistantAutomationElapsedMs: input.assistantMetrics.assistantAutomationElapsedMs ?? null,
+        assistantAutomationPassElapsedMs:
+          input.assistantMetrics.assistantAutomationPassElapsedMs ?? null,
+        assistantAutomationTotalElapsedMs:
+          input.assistantMetrics.assistantAutomationTotalElapsedMs ?? null,
         deliveryEffectCount: input.deliveryEffectCount,
+        deviceSyncElapsedMs: input.assistantMetrics.deviceSyncElapsedMs ?? null,
         deviceSyncProcessed: input.assistantMetrics.deviceSyncProcessed,
         deviceSyncSkipped: input.assistantMetrics.deviceSyncSkipped,
         deviceSyncDirtyAckPending: (input.assistantMetrics.postCheckpointRecord ?? null) !== null,
         nextWakeAtPresent: input.nextWakeAt !== null,
         parserProcessed: input.assistantMetrics.parserProcessed,
         progressed: input.progressed,
+        readinessElapsedMs: input.assistantMetrics.readinessElapsedMs ?? null,
         systemWakeAtPresent: input.systemMailboxWakeAt !== null,
+        totalElapsedMs: input.assistantMetrics.totalElapsedMs ?? null,
       },
     },
     platform: input.input.platform,
@@ -1287,6 +1357,20 @@ function assistantMetricsProgressed(
     || metrics.nextWakeAt !== null
     || metrics.parserProcessed > 0
     || (metrics.postCheckpointRecord ?? null) !== null
+  );
+}
+
+function shouldFastDispatchAssistantDeliveryEffects(input: {
+  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+  deliveryEffects: HostedAssistantDeliveryEffects;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): boolean {
+  return (
+    input.input.request.reason === "nudge"
+    && input.input.initialMailboxImport.importResult.importedCount > 0
+    && input.deliveryEffects.length > 0
+    && input.deliveryEffects.every((effect) => effect.payload.transportIdempotent === true)
+    && (input.assistantMetrics.postCheckpointRecord ?? null) === null
   );
 }
 

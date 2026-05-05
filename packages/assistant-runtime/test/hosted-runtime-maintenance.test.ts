@@ -332,11 +332,11 @@ describe("runHostedAssistantAutomation", () => {
           platformEnv: {},
         },
       ),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       nextWakeAt: null,
       progressed: true,
       redactedLogEntries: expect.any(Array),
-    });
+    }));
 
     expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
       requestId: "req_turn_input",
@@ -380,11 +380,11 @@ describe("runHostedAssistantAutomation", () => {
         },
         createHostedAutomationRuntime(),
       ),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-08T01:00:00.000Z",
       progressed: false,
       redactedLogEntries: expect.any(Array),
-    });
+    }));
 
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
@@ -492,11 +492,11 @@ describe("runHostedAssistantAutomation", () => {
           platformEnv: {},
         },
       ),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
       nextWakeAt: null,
       progressed: true,
       redactedLogEntries: expect.any(Array),
-    });
+    }));
 
     expect(show).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -574,7 +574,7 @@ describe("runHostedAssistantAutomation", () => {
       createHostedAutomationRuntime(),
     );
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-08T01:15:00.000Z",
       progressed: true,
       redactedLogEntries: [
@@ -600,7 +600,7 @@ describe("runHostedAssistantAutomation", () => {
           }),
         }),
       ],
-    });
+    }));
     expect(JSON.stringify(result.redactedLogEntries)).not.toContain(
       "real_thread_id",
     );
@@ -1413,13 +1413,20 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    assert.deepEqual(result, {
+    assert.deepEqual({
+      deviceSyncProcessed: result.deviceSyncProcessed,
+      deviceSyncSkipped: result.deviceSyncSkipped,
+      nextWakeAt: result.nextWakeAt,
+      parserProcessed: result.parserProcessed,
+      postCheckpointRecord: result.postCheckpointRecord,
+    }, {
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
       nextWakeAt: null,
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
+    assert.equal(typeof result.totalElapsedMs, "number");
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });

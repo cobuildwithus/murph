@@ -213,6 +213,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
+        preferredInputIds: ["ain_00000000000000000000000000000001"],
         skipDeviceSync: true,
       }),
     );
@@ -684,6 +685,46 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot: "/tmp/murph-vault",
       }),
     );
+  });
+
+  it("fast-dispatches idempotent active nudge delivery before the runner checkpoint", async () => {
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_synthetic",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+    }));
+
+    expect(result.afterCheckpoint).toBeUndefined();
+    expect(result.checkpointReason).toBe("outbox_receipt");
+    expect(result.redactedStatus).toEqual(expect.objectContaining({
+      hostedOutboxDeliveryAttempted: 1,
+      hostedOutboxDeliverySent: 1,
+      hostedOutboxPendingDeliveryEffects: 1,
+    }));
+    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit)
+      .toHaveBeenCalledTimes(1);
   });
 
   it("writes a warning outbox delivery summary when a committed delivery fails", async () => {
@@ -1239,6 +1280,7 @@ function createPhaseInput(input: {
       checkpoint: null,
       checkpointDeferred: false,
       importResult: {
+        assistantInputIds: input.importedCount ? ["ain_00000000000000000000000000000001"] : [],
         blocked: [],
         fetchedCount: input.importedCount ?? 0,
         importedCount: input.importedCount ?? 0,

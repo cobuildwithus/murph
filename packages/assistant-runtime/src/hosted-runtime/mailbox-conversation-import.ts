@@ -165,6 +165,7 @@ export type HostedConversationMailboxWakeContextPreparer = (input: {
 export type HostedConversationMailboxImportOutcome =
   | {
       afterCheckpoint?: (() => Promise<HostedMailboxPostCheckpointEffectResult>) | null;
+      assistantInputId?: string | null;
       captureId: string | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
@@ -293,6 +294,7 @@ export async function importHostedConversationMailboxItem(input: {
         wake: decoded.wake,
       });
     },
+    assistantInputId: stagedInput.inputId,
     captureId: null,
     metrics: createEmptyHostedConversationWakeMetrics(),
     status: "imported",
