@@ -707,9 +707,17 @@ export async function sendAssistantMessageLocal(
       } finally {
         activeTurnInputController?.close()
         await stopAssistantChannelTypingIndicator(typingIndicator)
-        await runAssistantTurnBestEffort(() =>
-          refreshAssistantStatusSnapshotLocal(input.vault),
-        )
+        if (
+          !(
+            executionContext?.hosted != null
+            && input.deliveryDispatchMode === 'queue-only'
+            && input.turnTrigger === 'automation-auto-reply'
+          )
+        ) {
+          await runAssistantTurnBestEffort(() =>
+            refreshAssistantStatusSnapshotLocal(input.vault),
+          )
+        }
       }
     },
   })

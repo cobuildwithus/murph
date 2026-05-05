@@ -2884,6 +2884,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
       },
     },
     prompt: 'Queue this reply',
+    turnTrigger: 'automation-auto-reply',
     vault: '/vaults/test',
   })
 
@@ -2906,6 +2907,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal reports failed delivery outcomes after provider success', async () => {

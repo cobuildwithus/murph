@@ -1004,13 +1004,20 @@ export async function runAssistantAutomationPass(
     automationPassCronSucceeded: cronResult.succeeded,
   })
 
-  await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
-    warnAssistantBestEffortFailure({
-      error,
-      operation: 'status snapshot refresh',
+  const skipStatusRefresh =
+    executionContext?.hosted != null
+    && input.deliveryDispatchMode === 'queue-only'
+  if (!skipStatusRefresh) {
+    await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'status snapshot refresh',
+      })
     })
+  }
+  emitTiming('status-refresh-finished', {
+    automationPassStatusRefreshSkipped: skipStatusRefresh,
   })
-  emitTiming('status-refresh-finished')
 
   const stateProgressed = didAssistantAutomationStateProgress(
     stateBeforeScan,
