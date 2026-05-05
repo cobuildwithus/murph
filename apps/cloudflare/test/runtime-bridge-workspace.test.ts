@@ -367,7 +367,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       expectedKind: "vault",
       path: ".codex-hosted/sessions/thread.jsonl",
       root: "operator-home",
-    })).toBe("{\"thread\":\"ready\"}\n");
+    })).toBeNull();
     expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
     expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
     expect(writeLog).toHaveBeenCalledWith({
@@ -578,7 +578,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("outbox_sending"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("import"));
     const snapshotRef = requireBundleRef(result.snapshotRef);
 
     expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
@@ -601,7 +601,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
   });
 
-  it("logs when hot-state continuity fallback still fails full snapshot creation", async () => {
+  it("fails full snapshots that have dangling Codex resume state", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
@@ -662,33 +662,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expect(options.createCheckpointSnapshot(createCheckpointInput("outbox_sending")))
       .rejects.toThrow("missing required provider continuity state");
 
-    expect(writeLog).toHaveBeenCalledWith({
+    expect(writeLog).not.toHaveBeenCalledWith(expect.objectContaining({
       entries: [
         expect.objectContaining({
-          component: "workspace",
           eventCode: "checkpoint.hot_state_fallback",
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson: expect.objectContaining({
-            continuityReason: "codex_home_missing",
-            fallbackReason: "continuity_incomplete",
-          }),
         }),
       ],
-    });
-    expect(writeLog).toHaveBeenCalledWith({
-      entries: [
-        expect.objectContaining({
-          component: "workspace",
-          eventCode: "checkpoint.codex_continuity_missing_after_full_fallback",
-          level: "error",
-          phase: "checkpoint",
-          redactedJson: expect.objectContaining({
-            continuityReason: "codex_home_missing",
-          }),
-        }),
-      ],
-    });
+    }));
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
@@ -748,7 +728,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   });
 
   it("pins the checkpoint snapshot policy for every supported checkpoint reason", async () => {
-    const fullReasons = new Set(["maintenance", "system_mailbox_receipt"]);
+    const fullReasons = new Set([
+      "maintenance",
+      "outbox_intent",
+      "outbox_sending",
+      "system_mailbox_sending",
+      "system_mailbox_receipt",
+    ]);
 
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS) {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));

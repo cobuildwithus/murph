@@ -236,7 +236,7 @@ describe("hosted runtime checkpoint baseline", () => {
     }
   });
 
-  it("reproduces Codex home over-budget import checkpoint fallback", async () => {
+  it("keeps over-budget Codex home out of import hot checkpoints", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-codex-budget-"));
     const operatorHomeRoot = `${vaultRoot}-operator-home`;
     cleanupPaths.push(vaultRoot, operatorHomeRoot);
@@ -339,33 +339,38 @@ describe("hosted runtime checkpoint baseline", () => {
       runtimeLogRequests,
       "workspace.codex_home_snapshot",
     );
-    const fallbackBudgetActual = readRedactedJsonNumber(fallbackLog, "budgetActual");
-    const fallbackBudgetLimit = readRedactedJsonNumber(fallbackLog, "budgetLimit");
 
     expect(result.status).toBe("idle");
     expect(checkpointRequests[0]?.reason).toBe("import");
-    expect(hotSnapshotRef).toBeNull();
-    expect(fallbackLog?.redactedJson).toMatchObject({
-      budgetClass: "inline_bytes",
-      checkpointReason: "import",
-      fallbackReason: "budget_exceeded",
-    });
-    expect(fallbackBudgetActual).toBeGreaterThan(fallbackBudgetLimit ?? 0);
+    expect(hotSnapshotRef).toEqual(expect.objectContaining({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
+      size: expect.any(Number),
+    }));
+    expect(fallbackLog).toBeNull();
     expect(snapshotLog?.redactedJson).toMatchObject({
       checkpointReason: "import",
-      snapshotMode: "full",
+      snapshotMode: "hot-state",
     });
-    expect(codexDiagnosticLog?.redactedJson).toMatchObject({
-      codexHomeSnapshotCandidateCount: expect.any(Number),
-      codexHomeSnapshotIncludedCount: expect.any(Number),
+    expect(codexDiagnosticLog).toBeNull();
+    expect(hotSnapshotRef).not.toBeNull();
+    expect(checkpointRequests[0]?.snapshotRef).toEqual(expect.objectContaining({
+      base: existingBaseSnapshotRef,
+      hot: expect.objectContaining({
+        key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
+      }),
+      schema: "murph.hosted-execution-layered-snapshot.v1",
+    }));
+    expect(checkpointRequests[0]?.browserVaultReplicaRef).toEqual(existingBrowserVaultReplicaRef);
+    expect(snapshotLog?.redactedJson).not.toMatchObject({
+      checkpointReason: "import",
+      snapshotMode: "full",
     });
 
     if (process.env.HOSTED_CHECKPOINT_BASELINE_LOG === "1") {
       process.stdout.write(`hosted-checkpoint-codex-budget ${JSON.stringify({
         artifactPutBytes: artifactPutCalls.reduce((total, call) => total + call.byteLength, 0),
         artifactPutCalls: artifactPutCalls.length,
-        fallbackBudgetActual,
-        fallbackBudgetLimit,
         mailboxFetchCalls: fetchRequests.length,
         workspaceCheckpointCalls: checkpointRequests.length,
       })}\n`);
@@ -644,12 +649,4 @@ function findFirstRuntimeLogEntry(
     }
   }
   return null;
-}
-
-function readRedactedJsonNumber(
-  entry: HostedRuntimeLogRequest["entries"][number] | null,
-  key: string,
-): number | null {
-  const value = entry?.redactedJson?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
