@@ -70,6 +70,19 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
+const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
+
+type HostedAiUsageGateDecision =
+  | {
+    allowed: true;
+    reason: null;
+    retryAfter: null;
+  }
+  | {
+    allowed: false;
+    reason: string;
+    retryAfter: string;
+  };
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -506,6 +519,31 @@ export class HostedUserRunner {
       };
     }
 
+    const gate = await this.readHostedAiUsageGateBeforeInvocation(initialRecord.userId);
+    if (!gate.allowed) {
+      const record = await this.markPendingNudgeAndApplyAlarm({
+        preferredWakeAt: gate.retryAfter,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          reason: gate.reason,
+          retryAfter: gate.retryAfter,
+        },
+        message: "Hosted runner skipped workspace invocation because the AI usage gate denied the start.",
+        phase: "scheduled",
+      });
+      return {
+        nextWakeAt: record.nextWakeAt,
+        redactedStatus: {
+          aiUsageGateBlocked: true,
+          aiUsageGateReason: gate.reason,
+          aiUsageGateRetryAfter: gate.retryAfter,
+        },
+        status: "scheduled",
+      };
+    }
+
     let lease = await this.stateStore.beginInvocation({
       reason: input.reason,
       userId: initialRecord.userId,
@@ -747,6 +785,46 @@ export class HostedUserRunner {
     }
 
     return parseHostedWorkspaceReadResponse(await response.json());
+  }
+
+  private async readHostedAiUsageGateBeforeInvocation(
+    userId: string,
+  ): Promise<HostedAiUsageGateDecision> {
+    try {
+      const response = await fetchHostedExecutionWebControlPlaneResponse({
+        baseUrl: this.readHostedWebControlBaseUrl(),
+        body: "{}",
+        boundUserId: userId,
+        callbackSigning: this.env.webCallbackSigning,
+        method: "POST",
+        path: HOSTED_WEB_USAGE_GATE_PATH,
+        timeoutMs: this.env.webControlTimeoutMs,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Hosted AI usage gate failed with HTTP ${response.status}.`);
+      }
+
+      return parseHostedAiUsageGateDecision(await response.json());
+    } catch (error) {
+      const retryAfter = new Date(Date.now() + this.env.retryDelayMs).toISOString();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          reason: "ai_usage_gate_unavailable",
+          retryAfter,
+        },
+        error,
+        level: "warn",
+        message: "Hosted runner skipped workspace invocation because the AI usage gate was unavailable.",
+        phase: "scheduled",
+      });
+      return {
+        allowed: false,
+        reason: "ai_usage_gate_unavailable",
+        retryAfter,
+      };
+    }
   }
 
   private assertWorkspaceBelongsToRunnerUser(
@@ -1020,6 +1098,53 @@ export class HostedUserRunner {
     }
   }
 
+}
+
+function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecision {
+  const record = requireHostedAiUsageGateObject(value);
+  if (record.allowed === true) {
+    return {
+      allowed: true,
+      reason: null,
+      retryAfter: null,
+    };
+  }
+
+  if (record.allowed !== false) {
+    throw new TypeError("Hosted AI usage gate response allowed must be boolean.");
+  }
+
+  return {
+    allowed: false,
+    reason: requireHostedAiUsageGateString(record.reason, "reason"),
+    retryAfter: requireHostedAiUsageGateIsoDateString(record.retryAfter, "retryAfter"),
+  };
+}
+
+function requireHostedAiUsageGateObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted AI usage gate response must be an object.");
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireHostedAiUsageGateString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`Hosted AI usage gate response ${label} must be a string.`);
+  }
+
+  return value;
+}
+
+function requireHostedAiUsageGateIsoDateString(value: unknown, label: string): string {
+  const normalized = requireHostedAiUsageGateString(value, label);
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new TypeError(`Hosted AI usage gate response ${label} must be an ISO date string.`);
+  }
+
+  return parsed.toISOString();
 }
 
 async function deleteR2ObjectIfSupported(

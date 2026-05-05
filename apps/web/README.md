@@ -232,6 +232,7 @@ Hosted AI usage metering:
 - `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending usage rows each cron drain attempts.
 - `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests only when `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`.
 - `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` must be a Stripe restricted key with billing meter-event write permission only; it is forwarded to hosted execution, never persisted with usage rows, and ignored unless it starts with `rk_`.
+- Hosted AI included-allowance gating is app-owned: web prices imported `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
 
 Hosted runner cleanup:
 
@@ -245,11 +246,10 @@ and `stripeMeterStatus=delegated` only when `stripe_meter` billing is enabled
 in both the web app and execution worker,
 while the hosted-web Stripe drain owns `stripeMeterSource=murph`.
 
-For exact flat-fee plus included-credit plus provider token cost with margin
-pricing, prefer Stripe pricing plans and Billing for LLM tokens when your
-account has preview access. If you stay on the classic metered-price fallback,
-keep included allowance and overage logic in Stripe pricing rather than
-subtracting allowance in app code.
+Stripe meter state remains downstream billing/reconciliation. The hosted
+allowance gate reads web-owned spend, never Stripe meter totals, and Cloudflare
+only enforces the signed gate decision before starting a new container
+invocation.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.

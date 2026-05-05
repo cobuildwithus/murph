@@ -140,6 +140,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes member-scoped usage rows. Already-submitted external billing/metering data may remain under vendor retention.",
   },
   {
+    slug: "prisma.hosted_ai_usage_period",
+    label: "AI usage allowance period rows",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes member-scoped included-allowance spend aggregates used by the hosted AI usage gate.",
+  },
+  {
     slug: "prisma.hosted_linq_daily_state",
     label: "Linq daily message counters",
     deletion: "live-delete",
@@ -447,6 +454,7 @@ export async function buildHostedDataExport(input: {
     consentEvents,
     consentGrants,
     aiUsage,
+    aiUsagePeriods,
     linqDailyStates,
   ] = await Promise.all([
     readHostedMemberSnapshot({ memberId, prisma }),
@@ -688,6 +696,23 @@ export async function buildHostedDataExport(input: {
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
+    prisma.hostedAiUsagePeriod.findMany({
+      orderBy: { periodStart: "desc" },
+      select: {
+        billingPlanCode: true,
+        blockedAt: true,
+        createdAt: true,
+        lastUsageAt: true,
+        limitUsdMicros: true,
+        memberId: true,
+        periodEnd: true,
+        periodStart: true,
+        spentUsdMicros: true,
+        updatedAt: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { memberId },
+    }),
     prisma.hostedLinqDailyState.findMany({
       orderBy: { dayUtc: "desc" },
       select: {
@@ -726,6 +751,7 @@ export async function buildHostedDataExport(input: {
   const limitedConsentEvents = limitRowsForExport(consentEvents);
   const limitedConsentGrants = limitRowsForExport(consentGrants);
   const limitedAiUsage = limitRowsForExport(aiUsage);
+  const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
   const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
 
   return toExportRecord({
@@ -748,6 +774,7 @@ export async function buildHostedDataExport(input: {
         mailboxLaneCounters: limitedMailboxLaneCounters.meta,
         runtimeLogs: limitedRuntimeLogs.meta,
         aiUsage: limitedAiUsage.meta,
+        aiUsagePeriods: limitedAiUsagePeriods.meta,
       },
     },
     security: {
@@ -887,6 +914,18 @@ export async function buildHostedDataExport(input: {
       })),
     },
     usage: {
+      aiUsagePeriods: limitedAiUsagePeriods.rows.map((period) => ({
+        billingPlanCode: period.billingPlanCode,
+        blockedAt: period.blockedAt,
+        createdAt: period.createdAt,
+        lastUsageAt: period.lastUsageAt,
+        limitUsdMicros: period.limitUsdMicros.toString(),
+        memberId: period.memberId,
+        periodEnd: period.periodEnd,
+        periodStart: period.periodStart,
+        spentUsdMicros: period.spentUsdMicros.toString(),
+        updatedAt: period.updatedAt,
+      })),
       aiUsage: limitedAiUsage.rows.map((entry) => ({
         attemptCount: entry.attemptCount,
         apiKeyEnvConfigured: Boolean(entry.apiKeyEnv),
@@ -1206,6 +1245,7 @@ async function countHostedAccountData(input: {
     hostedConsentEvent,
     hostedConsentGrant,
     hostedAiUsage,
+    hostedAiUsagePeriod,
     hostedLinqDailyState,
     deviceConnection,
     deviceTokenAudit,
@@ -1232,6 +1272,7 @@ async function countHostedAccountData(input: {
     input.prisma.hostedConsentEvent.count({ where: { memberId } }),
     input.prisma.hostedConsentGrant.count({ where: { memberId } }),
     input.prisma.hostedAiUsage.count({ where: { memberId } }),
+    input.prisma.hostedAiUsagePeriod.count({ where: { memberId } }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId } }),
     input.prisma.deviceConnection.count({ where: { userId: memberId } }),
     input.prisma.deviceTokenAudit.count({ where: { userId: memberId } }),
@@ -1250,6 +1291,7 @@ async function countHostedAccountData(input: {
     "prisma.device_sync_signal": deviceSyncSignal,
     "prisma.device_token_audit": deviceTokenAudit,
     "prisma.hosted_ai_usage": hostedAiUsage,
+    "prisma.hosted_ai_usage_period": hostedAiUsagePeriod,
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
     "prisma.hosted_invite": hostedInvite,
@@ -1289,6 +1331,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_user_crypto_audit", await deleteHostedUserCryptoAuditRows(input.prisma, memberId));
   record("prisma.hosted_user_crypto_envelope", await deleteHostedUserCryptoEnvelopeRows(input.prisma, memberId));
   record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_ai_usage_period", await input.prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId } }));
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId } }));

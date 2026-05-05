@@ -49,6 +49,11 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
+export const HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS = {
+  launch_edge_monthly: 25_000_000n,
+  launch_monthly: 10_000_000n,
+} as const satisfies Record<HostedBillingPlanCode, bigint>;
+
 export function getHostedBillingPlanDefinition(
   code: HostedBillingPlanCode
 ): HostedBillingPlanDefinition {
@@ -57,6 +62,12 @@ export function getHostedBillingPlanDefinition(
 
 export function getHostedDefaultBillingPlanCode(): HostedBillingPlanCode {
   return "launch_monthly";
+}
+
+export function getHostedAiUsageMonthlyAllowanceUsdMicros(
+  code: HostedBillingPlanCode,
+): bigint {
+  return HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS[code];
 }
 
 export function parseHostedBillingPlanCode(

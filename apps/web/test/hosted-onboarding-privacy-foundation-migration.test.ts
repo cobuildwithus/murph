@@ -58,6 +58,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
     'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
+    'currentBillingPlanCode String? @map("current_billing_plan_code")',
+    'currentPeriodStart DateTime? @map("current_period_start")',
+    'currentPeriodEnd DateTime? @map("current_period_end")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -78,6 +81,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsage",
+  "HostedAiUsagePeriod",
   "HostedConsentEvent",
   "HostedConsentGrant",
   "HostedInvite",
@@ -208,6 +212,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050403_linq_pending_participant_contact",
       "2026050500_device_sync_dirty_connection",
       "2026050501_stripe_checkout_email_authorization",
+      "2026050502_hosted_ai_usage_allowance",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');

@@ -1639,6 +1639,32 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("keeps the AI usage gate off the runtime web-control proxy", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-execution/usage/gate", {
+        body: "{}",
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not proxy generic loopback host traffic through runner outbound handling", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

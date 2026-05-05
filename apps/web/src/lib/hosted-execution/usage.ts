@@ -16,6 +16,7 @@ import {
 } from "@murphai/hosted-execution";
 import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
+import { accountHostedAiUsageForAllowanceTx } from "./usage-allowance";
 
 export interface ImportHostedAiUsageResult {
   recordedIds: string[];
@@ -537,6 +538,7 @@ async function updateHostedAiUsageStripeMeterState(input: {
 }
 
 export async function importHostedAiUsageRecords(input: {
+  accountAllowance?: boolean;
   aiUsageBillingMode?: HostedAiUsageBillingMode;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
@@ -557,24 +559,34 @@ export async function importHostedAiUsageRecords(input: {
       aiUsageBillingMode,
       stripeCustomerIdCache: memberStripeCustomerIdCache,
     });
-    const storedRecord = await prisma.hostedAiUsage.upsert({
-      where: {
-        id: record.usageId,
-      },
-      create: buildHostedAiUsageCreateData(
-        record,
-        memberId,
-        stripeMeterSource,
-        aiUsageBillingMode,
-      ),
-      update: {},
-      select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
-    });
+    await runHostedAiUsageImportTransaction(prisma, async (tx) => {
+      const storedRecord = await tx.hostedAiUsage.upsert({
+        where: {
+          id: record.usageId,
+        },
+        create: buildHostedAiUsageCreateData(
+          record,
+          memberId,
+          stripeMeterSource,
+          aiUsageBillingMode,
+        ),
+        update: {},
+        select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
+      });
 
-    assertStoredHostedAiUsageMatchesRecord({
-      memberId,
-      record,
-      storedRecord,
+      assertStoredHostedAiUsageMatchesRecord({
+        memberId,
+        record,
+        storedRecord,
+      });
+
+      if (input.accountAllowance === true) {
+        await accountHostedAiUsageForAllowanceTx({
+          memberId,
+          record,
+          tx,
+        });
+      }
     });
     recordedIds.push(record.usageId);
   }
@@ -583,6 +595,23 @@ export async function importHostedAiUsageRecords(input: {
     recordedIds,
     records,
   };
+}
+
+async function runHostedAiUsageImportTransaction<T>(
+  prisma: HostedAiUsageClient,
+  run: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  const maybeTransaction = prisma as {
+    $transaction?: <R>(
+      run: (tx: Prisma.TransactionClient) => Promise<R>,
+    ) => Promise<R>;
+  };
+
+  if (typeof maybeTransaction.$transaction === "function") {
+    return maybeTransaction.$transaction(run);
+  }
+
+  return run(prisma as Prisma.TransactionClient);
 }
 
 export async function markHostedAiUsageStripeMeteringDisabled(input: {

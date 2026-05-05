@@ -51,6 +51,9 @@ export async function prepareHostedMemberStripeBillingWrite(input: {
 export async function writeHostedMemberStripeBillingTx(input: {
   billingStatus: HostedBillingStatus;
   canonicalBillingStatus: HostedBillingStatus | null;
+  currentBillingPlanCode?: string | null;
+  currentPeriodEnd?: Date | null;
+  currentPeriodStart?: Date | null;
   dispatchContext: HostedStripeDispatchContext;
   freshnessPolicy?: HostedStripeBillingFreshnessPolicy;
   member: HostedMemberBillingSnapshot;
@@ -109,6 +112,9 @@ export async function writeHostedMemberStripeBillingTx(input: {
 
   await writeHostedMemberStripeBillingRefTx({
     memberId: currentMember.core.id,
+    currentBillingPlanCode: input.currentBillingPlanCode,
+    currentPeriodEnd: input.currentPeriodEnd,
+    currentPeriodStart: input.currentPeriodStart,
     stripeEventCreatedAt: resolveHostedStripeBillingRefEventCreatedAt({
       billingRef: currentMember.billingRef,
       dispatchContext: input.dispatchContext,
@@ -127,6 +133,9 @@ export async function writeHostedMemberStripeBillingTx(input: {
 export const updateHostedMemberStripeBillingIfFreshTx = writeHostedMemberStripeBillingTx;
 
 export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
+  currentBillingPlanCode?: string | null;
+  currentPeriodEnd?: Date | null;
+  currentPeriodStart?: Date | null;
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
   memberId: string;
   stripeCustomerId?: string | null;
@@ -149,6 +158,9 @@ export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
 
   await writeHostedMemberStripeBillingRefTx({
     memberId: input.memberId,
+    currentBillingPlanCode: input.currentBillingPlanCode,
+    currentPeriodEnd: input.currentPeriodEnd,
+    currentPeriodStart: input.currentPeriodStart,
     stripeEventCreatedAt: input.dispatchContext.eventCreatedAt,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,

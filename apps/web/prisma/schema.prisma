@@ -274,6 +274,7 @@ model HostedMember {
   hostedMailboxLaneCounters HostedMailboxLaneCounter[]
   hostedWorkspace           HostedWorkspace?
   hostedRuntimeLogs         HostedRuntimeLog[]
+  hostedAiUsagePeriods      HostedAiUsagePeriod[]
   consentEvents             HostedConsentEvent[]
   consentGrants             HostedConsentGrant[]
   hostedCryptoEnvelopes     HostedUserCryptoEnvelope[]
@@ -362,6 +363,9 @@ model HostedMemberBillingRef {
   stripeCustomerIdEncrypted     String?      @map("stripe_customer_id_encrypted")
   stripeSubscriptionLookupKey   String?      @unique @map("stripe_subscription_lookup_key")
   stripeSubscriptionIdEncrypted String?      @map("stripe_subscription_id_encrypted")
+  currentBillingPlanCode        String?      @map("current_billing_plan_code")
+  currentPeriodStart            DateTime?    @map("current_period_start")
+  currentPeriodEnd              DateTime?    @map("current_period_end")
   lastStripeEventCreatedAt      DateTime?    @map("last_stripe_event_created_at")
   createdAt                     DateTime     @default(now()) @map("created_at")
   updatedAt                     DateTime     @updatedAt @map("updated_at")
@@ -624,6 +628,13 @@ model HostedAiUsage {
   cacheWriteTokens           Int?         @map("cache_write_tokens")
   totalTokens                Int?         @map("total_tokens")
   providerRequestOutcome     String       @default("succeeded") @map("provider_request_outcome")
+  allowanceAccountedAt       DateTime?    @map("allowance_accounted_at")
+  allowancePeriodStart       DateTime?    @map("allowance_period_start")
+  allowancePeriodEnd         DateTime?    @map("allowance_period_end")
+  allowanceCostUsdMicros     BigInt       @default(0) @map("allowance_cost_usd_micros")
+  allowancePricingVersion    String?      @map("allowance_pricing_version")
+  allowancePricingSnapshotJson Json?      @map("allowance_pricing_snapshot_json")
+  allowanceCounted           Boolean      @default(false) @map("allowance_counted")
   stripeMeterStatus          String       @default("pending") @map("stripe_meter_status")
   stripeMeterAttemptCount    Int          @default(0) @map("stripe_meter_attempt_count")
   stripeMeterLastAttemptedAt DateTime?    @map("stripe_meter_last_attempted_at")
@@ -637,11 +648,32 @@ model HostedAiUsage {
 
   @@unique([turnId, attemptCount, providerRequestOrdinal], map: "hosted_ai_usage_turn_attempt_provider_request_idx")
   @@index([featureKey, createdAt])
+  @@index([memberId, allowancePeriodStart])
   @@index([memberId, occurredAt])
   @@index([reportingUserId, createdAt])
   @@index([stripeMeterStatus, stripeMeterNextAttemptAt, occurredAt], map: "hosted_ai_usage_stripe_meter_due_idx")
   @@index([surface, createdAt])
   @@map("hosted_ai_usage")
+}
+
+model HostedAiUsagePeriod {
+  memberId        String       @map("member_id")
+  periodStart     DateTime     @map("period_start")
+  periodEnd       DateTime     @map("period_end")
+  billingPlanCode String       @map("billing_plan_code")
+  limitUsdMicros  BigInt       @map("limit_usd_micros")
+  spentUsdMicros  BigInt       @default(0) @map("spent_usd_micros")
+  blockedAt       DateTime?    @map("blocked_at")
+  lastUsageAt     DateTime?    @map("last_usage_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  member          HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, periodStart])
+  @@index([memberId, periodEnd])
+  @@index([blockedAt])
+  @@index([periodEnd])
+  @@map("hosted_ai_usage_period")
 }
 
 model HostedAssistantRuntimeIssue {

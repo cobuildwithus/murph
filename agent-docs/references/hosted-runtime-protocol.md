@@ -265,7 +265,7 @@ secret, checkpoint diagnostics stay count/class only.
 - runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
 - hosted member identity/routing/billing/email authorization
 - hosted device-sync authority
-- hosted AI usage ledger
+- hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
 - anonymized assistant-runtime issue sink
 
 ### Runtime Owns
@@ -288,13 +288,15 @@ secret, checkpoint diagnostics stay count/class only.
 - lease/fencing generation
 - alarm/nudge coalescing
 - container invocation
+- signed web usage-gate enforcement before container invocation
 - encrypted bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
 - verification of signed ingress/runtime root envelopes plus Cloudflare P-256
   recipient unwrap; Cloudflare must not hold GCP KMS decrypt authority
 
 Cloudflare does not own product facts, mailbox state, mailbox import progress,
-assistant channel enablement state, outbox truth, or durable queue history.
+hosted AI usage spend, assistant channel enablement state, outbox truth, or
+durable queue history.
 
 ### Vercel Workflow Owns
 
