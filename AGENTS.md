@@ -45,6 +45,7 @@ Always read these before repo code/docs/test/config work:
 
 - Do not include or expose legal names, local account usernames, home directory paths, secrets, raw credentials, or full `Authorization` headers in commits, code, docs, generated files, comments, logs, examples, or quoted output. Redact unavoidable identifiers with neutral placeholders such as `<REDACTED_USER>` or `<HOME_DIR>`.
 - Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
+- Do not pull remote environment variables into local files for inspection. Use provider CLI list/status commands that show names/scopes only, and ask before any operation that would download secret values.
 - When writing assistant/provider prompts, avoid automated-outreach framing: acquisition/signup language, `new user` labels, delivery/notification wording, and imperative exact-send phrasing in the same prompt. Prefer in-chat, user-facing task framing.
 - Import sibling workspace packages by package name through declared public entrypoints only; do not reach into another package's `src/` or `dist/`.
 - Keep workspace package dependencies one-way and acyclic. Put shared runtime/domain logic in a lower owning package instead of cross-importing sibling internals or using sibling-to-sibling re-exports.
