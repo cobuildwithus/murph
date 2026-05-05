@@ -18,6 +18,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-delivery"
   | "linq-scheduled-reminder"
   | "linq-webhook"
+  | "snapshot-stress"
   | "telegram"
   | "telegram-first-contact";
 
@@ -60,6 +61,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
     name: "linq-webhook",
     requiresParserToolchain: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-snapshot-stress-e2e.test.ts",
+    manualOnly: true,
+    name: "snapshot-stress",
   },
   {
     aliases: ["telegram"],
