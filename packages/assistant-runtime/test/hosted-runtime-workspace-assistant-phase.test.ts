@@ -183,12 +183,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
 
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith({
-      hosted: expect.objectContaining({
-        memberId: "member_synthetic_phase",
-        userEnvKeys: [],
-      }),
-    });
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          memberId: "member_synthetic_phase",
+          userEnvKeys: [],
+        }),
+      },
+      {
+        runtimeEnv: {},
+      },
+    );
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext: expect.objectContaining({

@@ -319,9 +319,16 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
   };
 }
 
-export async function readHostedAssistantExecutionDefaultTarget(): Promise<
-  AssistantModelTarget | null
-> {
+export async function readHostedAssistantExecutionDefaultTarget(input: {
+  runtimeEnv?: Readonly<Record<string, string | undefined>>;
+} = {}): Promise<AssistantModelTarget | null> {
+  if (input.runtimeEnv) {
+    await ensureHostedAssistantOperatorDefaults({
+      allowMissing: true,
+      env: input.runtimeEnv,
+    });
+  }
+
   const operatorConfig = await readOperatorConfig();
   const hostedAssistantConfig = operatorConfig?.hostedAssistant
     ?? (await resolveHostedAssistantConfig());
@@ -332,7 +339,8 @@ export async function readHostedAssistantExecutionDefaultTarget(): Promise<
 
   return applyHostedCodexRuntimeModelProviderTarget({
     modelProviderId: normalizeHostedContextString(
-      process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+      input.runtimeEnv?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]
+        ?? process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
     ),
     target,
   });
@@ -340,12 +348,17 @@ export async function readHostedAssistantExecutionDefaultTarget(): Promise<
 
 export async function hydrateHostedExecutionDefaultTarget(
   executionContext: AssistantExecutionContext,
+  input: {
+    runtimeEnv?: Readonly<Record<string, string | undefined>>;
+  } = {},
 ): Promise<AssistantExecutionContext> {
   if (!executionContext.hosted || executionContext.hosted.defaultTarget) {
     return executionContext;
   }
 
-  const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
+  const defaultTarget = await readHostedAssistantExecutionDefaultTarget({
+    runtimeEnv: input.runtimeEnv,
+  });
   if (!defaultTarget) {
     return executionContext;
   }
