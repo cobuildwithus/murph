@@ -32,6 +32,8 @@ export type HostedBillingPhase = (typeof HOSTED_BILLING_PHASES)[number];
 
 export const HOSTED_STANDARD_CHECKOUT_OFFER = "standard" as const;
 export const HOSTED_PULSE_TRIAL_OFFER = "pulse_trial_7d" as const;
+export const HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV =
+  "HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED";
 export const HOSTED_PULSE_TRIAL_DAYS = 7;
 export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 2_500_000n;
 export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
@@ -112,6 +114,12 @@ export function getHostedAiUsageMonthlyAllowanceUsdMicros(
   code: HostedBillingPlanCode,
 ): bigint {
   return HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS[code];
+}
+
+export function isHostedPulseTrialCheckoutEnabled(
+  source: Record<string, string | undefined> = process.env,
+): boolean {
+  return source[HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV] === "1";
 }
 
 export function parseHostedBillingPlanCode(

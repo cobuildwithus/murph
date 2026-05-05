@@ -4,6 +4,7 @@ import {
   formatHostedLandingPricingLongSummary,
   formatHostedLandingPricingShortSummary,
   getHostedBillingPlanDefinition,
+  isHostedPulseTrialCheckoutEnabled,
   listHostedBillingPlanPresentations,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
@@ -54,6 +55,16 @@ describe("hosted billing launch plan Stripe configuration", () => {
       durationDays: 7,
       usageLimitUsdMicros: 2_500_000n,
     });
+  });
+
+  it("resolves the Pulse Trial checkout rollout flag from a single helper", () => {
+    expect(isHostedPulseTrialCheckoutEnabled({
+      HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED: "1",
+    })).toBe(true);
+    expect(isHostedPulseTrialCheckoutEnabled({
+      HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED: "0",
+    })).toBe(false);
+    expect(isHostedPulseTrialCheckoutEnabled({})).toBe(false);
   });
 
   it("formats the homepage pricing summaries from the shared plan definitions", () => {
