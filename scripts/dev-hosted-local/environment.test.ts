@@ -1,3 +1,7 @@
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +15,7 @@ import {
   mergeCloudflareLocalEnv,
   normalizeLocalDatabaseUrl,
   parseEnvText,
+  readHostedLocalDevVarsText,
   resolveHostedLocalDatabaseUrl,
   resolveHostedLocalStripeEnvFilePath,
   shouldSyncLocalDatabaseSchema,
@@ -622,6 +627,34 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBe(
       "http://host.docker.internal:8787",
     );
+  });
+});
+
+describe("readHostedLocalDevVarsText", () => {
+  it("recovers hosted-local state when .dev.vars is an interrupted worker-env symlink", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "murph-hosted-local-env-"));
+    try {
+      const devVarsPath = path.join(tempDir, ".dev.vars");
+      const workerEnvPath = path.join(tempDir, "cloudflare-worker.dev.vars");
+      const stateEnvPath = path.join(tempDir, "hosted-local-state.dev.vars");
+      await writeFile(workerEnvPath, 'HOSTED_CRYPTO_ENV="local"\n', "utf8");
+      await writeFile(
+        stateEnvPath,
+        [
+          'HOSTED_CRYPTO_ENV="local"',
+          'HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK="{\\"kty\\":\\"EC\\"}"',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await symlink(workerEnvPath, devVarsPath);
+
+      await expect(readHostedLocalDevVarsText(devVarsPath)).resolves.toContain(
+        "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+      );
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
   });
 });
 

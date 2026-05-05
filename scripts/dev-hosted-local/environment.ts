@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
 import {
   cloudflareDir,
@@ -51,7 +51,7 @@ export async function resolveCloudflareLocalEnv(input: {
   oidcIdentity: HostedExecutionOidcIdentity;
   overrides?: Record<string, string | undefined>;
 }): Promise<Record<string, string>> {
-  const originalContents = await tryReadTextFile(cloudflareDevVarsPath);
+  const originalContents = await readHostedLocalDevVarsText(cloudflareDevVarsPath);
   const existing = originalContents === null ? {} : parseEnvText(originalContents);
 
   return mergeCloudflareLocalEnv({
@@ -60,6 +60,25 @@ export async function resolveCloudflareLocalEnv(input: {
     oidcIdentity: input.oidcIdentity,
     overrides: input.overrides,
   });
+}
+
+export async function readHostedLocalDevVarsText(
+  devVarsPath: string = cloudflareDevVarsPath,
+): Promise<string | null> {
+  const symlinkTarget = await tryReadSymlinkTarget(devVarsPath);
+  if (symlinkTarget) {
+    const resolvedTarget = path.resolve(path.dirname(devVarsPath), symlinkTarget);
+    const interruptedStatePath = path.join(
+      path.dirname(resolvedTarget),
+      "hosted-local-state.dev.vars",
+    );
+    const interruptedStateText = await tryReadTextFile(interruptedStatePath);
+    if (interruptedStateText !== null) {
+      return interruptedStateText;
+    }
+  }
+
+  return await tryReadTextFile(devVarsPath);
 }
 
 export async function loadHostedLocalBaseEnvironment(
@@ -1118,15 +1137,36 @@ async function tryReadTextFile(filePath: string): Promise<string | null> {
   try {
     return await readFile(filePath, "utf8");
   } catch (error) {
-    if (
-      typeof error === "object"
-      && error !== null
-      && "code" in error
-      && error.code === "ENOENT"
-    ) {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
       return null;
     }
 
     throw error;
   }
+}
+
+async function tryReadSymlinkTarget(filePath: string): Promise<string | null> {
+  try {
+    const stat = await lstat(filePath);
+    if (!stat.isSymbolicLink()) {
+      return null;
+    }
+
+    return await readlink(filePath);
+  } catch (error) {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === code
+  );
 }

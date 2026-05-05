@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   incrementHostedLinqOutboundDailyState: vi.fn(),
   issueHostedInviteTx: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
@@ -56,6 +57,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey:
+    mocks.lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
@@ -131,6 +134,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
       runId: "workflow_run_123",
     });
+    mocks.lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey.mockResolvedValue(null);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });
@@ -224,6 +228,72 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("treats stale generated local crypto identity rows as a first contact miss", async () => {
+    const previousHostedCryptoEnv = process.env.HOSTED_CRYPTO_ENV;
+    process.env.HOSTED_CRYPTO_ENV = "local";
+    try {
+      const prisma = createPrismaStub();
+      mocks.getPrisma.mockReturnValue(prisma);
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockRejectedValue(
+        new Error("Hosted domain root envelope authority signature verification failed."),
+      );
+      mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      });
+      mocks.issueHostedInviteTx.mockResolvedValue({
+        id: "invite_123",
+        inviteCode: "code_first_contact",
+      });
+
+      await expect(
+        handleHostedOnboardingLinqWebhook({
+          rawBody: buildLinqMessageWebhookBody({
+            service: "iMessage",
+          }),
+          signature: null,
+          timestamp: null,
+        }),
+      ).resolves.toMatchObject({
+        inviteCode: "code_first_contact",
+        ok: true,
+        reason: "sent-signup-link",
+      });
+
+      expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+        phoneNumber: "+15551234567",
+        prisma,
+      });
+    } finally {
+      restoreEnvValue("HOSTED_CRYPTO_ENV", previousHostedCryptoEnv);
+    }
+  });
+
+  it("still fails closed on stale hosted crypto identity rows outside local dev", async () => {
+    const previousHostedCryptoEnv = process.env.HOSTED_CRYPTO_ENV;
+    process.env.HOSTED_CRYPTO_ENV = "development";
+    try {
+      const prisma = createPrismaStub();
+      mocks.getPrisma.mockReturnValue(prisma);
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockRejectedValue(
+        new Error("Hosted domain root envelope authority signature verification failed."),
+      );
+
+      await expect(
+        handleHostedOnboardingLinqWebhook({
+          rawBody: buildLinqMessageWebhookBody({
+            service: "iMessage",
+          }),
+          signature: null,
+          timestamp: null,
+        }),
+      ).rejects.toThrow("Hosted domain root envelope authority signature verification failed.");
+    } finally {
+      restoreEnvValue("HOSTED_CRYPTO_ENV", previousHostedCryptoEnv);
+    }
   });
 
   it("appends and hands off the active-member wake without any direct Linq send", async () => {
@@ -347,4 +417,13 @@ function createPrismaStub() {
   } as const;
 
   return prisma;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
 }
