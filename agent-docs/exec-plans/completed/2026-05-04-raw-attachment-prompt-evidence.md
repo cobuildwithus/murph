@@ -43,5 +43,6 @@ Success criteria:
 - Generic raw-file instruction is additive; PDF-specific instruction remains an extra specialization.
 - Scoped commit is blocked by overlapping active dirty work in `prompt-builder.ts` and `assistant-automation-prompt-builder.test.ts` from the assistant attachment filenames row; do not partial-stage these files without coordinating that row.
 
-Status: handoff
-Updated: 2026-05-04
+Status: completed
+Updated: 2026-05-06
+Completed: 2026-05-06

@@ -1,8 +1,8 @@
 # Run Digital Sunset Health Commons research
 
-Status: content landed; current verification passed
+Status: completed
 Created: 2026-04-24
-Updated: 2026-04-27
+Updated: 2026-05-06
 
 ## Goal
 
@@ -100,3 +100,4 @@ Updated: 2026-04-27
   - ChatGPT conversation `69ec305e-09a0-839d-965e-92ed12427e86` belongs to `output-packages/research/digital-sunset`, seam `12-source-extraction-008`.
   - That original seam was already replaced by completed seams `12-source-extraction-008a` and `12-source-extraction-008b`; do not keep reharvesting the original `008` thread.
   - A stale harvest attempt for original `008` was marked stopped because live `phlebas` CDP did not show the conversation and the replacement seams already hold the extracted artifacts.
+Completed: 2026-05-06
