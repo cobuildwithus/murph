@@ -122,4 +122,20 @@ describe("@murphai/runtime-state package boundary", () => {
       types: "./dist/node/ulid.d.ts",
     });
   });
+
+  it("keeps node helper source imports compatible with hosted source resolution", async () => {
+    const nodeBarrel = await readFile(
+      new URL("../src/node/index.ts", import.meta.url),
+      "utf8",
+    );
+    const loopbackAuthSource = await readFile(
+      new URL("../src/node/loopback-control-plane-auth.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(nodeBarrel).toContain('from "./loopback-control-plane-auth.ts"');
+    expect(nodeBarrel).not.toContain('from "./loopback-control-plane-auth.js"');
+    expect(loopbackAuthSource).toContain('from "../loopback-control-plane.ts"');
+    expect(loopbackAuthSource).not.toContain('from "../loopback-control-plane.js"');
+  });
 });

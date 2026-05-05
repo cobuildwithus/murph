@@ -31,7 +31,7 @@ export * from "../hosted-provider-continuity-repair.ts";
 export * from "../hosted-email.ts";
 export * from "../locks.ts";
 export * from "../loopback-control-plane.ts";
-export * from "./loopback-control-plane-auth.js";
+export * from "./loopback-control-plane-auth.ts";
 export * from "../process-env.ts";
 export * from "../process-kill.ts";
 export * from "../runtime-paths.ts";
