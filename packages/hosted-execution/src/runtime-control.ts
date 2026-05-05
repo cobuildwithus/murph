@@ -55,8 +55,27 @@ export function normalizeHostedAiUsageAllowancePricedModelId(
   value: string,
 ): HostedAiUsageAllowancePricedModel | null {
   const normalized = value.trim().toLowerCase();
+  const exact = normalizeHostedAiUsageAllowancePricedModelCandidate(normalized);
+  if (exact) {
+    return exact;
+  }
 
-  return isHostedAiUsageAllowancePricedModelId(normalized) ? normalized : null;
+  const providerScoped = normalized.split("/").at(-1) ?? normalized;
+  const providerScopedExact =
+    normalizeHostedAiUsageAllowancePricedModelCandidate(providerScoped);
+  if (providerScopedExact) {
+    return providerScopedExact;
+  }
+
+  const datedSnapshotBase = providerScoped.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
+
+  return normalizeHostedAiUsageAllowancePricedModelCandidate(datedSnapshotBase);
+}
+
+function normalizeHostedAiUsageAllowancePricedModelCandidate(
+  value: string,
+): HostedAiUsageAllowancePricedModel | null {
+  return isHostedAiUsageAllowancePricedModelId(value) ? value : null;
 }
 
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";

@@ -103,18 +103,34 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices direct OpenAI dated gpt-5.5 snapshots", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.5-2026-04-23",
+      servedModel: "gpt-5.5-2026-04-23",
+    })).toMatchObject({
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.5",
+        modelSource: "served",
+        requestedModel: "gpt-5.5-2026-04-23",
+        servedModel: "gpt-5.5-2026-04-23",
+      },
+    });
+  });
+
   it("falls back to a recognized requested model when the served model is decorated", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: "gpt-5.5",
-      servedModel: "gpt-5.5-2026-05-05",
+      servedModel: "gpt-5.5-production",
     })).toMatchObject({
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.5",
         modelSource: "requested",
         requestedModel: "gpt-5.5",
-        servedModel: "gpt-5.5-2026-05-05",
+        servedModel: "gpt-5.5-production",
       },
     });
   });
