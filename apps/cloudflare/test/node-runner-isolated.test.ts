@@ -113,6 +113,34 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     expect(cwdValues[2]).not.toContain("member_456");
   });
 
+  it("keeps the same warm launcher root after a failed child", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+    const cwdValues: string[] = [];
+
+    spawnMock
+      .mockImplementationOnce((_command, _args, options) => {
+        cwdValues.push(String(options?.cwd ?? ""));
+        return createFailedChildProcess(module);
+      })
+      .mockImplementationOnce((_command, _args, options) => {
+        cwdValues.push(String(options?.cwd ?? ""));
+        return createSuccessfulChildProcess(module);
+      });
+
+    await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_warm_failure"),
+    })).rejects.toThrow("simulated child failure");
+
+    await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_warm_after_failure"),
+    });
+
+    expect(cwdValues).toHaveLength(2);
+    expect(cwdValues[1]).toBe(cwdValues[0]);
+  });
+
   it("passes only the normalized runtime env into the isolated child env", async () => {
     vi.stubEnv("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK", '{"kty":"EC"}');
     vi.stubEnv("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT", "development");
@@ -395,6 +423,38 @@ function createSuccessfulChildProcess(
       result: createRunnerResult(),
     }));
     child.emit("close", 0);
+  });
+
+  return child;
+}
+
+function createFailedChildProcess(
+  module: typeof import("../src/node-runner-isolated.ts"),
+) {
+  const child = new EventEmitter() as EventEmitter & {
+    kill: ReturnType<typeof vi.fn>;
+    pid: number;
+    stderr: PassThrough;
+    stdin: PassThrough;
+    stdout: PassThrough;
+  };
+  child.kill = vi.fn();
+  child.pid = 42_425;
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+
+  queueMicrotask(() => {
+    child.stdout.end(module.formatHostedExecutionChildResult({
+      ok: false,
+      error: {
+        message: "simulated child failure",
+        name: "Error",
+      },
+    }));
+    child.emit("close", 1);
   });
 
   return child;

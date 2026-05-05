@@ -601,7 +601,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
   });
 
-  it("fails full snapshots that have dangling Codex resume state", async () => {
+  it("fails full fallback snapshots that have dangling Codex resume state", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
@@ -628,7 +628,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         readWorkspace: async () => ({
           fetchedAt: "2026-05-01T00:00:00.000Z",
           workspace: {
-            browserVaultReplicaRef: createBrowserVaultReplicaRef(baseSnapshotRef.hash),
+            browserVaultReplicaRef: null,
             checkpointedAt: "2026-05-01T00:00:00.000Z",
             createdAt: "2026-05-01T00:00:00.000Z",
             nextWakeAt: null,
@@ -745,25 +745,28 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     })).toBeNull();
   });
 
-  it("writes full snapshots for system mailbox receipt checkpoints", async () => {
+  it("writes hot snapshots for system mailbox receipt checkpoints when base sidecars exist", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
     const putArtifact = vi.fn(async () => {});
     const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
       createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const baseSnapshotRef = createBundleRef("d");
+    const browserVaultReplicaRef = createBrowserVaultReplicaRef(baseSnapshotRef.hash);
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         putArtifact,
         readWorkspace: async () => ({
           fetchedAt: "2026-05-01T00:00:00.000Z",
           workspace: {
+            browserVaultReplicaRef,
             checkpointedAt: "2026-05-01T00:00:00.000Z",
             createdAt: "2026-05-01T00:00:00.000Z",
             nextWakeAt: null,
             nextWakeReason: null,
             redactedStatus: null,
-            snapshotRef: createBundleRef("d"),
+            snapshotRef: baseSnapshotRef,
             updatedAt: "2026-05-01T00:00:00.000Z",
             userId: "member_1",
             version: "8",
@@ -791,21 +794,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const result = await options.createCheckpointSnapshot(
       createCheckpointInput("system_mailbox_receipt"),
     );
-    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
 
-    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
-    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
-      sourceBundleHash: snapshotRef.hash,
-    }));
+    expect(snapshotRef.base).toEqual(baseSnapshotRef);
+    expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
+    expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
   });
 
   it("pins the checkpoint snapshot policy for every supported checkpoint reason", async () => {
-    const fullReasons = new Set([
-      "maintenance",
-      "system_mailbox_receipt",
-    ]);
-
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS) {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
       cleanupPaths.push(vaultRoot);
@@ -862,20 +859,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
       const result = await options.createCheckpointSnapshot(createCheckpointInput(reason));
 
-      if (fullReasons.has(reason)) {
-        const snapshotRef = requireBundleRef(result.snapshotRef);
-        expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-        expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
-        expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
-          sourceBundleHash: snapshotRef.hash,
-        }));
-      } else {
-        const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
-        expect(snapshotRef.base).toEqual(baseSnapshotRef);
-        expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
-        expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
-        expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
-      }
+      const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
+      expect(snapshotRef.base).toEqual(baseSnapshotRef);
+      expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
+      expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+      expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
     }
   });
 
