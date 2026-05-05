@@ -37,6 +37,9 @@ import type {
 import {
   createDefaultHostedManagedAutoReplyChannels,
 } from "./managed-auto-reply.ts";
+import {
+  resolveHostedCodexLocalTestModelProviderId,
+} from "./codex-config.ts";
 
 interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
@@ -316,14 +319,21 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
   };
 }
 
-export async function readHostedAssistantExecutionDefaultTarget(): Promise<AssistantModelTarget | null> {
+export async function readHostedAssistantExecutionDefaultTarget(
+  runtimeEnv: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<AssistantModelTarget | null> {
   const operatorConfig = await readOperatorConfig();
   const hostedAssistantConfig = operatorConfig?.hostedAssistant
     ?? (await resolveHostedAssistantConfig());
 
-  return createAssistantModelTarget(
+  const target = createAssistantModelTarget(
     resolveHostedAssistantProviderConfig(hostedAssistantConfig),
   );
+
+  return applyHostedCodexRuntimeModelProviderTarget({
+    runtimeEnv,
+    target,
+  });
 }
 
 export async function hydrateHostedExecutionDefaultTarget(
@@ -344,6 +354,27 @@ export async function hydrateHostedExecutionDefaultTarget(
       ...executionContext.hosted,
       defaultTarget,
     },
+  };
+}
+
+function applyHostedCodexRuntimeModelProviderTarget(input: {
+  runtimeEnv: Readonly<Record<string, string | undefined>>;
+  target: AssistantModelTarget | null;
+}): AssistantModelTarget | null {
+  if (!input.target || input.target.adapter !== "codex-cli") {
+    return input.target;
+  }
+
+  const runtimeModelProvider = resolveHostedCodexLocalTestModelProviderId({
+    runtimeEnv: input.runtimeEnv,
+  });
+  if (!runtimeModelProvider || runtimeModelProvider === input.target.modelProvider) {
+    return input.target;
+  }
+
+  return {
+    ...input.target,
+    modelProvider: runtimeModelProvider,
   };
 }
 

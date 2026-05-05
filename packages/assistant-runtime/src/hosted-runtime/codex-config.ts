@@ -85,6 +85,24 @@ export interface HostedCodexRuntimeEnvironmentResult {
   runtimeEnv: Record<string, string>;
 }
 
+export function resolveHostedCodexLocalTestModelProviderId(input: {
+  runtimeEnv: Readonly<Record<string, string | undefined>>;
+}): string | null {
+  const hasLocalTestOverride =
+    normalizeHostedCodexEnvString(
+      input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
+    ) !== null;
+
+  if (!hasLocalTestOverride) {
+    return null;
+  }
+
+  return resolveHostedCodexModelProviderConfig({
+    provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
+    runtimeEnv: input.runtimeEnv,
+  }).id;
+}
+
 export async function prepareHostedCodexRuntimeEnvironment(
   input: HostedCodexRuntimeEnvironmentInput,
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
@@ -189,7 +207,7 @@ function rejectDeprecatedHostedCodexAppServerProxyEnv(
 
 function resolveHostedCodexModelProviderConfig(input: {
   provider: string | null;
-  runtimeEnv: Readonly<Record<string, string>>;
+  runtimeEnv: Readonly<Record<string, string | undefined>>;
 }): AssistantCodexModelProviderConfig {
   const providerConfig = input.provider === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
     ? resolveAssistantCodexModelProviderConfig(input.provider)
