@@ -195,6 +195,16 @@ checkpoint fields that are not required to answer user messages must follow the
 same compatibility rule: old deployed runners may omit them without blocking
 assistant progress, and any stricter lockstep contract needs an explicit
 capability/version rollout plan before it can be required in production.
+The same runner-side liveness rule applies to auxiliary lanes: browser-vault
+publishing, hot-checkpoint current-ref reads, inbox projection and parser
+enrichment, provider cleanup and read acknowledgement, usage export, telemetry,
+log export, post-checkpoint system-mailbox acknowledgement, billing/customer
+decoration, and device-connect context enrichment may record degraded status,
+request a later wake, or force a full checkpoint. They must not prevent mailbox
+import, assistant admission, outbox intent checkpointing, or reply delivery when
+the user-message trust boundary is otherwise valid. Hard failures remain
+appropriate for wrong-user authority, invalid auth, undecryptable mailbox
+payloads, mismatched supplied sidecar refs, and lease/CAS conflicts.
 
 Hosted snapshots also preserve safe non-secret Codex home continuity under
 `.codex-hosted/**` by default, while excluding environment files, credential,
