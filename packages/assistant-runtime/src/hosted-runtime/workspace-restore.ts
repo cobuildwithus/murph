@@ -1,4 +1,4 @@
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -36,6 +36,8 @@ import type {
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_BUNDLE_KEY_PREFIX = "cloudflare-workspace-hot-state/";
+const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-base-restore-cache.v1";
+const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-restore-cache.json";
 
 export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 
@@ -52,6 +54,13 @@ export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
     this.name = "HostedWorkspaceRuntimeSnapshotRestoreError";
     this.snapshotHash = snapshotHash;
   }
+}
+
+interface HostedWorkspaceBaseRestoreCache {
+  baseProvidesCodexProviderContinuity: boolean;
+  baseSnapshotHash: string;
+  baseSnapshotSize: number;
+  schema: typeof HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA;
 }
 
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
@@ -102,45 +111,77 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
   let baseProvidesCodexProviderContinuity = false;
   if (baseSnapshotRef) {
-    const layerStartedAt = Date.now();
-    const fetchStartedAt = Date.now();
-    const baseBundle = await readHostedWorkspaceRuntimeBundle({
-      platform: input.platform,
+    const cachedBaseRestore = await readHostedWorkspaceBaseRestoreCache(restored.vaultRoot);
+
+    if (cachedBaseRestore && isHostedWorkspaceBaseRestoreCacheHit({
+      cache: cachedBaseRestore,
       ref: baseSnapshotRef,
-    });
-    const fetchElapsedMs = Date.now() - fetchStartedAt;
-    const repairStartedAt = Date.now();
-    const baseRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
-      bundle: baseBundle,
-      logContext: input.logContext ?? null,
-      platform: input.platform,
-      snapshotLayer: "base",
-    });
-    const repairElapsedMs = Date.now() - repairStartedAt;
-    const materializeStartedAt = Date.now();
-    await restoreHostedWorkspaceRuntimeBundle({
-      bundle: baseRepair.bundle,
-      platform: input.platform,
-      ref: baseSnapshotRef,
-      restored,
-    });
-    const materializeElapsedMs = Date.now() - materializeStartedAt;
-    baseProvidesCodexProviderContinuity = hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-      bundle: baseRepair.bundle,
-    });
-    await writeHostedWorkspaceRestoreLayerFinishedLog({
-      bundleBytes: readBundleByteLength(baseRepair.bundle),
-      fetchElapsedMs,
-      logContext: input.logContext ?? null,
-      materializeElapsedMs,
-      platform: input.platform,
-      ref: baseSnapshotRef,
-      repairElapsedMs,
-      repairRemovedMalformedSessionCount: baseRepair.removedMalformedSessionCount,
-      repairScrubbedSessionCount: baseRepair.scrubbedSessionCount,
-      snapshotLayer: "base",
-      totalElapsedMs: Date.now() - layerStartedAt,
-    });
+    })) {
+      baseProvidesCodexProviderContinuity = cachedBaseRestore.baseProvidesCodexProviderContinuity;
+      await writeHostedWorkspaceRestoreLayerFinishedLog({
+        bundleBytes: baseSnapshotRef.size,
+        cacheHit: true,
+        fetchElapsedMs: 0,
+        logContext: input.logContext ?? null,
+        materializeElapsedMs: 0,
+        platform: input.platform,
+        ref: baseSnapshotRef,
+        repairElapsedMs: 0,
+        repairRemovedMalformedSessionCount: 0,
+        repairScrubbedSessionCount: 0,
+        snapshotLayer: "base",
+        totalElapsedMs: 0,
+      });
+    } else {
+      const layerStartedAt = Date.now();
+      const fetchStartedAt = Date.now();
+      const baseBundle = await readHostedWorkspaceRuntimeBundle({
+        platform: input.platform,
+        ref: baseSnapshotRef,
+      });
+      const fetchElapsedMs = Date.now() - fetchStartedAt;
+      const repairStartedAt = Date.now();
+      const baseRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
+        bundle: baseBundle,
+        logContext: input.logContext ?? null,
+        platform: input.platform,
+        snapshotLayer: "base",
+      });
+      const repairElapsedMs = Date.now() - repairStartedAt;
+      const materializeStartedAt = Date.now();
+      await restoreHostedWorkspaceRuntimeBundle({
+        bundle: baseRepair.bundle,
+        platform: input.platform,
+        ref: baseSnapshotRef,
+        restored,
+      });
+      const materializeElapsedMs = Date.now() - materializeStartedAt;
+      baseProvidesCodexProviderContinuity = hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+        bundle: baseRepair.bundle,
+      });
+      await writeHostedWorkspaceBaseRestoreCacheBestEffort({
+        cache: {
+          baseProvidesCodexProviderContinuity,
+          baseSnapshotHash: baseSnapshotRef.hash,
+          baseSnapshotSize: baseSnapshotRef.size,
+          schema: HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA,
+        },
+        vaultRoot: restored.vaultRoot,
+      });
+      await writeHostedWorkspaceRestoreLayerFinishedLog({
+        bundleBytes: readBundleByteLength(baseRepair.bundle),
+        fetchElapsedMs,
+        logContext: input.logContext ?? null,
+        materializeElapsedMs,
+        platform: input.platform,
+        ref: baseSnapshotRef,
+        repairElapsedMs,
+        repairRemovedMalformedSessionCount: baseRepair.removedMalformedSessionCount,
+        repairScrubbedSessionCount: baseRepair.scrubbedSessionCount,
+        snapshotLayer: "base",
+        totalElapsedMs: Date.now() - layerStartedAt,
+      });
+    }
   }
 
   if (hotSnapshotRef) {
@@ -289,6 +330,7 @@ async function writeHostedWorkspaceRestoreStartedLog(input: {
 
 async function writeHostedWorkspaceRestoreLayerFinishedLog(input: {
   bundleBytes: number;
+  cacheHit?: boolean;
   clearElapsedMs?: number;
   fetchElapsedMs: number;
   logContext: HostedRuntimeLogContext | null;
@@ -311,6 +353,7 @@ async function writeHostedWorkspaceRestoreLayerFinishedLog(input: {
       redactedJson: {
         bundleBytes: input.bundleBytes,
         bundleRefSize: input.ref.size,
+        cacheHit: input.cacheHit === true,
         clearElapsedMs: input.clearElapsedMs ?? null,
         fetchElapsedMs: input.fetchElapsedMs,
         materializeElapsedMs: input.materializeElapsedMs,
@@ -359,6 +402,84 @@ function readBundleByteLength(bundle: Uint8Array | ArrayBuffer): number {
 
 function isHostedAssistantRuntimeHotStateBundleRef(ref: HostedExecutionBundleRef): boolean {
   return ref.key.startsWith(HOSTED_ASSISTANT_RUNTIME_HOT_STATE_BUNDLE_KEY_PREFIX);
+}
+
+async function readHostedWorkspaceBaseRestoreCache(
+  vaultRoot: string,
+): Promise<HostedWorkspaceBaseRestoreCache | null> {
+  try {
+    const contents = await readFile(resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot), "utf8");
+    const parsed: unknown = JSON.parse(contents);
+    return parseHostedWorkspaceBaseRestoreCache(parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function writeHostedWorkspaceBaseRestoreCacheBestEffort(input: {
+  cache: HostedWorkspaceBaseRestoreCache;
+  vaultRoot: string;
+}): Promise<void> {
+  try {
+    await writeFile(
+      resolveHostedWorkspaceBaseRestoreCachePath(input.vaultRoot),
+      JSON.stringify(input.cache) + "\n",
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+  } catch {
+    // Restore remains correct without the local cache marker; the next run will cold-restore base.
+  }
+}
+
+function isHostedWorkspaceBaseRestoreCacheHit(input: {
+  cache: HostedWorkspaceBaseRestoreCache;
+  ref: HostedExecutionBundleRef;
+}): boolean {
+  return (
+    input.cache.baseSnapshotHash === input.ref.hash
+    && input.cache.baseSnapshotSize === input.ref.size
+  );
+}
+
+function parseHostedWorkspaceBaseRestoreCache(
+  value: unknown,
+): HostedWorkspaceBaseRestoreCache | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (value.schema !== HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA) {
+    return null;
+  }
+  if (typeof value.baseSnapshotHash !== "string") {
+    return null;
+  }
+  if (typeof value.baseSnapshotSize !== "number") {
+    return null;
+  }
+  if (typeof value.baseProvidesCodexProviderContinuity !== "boolean") {
+    return null;
+  }
+
+  return {
+    baseProvidesCodexProviderContinuity: value.baseProvidesCodexProviderContinuity,
+    baseSnapshotHash: value.baseSnapshotHash,
+    baseSnapshotSize: value.baseSnapshotSize,
+    schema: HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA,
+  };
+}
+
+function resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot: string): string {
+  return path.join(
+    path.dirname(path.resolve(vaultRoot)),
+    HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME,
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function restoreHostedWorkspaceRuntimeBundle(input: {
