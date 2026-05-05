@@ -23,6 +23,12 @@ describe("mergeRequiredEnvProfile", () => {
   it("adds the required profile without duplicating existing entries", () => {
     expect(mergeRequiredEnvProfile("assistant,linq", "linq")).toBe("assistant,linq");
   });
+
+  it("keeps the assistant profile when local dev supplies non-assistant defaults", () => {
+    expect(
+      mergeRequiredEnvProfile("device-sync,hosted-email,linq,mapbox,telegram", "linq"),
+    ).toBe("assistant,device-sync,hosted-email,linq,mapbox,telegram");
+  });
 });
 
 describe("startAssistantProviderStubServer", () => {

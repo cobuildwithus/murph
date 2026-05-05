@@ -27,6 +27,9 @@
       "@murphai/health-metrics/*": [
         "packages/health-metrics/src/*"
       ],
+      "@murphai/inbox-services": [
+        "packages/inbox-services/src/index.ts"
+      ],
       "@murphai/inboxd/runtime": [
         "packages/inboxd/src/runtime.ts"
       ],
