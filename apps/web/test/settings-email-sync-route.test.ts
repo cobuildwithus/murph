@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   },
   requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
+  sendHostedSignupWelcomeEmailForRecentMember: vi.fn(),
   upsertHostedMemberEmailAuthorization: vi.fn(),
 }));
 
@@ -35,6 +36,17 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireFreshActivePrivyMemberAuthForHostedAppSession: mocks.requireFreshActivePrivyMemberAuthForHostedAppSession,
   requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/signup-welcome-email")
+  >("@/src/lib/hosted-onboarding/signup-welcome-email");
+
+  return {
+    ...actual,
+    sendHostedSignupWelcomeEmailForRecentMember: mocks.sendHostedSignupWelcomeEmailForRecentMember,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
@@ -95,6 +107,10 @@ describe("settings email sync route", () => {
       eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
     });
     mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
+    mocks.sendHostedSignupWelcomeEmailForRecentMember.mockResolvedValue({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
   });
 
   it("verifies the server-side Privy cookie-backed session and writes canonical verified-email facts", async () => {
@@ -131,6 +147,10 @@ describe("settings email sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.email.sync",
     });
+    expect(mocks.sendHostedSignupWelcomeEmailForRecentMember).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
     expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "settings.email.sync",
       userId: "member_123",
@@ -164,6 +184,33 @@ describe("settings email sync route", () => {
         verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
       },
     });
+  });
+
+  it("does not fail settings email sync when the welcome email provider fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.sendHostedSignupWelcomeEmailForRecentMember.mockRejectedValueOnce(
+      new Error("Resend unavailable"),
+    );
+
+    const response = await settingsEmailSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/email/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
+      context: "settings.email.sync",
+      userId: "member_123",
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted signup welcome email send failed after settings email sync.",
+      {
+        errorName: "Error",
+      },
+    );
+    warnSpy.mockRestore();
   });
 
   it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {

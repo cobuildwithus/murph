@@ -5,13 +5,17 @@ import {
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-store";
-import { readHostedMemberEmailAuthorization } from "./hosted-member-store";
+import {
+  readHostedMemberCoreState,
+  readHostedMemberEmailAuthorization,
+} from "./hosted-member-store";
 
 const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
 const HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT = "Welcome to Murph";
 const HOSTED_SIGNUP_WELCOME_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
 const HOSTED_SIGNUP_WELCOME_EMAIL_MIN_TIMEOUT_MS = 1_000;
 const HOSTED_SIGNUP_WELCOME_EMAIL_MAX_TIMEOUT_MS = 30_000;
+const HOSTED_SIGNUP_WELCOME_EMAIL_RECENT_MEMBER_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
 
 type HostedSignupWelcomeEmailEnv = Readonly<Record<string, string | undefined>>;
 
@@ -37,7 +41,7 @@ type HostedSignupWelcomeEmailStartAction =
 
 export type HostedSignupWelcomeEmailResult =
   | {
-      reason: "not_configured" | "no_verified_email";
+      reason: "member_not_found" | "member_too_old" | "no_verified_email" | "not_configured";
       status: "skipped";
     }
   | {
@@ -55,6 +59,49 @@ export class HostedSignupWelcomeEmailError extends Error {
     this.code = input.code;
     this.providerStatus = input.providerStatus ?? null;
   }
+}
+
+export async function sendHostedSignupWelcomeEmailForRecentMember(input: {
+  env?: HostedSignupWelcomeEmailEnv;
+  fetchImpl?: typeof fetch;
+  maxAccountAgeMs?: number;
+  memberId: string;
+  now?: Date;
+  prisma?: Parameters<typeof readHostedMemberCoreState>[0]["prisma"];
+}): Promise<HostedSignupWelcomeEmailResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const member = await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma,
+  });
+
+  if (!member) {
+    return {
+      reason: "member_not_found",
+      status: "skipped",
+    };
+  }
+
+  if (
+    !isHostedSignupWelcomeEmailRecentMember({
+      maxAccountAgeMs: input.maxAccountAgeMs
+        ?? HOSTED_SIGNUP_WELCOME_EMAIL_RECENT_MEMBER_MAX_AGE_MS,
+      memberCreatedAt: member.createdAt,
+      now: input.now ?? new Date(),
+    })
+  ) {
+    return {
+      reason: "member_too_old",
+      status: "skipped",
+    };
+  }
+
+  return sendHostedSignupWelcomeEmailForMember({
+    env: input.env,
+    fetchImpl: input.fetchImpl,
+    memberId: input.memberId,
+    prisma,
+  });
 }
 
 export async function sendHostedSignupWelcomeEmailForMember(input: {
@@ -187,6 +234,14 @@ function readHostedSignupWelcomeEmailTimeoutMs(source: HostedSignupWelcomeEmailE
   );
 }
 
+function isHostedSignupWelcomeEmailRecentMember(input: {
+  maxAccountAgeMs: number;
+  memberCreatedAt: Date;
+  now: Date;
+}): boolean {
+  return input.now.getTime() - input.memberCreatedAt.getTime() < input.maxAccountAgeMs;
+}
+
 function buildHostedSignupWelcomeEmailText(input: {
   founderName: string;
   murphStartLine?: string | null;
@@ -206,7 +261,7 @@ function buildHostedSignupWelcomeEmailText(input: {
     nextStep,
     ...(murphStartLine ? ["", murphStartLine] : []),
     "",
-    "Hit reply if anything is confusing or not working. We're early, shipping fast, and I want to hear it!",
+    "Email me if anything's confusing or not working. We're early, shipping fast, and I want to hear it!",
     "",
     `- ${input.founderName}`,
   ].join("\n");
@@ -230,7 +285,6 @@ function buildHostedSignupWelcomeEmailHtml(input: {
     nextStep,
   ];
   const body = [
-    `<h1 style="font-size:24px;line-height:1.25;margin:0 0 28px;">${escapeHostedSignupWelcomeEmailHtml(HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT)}</h1>`,
     ...paragraphs.map(renderHostedSignupWelcomeEmailParagraphHtml),
     ...(murphStartLine
       ? [
@@ -243,7 +297,7 @@ function buildHostedSignupWelcomeEmailHtml(input: {
         ]
       : []),
     renderHostedSignupWelcomeEmailParagraphHtml(
-      "Hit reply if anything is confusing or not working. We're early, shipping fast, and I want to hear it!",
+      "Email me if anything's confusing or not working. We're early, shipping fast, and I want to hear it!",
     ),
     renderHostedSignupWelcomeEmailParagraphHtml(`- ${input.founderName}`),
   ];

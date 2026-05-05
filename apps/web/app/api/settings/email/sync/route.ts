@@ -10,6 +10,10 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requireFreshActivePrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HostedSignupWelcomeEmailError,
+  sendHostedSignupWelcomeEmailForRecentMember,
+} from "@/src/lib/hosted-onboarding/signup-welcome-email";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
@@ -33,7 +37,8 @@ export const POST = withJsonError(async (request: Request) => {
 
   const now = new Date().toISOString();
   const verifiedAt = new Date(verifiedEmail.verifiedAt * 1000).toISOString();
-  await getPrisma().$transaction((tx) => {
+  const prisma = getPrisma();
+  await prisma.$transaction((tx) => {
     return upsertHostedMemberEmailAuthorization({
       directPublicSender: {
         address: verifiedEmail.address,
@@ -55,6 +60,10 @@ export const POST = withJsonError(async (request: Request) => {
       })
     );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await sendSettingsEmailSyncWelcomeEmailBestEffort({
+    memberId: auth.member.id,
+    prisma,
+  });
   await nudgeHostedRunnerBestEffort({
     context: "settings.email.sync",
     userId: auth.member.id,
@@ -67,6 +76,29 @@ export const POST = withJsonError(async (request: Request) => {
     verifiedAt,
   });
 });
+
+async function sendSettingsEmailSyncWelcomeEmailBestEffort(input: {
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<void> {
+  try {
+    await sendHostedSignupWelcomeEmailForRecentMember({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.warn("Hosted signup welcome email send failed after settings email sync.", {
+      ...(error instanceof HostedSignupWelcomeEmailError
+        ? {
+            errorCode: error.code,
+            providerStatus: error.providerStatus,
+          }
+        : {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          }),
+    });
+  }
+}
 
 function normalizeComparableEmail(value: string | null | undefined): string | null {
   if (typeof value !== "string") {

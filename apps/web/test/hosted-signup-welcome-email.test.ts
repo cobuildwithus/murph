@@ -4,10 +4,12 @@ import {
   HostedSignupWelcomeEmailError,
   sendHostedSignupWelcomeEmail,
   sendHostedSignupWelcomeEmailForMember,
+  sendHostedSignupWelcomeEmailForRecentMember,
 } from "@/src/lib/hosted-onboarding/signup-welcome-email";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
 }));
@@ -30,6 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
+    readHostedMemberCoreState: mocks.readHostedMemberCoreState,
     readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
   };
 });
@@ -51,6 +54,13 @@ describe("hosted signup welcome email", () => {
     mocks.getPrisma.mockReturnValue({
       readonly: true,
     });
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "active",
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   });
 
@@ -67,12 +77,16 @@ describe("hosted signup welcome email", () => {
       const payload = JSON.parse(String(init?.body));
       expect(payload).toEqual({
         from: "Murph founder <founder@example.com>",
-        html: expect.stringContaining("<h1"),
+        html: expect.stringContaining("Hey, welcome to Murph!"),
         subject: "Welcome to Murph",
         text: expect.stringContaining("I'm Murph founder, the founder of Murph."),
         to: ["member@example.com"],
       });
+      expect(payload.html).not.toContain("<h1");
+      expect(payload.html).not.toContain("Welcome to Murph</h1>");
       expect(payload.text).toContain("- Murph founder");
+      expect(payload.text).toContain("Email me if anything's confusing or not working.");
+      expect(payload.html).toContain("Email me if anything&#39;s confusing or not working.");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -236,6 +250,71 @@ describe("hosted signup welcome email", () => {
       providerMessageId: "resend_email_123",
       status: "sent",
     });
+  });
+
+  it("sends for recently created members when email is linked after signup", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain(
+        "Shoot Murph an email at murph@mail.withmurph.ai to start your first experiment.",
+      );
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForRecentMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      now: new Date("2026-05-14T23:59:59.999Z"),
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {
+        readonly: true,
+      },
+    });
+  });
+
+  it("skips later email-link sends for accounts that are not less than two weeks old", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(sendHostedSignupWelcomeEmailForRecentMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      now: new Date("2026-05-15T00:00:00.000Z"),
+    })).resolves.toEqual({
+      reason: "member_too_old",
+      status: "skipped",
+    });
+
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
   });
 
   it("skips sending for members without a verified email address", async () => {
