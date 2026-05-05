@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 
+import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+
 import type { HostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/types.ts";
 
 const hostedLocalDevConfig: HostedLocalDevConfig = {
@@ -61,6 +63,7 @@ vi.mock("../../../../scripts/dev-hosted-local/stack.ts", () => ({
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 it("passes the harness process pid to hosted web dev for orphan cleanup", async () => {
@@ -84,4 +87,45 @@ it("passes the harness process pid to hosted web dev for orphan cleanup", async 
     }),
     pipeOutput: false,
   });
+});
+
+it("fails fast when hosted completion reaches a terminal runner error", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const status = {
+    inFlight: false,
+    lastErrorCode: "configuration_error",
+    mailboxLag: [
+      {
+        importedSeq: "0",
+        lag: "1",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [],
+    userId: "member_terminal_error",
+    workspace: null,
+  } satisfies HostedRunnerStatusResponse;
+  const fetch = vi.fn(async () => Response.json(status));
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_terminal_error", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).rejects.toThrow(/terminal error[\s\S]*configuration_error/u);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    await harness.stop();
+  }
 });
