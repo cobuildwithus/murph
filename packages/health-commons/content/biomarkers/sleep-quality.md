@@ -6,6 +6,7 @@ slug: biomarkers/sleep-quality
 title: Subjective Sleep Quality
 summary: A low-burden self-report sleep outcome that captures how restorative or disrupted sleep felt, best interpreted as a repeated personal trend rather than a diagnostic measure.
 status: draft
+hidden: true
 quality: usable
 aliases:
   - sleep quality

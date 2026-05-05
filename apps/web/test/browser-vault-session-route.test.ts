@@ -1,6 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
+import {
+  HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+} from "@murphai/hosted-execution/bundles";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createJsonPostRequest } from "./route-test-helpers";
@@ -165,12 +168,7 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "a".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("a"),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -212,12 +210,46 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "a".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef,
+      state: "not_modified",
+    });
+  });
+
+  it("returns not_modified when a layered snapshot base matches the current replica", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createLayeredSnapshotRef({
+        base: createSnapshotRef("a"),
+        hot: createSnapshotRef("h"),
+      }),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -253,12 +285,81 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "b".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state: "empty",
+    });
+  });
+
+  it("returns empty when a layered snapshot base no longer matches the replica source bundle hash", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: createReplicaRef(),
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createLayeredSnapshotRef({
+        base: createSnapshotRef("b"),
+        hot: createSnapshotRef("h"),
+      }),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state: "empty",
+    });
+  });
+
+  it("returns empty when a layered snapshot has no base for the current replica", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: createReplicaRef(),
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createLayeredSnapshotRef({
+        base: null,
+        hot: createSnapshotRef("h"),
+      }),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -294,12 +395,7 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "b".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("b"),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -337,12 +433,7 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "a".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("a"),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -387,12 +478,7 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "a".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("a"),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -424,12 +510,7 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "a".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("a"),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -467,12 +548,7 @@ describe("browser vault session route", () => {
       redactedStatusJson: {},
       nextWakeAt: null,
       nextWakeReason: null,
-      snapshotRef: {
-        hash: "a".repeat(64),
-        kind: "prepared",
-        keyId: "bundle-key",
-        schema: "murph.hosted-execution-bundle-ref.v1",
-      },
+      snapshotRef: createSnapshotRef("a"),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
       version: "1",
@@ -512,6 +588,27 @@ function createReplicaRef() {
     runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
     sourceBundleHash: "a".repeat(64),
+  };
+}
+
+function createSnapshotRef(hashCharacter: string) {
+  const hash = hashCharacter.repeat(64);
+  return {
+    hash,
+    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
+    size: 1024,
+    updatedAt: "2026-04-20T08:00:00.000Z",
+  };
+}
+
+function createLayeredSnapshotRef(input: {
+  base: ReturnType<typeof createSnapshotRef> | null;
+  hot: ReturnType<typeof createSnapshotRef> | null;
+}) {
+  return {
+    base: input.base,
+    hot: input.hot,
+    schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   };
 }
 

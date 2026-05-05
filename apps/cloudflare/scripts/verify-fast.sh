@@ -102,7 +102,11 @@ wait_for_background_jobs() {
   [[ "$failed" -eq 0 ]]
 }
 
-pnpm --dir "$repo_root" health-commons:generate
+if [[ "${MURPH_HEALTH_COMMONS_GENERATED_PREPARED:-0}" == "1" ]]; then
+  echo "[apps/cloudflare verify] skipping health commons generated catalog; already prepared." >&2
+else
+  pnpm --dir "$repo_root" health-commons:generate
+fi
 
 if [[ "$skip_typecheck" == "1" ]]; then
   echo "[apps/cloudflare verify] skipping typecheck; root acceptance typecheck already covered this app." >&2

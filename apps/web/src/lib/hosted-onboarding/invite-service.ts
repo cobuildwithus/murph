@@ -143,7 +143,14 @@ export async function getHostedInviteStatus(input: {
   const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(
     await projectHostedMemberIdentityState(inviteIdentity, prisma),
   );
-  const verificationMode = resolveHostedInviteVerificationMode(phoneAuthTarget);
+  const verificationMode =
+    inviteRouting?.pendingLinqParticipantContact?.kind === "email"
+      ? "invite_email"
+      : resolveHostedInviteVerificationMode(phoneAuthTarget);
+  const statusPhoneAuthTarget =
+    verificationMode === "invite_email"
+      ? ({ kind: "manual" } as const)
+      : toHostedInviteStatusPhoneAuthTarget(phoneAuthTarget);
 
   return {
     billing: {
@@ -157,8 +164,11 @@ export async function getHostedInviteStatus(input: {
     invite: {
       code: invite.inviteCode,
       expiresAt: invite.expiresAt.toISOString(),
-      phoneAuthTarget: toHostedInviteStatusPhoneAuthTarget(phoneAuthTarget),
-      phoneHint: phoneAuthTarget.kind === "saved" ? phoneAuthTarget.phoneHint : null,
+      phoneAuthTarget: statusPhoneAuthTarget,
+      phoneHint:
+        verificationMode === "invite_phone" && phoneAuthTarget.kind === "saved"
+          ? phoneAuthTarget.phoneHint
+          : null,
       verificationMode,
     },
     messagingSetupRequired,

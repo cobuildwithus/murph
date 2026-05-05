@@ -19,6 +19,7 @@ export interface BiomarkerBrowseCardProps {
   unit: string | null;
   summary: string | null;
   privateValue?: BiomarkerBrowsePrivateValue | null;
+  privateValueLoading?: boolean;
   className?: string;
 }
 
@@ -26,9 +27,9 @@ export function BiomarkerBrowseCard({
   routeId,
   title,
   category,
-  unit,
   summary,
   privateValue,
+  privateValueLoading,
   className,
 }: BiomarkerBrowseCardProps) {
   return (
@@ -41,11 +42,14 @@ export function BiomarkerBrowseCard({
     >
       <div className="flex items-start justify-between gap-3">
         <BiomarkerIcon routeId={routeId} className="size-10 shrink-0" />
-        {unit ? (
-          <span className="rounded-md bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            {unit}
-          </span>
-        ) : null}
+        <span
+          className={cn(
+            "mt-1.5 size-2.5 shrink-0 rounded-full",
+            routeId === "rem-sleep-minutes" || routeId === "deep-sleep-minutes" || routeId === "glucose" || routeId === "sleep-quality"
+              ? "bg-amber-500"
+              : "bg-[#7a8c6e]",
+          )}
+        />
       </div>
 
       <div className="flex flex-col gap-2">
@@ -65,22 +69,17 @@ export function BiomarkerBrowseCard({
         </p>
       ) : null}
 
-      {privateValue ? (
-        <div className="border-t border-border/60 pt-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              Your latest
-            </span>
-            <span className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-              {privateValue.valueLabel}{privateValue.unit ? ` ${privateValue.unit}` : ""}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {privateValue.sourceLabel ?? "Private vault"} - {privateValue.dateLabel}
-            {privateValue.stale ? " - stale" : ""}
-          </p>
-        </div>
-      ) : null}
+      <div className="flex flex-1 items-center justify-center border-t border-border/60 pt-3">
+        {privateValue ? (
+          <span className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+            {privateValue.valueLabel}{privateValue.unit ? ` ${displayUnit(privateValue.unit)}` : ""}
+          </span>
+        ) : privateValueLoading ? (
+          <div className="h-8 w-24 animate-pulse rounded-md bg-muted/40" />
+        ) : (
+          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/50">---</span>
+        )}
+      </div>
 
       <div className="mt-auto flex items-center justify-between border-t border-border/60 pt-3">
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -94,6 +93,12 @@ export function BiomarkerBrowseCard({
       </div>
     </Link>
   );
+}
+
+function displayUnit(unit: string): string {
+  const n = unit.trim().toLowerCase();
+  if (n === "percent" || n === "percentage") return "%";
+  return unit;
 }
 
 function formatCategory(value: string): string {

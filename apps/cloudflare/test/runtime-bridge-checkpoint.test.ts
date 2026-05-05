@@ -45,7 +45,7 @@ const WRITTEN_REF: HostedExecutionBundleRef = {
 
 function createCheckpointResponse(input: {
   checkpointed: boolean;
-  snapshotRef: HostedExecutionBundleRef | null;
+  snapshotRef: HostedWorkspaceCheckpointRequest["snapshotRef"];
   userId?: string;
   version?: string;
 }): HostedWorkspaceCheckpointResponse {
@@ -63,6 +63,18 @@ function createCheckpointResponse(input: {
       version: input.version ?? "5",
     },
   };
+}
+
+function requireFlatBundleRef(
+  snapshotRef: HostedWorkspaceCheckpointRequest["snapshotRef"],
+): HostedExecutionBundleRef | null {
+  if (!snapshotRef) {
+    return null;
+  }
+  if ("hash" in snapshotRef) {
+    return snapshotRef;
+  }
+  throw new TypeError("Expected a flat hosted execution bundle ref.");
 }
 
 describe("checkpointHostedRuntimeBridgeWorkspace", () => {
@@ -97,7 +109,7 @@ describe("checkpointHostedRuntimeBridgeWorkspace", () => {
       return WRITTEN_REF;
     });
     const checkpointWorkspace = vi.fn((request: HostedWorkspaceCheckpointRequest) => {
-      calls.push(`checkpoint:${request.snapshotRef?.key ?? "null"}`);
+      calls.push(`checkpoint:${requireFlatBundleRef(request.snapshotRef)?.key ?? "null"}`);
       return createCheckpointResponse({
         checkpointed: true,
         snapshotRef: request.snapshotRef,

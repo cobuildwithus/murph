@@ -237,8 +237,23 @@ run_next_build() {
 run_timed_step "legal pdf" pnpm legal:pdf
 run_timed_step "prisma generate" pnpm prisma:generate
 
+run_health_commons_generate() {
+  if [[ "${MURPH_HEALTH_COMMONS_GENERATED_PREPARED:-0}" == "1" ]]; then
+    verify_log "skip health commons generated catalog; already prepared"
+    return 0
+  fi
+
+  pnpm health-commons:generate
+}
+
+run_web_tests() {
+  MURPH_HEALTH_COMMONS_GENERATED_PREPARED=1 pnpm test
+}
+
+run_timed_step "health commons generated catalog" run_health_commons_generate
+
 if [[ "$verify_step_parallel" != "1" ]]; then
-  run_timed_step "test" pnpm test
+  run_timed_step "test" run_web_tests
   run_timed_step "lint" pnpm lint
   run_timed_step "dev smoke" run_dev_smoke
   run_timed_step "next build" run_next_build
@@ -255,7 +270,7 @@ run_timed_step "dev smoke" run_dev_smoke
 run_timed_step "next build" run_next_build &
 build_pid="$!"
 register_background_pid "$build_pid"
-run_timed_step "test" pnpm test &
+run_timed_step "test" run_web_tests &
 test_pid="$!"
 register_background_pid "$test_pid"
 run_timed_step "lint" pnpm lint &

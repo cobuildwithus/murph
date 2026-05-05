@@ -15,14 +15,22 @@ interface HostedMemberMessagingIdentitySlice {
 }
 
 interface HostedMemberMessagingRoutingSlice {
+  linqChatId?: string | null;
+  pendingLinqChatId?: string | null;
+  pendingLinqParticipantContact?: {
+    lookupKey?: string | null;
+  } | null;
   telegramThreadId?: string | null;
   telegramUserId?: string | null;
 }
 
 export interface HostedMemberMessagingState {
   hasDirectMessagingChannel: boolean;
+  hasLinq: boolean;
   hasPhone: boolean;
   hasTelegram: boolean;
+  linqContactLookupKey: string | null;
+  linqThreadId: string | null;
   phoneLookupKey: string | null;
   telegramThreadId: string | null;
 }
@@ -36,16 +44,26 @@ export function resolveHostedMemberMessagingState(input: {
   routing: HostedMemberMessagingRoutingSlice | null;
 }): HostedMemberMessagingState {
   const phoneLookupKey = normalizeMessagingIdentity(input.identity?.phoneLookupKey);
+  const linqThreadId =
+    normalizeMessagingIdentity(input.routing?.linqChatId)
+    ?? normalizeMessagingIdentity(input.routing?.pendingLinqChatId);
+  const linqContactLookupKey =
+    phoneLookupKey
+    ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
   const telegramThreadId =
     normalizeMessagingIdentity(input.routing?.telegramThreadId)
     ?? normalizeMessagingIdentity(input.routing?.telegramUserId);
   const hasPhone = phoneLookupKey !== null;
+  const hasLinq = hasPhone || (linqThreadId !== null && linqContactLookupKey !== null);
   const hasTelegram = telegramThreadId !== null;
 
   return {
-    hasDirectMessagingChannel: hasPhone || hasTelegram,
+    hasDirectMessagingChannel: hasLinq || hasTelegram,
+    hasLinq,
     hasPhone,
     hasTelegram,
+    linqContactLookupKey,
+    linqThreadId,
     phoneLookupKey,
     telegramThreadId,
   };
@@ -67,23 +85,28 @@ export function resolveHostedMemberChannels(input: {
 
   return {
     email: input.emailLinked,
-    linq: messaging.hasPhone,
+    linq: messaging.hasLinq || (input.emailLinked && Boolean(input.routing?.linqChatId)),
     telegram: messaging.hasTelegram,
   };
 }
 
 export function resolveHostedMemberAssistantNotificationRoute(input: {
   linqChatId: string | null;
+  linqContactLookupKey?: string | null;
   linqRecipientPhone?: string | null;
   memberId: string;
   memberPhoneNumber?: string | null;
   messaging: HostedMemberMessagingState;
 }): HostedMemberAssistantNotificationRoute {
   const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
+  const linqContactLookupKey =
+    normalizeMessagingIdentity(input.linqContactLookupKey)
+    ?? input.messaging.linqContactLookupKey
+    ?? input.messaging.phoneLookupKey;
 
-  if (input.linqChatId && input.messaging.phoneLookupKey) {
+  if (input.linqChatId && linqContactLookupKey) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-      secret: input.messaging.phoneLookupKey,
+      secret: linqContactLookupKey,
       userId: input.memberId,
     });
     return {
@@ -98,7 +121,7 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
       },
       identityId: hashHostedAssistantConversationIdentifier(
         identifierBlind,
-        input.messaging.phoneLookupKey,
+        linqContactLookupKey,
       ),
       threadId: hashHostedAssistantConversationIdentifier(
         identifierBlind,

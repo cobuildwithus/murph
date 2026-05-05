@@ -190,15 +190,21 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
 
 export function buildHostedMemberActivationWelcomeRoute(input: {
   linqChatId: string | null;
+  linqContactLookupKey?: string | null;
   linqRecipientPhone?: string | null;
   memberId: string;
   memberPhoneNumber?: string | null;
   phoneLookupKey: string | null;
+  pendingLinqChatId?: string | null;
+  pendingLinqParticipantContact?: {
+    lookupKey?: string | null;
+  } | null;
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }): HostedExecutionAssistantNotificationRoute | null {
   return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: input.linqChatId,
+    linqContactLookupKey: input.linqContactLookupKey,
     linqRecipientPhone: input.linqRecipientPhone ?? null,
     memberId: input.memberId,
     memberPhoneNumber: input.memberPhoneNumber ?? null,
@@ -207,6 +213,9 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
         phoneLookupKey: input.phoneLookupKey,
       },
       routing: {
+        linqChatId: input.linqChatId,
+        pendingLinqChatId: input.pendingLinqChatId ?? null,
+        pendingLinqParticipantContact: input.pendingLinqParticipantContact ?? null,
         telegramThreadId: input.telegramThreadId,
         telegramUserId: input.telegramUserId,
       },
@@ -218,14 +227,27 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
   member: HostedMemberActivationSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<{ welcomeRoute: HostedExecutionAssistantNotificationRoute | null }> {
-  if (!input.member.identity?.phoneNumber) {
+  const linqContactLookupKey =
+    input.member.identity?.phoneLookupKey
+    ?? input.member.routing?.pendingLinqParticipantContact?.lookupKey
+    ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+    ?? null;
+
+  if (
+    !input.member.identity?.phoneNumber
+    && !linqContactLookupKey
+  ) {
     return {
       welcomeRoute: buildHostedMemberActivationWelcomeRoute({
         linqChatId: input.member.routing?.linqChatId ?? null,
+        linqContactLookupKey,
         linqRecipientPhone: input.member.routing?.linqRecipientPhone ?? null,
         memberId: input.member.core.id,
         memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
         phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+        pendingLinqChatId: input.member.routing?.pendingLinqChatId ?? null,
+        pendingLinqParticipantContact:
+          input.member.routing?.pendingLinqParticipantContact ?? null,
         telegramThreadId: input.member.routing?.telegramThreadId ?? null,
         telegramUserId: input.member.routing?.telegramUserId ?? null,
       }),
@@ -347,6 +369,10 @@ function buildHostedMemberActivationWakeForMember(input: {
     memberId: input.member.core.id,
     memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
     phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+    linqChatId: input.member.routing?.linqChatId ?? null,
+    pendingLinqChatId: input.member.routing?.pendingLinqChatId ?? null,
+    pendingLinqParticipantContact:
+      input.member.routing?.pendingLinqParticipantContact ?? null,
     telegramThreadId: input.member.routing?.telegramThreadId ?? null,
     telegramUserId: input.member.routing?.telegramUserId ?? null,
     occurredAt: input.occurredAt,
@@ -361,6 +387,11 @@ function buildHostedMemberActivationWake(input: {
   memberId: string;
   memberPhoneNumber?: string | null;
   phoneLookupKey?: string | null;
+  linqChatId?: string | null;
+  pendingLinqChatId?: string | null;
+  pendingLinqParticipantContact?: {
+    lookupKey?: string | null;
+  } | null;
   telegramThreadId?: string | null;
   telegramUserId?: string | null;
   occurredAt: string;
@@ -376,6 +407,9 @@ function buildHostedMemberActivationWake(input: {
         phoneLookupKey: input.phoneLookupKey ?? null,
       },
       routing: {
+        linqChatId: input.linqChatId ?? null,
+        pendingLinqChatId: input.pendingLinqChatId ?? null,
+        pendingLinqParticipantContact: input.pendingLinqParticipantContact ?? null,
         telegramThreadId: input.telegramThreadId ?? null,
         telegramUserId: input.telegramUserId ?? null,
       },

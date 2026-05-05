@@ -55,6 +55,7 @@ import {
   createHostedConversationMailboxImportItem,
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import {
+  createEmptyHostedMailboxImportState,
   readHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
@@ -122,6 +123,48 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("preserves explicit null browser-vault replica refs in checkpoint builders", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const requestInput = {
+      importResult: {
+        blocked: [],
+        fetchedCount: 0,
+        importedCount: 0,
+        state,
+      },
+      previousState: state,
+      reason: "maintenance",
+      redactedStatus: {},
+      state,
+    } satisfies Parameters<ReturnType<typeof createHostedWorkspaceCheckpointRequestBuilder>["createRequest"]>[0];
+    const checkpointBuilder = createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_synthetic_runner_null_replica",
+      browserVaultReplicaRef: null,
+      expectedWorkspaceVersion: "0",
+      leaseGeneration: "1",
+      snapshotRef: null,
+    });
+    const snapshotBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: () => ({
+        browserVaultReplicaRef: null,
+        snapshotRef: null,
+      }),
+      metadata: {
+        attemptId: "attempt_synthetic_runner_null_snapshot_replica",
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+      },
+    });
+
+    const checkpointRequest = await checkpointBuilder.createRequest(requestInput);
+    const snapshotRequest = await snapshotBuilder.createRequest(requestInput);
+
+    assert.equal(Object.hasOwn(checkpointRequest, "browserVaultReplicaRef"), true);
+    assert.equal(checkpointRequest.browserVaultReplicaRef, null);
+    assert.equal(Object.hasOwn(snapshotRequest, "browserVaultReplicaRef"), true);
+    assert.equal(snapshotRequest.browserVaultReplicaRef, null);
+  });
+
   test("imports mailbox and checkpoints before the assistant phase without inbox bootstrap", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
@@ -204,13 +247,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(events, [
         "import:1",
         "checkpoint:import",
-        "assistant",
         "mailbox:afterCheckpoint",
-        "checkpoint:maintenance",
+        "assistant",
       ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
-      assert.equal(result.latestWorkspace?.version, "2");
-      assert.equal(checkpointRequests.length, 2);
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.attemptId, "attempt_synthetic_runner_001");
       assert.equal(checkpointRequests[0]?.leaseGeneration, "1");
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
@@ -221,18 +263,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxConversationImportedSeq: "1",
         hostedMailboxFetchedCount: 1,
         hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
-      assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
-      assert.equal(checkpointRequests[1]?.reason, "maintenance");
-      assert.deepEqual(checkpointRequests[1]?.browserVaultReplicaRef, TEST_BROWSER_VAULT_REPLICA_REF);
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxProjectionCheckpoint: true,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
       });
@@ -292,6 +322,98 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           ],
         },
       ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("drains staged mailbox projection effects before assistant input sampling without an extra checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_active_turn_projection",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn_projection",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return {
+            afterCheckpoint: async () => {
+              events.push("mailbox:afterCheckpoint");
+              return createInboxProjectionEffectResult({
+                attachmentEvidenceUpdated: true,
+              });
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_active_turn_projection",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_active_turn_projection",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase() {
+          events.push("assistant");
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(events, [
+        "import:1",
+        "mailbox:afterCheckpoint",
+        "assistant",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+      ]);
+      assert.deepEqual(logRequests.map((request) => request.entries[0]?.phase), [
+        "import",
+        "import",
+      ]);
+      assert.deepEqual(logRequests[1]?.entries[0]?.redactedJson, {
+        attemptedCount: 1,
+        effectAttachmentEvidenceUpdated: [true],
+        effectKinds: ["inbox_projection"],
+        effectProjectionUpdated: [true],
+        effectReasonCodes: [null],
+        effectStatuses: ["succeeded"],
+        errorCodes: [],
+        failedCount: 0,
+        partialCount: 0,
+        succeededCount: 1,
+      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -662,7 +784,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runs mailbox post-checkpoint effects after assistant failure without an extra checkpoint", async () => {
+  test("runs mailbox post-checkpoint effects before assistant failure without an extra checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({
@@ -717,8 +839,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "assistant",
         "mailbox:afterCheckpoint",
+        "assistant",
       ]);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "import");
@@ -1201,6 +1323,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
           async createSnapshot(snapshotInput) {
+            const sourceBundleHash = "a".repeat(64);
             const state = await readHostedMailboxImportState({ vaultRoot });
             snapshotWatermarks.push(state.watermarks.conversation);
             assert.equal(snapshotInput.state.watermarks.conversation, "1");
@@ -1213,8 +1336,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               hostedMailboxSystemImportedSeq: "0",
             });
             return {
+              browserVaultReplicaRef: {
+                ...TEST_BROWSER_VAULT_REPLICA_REF,
+                sourceBundleHash,
+              },
               snapshotRef: createBundleRef({
-                hash: "a".repeat(64),
+                hash: sourceBundleHash,
                 key: "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json",
                 size: 512,
               }),
@@ -1244,7 +1371,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(snapshotWatermarks, ["1"]);
       assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.snapshotRef?.key, "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json");
+      const checkpointSnapshotRef = requireBundleRef(checkpointRequests[0]?.snapshotRef);
+      assert.equal(checkpointSnapshotRef.key, "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json");
+      assert.equal(checkpointRequests[0]?.browserVaultReplicaRef?.sourceBundleHash, "a".repeat(64));
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
     } finally {
       await rm(vaultRoot, {
@@ -2923,6 +3052,7 @@ function createWorkspacePort(input: {
       const response = {
         checkpointed,
         workspace: createWorkspaceState({
+          browserVaultReplicaRef: request.browserVaultReplicaRef ?? null,
           nextWakeAt: request.nextWakeAt ?? null,
           nextWakeReason: request.nextWakeReason ?? null,
           redactedStatus: request.redactedStatus ?? null,
@@ -2984,5 +3114,28 @@ function createBundleRef(input: {
     key: input.key,
     size: input.size,
     updatedAt: TEST_NOW,
+  };
+}
+
+function requireBundleRef(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !("hash" in value)) {
+    throw new TypeError("Expected a hosted execution bundle ref.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.hash !== "string"
+    || typeof record.key !== "string"
+    || typeof record.size !== "number"
+    || typeof record.updatedAt !== "string"
+  ) {
+    throw new TypeError("Hosted execution bundle ref is malformed.");
+  }
+
+  return {
+    hash: record.hash,
+    key: record.key,
+    size: record.size,
+    updatedAt: record.updatedAt,
   };
 }

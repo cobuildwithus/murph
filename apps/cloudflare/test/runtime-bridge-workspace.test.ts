@@ -12,12 +12,17 @@ import {
 import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
+  HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  type HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+} from "@murphai/hosted-execution/bundles";
 
 import {
   createHostedMailboxEncryptionEnvironmentFromIngressRoot,
@@ -40,13 +45,15 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("writes local workspace snapshots through the artifact store", async () => {
+  it("writes full local workspace snapshots through the artifact store for maintenance checkpoints", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
     const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      platform: createPlatform({ putArtifact }),
+      platform: createPlatform({ putArtifact, writeBrowserVaultReplica }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
         leaseGeneration: "4",
@@ -64,15 +71,20 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput());
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    const snapshotRef = requireBundleRef(result.snapshotRef);
 
-    expect(result.snapshotRef).toEqual(expect.objectContaining({
+    expect(snapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
       key: expect.stringMatching(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u),
       size: expect.any(Number),
     }));
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: result.snapshotRef!.hash,
+      sha256: snapshotRef.hash,
+    }));
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
     }));
   });
 
@@ -100,12 +112,362 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput());
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
 
     expect(result.snapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
     }));
     expect(putArtifact).toHaveBeenCalled();
+  });
+
+  it("writes hot user-path snapshots without external artifacts or browser-vault replicas", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"),
+      "{\"intent\":\"ready\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const baseSnapshotRef = createBundleRef("c");
+    const browserVaultReplicaRef = createBrowserVaultReplicaRef(baseSnapshotRef.hash);
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            browserVaultReplicaRef,
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: baseSnapshotRef,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "7",
+          },
+        }),
+        writeBrowserVaultReplica,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("import"));
+    const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
+
+    expect(snapshotRef.base).toEqual(baseSnapshotRef);
+    expect(snapshotRef.hot).toEqual(expect.objectContaining({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
+      size: expect.any(Number),
+    }));
+    expect(putArtifact).toHaveBeenCalledTimes(1);
+    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sha256: snapshotRef.hot?.hash,
+    }));
+    expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          component: "workspace",
+          eventCode: "checkpoint.snapshot_finished",
+          phase: "checkpoint",
+          redactedJson: expect.objectContaining({
+            bundlePutCount: 1,
+            checkpointPolicy: "hot",
+            checkpointReason: "import",
+            externalArtifactPutCount: 0,
+            leaseCheckCount: 2,
+            snapshotMode: "hot-state",
+          }),
+        }),
+      ],
+    });
+  });
+
+  it("falls back to a full snapshot when hot checkpointing has no base snapshot", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"),
+      "{\"intent\":\"ready\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            checkpointedAt: null,
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: null,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "0",
+          },
+        }),
+        writeBrowserVaultReplica,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "0",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "0",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("import"));
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sha256: snapshotRef.hash,
+    }));
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
+    }));
+  });
+
+  it("falls back to a full snapshot when hot-state exceeds its budget", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "large.json"),
+      "x".repeat(17 * 1024 * 1024),
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const baseSnapshotRef = createBundleRef("e");
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            browserVaultReplicaRef: createBrowserVaultReplicaRef(baseSnapshotRef.hash),
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: baseSnapshotRef,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "8",
+          },
+        }),
+        writeBrowserVaultReplica,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "8",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "8",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("outbox_sending"));
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
+    }));
+  });
+
+  it("writes full snapshots for system mailbox receipt checkpoints", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: createBundleRef("d"),
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "8",
+          },
+        }),
+        writeBrowserVaultReplica,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "8",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "8",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(
+      createCheckpointInput("system_mailbox_receipt"),
+    );
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
+    }));
+  });
+
+  it("pins the checkpoint snapshot policy for every supported checkpoint reason", async () => {
+    const fullReasons = new Set(["maintenance", "system_mailbox_receipt"]);
+
+    for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS) {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+      cleanupPaths.push(vaultRoot);
+      await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", `${reason}.json`),
+        "{\"intent\":\"ready\"}\n",
+        "utf8",
+      );
+      await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+      const putArtifact = vi.fn(async () => {});
+      const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+        createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+      const baseSnapshotRef = createBundleRef("f");
+      const browserVaultReplicaRef = createBrowserVaultReplicaRef(baseSnapshotRef.hash);
+      const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+        platform: createPlatform({
+          putArtifact,
+          readWorkspace: async () => ({
+            fetchedAt: "2026-05-01T00:00:00.000Z",
+            workspace: {
+              browserVaultReplicaRef,
+              checkpointedAt: "2026-05-01T00:00:00.000Z",
+              createdAt: "2026-05-01T00:00:00.000Z",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              redactedStatus: null,
+              snapshotRef: baseSnapshotRef,
+              updatedAt: "2026-05-01T00:00:00.000Z",
+              userId: "member_1",
+              version: "8",
+            },
+          }),
+          writeBrowserVaultReplica,
+        }),
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "4",
+          userId: "member_1",
+          workspaceVersion: "8",
+        }),
+        request: {
+          attemptId: "attempt_1",
+          leaseGeneration: "4",
+          reason: "nudge",
+          userId: "member_1",
+          workspaceVersion: "8",
+        },
+        runtime: {},
+        vaultRoot,
+      });
+
+      const result = await options.createCheckpointSnapshot(createCheckpointInput(reason));
+
+      if (fullReasons.has(reason)) {
+        const snapshotRef = requireBundleRef(result.snapshotRef);
+        expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+        expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+        expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+          sourceBundleHash: snapshotRef.hash,
+        }));
+      } else {
+        const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
+        expect(snapshotRef.base).toEqual(baseSnapshotRef);
+        expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
+        expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+        expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
+      }
+    }
   });
 
   it("logs hashed Codex home snapshot diagnostics when checkpointing", async () => {
@@ -159,7 +521,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await options.createCheckpointSnapshot(createCheckpointInput());
+    await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
 
     expect(writeLog).toHaveBeenCalledWith({
       entries: [
@@ -404,7 +766,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
 });
 
-function createCheckpointInput() {
+function createCheckpointInput(
+  reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "idle",
+) {
   const state = {
     recentStatuses: [],
     watermarks: {
@@ -421,7 +785,7 @@ function createCheckpointInput() {
       state,
     },
     previousState: state,
-    reason: "idle" as const,
+    reason,
     redactedStatus: {},
     state,
   };
@@ -429,6 +793,8 @@ function createCheckpointInput() {
 
 function createPlatform(input: {
   putArtifact: (payload: { bytes: Uint8Array; sha256: string }) => Promise<void>;
+  readWorkspace?: () => Promise<HostedWorkspaceReadResponse>;
+  writeBrowserVaultReplica?: (payload: { replica: unknown }) => Promise<ReturnType<typeof createBrowserVaultReplicaRef>>;
   writeLog?: (request: {
     entries: readonly unknown[];
   }) => Promise<{ loggedCount: number }>;
@@ -437,6 +803,11 @@ function createPlatform(input: {
     artifactStore: {
       get: async () => null,
       put: input.putArtifact,
+    },
+    browserVaultReplicaPort: {
+      write: input.writeBrowserVaultReplica
+        ?? (async (payload: { replica: unknown }) =>
+          createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(payload.replica))),
     },
     effectsPort: {
       readRawEmailMessage: async () => null,
@@ -449,5 +820,97 @@ function createPlatform(input: {
           },
         }
       : {}),
+    ...(input.readWorkspace
+      ? {
+          workspacePort: {
+            checkpoint: async () => {
+              throw new Error("Workspace checkpoint is not used by bridge snapshot tests.");
+            },
+            read: input.readWorkspace,
+          },
+        }
+      : {}),
+  };
+}
+
+function createBundleRef(hashCharacter: string) {
+  const hash = hashCharacter.repeat(64);
+  return {
+    hash,
+    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
+    size: 512,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+}
+
+function readBrowserVaultReplicaSourceBundleHash(replica: unknown): string {
+  if (!replica || typeof replica !== "object" || Array.isArray(replica)) {
+    throw new TypeError("Browser vault replica must be an object.");
+  }
+
+  const source = (replica as Record<string, unknown>).source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new TypeError("Browser vault replica source must be an object.");
+  }
+
+  const sourceBundleHash = (source as Record<string, unknown>).sourceBundleHash;
+  if (typeof sourceBundleHash !== "string") {
+    throw new TypeError("Browser vault replica sourceBundleHash must be a string.");
+  }
+
+  return sourceBundleHash;
+}
+
+function createBrowserVaultReplicaRef(sourceBundleHash: string) {
+  return {
+    byteLength: 256,
+    dataVersion: "workspace-bridge-test",
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    keyId: "browser-key-workspace-bridge",
+    objectKey: "browser-vault/member-test/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:workspace-bridge",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
+  } as const;
+}
+
+function requireBundleRef(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !("hash" in value)) {
+    throw new TypeError("Expected a hosted execution bundle ref.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.hash !== "string"
+    || typeof record.key !== "string"
+    || typeof record.size !== "number"
+    || typeof record.updatedAt !== "string"
+  ) {
+    throw new TypeError("Hosted execution bundle ref is malformed.");
+  }
+
+  return {
+    hash: record.hash,
+    key: record.key,
+    size: record.size,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function requireLayeredSnapshotRef(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !("schema" in value)) {
+    throw new TypeError("Expected a hosted execution layered snapshot ref.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.schema !== HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA) {
+    throw new TypeError("Hosted execution layered snapshot schema is malformed.");
+  }
+
+  return {
+    base: record.base === null ? null : requireBundleRef(record.base),
+    hot: record.hot === null ? null : requireBundleRef(record.hot),
+    schema: record.schema,
   };
 }

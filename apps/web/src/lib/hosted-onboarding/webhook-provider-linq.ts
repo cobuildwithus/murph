@@ -10,9 +10,18 @@ import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
-import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
+import {
+  ensureHostedMemberForPendingLinqParticipantContactTx,
+  ensureHostedMemberForPhoneTx,
+} from "./member-identity-service";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
-import { readHostedMemberSnapshot } from "./hosted-member-store";
+import {
+  lookupHostedMemberByVerifiedEmailAddress,
+  readHostedMemberSnapshot,
+} from "./hosted-member-store";
+import {
+  lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
+} from "./hosted-member-routing-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
@@ -27,9 +36,6 @@ import {
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "./linq-routing-policy";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import {
-  createHostedPhoneLookupKey,
-} from "./contact-privacy";
 import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
@@ -48,6 +54,7 @@ export type {
 import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
+import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -70,26 +77,31 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const {
     messageEvent,
     occurredAt,
-    participantPhoneNumber,
+    participantContact,
     recipientPhoneNumber,
     summary,
   } = context;
 
-  if (!participantPhoneNumber) {
-    return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-phone");
+  if (!participantContact) {
+    return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-contact");
   }
 
-  const phoneLookupKey = createHostedPhoneLookupKey(participantPhoneNumber);
-
-  if (!phoneLookupKey) {
-    return buildIgnoredLinqWebhookPlan("invalid-phone");
-  }
-
-  const existingMemberLookup = await lookupHostedMemberIdentityByPhoneNumber({
-    phoneNumber: participantPhoneNumber,
-    prisma: input.prisma,
-  });
-  const existingMember = existingMemberLookup?.core ?? null;
+  const existingMemberLookup = participantContact.kind === "phone"
+    ? await lookupHostedMemberIdentityByPhoneNumber({
+        phoneNumber: participantContact.value,
+        prisma: input.prisma,
+      })
+    : await lookupHostedMemberByVerifiedEmailAddress({
+        address: participantContact.value,
+        prisma: input.prisma,
+      });
+  const existingPendingLinqContactLookup = existingMemberLookup
+    ? null
+    : await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
+        lookupKey: participantContact.lookupKey,
+        prisma: input.prisma,
+      });
+  const existingMember = existingMemberLookup?.core ?? existingPendingLinqContactLookup?.core ?? null;
 
   if (summary.isFromMe) {
     if (existingMember) {
@@ -177,7 +189,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       eventId: input.event.event_id,
       linqMessage: {
         chatId: summary.chatId,
-        from: participantPhoneNumber,
+        from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
         ...(messageEvent.data.message.reply_to?.message_id === undefined
@@ -189,7 +201,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
       },
       occurredAt,
-      phoneLookupKey,
+      participantContact,
       rawParts: messageEvent.data.message.parts,
       userId: existingMember.id,
     });
@@ -218,14 +230,22 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("non-imessage-first-contact");
   }
 
-  const member = existingMember ?? await ensureHostedMemberForPhoneTx({
-    phoneNumber: participantPhoneNumber,
-    prisma: input.prisma,
-  });
+  const member = existingMember
+    ?? (participantContact.kind === "phone"
+      ? await ensureHostedMemberForPhoneTx({
+          phoneNumber: participantContact.value,
+          prisma: input.prisma,
+        })
+      : await ensureHostedMemberForPendingLinqParticipantContactTx({
+          contact: participantContact,
+          observedAt: new Date(occurredAt),
+          prisma: input.prisma,
+        }));
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
     chatId: summary.chatId,
     memberId: member.id,
     occurredAt,
+    participantContact: participantContact.kind === "email" ? participantContact : null,
     prisma: input.prisma,
     recipientPhone: recipientPhoneNumber,
   });
@@ -263,7 +283,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   eventId: string;
   linqMessage: Omit<HostedExecutionLinqConversationMessage, "parts">;
   occurredAt: string;
-  phoneLookupKey: string;
+  participantContact: HostedLinqParticipantContact;
   rawParts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"];
   userId: string;
 }): ReturnType<typeof buildHostedExecutionLinqConversationMessageWake> {
@@ -274,7 +294,11 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       parts: buildHostedLinqMailboxParts(input.rawParts, "normal"),
     },
     occurredAt: input.occurredAt,
-    phoneLookupKey: input.phoneLookupKey,
+    contactKind: input.participantContact.kind,
+    contactLookupKey: input.participantContact.lookupKey,
+    ...(input.participantContact.kind === "phone"
+      ? { phoneLookupKey: input.participantContact.lookupKey }
+      : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(fullWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -288,7 +312,11 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       parts: buildHostedLinqMailboxParts(input.rawParts, "compact"),
     },
     occurredAt: input.occurredAt,
-    phoneLookupKey: input.phoneLookupKey,
+    contactKind: input.participantContact.kind,
+    contactLookupKey: input.participantContact.lookupKey,
+    ...(input.participantContact.kind === "phone"
+      ? { phoneLookupKey: input.participantContact.lookupKey }
+      : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(compactWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -302,7 +330,11 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       parts: buildMinimalHostedLinqMailboxParts(input.rawParts),
     },
     occurredAt: input.occurredAt,
-    phoneLookupKey: input.phoneLookupKey,
+    contactKind: input.participantContact.kind,
+    contactLookupKey: input.participantContact.lookupKey,
+    ...(input.participantContact.kind === "phone"
+      ? { phoneLookupKey: input.participantContact.lookupKey }
+      : {}),
     userId: input.userId,
   });
 }

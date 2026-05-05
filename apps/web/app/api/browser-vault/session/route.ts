@@ -1,4 +1,8 @@
-import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedBrowserVaultReplicaRef,
+  parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+} from "@murphai/hosted-execution/parsers";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 
 import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
@@ -39,7 +43,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const workspaceSnapshotHash = readHostedWorkspaceSnapshotHash(workspace?.snapshotRef ?? null);
-  if (workspaceSnapshotHash && workspaceSnapshotHash !== replicaRef.sourceBundleHash) {
+  if (!workspaceSnapshotHash || workspaceSnapshotHash !== replicaRef.sourceBundleHash) {
     return emptyBrowserVaultSession();
   }
 
@@ -99,10 +103,7 @@ function emptyBrowserVaultSession() {
 }
 
 function readHostedWorkspaceSnapshotHash(value: unknown): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const hash = Reflect.get(value, "hash");
-  return typeof hash === "string" ? hash : null;
+  return readHostedExecutionSnapshotBaseRef(
+    parseHostedExecutionSnapshotRef(value, "Hosted browser vault session workspace snapshotRef"),
+  )?.hash ?? null;
 }

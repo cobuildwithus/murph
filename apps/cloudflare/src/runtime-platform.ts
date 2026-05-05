@@ -13,6 +13,7 @@ import {
 import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
+  parseHostedBrowserVaultReplicaRef,
   parseHostedRuntimeLogResponse,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
@@ -128,13 +129,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
     bytes: Uint8Array;
     sha256: string;
   }): Promise<void> => {
-    const headers = new Headers();
-    const lease = await input.workspaceCheckpointBridge?.readCurrentLease() ?? null;
-    if (lease) {
-      headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
-      headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
-      headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
-    }
+    const headers = input.workspaceCheckpointBridge
+      ? await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge)
+      : new Headers();
     const response = await fetchHostedResponse({
       description: `Hosted artifact upload ${artifact.sha256}`,
       fetchImpl,
@@ -226,6 +223,11 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
     ...(input.internalWorkerProxyToken && input.workspaceCheckpointBridge
       ? {
+          browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
+            fetchImpl,
+            timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
           runtimeLivenessPort: createCloudflareRuntimeLivenessPort({
             fetchImpl,
             timeoutMs,
@@ -332,6 +334,58 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
 function buildHostedExecutionRunnerEmailMessagePath(rawMessageKey: string): string {
   return `/messages/${encodeURIComponent(rawMessageKey)}`;
+}
+
+async function createHostedRuntimeActiveLeaseHeaders(
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority,
+): Promise<Headers> {
+  const headers = new Headers();
+  const lease = await workspaceCheckpointBridge.readCurrentLease();
+  if (lease) {
+    headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
+    headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
+    headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
+  }
+  return headers;
+}
+
+function createCloudflareBrowserVaultReplicaPort(input: {
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}) {
+  return {
+    async write(writeInput: {
+      replica: unknown;
+    }) {
+      const payload = await fetchHostedJson({
+        body: {
+          replica: writeInput.replica,
+        },
+        description: "Hosted browser-vault replica write",
+        fetchImpl: input.fetchImpl,
+        headers: await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge),
+        method: "POST",
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          "/replicas",
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.browserVaultReplicaStore}/`,
+        ),
+      });
+      const replicaRef = parseHostedBrowserVaultReplicaRef(
+        readRequiredField(payload, "replicaRef"),
+        "Hosted browser-vault replica write response.replicaRef",
+      );
+
+      if (!replicaRef) {
+        throw new TypeError(
+          "Hosted browser-vault replica write response.replicaRef must not be null.",
+        );
+      }
+
+      return replicaRef;
+    },
+  };
 }
 
 function createCloudflareRuntimeLivenessPort(input: {
@@ -1233,6 +1287,19 @@ function readOptionalStringField(value: unknown, field: string): string | null {
 
   if (typeof entry !== "string") {
     throw new TypeError(`Hosted runtime response.${field} must be a string.`);
+  }
+
+  return entry;
+}
+
+function readRequiredField(value: unknown, field: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime response must be an object.");
+  }
+
+  const entry = (value as Record<string, unknown>)[field];
+  if (entry === undefined) {
+    throw new TypeError(`Hosted runtime response.${field} is required.`);
   }
 
   return entry;

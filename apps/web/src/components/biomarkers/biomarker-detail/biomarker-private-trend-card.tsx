@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowRightIcon, LineChartIcon, LockKeyholeIcon } from "lucide-react";
+import { ArrowRightIcon, LockKeyholeIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
+import { Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 
 import {
   selectBrowserVaultBiomarkerPanel,
@@ -14,13 +15,17 @@ import {
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/src/components/ui/chart";
+import { MetricCard } from "@/src/components/ui/metric-card";
+import {
   useBrowserVault,
   type BrowserVaultStatus,
 } from "@/src/lib/browser-vault/context";
-import {
-  formatMetricValue,
-  formatTrendDeltaSummary,
-} from "@/src/lib/browser-vault/trend-comparison";
+import { formatMetricValue } from "@/src/lib/browser-vault/trend-comparison";
 import type { BiomarkerOverviewProjection } from "@/src/lib/health-commons/biomarker-projections";
 
 interface TrendPoint {
@@ -56,6 +61,13 @@ export function BiomarkerPrivateTrendCard({
   const trend = useMemo(
     () => resolvePrivateTrend({ biomarker, browserVaultStatus: status, client, error }),
     [biomarker, client, error, status],
+  );
+
+  const { avg7, avg30, pctChange, pctDirection } = useMemo(
+    () => trend.status === "ready"
+      ? computeAverages(trend.series)
+      : { avg7: null, avg30: null, pctChange: null, pctDirection: "neutral" as const },
+    [trend],
   );
 
   if (trend.status === "loading") {
@@ -120,110 +132,113 @@ export function BiomarkerPrivateTrendCard({
   }
 
   return (
-    <Card className="border border-border/60">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              Private to you
-            </p>
-            <CardTitle>Your {biomarker.shortName} trend</CardTitle>
-            <CardDescription>
-              {trend.stale
-                ? "Your latest private value is older than the usual wearable sync window."
-                : "Murph compares this to your own recent baseline, not to other people."}
-            </CardDescription>
-          </div>
-          <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <LineChartIcon className="size-5" aria-hidden />
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-5">
-        <div>
-          <div className="flex items-end gap-2">
-            <span className="font-serif text-5xl font-semibold tracking-tight text-foreground">
-              {formatMetricValue(trend.latest.value, biomarker.valuePrecision)}
-            </span>
-            <span className="pb-2 text-sm font-medium text-muted-foreground">
-              {biomarker.unit}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Latest {formatChipLabel(trend.latest.sourceLabel)} ·{" "}
-            {formatDateLabel(trend.latest.date)} ·{" "}
-            {formatChipLabel(trend.latest.confidence)} confidence
-          </p>
-        </div>
-        <TrendSparkline series={trend.series} />
-        {trend.comparison ? (
-          <TrendDeltaRow
-            comparison={trend.comparison}
-            precision={biomarker.valuePrecision}
-            unit={biomarker.unit}
-          />
-        ) : (
-          <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-            Not enough baseline data yet for a clean window comparison.
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function TrendDeltaRow({
-  comparison,
-  precision,
-  unit,
-}: {
-  comparison: BrowserVaultBiomarkerTrend;
-  precision: number;
-  unit: string;
-}) {
-  const deltaSummary = formatTrendDeltaSummary({ comparison, precision, unit });
-
-  return (
-    <div className="grid gap-3 rounded-xl border border-border/60 bg-background/80 p-3 text-sm">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-muted-foreground">{comparison.label}</span>
-        <span className="font-medium text-foreground">{deltaSummary}</span>
-      </div>
-      <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-        <span>Recent: {formatMetricValue(comparison.currentValue, precision)} {unit}</span>
-        <span>Prior: {formatMetricValue(comparison.baselineValue, precision)} {unit}</span>
+    <div className="grid items-start gap-6 md:grid-cols-[minmax(0,1fr)_280px]">
+      <TrendLineChart series={trend.series} unit={biomarker.unit} precision={biomarker.valuePrecision} />
+      <div className="flex flex-col gap-4">
+        <MetricCard
+          label="Latest"
+          value={formatMetricValue(trend.latest.value, biomarker.valuePrecision)}
+          unit={biomarker.unit}
+          delta={avg7 !== null && avg7 !== 0 ? `${Math.abs(((trend.latest.value - avg7) / avg7) * 100).toFixed(1)}%` : ""}
+          direction={avg7 !== null && avg7 !== 0 ? (Math.abs(((trend.latest.value - avg7) / avg7) * 100) < 1 ? "neutral" : trend.latest.value > avg7 ? "up" : "down") : "neutral"}
+          baseline={`${formatChipLabel(trend.latest.sourceLabel)} · ${formatDateLabel(trend.latest.date)}`}
+        />
+        <MetricCard
+          label="7-day average"
+          value={avg7 !== null ? formatMetricValue(avg7, biomarker.valuePrecision) : "---"}
+          unit={biomarker.unit}
+          delta={pctChange !== null ? `${Math.abs(pctChange).toFixed(1)}%` : ""}
+          direction={pctDirection}
+          baseline={avg30 !== null ? `30d avg: ${formatMetricValue(avg30, biomarker.valuePrecision)}${abbreviateUnit(biomarker.unit)}` : undefined}
+        />
       </div>
     </div>
   );
 }
 
-function TrendSparkline({ series }: { series: TrendPoint[] }) {
-  const points = useMemo(() => toSparklinePoints(series), [series]);
+const trendChartConfig = {
+  value: {
+    label: "Value",
+    color: "var(--primary)",
+  },
+} satisfies ChartConfig;
 
-  if (points.length < 2) {
-    return <div className="h-24 rounded-xl bg-muted/40" aria-hidden />;
+function TrendLineChart({ series, unit, precision }: { precision: number; series: TrendPoint[]; unit: string }) {
+  const chartData = useMemo(
+    () =>
+      series.slice(-90).map((point) => ({
+        date: point.date,
+        label: formatDateLabel(point.date),
+        value: point.value,
+      })),
+    [series],
+  );
+
+  if (chartData.length < 2) {
+    return <div className="h-64 rounded-lg bg-muted/30" aria-hidden />;
   }
 
-  const pointString = points.map((point) => `${point.x},${point.y}`).join(" ");
-
   return (
-    <svg
-      role="img"
-      aria-label="Private biomarker trend sparkline"
-      viewBox="0 0 100 42"
-      className="h-24 w-full overflow-visible rounded-xl border border-border/60 bg-muted/20 p-3 text-primary"
-      preserveAspectRatio="none"
-    >
-      <polyline
-        points={pointString}
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="3"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
+    <ChartContainer config={trendChartConfig} className="h-64 w-full">
+      <LineChart
+        accessibilityLayer
+        data={chartData}
+        margin={{ bottom: 0, left: 0, right: 40, top: 8 }}
+      >
+        <XAxis
+          dataKey="label"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          interval="equidistantPreserveStart"
+          minTickGap={40}
+          className="text-[10px]"
+        />
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          tickMargin={4}
+          width={40}
+          domain={["auto", "auto"]}
+          className="text-[10px]"
+        />
+        <ReferenceLine
+          y={120}
+          stroke="var(--primary)"
+          strokeWidth={1.5}
+          strokeDasharray="6 3"
+          strokeOpacity={0.5}
+          label={{
+            value: "Goal",
+            position: "right",
+            fill: "var(--primary)",
+            fontSize: 10,
+            fontWeight: 600,
+          }}
+        />
+        <ChartTooltip
+          cursor={false}
+          content={
+            <ChartTooltipContent
+              labelKey="label"
+              labelFormatter={(_label, payload) => {
+                const item = payload[0]?.payload as { label?: string } | undefined;
+                return item?.label ?? "";
+              }}
+              formatter={(value) => `${Number(value).toFixed(precision)} ${unit}`}
+            />
+          }
+        />
+        <Line
+          dataKey="value"
+          type="monotone"
+          stroke="var(--color-value)"
+          strokeWidth={2.5}
+          dot={false}
+          activeDot={{ r: 4, strokeWidth: 0 }}
+        />
+      </LineChart>
+    </ChartContainer>
   );
 }
 
@@ -313,24 +328,44 @@ function emptyStateAction(status: BrowserVaultBiomarkerPanelStatus): { href: str
   return null;
 }
 
-function toSparklinePoints(series: readonly TrendPoint[]): Array<{ x: number; y: number }> {
-  const recent = series.slice(-30);
-  const values = recent.map((point) => point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const denominator = Math.max(1, recent.length - 1);
+function computeAverages(series: TrendPoint[]): {
+  avg7: number | null;
+  avg30: number | null;
+  pctChange: number | null;
+  pctDirection: "down" | "neutral" | "up";
+} {
+  if (series.length === 0) {
+    return { avg7: null, avg30: null, pctChange: null, pctDirection: "neutral" };
+  }
 
-  return recent.map((point, index) => ({
-    x: (index / denominator) * 100,
-    y: 36 - ((point.value - min) / range) * 30 + 3,
-  }));
+  const last7 = series.slice(-7);
+  const last30 = series.slice(-30);
+  const avg7 = last7.reduce((s, p) => s + p.value, 0) / last7.length;
+  const avg30 = last30.reduce((s, p) => s + p.value, 0) / last30.length;
+
+  if (avg30 === 0) {
+    return { avg7, avg30, pctChange: null, pctDirection: "neutral" };
+  }
+
+  const pctChange = ((avg7 - avg30) / avg30) * 100;
+  const pctDirection: "down" | "neutral" | "up" =
+    Math.abs(pctChange) < 1 ? "neutral" : pctChange > 0 ? "up" : "down";
+
+  return { avg7, avg30, pctChange, pctDirection };
 }
 
-function formatDateLabel(date: string): string {
-  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short" }).format(
-    new Date(`${date}T00:00:00.000Z`),
-  );
+
+const unitAbbreviations: Record<string, string> = {
+  minutes: "m",
+  hours: "h",
+  seconds: "s",
+  milliseconds: "ms",
+  bpm: "bpm",
+  "%": "%",
+};
+
+function abbreviateUnit(unit: string): string {
+  return unitAbbreviations[unit.toLowerCase()] ?? ` ${unit}`;
 }
 
 function formatChipLabel(value: string): string {
@@ -339,4 +374,10 @@ function formatChipLabel(value: string): string {
     .filter((part) => part.length > 0)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
+}
+
+function formatDateLabel(date: string): string {
+  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short" }).format(
+    new Date(`${date}T00:00:00.000Z`),
+  );
 }

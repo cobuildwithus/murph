@@ -154,6 +154,7 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     "PATH",
     "PORT",
     "PWD",
+    "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL",
     "VAULT",
   ],
 );
@@ -421,6 +422,7 @@ async function runWithHostedProcessEnvironment<T>(input: {
   vaultRoot: string;
 }, run: () => Promise<T>): Promise<T> {
   const previousEnvironment = { ...process.env };
+  const previousWorkingDirectory = process.cwd();
   const nextEnvironment: NodeJS.ProcessEnv = {
     ...buildHostedBaseProcessEnvironment(previousEnvironment),
     ...input.envOverrides,
@@ -432,8 +434,10 @@ async function runWithHostedProcessEnvironment<T>(input: {
   replaceProcessEnvironment(nextEnvironment);
 
   try {
+    process.chdir(input.vaultRoot);
     return await run();
   } finally {
+    process.chdir(previousWorkingDirectory);
     replaceProcessEnvironment(previousEnvironment);
   }
 }

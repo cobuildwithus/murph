@@ -163,13 +163,24 @@ after terminal handling evidence is durable under
 drained through the hosted provider-cleanup retry state after the next workspace
 checkpoint.
 
-The hosted workspace snapshot preserves durable operational runtime continuity
-under `vault/.runtime/operations/**` by default, excluding explicit
-unsafe/process-local or repair-bin material such as secrets, device-sync runtime
-state, parser executable-selector config, quarantine payloads, locks,
-pid/socket files, global cache/tmp, and rebuildable projections. This is
-intentionally denylist-based so newly added hosted operational state is not
-silently dropped from later checkpoints.
+The hosted workspace checkpoint ref may be either a full/base workspace bundle
+or a layered `{base, hot}` ref. The full/base bundle preserves durable
+operational runtime continuity under `vault/.runtime/operations/**` by default,
+excluding explicit unsafe/process-local or repair-bin material such as secrets,
+device-sync runtime state, parser executable-selector config, quarantine
+payloads, locks, pid/socket files, global cache/tmp, and rebuildable
+projections. Hot checkpoints snapshot a much narrower explicit assistant
+runtime continuity subset under `vault/.runtime/operations/assistant/**` for
+user-visible checkpoint boundaries such as mailbox import and outbox state.
+Restore applies the base bundle first, clears the hot-state include paths, then
+restores the latest hot bundle so files deleted by a hot checkpoint cannot
+resurrect from the base image. If no base snapshot exists, the runner may fall
+back to a full checkpoint so non-hot workspace content is not lost. Hot
+checkpoints also carry forward the browser-vault replica ref for the current
+base snapshot explicitly; if that continuity is missing or stale, the runner
+uses a full checkpoint instead. `system_mailbox_receipt` remains full because
+activation can mutate canonical vault bootstrap state that must be present for
+later conversation wakes.
 
 Hosted snapshots also preserve safe non-secret Codex home continuity under
 `.codex-hosted/**` by default, while excluding environment files, credential,
@@ -208,6 +219,8 @@ secret, checkpoint diagnostics stay count/class only.
 - provider delivery and receipt/reconciliation policy
 - runtime timers and next wake projection
 - checkpoint timing
+- checkpoint snapshot policy and metrics (`full` vs `hot`, external artifact
+  PUT count, bundle PUT count, hot-state file/byte counts)
 
 ### Cloudflare Owns
 

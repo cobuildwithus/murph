@@ -5,7 +5,7 @@ key: "biomarker:apolipoprotein-b"
 slug: "biomarkers/apolipoprotein-b"
 title: "Apolipoprotein B"
 summary: "A blood marker reflecting the number of apoB-containing atherogenic lipoprotein particles; an optional higher-resolution secondary endpoint."
-status: "draft"
+status: "field-testing"
 quality: "usable"
 aliases:
   - "ApoB"
@@ -39,11 +39,14 @@ biomarker:
   explainerCards:
 
     -
-      title: "What it is"
-      body: "A blood marker reflecting the number of apoB-containing atherogenic lipoprotein particles; an optional higher-resolution secondary endpoint."
+      title: "Why people care"
+      body: "Each atherogenic lipoprotein carries exactly one ApoB molecule, making it a direct particle count and a stronger predictor of cardiovascular risk than LDL-C alone; in 20-30% of people LDL-C looks normal while ApoB is elevated."
     -
-      title: "How it works"
-      body: "A pre-intervention lipid panel is compared with a repeat panel after the protocol-specific intervention window."
+      title: "How to measure it"
+      body: "A standard blood draw (fasting not required); desirable is below 100 mg/dL, optimal for higher-risk individuals is below 80 mg/dL, and above 130 mg/dL is elevated. Track over 3-6 month intervals."
+    -
+      title: "What moves it"
+      body: "Saturated fat, excess body fat, refined sugar, inactivity, and poor sleep raise it; Mediterranean-style diet, fiber, weight loss, and exercise can lower it 5-15% over 12 weeks. Hypothyroidism, insulin resistance, and certain medications can confound readings."
   measurement:
     bestContext: "A blood lipid panel drawn before the intervention and repeated after the planned intervention window, ideally with similar lab and fasting conditions."
     howToMeasure:

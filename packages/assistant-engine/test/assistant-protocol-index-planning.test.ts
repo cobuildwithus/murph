@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
@@ -46,6 +49,7 @@ import {
   resolveAssistantRouteTurnPlan,
   type AssistantProviderTurnResolvedExecutionProfile,
 } from '../src/assistant/provider-turn/planning.js'
+import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import type { AssistantActiveTurnProviderHistory } from '../src/assistant/active-turn-history.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
@@ -237,6 +241,62 @@ describe('assistant protocol index planning', () => {
     })
   })
 
+  it('replays committed transcript messages when provider-native resume is unavailable', async () => {
+    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-transcript-'))
+    const session = createSession({
+      turnCount: 1,
+    })
+    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'status',
+          text: 'tool audit',
+        },
+        {
+          kind: 'assistant',
+          text: 'Earlier welcome.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createSharedPlan(),
+      })
+
+      expect(plan.resumeProviderSessionId).toBeNull()
+      expect(plan.conversationMessages).toEqual([
+        {
+          content: 'Earlier welcome.',
+          role: 'assistant',
+        },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('refreshes resumed thread instructions when the fingerprint changed', async () => {
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -317,6 +377,7 @@ function createRoute(): CodexThreadIdentity {
 
 function createSession(input?: {
   resumeState?: AssistantSession['resumeState']
+  turnCount?: number
 }): AssistantSession {
   const target = createDefaultLocalAssistantModelTarget()
   if (!target) {
@@ -346,7 +407,7 @@ function createSession(input?: {
     schema: 'murph.assistant-session.v1',
     sessionId: 'session-test',
     target,
-    turnCount: 0,
+    turnCount: input?.turnCount ?? 0,
     updatedAt: '2026-05-04T00:00:00.000Z',
   }
 }

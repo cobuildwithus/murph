@@ -2,7 +2,11 @@ import {
   normalizeIanaTimeZone,
 } from "@murphai/contracts";
 
-import { isHostedConversationMessageChannel, isHostedExecutionWakeKind } from "./contracts.ts";
+import {
+  isHostedConversationMessageChannel,
+  isHostedExecutionWakeKind,
+  isHostedLinqConversationContactKind,
+} from "./contracts.ts";
 
 import type {
   HostedExecutionAssistantNotificationDelivery,
@@ -52,10 +56,14 @@ import {
   readOptionalStringArray,
 } from "./parsers/assertions.ts";
 import {
+  buildHostedExecutionLayeredSnapshotRef,
+  isHostedExecutionLayeredSnapshotRef,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 import {
   parseHostedExecutionDeviceSyncReason,
@@ -64,10 +72,14 @@ import {
 import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
 export {
+  buildHostedExecutionLayeredSnapshotRef,
+  isHostedExecutionLayeredSnapshotRef,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 export {
   parseHostedMailboxFetchRequest,
@@ -189,17 +201,7 @@ export function parseHostedExecutionConversationMessagePayload(
 
   switch (channel) {
     case "linq":
-      return {
-        channel,
-        linqMessage: parseHostedExecutionLinqConversationMessage(
-          record.linqMessage,
-          "Hosted execution conversation.message wake payload linqMessage",
-        ),
-        phoneLookupKey: requireString(
-          record.phoneLookupKey,
-          "Hosted execution conversation.message wake payload phoneLookupKey",
-        ),
-      };
+      return parseHostedExecutionLinqConversationMessagePayload(record, channel);
     case "telegram":
       return {
         channel,
@@ -298,6 +300,64 @@ export function parseHostedExecutionConversationMessagePayload(
             }),
       };
   }
+}
+
+function parseHostedExecutionLinqConversationMessagePayload(
+  record: Record<string, unknown>,
+  channel: "linq",
+): HostedExecutionLinqConversationMessagePayload {
+  const linqMessage = parseHostedExecutionLinqConversationMessage(
+    record.linqMessage,
+    "Hosted execution conversation.message wake payload linqMessage",
+  );
+
+  if (record.contactLookupKey !== undefined || record.contactKind !== undefined) {
+    const contactKind = parseHostedExecutionLinqConversationContactKind(
+      record.contactKind,
+      "Hosted execution conversation.message wake payload contactKind",
+    );
+    const contactLookupKey = requireString(
+      record.contactLookupKey,
+      "Hosted execution conversation.message wake payload contactLookupKey",
+    );
+    return {
+      channel,
+      contactKind,
+      contactLookupKey,
+      linqMessage,
+      ...(record.phoneLookupKey === undefined
+        ? {}
+        : {
+            phoneLookupKey: readOptionalNullableString(
+              record.phoneLookupKey,
+              "Hosted execution conversation.message wake payload phoneLookupKey",
+            ),
+          }),
+    };
+  }
+
+  const phoneLookupKey = requireString(
+    record.phoneLookupKey,
+    "Hosted execution conversation.message wake payload phoneLookupKey",
+  );
+  return {
+    channel,
+    contactKind: "phone",
+    contactLookupKey: phoneLookupKey,
+    linqMessage,
+    phoneLookupKey,
+  };
+}
+
+function parseHostedExecutionLinqConversationContactKind(
+  value: unknown,
+  label: string,
+) {
+  if (!isHostedLinqConversationContactKind(value)) {
+    throw new TypeError(`${label} must be phone or email.`);
+  }
+
+  return value;
 }
 
 function parseHostedExecutionEmailAttachmentSummaries(

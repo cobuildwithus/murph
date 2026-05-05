@@ -1063,6 +1063,90 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
+  it("writes browser-vault replicas after checking the active invocation lease", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName() {
+          return {
+            async bindUser(userId: string) {
+              return { userId };
+            },
+            ownsActiveInvocationLease,
+          };
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const sourceBundleHash = "c".repeat(64);
+
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaWriteRequest({
+        replica: createBrowserVaultReplica(sourceBundleHash),
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      replicaRef: expect.objectContaining({
+        replicaSchema: "murph.browser-vault-replica",
+        schema: "murph.hosted-browser-vault-replica-ref.v1",
+        sourceBundleHash,
+      }),
+    });
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects browser-vault replica writes with missing lease headers before resolving crypto", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const bindUser = vi.fn(async (userId: string) => ({ userId }));
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName() {
+          return {
+            bindUser,
+            ownsActiveInvocationLease,
+          };
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://browser-vault.worker/replicas", {
+        body: JSON.stringify({
+          replica: createBrowserVaultReplica("d".repeat(64)),
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(bindUser).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not retain resolved outbound plaintext crypto contexts", async () => {
     const fetchedAt = "2026-05-04T00:00:00.000Z";
     const fixture = await createHostedRuntimeCryptoContextFixture({
@@ -1542,6 +1626,35 @@ function createArtifactPutRequest(input: {
     }),
     method: "PUT",
   });
+}
+
+function createBrowserVaultReplicaWriteRequest(input: {
+  replica: unknown;
+  workspaceVersion: string;
+}): Request {
+  return new Request("http://browser-vault.worker/replicas", {
+    body: JSON.stringify({
+      replica: input.replica,
+    }),
+    headers: createRunnerProxyHeaders({
+      "content-type": "application/json; charset=utf-8",
+      "x-hosted-runtime-attempt-id": "attempt_1",
+      "x-hosted-runtime-lease-generation": "9",
+      "x-hosted-runtime-workspace-version": input.workspaceVersion,
+    }),
+    method: "POST",
+  });
+}
+
+function createBrowserVaultReplica(sourceBundleHash: string) {
+  return {
+    generatedAt: "2026-04-26T00:00:00.000Z",
+    schema: "murph.browser-vault-replica",
+    source: {
+      dataVersion: "runner-outbound-test",
+      sourceBundleHash,
+    },
+  };
 }
 
 function sha256Hex(bytes: Uint8Array): string {

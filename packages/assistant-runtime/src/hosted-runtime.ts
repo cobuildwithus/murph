@@ -80,6 +80,9 @@ export {
 export {
   resolveHostedVercelAiGatewayStripeCustomerId,
 } from "./hosted-runtime/billing.ts";
+export {
+  createHostedBrowserVaultReplicaForSnapshot,
+} from "./hosted-runtime/browser-vault-replica.ts";
 
 export type {
   HostedAssistantRuntimeChannelCapabilities,
@@ -96,6 +99,7 @@ export type {
   HostedRuntimeActiveTurnInputCheckpointInput,
   HostedRuntimeActiveTurnInputMailboxRefresh,
   HostedRuntimeActiveTurnInputMailboxRefreshInput,
+  HostedRuntimeBrowserVaultReplicaPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
@@ -508,6 +512,14 @@ function createLivenessGuardedHostedRuntimePlatform(
       ? {
           checkpointActiveTurnInput: (checkpointInput) =>
             guard(() => platform.checkpointActiveTurnInput!(checkpointInput)),
+        }
+      : {}),
+    ...(platform.browserVaultReplicaPort
+      ? {
+          browserVaultReplicaPort: {
+            write: (writeInput) =>
+              guard(() => platform.browserVaultReplicaPort!.write(writeInput)),
+          },
         }
       : {}),
     ...(platform.deviceSyncPort

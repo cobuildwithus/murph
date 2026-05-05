@@ -29,6 +29,11 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     routing,
   });
   const memberPhoneNumber = input.member.identity?.phoneNumber ?? null;
+  const linqContactLookupKey =
+    input.member.identity?.phoneLookupKey
+    ?? routing?.pendingLinqParticipantContact?.lookupKey
+    ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+    ?? null;
 
   if (routing?.linqChatId) {
     if (routing.pendingLinqChatId) {
@@ -44,6 +49,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: routing.linqChatId,
+        linqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,
@@ -58,22 +64,31 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     }),
   );
 
+  const pendingLinqRecipientPhone = normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
+
   if (
     routing?.pendingLinqChatId
-    && targetRecipientPhone
-    && normalizePhoneNumber(routing.pendingLinqRecipientPhone) === targetRecipientPhone
+    && linqContactLookupKey
+    && (
+      memberPhoneNumber
+        ? targetRecipientPhone !== null && pendingLinqRecipientPhone === targetRecipientPhone
+        : true
+    )
   ) {
+    const promotedRecipientPhone =
+      pendingLinqRecipientPhone ?? targetRecipientPhone;
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
       linqChatId: routing.pendingLinqChatId,
       memberId: input.member.core.id,
       prisma: input.prisma,
-      recipientPhone: targetRecipientPhone,
+      recipientPhone: promotedRecipientPhone,
     });
 
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: routing.pendingLinqChatId,
+        linqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,
         messaging,

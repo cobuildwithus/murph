@@ -11,6 +11,11 @@ import {
 } from "@murphai/messaging-ingress/linq-webhook";
 
 import { hostedOnboardingError } from "./errors";
+import { normalizeHostedEmailAddress } from "./contact-privacy";
+import {
+  createHostedLinqParticipantContact,
+  type HostedLinqParticipantContact,
+} from "./linq-participant-contact";
 import { normalizePhoneNumber } from "./phone";
 import { getHostedOnboardingEnvironment } from "./runtime";
 
@@ -128,6 +133,44 @@ export function resolveHostedLinqParticipantPhoneNumber(
   );
 }
 
+export function resolveHostedLinqParticipantContact(
+  event: HostedLinqMessageReceivedEvent,
+): HostedLinqParticipantContact | null {
+  const phone = resolveHostedLinqParticipantPhoneNumber(event);
+  if (phone) {
+    return createHostedLinqParticipantContact({
+      kind: "phone",
+      value: phone,
+    });
+  }
+
+  const email = resolveHostedLinqParticipantEmailAddress(event);
+  if (email) {
+    return createHostedLinqParticipantContact({
+      kind: "email",
+      value: email,
+    });
+  }
+
+  return null;
+}
+
+export function resolveHostedLinqParticipantEmailAddress(
+  event: HostedLinqMessageReceivedEvent,
+): string | null {
+  if (!event.data.is_from_me) {
+    return (
+      normalizeHostedEmailAddress(event.data.from)
+      ?? normalizeHostedEmailAddress(event.data.sender_handle?.handle)
+    );
+  }
+
+  return (
+    resolveHostedLinqOutboundFallbackEmailAddress(event)
+    ?? normalizeHostedEmailAddress(event.data.recipient_phone)
+  );
+}
+
 export function resolveHostedLinqRecipientPhoneNumber(
   event: HostedLinqMessageReceivedEvent,
 ): string | null {
@@ -159,6 +202,28 @@ function resolveHostedLinqOutboundFallbackPhoneNumber(
   const fromPhone = normalizePhoneNumber(event.data.from);
   if (fromPhone && fromPhone !== ownerPhone) {
     return fromPhone;
+  }
+
+  return null;
+}
+
+function resolveHostedLinqOutboundFallbackEmailAddress(
+  event: HostedLinqMessageReceivedEvent,
+): string | null {
+  const ownerEmail = normalizeHostedEmailAddress(event.data.chat?.owner_handle?.handle);
+  const senderHandleEmail = normalizeHostedEmailAddress(event.data.sender_handle?.handle);
+  if (senderHandleEmail && senderHandleEmail !== ownerEmail) {
+    return senderHandleEmail;
+  }
+
+  const fromHandleEmail = normalizeHostedEmailAddress(event.data.from_handle?.handle);
+  if (fromHandleEmail && fromHandleEmail !== ownerEmail) {
+    return fromHandleEmail;
+  }
+
+  const fromEmail = normalizeHostedEmailAddress(event.data.from);
+  if (fromEmail && fromEmail !== ownerEmail) {
+    return fromEmail;
   }
 
   return null;

@@ -22,8 +22,13 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedBrowserVaultReplicaRef,
-  parseHostedExecutionBundleRef,
+  parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedBrowserVaultReplicaRef,
+  HostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/contracts";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
@@ -205,14 +210,27 @@ export async function checkpointHostedWorkspaceTx(input: {
     "Hosted workspace checkpoint reason",
   );
   const userId = requireNonEmptyString(input.userId, "Hosted workspace userId");
+  const snapshotRef = parseHostedExecutionSnapshotRef(
+    input.snapshotRef,
+    "Hosted workspace snapshotRef",
+  );
+  const browserVaultReplicaRefPresent = Object.hasOwn(input, "browserVaultReplicaRef");
+  const browserVaultReplicaRef = browserVaultReplicaRefPresent
+    ? parseHostedBrowserVaultReplicaRef(
+        input.browserVaultReplicaRef,
+        "Hosted workspace browserVaultReplicaRef",
+      )
+    : undefined;
+  assertHostedWorkspaceBrowserVaultReplicaCheckpointInvariant({
+    browserVaultReplicaRef,
+    browserVaultReplicaRefPresent,
+    snapshotRef,
+  });
   const updateData: Prisma.HostedWorkspaceUpdateManyMutationInput = {
     checkpointedAt: input.checkpointedAt === undefined || input.checkpointedAt === null
       ? new Date()
       : requireDate(input.checkpointedAt, "Hosted workspace checkpointedAt"),
-    snapshotRef: toNullablePrismaJson(parseHostedExecutionBundleRef(
-      input.snapshotRef,
-      "Hosted workspace snapshotRef",
-    )),
+    snapshotRef: toNullablePrismaJson(snapshotRef),
     version: {
       increment: 1,
     },
@@ -237,11 +255,8 @@ export async function checkpointHostedWorkspaceTx(input: {
       ));
   }
 
-  if ("browserVaultReplicaRef" in input) {
-    updateData.browserVaultReplicaRef = toNullablePrismaJson(parseHostedBrowserVaultReplicaRef(
-      input.browserVaultReplicaRef,
-      "Hosted workspace browserVaultReplicaRef",
-    ));
+  if (browserVaultReplicaRefPresent) {
+    updateData.browserVaultReplicaRef = toNullablePrismaJson(browserVaultReplicaRef ?? null);
   }
 
   const updated = await input.tx.hostedWorkspace.updateMany({
@@ -261,6 +276,51 @@ export async function checkpointHostedWorkspaceTx(input: {
     status: updated.count === 1 ? "updated" : "conflict",
     workspace: row ? projectHostedWorkspace(row) : null,
   };
+}
+
+function assertHostedWorkspaceBrowserVaultReplicaCheckpointInvariant(input: {
+  browserVaultReplicaRef: HostedBrowserVaultReplicaRef | null | undefined;
+  browserVaultReplicaRefPresent: boolean;
+  snapshotRef: HostedExecutionSnapshotRef;
+}): void {
+  if (!input.snapshotRef) {
+    if (input.browserVaultReplicaRef) {
+      throw new TypeError(
+        "Hosted workspace checkpoint cannot persist a browser-vault replica without a snapshot.",
+      );
+    }
+    return;
+  }
+
+  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
+  const snapshotIsLayered = "schema" in input.snapshotRef;
+
+  if (snapshotIsLayered && !input.browserVaultReplicaRefPresent) {
+    throw new TypeError(
+      "Hosted workspace layered checkpoint requires an explicit browser-vault replica ref.",
+    );
+  }
+
+  if (!baseSnapshotRef) {
+    if (input.browserVaultReplicaRef) {
+      throw new TypeError(
+        "Hosted workspace checkpoint cannot persist a browser-vault replica without a base snapshot.",
+      );
+    }
+    return;
+  }
+
+  if (!input.browserVaultReplicaRefPresent || !input.browserVaultReplicaRef) {
+    throw new TypeError(
+      "Hosted workspace checkpoint requires a browser-vault replica ref for non-empty snapshots.",
+    );
+  }
+
+  if (input.browserVaultReplicaRef.sourceBundleHash !== baseSnapshotRef.hash) {
+    throw new TypeError(
+      "Hosted workspace checkpoint browser-vault replica sourceBundleHash must match snapshot base hash.",
+    );
+  }
 }
 
 export async function recordHostedRuntimeLog(input: {

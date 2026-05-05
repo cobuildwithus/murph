@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHostedExecutionEvent } from "../src/parsers.ts";
+import {
+  parseHostedExecutionEvent,
+  parseHostedExecutionWake,
+} from "../src/parsers.ts";
 
 describe("parseHostedExecutionEvent", () => {
   it("parses explicit member channel sync events", () => {
@@ -248,5 +251,57 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toThrow(/Unsupported hosted execution event kind/i);
+  });
+});
+
+describe("parseHostedExecutionWake", () => {
+  it("parses Linq conversation wakes keyed by email contact lookup", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "evt_linq_email",
+        kind: "conversation.message",
+        message: {
+          channel: "linq",
+          contactKind: "email",
+          contactLookupKey: "hbidx:email:v1:test",
+          linqMessage: {
+            chatId: "chat_email",
+            from: "buddy@icloud.com",
+            isFromMe: false,
+            messageId: "msg_email",
+            parts: [
+              {
+                type: "text",
+                value: "hello",
+              },
+            ],
+          },
+        },
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        userId: "user-1",
+      }),
+    ).toEqual({
+      eventId: "evt_linq_email",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "email",
+        contactLookupKey: "hbidx:email:v1:test",
+        linqMessage: {
+          chatId: "chat_email",
+          from: "buddy@icloud.com",
+          isFromMe: false,
+          messageId: "msg_email",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+          ],
+        },
+      },
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      userId: "user-1",
+    });
   });
 });

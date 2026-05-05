@@ -74,8 +74,15 @@ test("the biomarker overview mounts the browser-vault private card", () => {
 });
 
 test("the biomarker overview lets the metric catalog decide private trend support", () => {
-  const biomarker = resolveHealthCommonsBiomarkerOverview("sleep-quality");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("apolipoprotein-b");
   assert.ok(biomarker);
+  const unsupportedBiomarker = {
+    ...biomarker,
+    key: "biomarker:unsupported-private-trend-fixture",
+    privateMetricBindings: [],
+    shortName: "Unsupported",
+    title: "Unsupported Private Trend Fixture",
+  };
 
   mocks.useBrowserVault.mockReturnValue({
     client: createBrowserVaultQueryClient(createReplica()),
@@ -87,7 +94,7 @@ test("the biomarker overview lets the metric catalog decide private trend suppor
   });
 
   const markup = renderToStaticMarkup(
-    createElement(BiomarkerOverview, { biomarker }),
+    createElement(BiomarkerOverview, { biomarker: unsupportedBiomarker }),
   );
 
   assert.match(markup, /data-browser-vault-provider/u);
@@ -135,11 +142,11 @@ test("renders private trend values from the browser-vault selector", () => {
     createElement(BiomarkerPrivateTrendCard, { biomarker }),
   );
 
-  assert.match(markup, /Your RHR trend/u);
+  assert.match(markup, /Latest/u);
   assert.match(markup, />56</u);
   assert.match(markup, /WHOOP/u);
-  assert.match(markup, /7-day median vs prior 30 days/u);
-  assert.match(markup, /Murph compares this to your own recent baseline/u);
+  assert.match(markup, /7-day average/u);
+  assert.match(markup, /30d avg/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
 });
 
@@ -224,7 +231,7 @@ test("renders private trend values for catalog-supported biomarker keys", () => 
     );
 
     assert.match(markup, scenario.valuePattern);
-    assert.match(markup, /Murph compares this to your own recent baseline/u);
+    assert.match(markup, /7-day average/u);
     assert.doesNotMatch(markup, /Biomarker unavailable/u);
   }
 });
@@ -283,8 +290,15 @@ test("renders a no-data state when the browser-vault replica has no matching row
 });
 
 test("renders an unsupported state for biomarkers without browser-vault metric bindings", () => {
-  const biomarker = resolveHealthCommonsBiomarkerOverview("sleep-quality");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("apolipoprotein-b");
   assert.ok(biomarker);
+  const unsupportedBiomarker = {
+    ...biomarker,
+    key: "biomarker:unsupported-private-trend-fixture",
+    privateMetricBindings: [],
+    shortName: "Unsupported",
+    title: "Unsupported Private Trend Fixture",
+  };
 
   mocks.useBrowserVault.mockReturnValue({
     client: createBrowserVaultQueryClient(createReplica()),
@@ -296,7 +310,7 @@ test("renders an unsupported state for biomarkers without browser-vault metric b
   });
 
   const markup = renderToStaticMarkup(
-    createElement(BiomarkerPrivateTrendCard, { biomarker }),
+    createElement(BiomarkerPrivateTrendCard, { biomarker: unsupportedBiomarker }),
   );
 
   assert.match(markup, /Biomarker unavailable/u);

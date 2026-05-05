@@ -60,6 +60,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     linqRecipientPhone: null,
     memberId: input.memberId,
     pendingLinqChatId: null,
+    pendingLinqParticipantContact: null,
     pendingLinqRecipientPhone: null,
     prisma: input.prisma,
     telegramThreadId: preferredTelegramThreadId ?? input.telegramThreadId ?? null,

@@ -57,9 +57,9 @@ it("renders a compact latest private value when available", () => {
     }),
   );
 
-  expect(markup).toContain("Your latest");
   expect(markup).toContain("57 bpm");
-  expect(markup).toContain("Wearable summary - 29 Apr");
+  expect(markup).toContain("Open biomarker");
+  expect(markup).not.toContain("Wearable summary");
   expect(markup).not.toContain("stale");
 });
 
@@ -117,9 +117,9 @@ it("wires browser-vault metric selections into biomarker browse cards", async ()
   );
 
   try {
-    expect(rendered.container.textContent).toContain("Your latest");
     expect(rendered.container.textContent).toContain("57 bpm");
-    expect(rendered.container.textContent).toContain("Wearable summary - Apr 29");
+    expect(rendered.container.textContent).toContain("Open biomarker");
+    expect(rendered.container.textContent).not.toContain("Wearable summary");
   } finally {
     await rendered.cleanup();
   }

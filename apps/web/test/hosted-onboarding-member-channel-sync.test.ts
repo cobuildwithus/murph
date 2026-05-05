@@ -273,6 +273,7 @@ function makeMemberSnapshot(): HostedMemberSnapshot {
       linqRecipientPhone: null,
       memberId: "member_123",
       pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
       pendingLinqRecipientPhone: null,
       telegramThreadId: "telegram_user_123:business:biz-42:dm-topic:9",
       telegramUserId: "telegram_user_123",

@@ -158,6 +158,8 @@ describe("hosted execution wake builders", () => {
 
     expect(wake.message).toEqual({
       channel: "linq",
+      contactKind: "phone",
+      contactLookupKey: "phone_lookup_123",
       linqMessage: {
         chatId: "chat_123",
         from: "+15551234567",
