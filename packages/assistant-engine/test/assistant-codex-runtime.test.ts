@@ -165,12 +165,21 @@ describe('assistant codex runtime', () => {
         providerSessionId: 'thread-1',
       }),
     ).toEqual({
-      approvalPolicy: 'never',
-      cwd: '/workspace',
       excludeTurns: true,
-      model: 'gpt-5',
-      modelProvider: 'vercel-ai-gateway',
-      sandbox: 'workspace-write',
+      threadId: 'thread-1',
+    })
+
+    expect(
+      buildCodexThreadResumeParams({
+        input: {
+          ...baseInput,
+          refreshThreadInstructions: true,
+        },
+        providerSessionId: 'thread-1',
+      }),
+    ).toEqual({
+      developerInstructions: 'Stable Murph instructions.',
+      excludeTurns: true,
       threadId: 'thread-1',
     })
 
@@ -1033,7 +1042,7 @@ describe('assistant codex runtime', () => {
     ['workspace-write', 'workspace-write'],
     ['danger-full-access', 'danger-full-access'],
   ] as const)(
-    'uses Codex app-server SandboxMode %s on thread/start and thread/resume',
+    'uses Codex app-server SandboxMode %s on thread/start and thin params on thread/resume',
     async (sandbox, expectedSandbox) => {
       const workingDirectory = await createTempDir('assistant-codex-thread-context-')
       const expectedThreadContext = {
@@ -1153,6 +1162,7 @@ describe('assistant codex runtime', () => {
           developerInstructions: 'Stable Murph instructions.',
           prompt: 'resume prompt',
           reasoningEffort: 'high',
+          refreshThreadInstructions: false,
           resumeSessionId: 'thread-resume-request',
           sandbox,
           workingDirectory,
@@ -1166,7 +1176,6 @@ describe('assistant codex runtime', () => {
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual({
-        ...expectedThreadContext,
         excludeTurns: true,
         threadId: 'thread-resume-request',
       })

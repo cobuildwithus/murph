@@ -54,11 +54,10 @@ export function buildCodexThreadResumeParams(input: {
   providerSessionId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
-    ...buildCodexThreadContextParams({
-      includeInstructions: input.input.refreshThreadInstructions !== false,
-      includeServiceName: false,
-      input: input.input,
-    }),
+    developerInstructions:
+      input.input.refreshThreadInstructions !== false
+        ? normalizeNullableString(input.input.developerInstructions)
+        : undefined,
     excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,
     threadId: input.providerSessionId,
   })
