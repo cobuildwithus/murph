@@ -41,8 +41,6 @@ export type HostedAiUsageAllowancePricedModel =
 
 export const HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS = [
   ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
-  "openai/gpt-5.4-mini",
-  "openai/gpt-5.5",
 ] as const;
 
 export function isHostedAiUsageAllowancePricedModelId(
@@ -57,11 +55,8 @@ export function normalizeHostedAiUsageAllowancePricedModelId(
   value: string,
 ): HostedAiUsageAllowancePricedModel | null {
   const normalized = value.trim().toLowerCase();
-  const openAiModel = normalized.startsWith("openai/")
-    ? normalized.slice("openai/".length)
-    : normalized;
 
-  return isHostedAiUsageAllowancePricedModelId(openAiModel) ? openAiModel : null;
+  return isHostedAiUsageAllowancePricedModelId(normalized) ? normalized : null;
 }
 
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";

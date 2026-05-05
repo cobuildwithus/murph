@@ -35,6 +35,7 @@ const HOSTED_DEPLOY_CONTEXTS = [
   "preview",
   "production",
 ] as const;
+const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -192,6 +193,13 @@ export function listHostedDeployEnvironmentInvariantErrors(
   }
 
   const hostedAssistantModel = normalizeOptionalString(source.HOSTED_ASSISTANT_MODEL);
+  const hostedAssistantProvider = normalizeOptionalString(source.HOSTED_ASSISTANT_PROVIDER);
+  if (hostedAssistantProvider !== REQUIRED_HOSTED_ASSISTANT_PROVIDER) {
+    errors.push(
+      `HOSTED_ASSISTANT_PROVIDER must be ${REQUIRED_HOSTED_ASSISTANT_PROVIDER} for hosted runner execution.`,
+    );
+  }
+
   if (!hostedAssistantModel) {
     errors.push(
       `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,

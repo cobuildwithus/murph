@@ -209,8 +209,8 @@ vi.mock("./environment.ts", () => ({
   ),
   shouldSyncLocalDatabaseSchema: vi.fn(() => true),
   readOptionalSimpleEnvFile: vi.fn(async () => ({
-    HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-    VERCEL_AI_API_KEY: "local-vercel-key",
+    HOSTED_ASSISTANT_PROVIDER: "openai",
+    OPENAI_API_KEY: "local-openai-key",
   })),
   readHostedLocalStripeEnvFile: vi.fn(async () => ({})),
   readSimpleEnvFile: vi.fn(async () => ({})),
@@ -218,8 +218,8 @@ vi.mock("./environment.ts", () => ({
   resolveCloudflareLocalEnv: vi.fn(async (input: { overrides?: Record<string, string | undefined> }) => ({
     HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.5",
     HOSTED_ASSISTANT_PROVIDER:
-      input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "vercel-ai-gateway",
-    VERCEL_AI_API_KEY: input.overrides?.VERCEL_AI_API_KEY,
+      input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
+    OPENAI_API_KEY: input.overrides?.OPENAI_API_KEY,
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       input.overrides?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL
       ?? "http://127.0.0.1:8787",
@@ -305,6 +305,7 @@ describe("hosted local dev stack", () => {
   });
 
   it("starts Cloudflare through the prepared app-owned dev entrypoint", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
@@ -345,11 +346,11 @@ describe("hosted local dev stack", () => {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
         NODE_ENV: "development",
         TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
-        VERCEL_AI_API_KEY: "local-vercel-key",
+        OPENAI_API_KEY: "local-openai-key",
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
       expect.any(Object),
@@ -815,7 +816,7 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("passes hosted Vercel AI Gateway config to the worker but strips host-only Codex env", async () => {
+  it("passes hosted OpenAI config to the worker but strips host-only Codex env", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
@@ -827,9 +828,8 @@ describe("hosted local dev stack", () => {
       env: {
         ...process.env,
         CODEX_HOME: "/tmp/local-codex-home",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         OPENAI_API_KEY: "local-openai-key",
-        VERCEL_AI_API_KEY: "local-vercel-key",
       },
     });
     await stack.ready;
@@ -839,9 +839,8 @@ describe("hosted local dev stack", () => {
     expect(cloudflareCall).toBeDefined();
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
-    expect(cloudflareEnv.OPENAI_API_KEY).toBeUndefined();
-    expect(cloudflareEnv.VERCEL_AI_API_KEY).toBe("local-vercel-key");
-    expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
+    expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+    expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     for (const [, , options] of runCommand.mock.calls) {
@@ -856,12 +855,11 @@ describe("hosted local dev stack", () => {
     const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
     expect(envFileSource.CODEX_HOME).toBeUndefined();
-    expect(envFileSource.OPENAI_API_KEY).toBeUndefined();
-    expect(envFileSource.VERCEL_AI_API_KEY).toBe("local-vercel-key");
-    expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
+    expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
+    expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
   });
 
-  it("defaults the hosted assistant provider to Vercel AI Gateway when only the key is configured", async () => {
+  it("defaults the hosted assistant provider to OpenAI when only the key is configured", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 127 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 128 }));
@@ -874,7 +872,7 @@ describe("hosted local dev stack", () => {
       env: {
         ...process.env,
         HOSTED_ASSISTANT_PROVIDER: undefined,
-        VERCEL_AI_API_KEY: "local-vercel-key",
+        OPENAI_API_KEY: "local-openai-key",
       },
     });
     await stack.ready;
@@ -883,8 +881,8 @@ describe("hosted local dev stack", () => {
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     expect(cloudflareCall).toBeDefined();
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
-    expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
-    expect(cloudflareEnv.VERCEL_AI_API_KEY).toBe("local-vercel-key");
+    expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+    expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
   });
 
   it("generates a unique non-default local runner build id for each stack", async () => {
@@ -1180,14 +1178,14 @@ describe("hosted local dev stack", () => {
   });
 
   it("fails closed when local hosted dev is configured with a non-hosted assistant provider", async () => {
-    vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
+    vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "vercel-ai-gateway");
 
     const { startHostedLocalDevStack } = await import("./stack.ts");
 
     await expect(startHostedLocalDevStack({
       env: process.env,
     })).rejects.toThrow(
-      "HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway is required for local hosted dev.",
+      "HOSTED_ASSISTANT_PROVIDER=openai is required for local hosted dev.",
     );
     expect(spawnChildProcess).not.toHaveBeenCalled();
   });
@@ -1197,7 +1195,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 301 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
-    vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "vercel-ai-gateway");
+    vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
     vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.4-mini");
 
     const environmentModule = await import("./environment.ts");
@@ -1221,7 +1219,7 @@ describe("hosted local dev stack", () => {
       expect.any(Array),
       expect.objectContaining({
         HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),
     );

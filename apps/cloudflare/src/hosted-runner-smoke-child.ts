@@ -563,6 +563,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
     !/^include_only\s*=\s*\[/mu.test(config)
     || !/"PATH"/u.test(config)
     || !/"VAULT"/u.test(config)
+    || /include_only\s*=\s*\[[^\]]*"OPENAI_API_KEY"/mu.test(config)
     || /include_only\s*=\s*\[[^\]]*"VERCEL_AI_API_KEY"/mu.test(config)
   ) {
     throw new Error(
@@ -579,7 +580,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
     runtimeEnv: {
       PATH: process.env.PATH ?? "",
       VAULT: process.env.VAULT ?? "",
-      VERCEL_AI_API_KEY: "hosted-runner-smoke-secret",
+      OPENAI_API_KEY: "hosted-runner-smoke-secret",
     },
     vaultRoot: process.env.VAULT ?? "",
   });
@@ -595,15 +596,15 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
 function buildHostedRunnerSmokeCodexConfigToml(): string {
   return [
     'model = "gpt-5.5"',
-    'model_provider = "vercel-ai-gateway"',
+    'model_provider = "openai"',
     'model_reasoning_effort = "medium"',
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
     "",
-    '[model_providers."vercel-ai-gateway"]',
-    'name = "Vercel AI Gateway"',
-    'base_url = "https://ai-gateway.vercel.sh/v1"',
-    'env_key = "VERCEL_AI_API_KEY"',
+    '[model_providers."openai"]',
+    'name = "OpenAI"',
+    'base_url = "https://api.openai.com/v1"',
+    'env_key = "OPENAI_API_KEY"',
     'wire_api = "responses"',
     "",
     "[skills]",
@@ -769,7 +770,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
             "printf '%s\\n' \"${#murph_help}\"",
             "printf '%s\\n' \"$python_version\"",
             "printf '%s\\n' \"${VAULT:-}\"",
-            "printf '%s\\n' \"${VERCEL_AI_API_KEY:-}\"",
+            "printf '%s\\n' \"${OPENAI_API_KEY:-}\"",
           ].join("; "),
         ],
         timeoutMs: 5_000,

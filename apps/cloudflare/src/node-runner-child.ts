@@ -45,8 +45,8 @@ import {
 } from "./web-control-plane.js";
 import {
   assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv,
-  hasHostedRunnerVercelAiGatewayCredential,
-  isHostedRunnerVercelAiGatewayProvider,
+  hasHostedRunnerModelCredential,
+  isHostedRunnerOpenAiProvider,
 } from "./hosted-env-policy.ts";
 
 interface HostedExecutionChildDependencies {
@@ -308,13 +308,13 @@ function buildHostedRunnerChildRuntimeDiagnostics(
       typeof forwardedEnv.HOSTED_ASSISTANT_MODEL === "string",
     hostedAssistantProviderConfigured:
       typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string",
-    hostedAssistantVercelAiGatewayConfigured:
-      isHostedRunnerVercelAiGatewayProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
+    hostedAssistantOpenAiConfigured:
+      isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
     hasLocalInternalProxyBaseUrl: Boolean(input.localInternalProxyBaseUrl),
     linqApiConfigured:
       typeof forwardedEnv.LINQ_API_TOKEN === "string",
     modelCredentialConfigured:
-      hasHostedRunnerVercelAiGatewayCredential({
+      hasHostedRunnerModelCredential({
         forwardedEnv,
         userEnv,
       }),

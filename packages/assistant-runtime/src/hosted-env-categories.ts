@@ -52,7 +52,7 @@ export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
 
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
   assistantConfigured: [
-    "VERCEL_AI_API_KEY",
+    "OPENAI_API_KEY",
   ],
   hostedEmailConfigured: [
     "HOSTED_EMAIL_DOMAIN",
@@ -72,5 +72,5 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
 } as const satisfies Record<string, readonly string[]>;
 
 export const HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES = [
-  "VERCEL_AI_API_KEY",
+  "OPENAI_API_KEY",
 ] as const;

@@ -19,7 +19,7 @@ import {
   type HostedAssistantProfile,
 } from './assistant/hosted-config.js'
 import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexModelProviderConfig,
 } from './assistant/target-runtime.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
@@ -68,10 +68,10 @@ const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
 )
 
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
-const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV =
-  resolveAssistantCodexModelProviderConfig(
-    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
-  )?.envKey ?? 'VERCEL_AI_API_KEY'
+const HOSTED_ASSISTANT_SUPPORTED_PROVIDER_LABEL =
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_LABEL =
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey
 const DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT: AssistantReasoningEffort = 'medium'
 const DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY: AssistantApprovalPolicy = 'never'
 const DEFAULT_HOSTED_ASSISTANT_SANDBOX: AssistantSandbox = 'danger-full-access'
@@ -330,11 +330,13 @@ export function resolveHostedAssistantOperatorDefaultsState(
 export function readHostedAssistantApiKeyEnvName(
   source: Readonly<Record<string, unknown>>,
 ): string | null {
-  return normalizeHostedAssistantString(
-    source[HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV],
-  )
-    ? HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV
-    : null
+  for (const envName of HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES) {
+    if (normalizeHostedAssistantString(source[envName])) {
+      return envName
+    }
+  }
+
+  return null
 }
 
 export function isHostedAssistantApiKeyEnvName(
@@ -538,10 +540,14 @@ function resolveHostedAssistantCodexModelProvider(providerToken: string): {
   label: string
   modelProvider: string | null
 } {
-  if (providerToken === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID) {
+  const providerConfig =
+    providerToken === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+      ? resolveAssistantCodexModelProviderConfig(providerToken)
+      : null
+  if (providerConfig) {
     return {
-      label: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
-      modelProvider: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+      label: providerConfig.id,
+      modelProvider: providerConfig.id,
     }
   }
 
@@ -550,15 +556,15 @@ function resolveHostedAssistantCodexModelProvider(providerToken: string): {
       'HOSTED_ASSISTANT_CONFIG_INVALID',
       [
         `${HOSTED_ASSISTANT_PROVIDER_ENV}=local-codex is no longer supported for hosted assistant execution.`,
-        `Set ${HOSTED_ASSISTANT_PROVIDER_ENV}=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID}`,
-        `and configure ${HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV}.`,
+        `Set ${HOSTED_ASSISTANT_PROVIDER_ENV}=openai`,
+        `and configure ${HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_LABEL}.`,
       ].join(' '),
     )
   }
 
   throw new HostedAssistantConfigurationError(
     'HOSTED_ASSISTANT_CONFIG_INVALID',
-    `${HOSTED_ASSISTANT_PROVIDER_ENV} must be ${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID} for hosted assistant execution.`,
+    `${HOSTED_ASSISTANT_PROVIDER_ENV} must be ${HOSTED_ASSISTANT_SUPPORTED_PROVIDER_LABEL} for hosted assistant execution.`,
   )
 }
 

@@ -39,8 +39,8 @@ import {
   buildHostedRunnerJobRuntimeConfig,
 } from "./runner-env.ts";
 import {
-  hasHostedRunnerVercelAiGatewayCredential,
-  isHostedRunnerVercelAiGatewayProvider,
+  hasHostedRunnerModelCredential,
+  isHostedRunnerOpenAiProvider,
 } from "./hosted-env-policy.ts";
 import {
   destroyHostedExecutionContainer,
@@ -910,10 +910,10 @@ export class HostedUserRunner {
         hostedAssistantProviderConfigured:
           typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string"
           && forwardedEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
-        hostedAssistantVercelAiGatewayConfigured:
-          isHostedRunnerVercelAiGatewayProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
+        hostedAssistantOpenAiConfigured:
+          isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
         modelCredentialConfigured:
-          hasHostedRunnerVercelAiGatewayCredential({
+          hasHostedRunnerModelCredential({
             forwardedEnv,
             userEnv,
           }),

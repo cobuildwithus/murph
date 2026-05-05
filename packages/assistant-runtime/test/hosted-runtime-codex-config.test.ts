@@ -39,13 +39,13 @@ afterEach(async () => {
   );
 });
 
-test("hosted Codex runtime config writes Vercel AI Gateway Responses config without secret values", async () => {
+test("hosted Codex runtime config writes OpenAI Responses config without secret values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-      VERCEL_AI_API_KEY: "secret-vercel-key",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
@@ -60,13 +60,13 @@ test("hosted Codex runtime config writes Vercel AI Gateway Responses config with
 
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.doesNotMatch(config, /^model = /mu);
-  assert.match(config, /model_provider = "vercel-ai-gateway"/u);
+  assert.match(config, /model_provider = "openai"/u);
   assert.match(config, /model_reasoning_effort = "medium"/u);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
-  assert.match(config, /\[model_providers\."vercel-ai-gateway"\]/u);
-  assert.match(config, /base_url = "https:\/\/ai-gateway\.vercel\.sh\/v1"/u);
-  assert.match(config, /env_key = "VERCEL_AI_API_KEY"/u);
+  assert.match(config, /\[model_providers\."openai"\]/u);
+  assert.match(config, /base_url = "https:\/\/api\.openai\.com\/v1"/u);
+  assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "none"/u);
@@ -76,8 +76,8 @@ test("hosted Codex runtime config writes Vercel AI Gateway Responses config with
   assert.doesNotMatch(config, /"PDFTOTEXT_COMMAND"/u);
   assert.doesNotMatch(config, /"WHISPER_COMMAND"/u);
   assert.doesNotMatch(config, /"WHISPER_MODEL_PATH"/u);
-  assert.doesNotMatch(config, /include_only = \[[^\]]*"VERCEL_AI_API_KEY"/u);
-  assert.doesNotMatch(config, /secret-vercel-key/u);
+  assert.doesNotMatch(config, /include_only = \[[^\]]*"OPENAI_API_KEY"/u);
+  assert.doesNotMatch(config, /secret-openai-key/u);
 
   const configMode = (await stat(result.codexConfigPath)).mode & 0o777;
   assert.equal(configMode, 0o600);
@@ -90,20 +90,20 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
-      HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_CODEX_COMMAND: "codex-dev",
       HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: "openai",
       HOSTED_ASSISTANT_OSS: "true",
       HOSTED_ASSISTANT_PROFILE: "legacy-profile",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
-      VERCEL_AI_API_KEY: "secret-vercel-key",
+      OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER, "vercel-ai-gateway");
-  assert.equal(result.runtimeEnv.VERCEL_AI_API_KEY, "secret-vercel-key");
+  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER, "openai");
+  assert.equal(result.runtimeEnv.OPENAI_API_KEY, "secret-openai-key");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_BASE_URL, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_CODEX_COMMAND, undefined);
@@ -119,8 +119,8 @@ test("hosted Codex runtime config drops blank model env values", async () => {
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_MODEL: "   ",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-      VERCEL_AI_API_KEY: "secret-vercel-key",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
@@ -135,9 +135,9 @@ test("hosted Codex runtime config preserves explicit model and reasoning env", a
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_MODEL: "gpt-explicit",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "high",
-      VERCEL_AI_API_KEY: "secret-vercel-key",
+      OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
@@ -151,11 +151,11 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
         "http://host.docker.internal:4567/v1",
       NODE_ENV: "test",
-      VERCEL_AI_API_KEY: "secret-vercel-key",
+      OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
@@ -163,7 +163,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /request_max_retries = 0/u);
   assert.match(config, /stream_max_retries = 0/u);
-  assert.doesNotMatch(config, /https:\/\/ai-gateway\.vercel\.sh\/v1/u);
+  assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
 });
 
 test("hosted Codex runtime config accepts a Linux Docker bridge model provider override", async () => {
@@ -171,11 +171,11 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
         "http://172.17.0.1:4567/v1",
       NODE_ENV: "test",
-      VERCEL_AI_API_KEY: "secret-vercel-key",
+      OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
@@ -188,11 +188,11 @@ test("hosted Codex runtime config installs a local E2E app-server stub when conf
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         "http://host.docker.internal:4123/v1",
       NODE_ENV: "test",
-      VERCEL_AI_API_KEY: "secret-vercel-key",
+      OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
@@ -222,12 +222,12 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
     const result = await prepareHostedCodexRuntimeEnvironment({
       operatorHomeRoot,
       runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
           `${readServerBaseUrl(server)}/v1`,
         NODE_ENV: "test",
         PATH: process.env.PATH ?? "",
-        VERCEL_AI_API_KEY: "secret-vercel-key",
+        OPENAI_API_KEY: "secret-openai-key",
       },
     });
     const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
@@ -281,12 +281,12 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
     const result = await prepareHostedCodexRuntimeEnvironment({
       operatorHomeRoot,
       runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
           `${readServerBaseUrl(server)}/v1`,
         NODE_ENV: "test",
         PATH: process.env.PATH ?? "",
-        VERCEL_AI_API_KEY: "secret-vercel-key",
+        OPENAI_API_KEY: "secret-openai-key",
       },
     });
     const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
@@ -347,7 +347,7 @@ test("hosted Codex runtime config rejects the removed local Codex provider", asy
     (error) =>
       error instanceof HostedAssistantConfigurationError
       && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
-      && error.message.includes("HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway"),
+      && error.message.includes("HOSTED_ASSISTANT_PROVIDER=openai"),
   );
 });
 
@@ -359,11 +359,11 @@ test("hosted Codex runtime config rejects the local E2E app-server stub for non-
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
             "https://provider.example.test/v1",
           NODE_ENV: "test",
-          VERCEL_AI_API_KEY: "secret-vercel-key",
+          OPENAI_API_KEY: "secret-openai-key",
         },
       }),
     (error) =>
@@ -381,10 +381,10 @@ test("hosted Codex runtime config rejects the model provider base URL override o
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "http://127.0.0.1:4123/v1",
-          VERCEL_AI_API_KEY: "secret-vercel-key",
+          OPENAI_API_KEY: "secret-openai-key",
         },
       }),
     (error) =>
@@ -402,11 +402,11 @@ test("hosted Codex runtime config rejects non-local model provider base URL over
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "http://provider.example.test/v1",
           NODE_ENV: "test",
-          VERCEL_AI_API_KEY: "secret-vercel-key",
+          OPENAI_API_KEY: "secret-openai-key",
         },
       }),
     (error) =>
@@ -424,11 +424,11 @@ test("hosted Codex runtime config rejects https model provider base URL override
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "https://127.0.0.1:4123/v1",
           NODE_ENV: "test",
-          VERCEL_AI_API_KEY: "secret-vercel-key",
+          OPENAI_API_KEY: "secret-openai-key",
         },
       }),
     (error) =>
@@ -446,10 +446,10 @@ test("hosted Codex runtime config rejects the local E2E app-server stub outside 
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
             "http://127.0.0.1:4123/v1",
-          VERCEL_AI_API_KEY: "secret-vercel-key",
+          OPENAI_API_KEY: "secret-openai-key",
         },
       }),
     (error) =>
@@ -467,7 +467,7 @@ test("hosted Codex runtime config requires Vercel credentials even for the local
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
             "http://127.0.0.1:4123/v1",
           NODE_ENV: "test",
@@ -476,7 +476,7 @@ test("hosted Codex runtime config requires Vercel credentials even for the local
     (error) =>
       error instanceof HostedAssistantConfigurationError
       && error.code === "HOSTED_ASSISTANT_CONFIG_REQUIRED"
-      && error.message.includes("VERCEL_AI_API_KEY"),
+      && error.message.includes("OPENAI_API_KEY"),
   );
 });
 
@@ -488,11 +488,11 @@ test("hosted Codex runtime config rejects removed local dev app-server proxy env
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "token",
           [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://127.0.0.1:4123",
           NODE_ENV: "development",
-          VERCEL_AI_API_KEY: "secret-vercel-key",
+          OPENAI_API_KEY: "secret-openai-key",
         },
       }),
     (error) =>
@@ -555,11 +555,11 @@ test("hosted runtime launch env policy forwards the test-only model provider bas
   );
   assert.equal(
     buildHostedRuntimeForwardedEnv({
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
         "http://127.0.0.1:4111/v1",
       NODE_ENV: "test",
-      VERCEL_AI_API_KEY: "gateway-key",
+      OPENAI_API_KEY: "openai-key",
     })[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
     "http://127.0.0.1:4111/v1",
   );
@@ -573,13 +573,13 @@ test("hosted Codex runtime config fails closed without the configured model cred
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
         },
       }),
     (error) =>
       error instanceof HostedAssistantConfigurationError
       && error.code === "HOSTED_ASSISTANT_CONFIG_REQUIRED"
-      && error.message.includes("VERCEL_AI_API_KEY"),
+      && error.message.includes("OPENAI_API_KEY"),
   );
 });
 
@@ -598,7 +598,7 @@ test("hosted Codex runtime config rejects non-Codex provider env", async () => {
     (error) =>
       error instanceof HostedAssistantConfigurationError
       && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
-      && error.message.includes("vercel-ai-gateway"),
+      && error.message.includes("openai"),
   );
 });
 
@@ -606,10 +606,10 @@ test("hosted Codex config TOML uses env var names rather than credential values"
   const config = buildHostedCodexConfigToml({
     model: null,
     provider: {
-      id: "vercel-ai-gateway",
-      name: "Vercel AI Gateway",
-      baseUrl: "https://ai-gateway.vercel.sh/v1",
-      envKey: "VERCEL_AI_API_KEY",
+      id: "openai",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      envKey: "OPENAI_API_KEY",
       wireApi: "responses",
     },
     reasoningEffort: "medium",
@@ -618,15 +618,15 @@ test("hosted Codex config TOML uses env var names rather than credential values"
   assert.equal(
     config,
     [
-      'model_provider = "vercel-ai-gateway"',
+      'model_provider = "openai"',
       'model_reasoning_effort = "medium"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
       "",
-      '[model_providers."vercel-ai-gateway"]',
-      'name = "Vercel AI Gateway"',
-      'base_url = "https://ai-gateway.vercel.sh/v1"',
-      'env_key = "VERCEL_AI_API_KEY"',
+      '[model_providers."openai"]',
+      'name = "OpenAI"',
+      'base_url = "https://api.openai.com/v1"',
+      'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
@@ -649,10 +649,10 @@ test("hosted Codex config keeps skill instructions disabled for stable prompt pr
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.5",
     provider: {
-      id: "vercel-ai-gateway",
-      name: "Vercel AI Gateway",
-      baseUrl: "https://ai-gateway.vercel.sh/v1",
-      envKey: "VERCEL_AI_API_KEY",
+      id: "openai",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      envKey: "OPENAI_API_KEY",
       wireApi: "responses",
     },
     reasoningEffort: "low",

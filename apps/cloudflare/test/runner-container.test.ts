@@ -245,7 +245,7 @@ describe("RunnerContainer", () => {
       env: {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        VERCEL_AI_API_KEY: "model-api-key",
+        OPENAI_API_KEY: "model-api-key",
       },
     });
 
@@ -266,7 +266,7 @@ describe("RunnerContainer", () => {
 
     expect(procEnv).not.toContain("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
     expect(procEnv).not.toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
-    expect(procEnv).not.toContain("VERCEL_AI_API_KEY");
+    expect(procEnv).not.toContain("OPENAI_API_KEY");
   });
 
   it("passes the local internal bridge config through each runner request when configured", async () => {
@@ -752,7 +752,7 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "type_error",
           details: {
-            errorDetail: "Hosted assistant runtime job input runtime.userEnv.VERCEL_AI_API_KEY must be a string.",
+            errorDetail: "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
           },
           error: "Invalid request.",
           errorName: "TypeError",
@@ -778,7 +778,7 @@ describe("RunnerContainer", () => {
       code: "type_error",
       details: {
         errorDetail:
-          "Hosted assistant runtime job input runtime.userEnv.VERCEL_AI_API_KEY must be a string.",
+          "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
       },
       message:
         "Invalid request. Detail: Hosted assistant runtime job input runtime.userEnv.[redacted-env-key] must be a string. Code: type_error. Status: 400.",
@@ -788,7 +788,7 @@ describe("RunnerContainer", () => {
     });
     expect(requireObject(thrown, "runner error").details).toMatchObject({
       errorDetail:
-        "Hosted assistant runtime job input runtime.userEnv.VERCEL_AI_API_KEY must be a string.",
+        "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
     });
   });
 
@@ -1654,7 +1654,7 @@ describe("RunnerContainer", () => {
         request: extendedRequest,
         runtime: {
           userEnv: {
-            VERCEL_AI_API_KEY: "sk-user",
+            OPENAI_API_KEY: "sk-user",
           },
         },
       },
@@ -1687,7 +1687,7 @@ describe("RunnerContainer", () => {
         },
         runtime: {
           userEnv: {
-            VERCEL_AI_API_KEY: "sk-user",
+            OPENAI_API_KEY: "sk-user",
           },
         },
       },

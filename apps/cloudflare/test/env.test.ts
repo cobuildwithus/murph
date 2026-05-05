@@ -144,6 +144,42 @@ describe("readHostedExecutionEnvironment", () => {
     ).toBe("http://host.docker.internal:3000");
   });
 
+  it("allows the Docker bridge hosted web base url only in local proxy mode", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      ALLOW_LOCAL_INTERNAL_PROXY: "true",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+      HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000",
+    }));
+
+    expect(environment.hostedWebAllowHttpHosts).toEqual(["host.docker.internal"]);
+    expect(environment.hostedWebBaseUrl).toBe("http://host.docker.internal:3000");
+  });
+
+  it("rejects local proxy HTTP hosted web base urls in production", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        ALLOW_LOCAL_INTERNAL_PROXY: "true",
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000",
+      })),
+    ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP in production/u);
+
+    expect(() =>
+      readHostedExecutionWorkerEnvironment(
+        createHostedExecutionTestEnv({
+          HOSTED_CRYPTO_ENV: "production",
+          HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000",
+        }),
+        {
+          allowHostedWebHttpHosts: ["host.docker.internal"],
+        },
+      ),
+    ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP in production/u);
+  });
+
   it("reads the configured Vercel OIDC environment when provided", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
@@ -181,10 +217,10 @@ describe("readHostedExecutionEnvironment", () => {
 
   it("reads optional runner-secret allowlist extensions", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY,CUSTOM_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY,CUSTOM_API_KEY",
     }));
 
-    expect(environment.allowedRunnerSecretKeys).toBe("VERCEL_AI_API_KEY,CUSTOM_API_KEY");
+    expect(environment.allowedRunnerSecretKeys).toBe("OPENAI_API_KEY,CUSTOM_API_KEY");
   });
 
   it("hard-fails when the local internal proxy is configured outside development", () => {
@@ -251,13 +287,13 @@ describe("readHostedExecutionEnvironment", () => {
   it("drops non-string worker bindings before config readers consume env", () => {
     expect(toStringEnvSource({
       BUNDLES: { fetch() {} },
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
-      VERCEL_AI_API_KEY: "vercel-secret",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
+      OPENAI_API_KEY: "openai-secret",
       PORT: 8787,
     })).toEqual({
       BUNDLES: undefined,
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
-      VERCEL_AI_API_KEY: "vercel-secret",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
+      OPENAI_API_KEY: "openai-secret",
       PORT: undefined,
     });
   });
@@ -265,7 +301,7 @@ describe("readHostedExecutionEnvironment", () => {
 
 describe("hosted runner secrets policy", () => {
   it("keeps parser executable selectors operator-only", () => {
-    expect(isHostedRunnerSecretKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
+    expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(false);
 
     expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("PDFTOTEXT_COMMAND")).toBe(false);
@@ -303,11 +339,9 @@ describe("hosted runner secrets policy", () => {
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       NODE_OPTIONS: "--require /tmp/evil-loader.js",
-      VERCEL_AI_API_KEY: "sk-test",
+      OPENAI_API_KEY: "sk-test",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       WHISPER_COMMAND: "/tmp/evil-whisper",
-    })).toEqual({
-      VERCEL_AI_API_KEY: "sk-test",
-    });
+    })).toEqual({});
   });
 });

@@ -83,7 +83,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       PATH: `${path.join("/tmp/murph-home", ".codex-hosted", "bin")}${path.delimiter}/usr/bin`,
       TELEGRAM_BOT_TOKEN: "telegram-secret",
       VAULT: "/tmp/murph-vault",
-      VERCEL_AI_API_KEY: "vercel-secret",
+      OPENAI_API_KEY: "openai-secret",
     });
 
     const pathEntries = (env.PATH ?? "").split(path.delimiter);
@@ -94,7 +94,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.VAULT).toBe("/tmp/murph-vault");
     expect(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBe("bridge-token");
     expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
-    expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
+    expect(env.OPENAI_API_KEY).toBe("openai-secret");
     expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
     expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
     expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".codex-hosted", "bin"));

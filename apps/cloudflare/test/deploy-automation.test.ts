@@ -77,7 +77,6 @@ const LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES = [
   "NVIDIA_API_KEY",
   "NGC_API_KEY",
   "OLLAMA_API_KEY",
-  "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
   "PERPLEXITY_API_KEY",
   "TOGETHER_API_KEY",
@@ -123,7 +122,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
@@ -255,7 +254,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
     expect(config.vars.HOSTED_ASSISTANT_APPROVAL_POLICY).toBe("never");
     expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.5");
-    expect(config.vars.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
+    expect(config.vars.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(config.vars.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(config.vars.HOSTED_ASSISTANT_SANDBOX).toBe("danger-full-access");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
@@ -589,7 +588,7 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
-      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+      OPENAI_API_KEY: "openai-key",
     })).toEqual({
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -602,7 +601,7 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
-      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+      OPENAI_API_KEY: "openai-key",
     });
   });
 
@@ -622,14 +621,14 @@ describe("hosted deploy automation helpers", () => {
     const providerSecretsPayload = buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+      OPENAI_API_KEY: "openai-key",
     });
     expect(providerSecretsPayload).toMatchObject({
-      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+      OPENAI_API_KEY: "openai-key",
     });
     expect(providerSecretsPayload.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(providerSecretsPayload.HOSTED_ASSISTANT_MODEL).toBeUndefined();
@@ -641,10 +640,10 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+      OPENAI_API_KEY: "openai-key",
     });
     expect(platformSecretsPayload).toMatchObject({
-      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+      OPENAI_API_KEY: "openai-key",
     });
     expect(platformSecretsPayload.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(platformSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
@@ -652,7 +651,7 @@ describe("hosted deploy automation helpers", () => {
     expect(buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",
@@ -665,7 +664,7 @@ describe("hosted deploy automation helpers", () => {
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
 
     expect(readHostedDeployAutomationEnvironment({
@@ -675,7 +674,7 @@ describe("hosted deploy automation helpers", () => {
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
   });
 

@@ -7,6 +7,7 @@ import {
 import {
   HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
   HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
+  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
 } from "../hosted-env-categories.ts";
 
@@ -135,6 +136,7 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST_PREFIXES = [
 const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
   [
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
+    ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
     ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
     ...HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES,
     ...HOSTED_RUNTIME_OPERATOR_TOOL_SELECTOR_ENV_NAMES,
@@ -154,6 +156,7 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     "PATH",
     "PORT",
     "PWD",
+    "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL",
     "VAULT",
   ],
 );
@@ -275,8 +278,10 @@ export function sanitizeHostedAssistantRuntimeUserEnv(input: {
     input.forwardedEnv.HOSTED_ASSISTANT_API_KEY_ENV,
   );
 
-  if (normalizeHostedRuntimeString(normalizedUserEnv.VERCEL_AI_API_KEY) === null) {
-    delete normalizedUserEnv.VERCEL_AI_API_KEY;
+  for (const envName of HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES) {
+    if (normalizeHostedRuntimeString(normalizedUserEnv[envName]) === null) {
+      delete normalizedUserEnv[envName];
+    }
   }
 
   if (

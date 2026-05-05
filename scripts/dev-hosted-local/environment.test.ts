@@ -1016,10 +1016,10 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-        VERCEL_AI_API_KEY: "local-vercel-key",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "local-openai-key",
       }),
-    ).toContain('VERCEL_AI_API_KEY="local-vercel-key"');
+    ).toContain('OPENAI_API_KEY="local-openai-key"');
   });
 
   it("keeps web-only hosted-local crypto state out of worker env files", () => {
@@ -1162,21 +1162,21 @@ describe("buildWranglerLocalDevConfig", () => {
     });
   });
 
-  it("declares Vercel AI Gateway credentials as local worker secrets", () => {
+  it("declares OpenAI credentials as local worker secrets", () => {
     const config = buildWranglerLocalDevConfig({
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-      VERCEL_AI_API_KEY: "local-vercel-key",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "local-openai-key",
     });
 
     expect(config.secrets).toEqual({
       required: expect.arrayContaining([
-        "VERCEL_AI_API_KEY",
+        "OPENAI_API_KEY",
       ]),
     });
     expect(config.vars).toMatchObject({
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
     });
-    expect(config.vars).not.toHaveProperty("VERCEL_AI_API_KEY");
+    expect(config.vars).not.toHaveProperty("OPENAI_API_KEY");
   });
 
   it("declares each local worker secret binding only once", () => {

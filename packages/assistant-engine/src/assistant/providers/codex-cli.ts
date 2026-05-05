@@ -154,7 +154,6 @@ export async function executeCodexAssistantTurnAttempt(
     } else if (
       input.resumeProviderSessionId &&
       error instanceof VaultCliError &&
-      failureContext?.providerActionCount === 0 &&
       isCodexInvalidOutputResumeFailure(error)
     ) {
       result = await runFreshThreadFallback()

@@ -35,7 +35,7 @@ The supported worker HTTP surface stops at those three control routes, the deplo
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only to bridge local child-runtime requests back onto the same lease-scoped internal-worker bridge contract used by direct `http://*.worker` requests.
 
-Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with hosted Vercel AI Gateway configuration. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway` plus a Vercel AI Gateway key through Worker secrets or encrypted runner secrets.
+Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus `OPENAI_API_KEY` through Worker secrets or encrypted runner secrets.
 
 ## Storage Contract
 
@@ -104,8 +104,7 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway` plus `VERCEL_AI_API_KEY` for Codex hosted assistant execution through Vercel AI Gateway; host Codex bridge/proxy env is not accepted
-- `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`, `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED`, and `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly
+- `HOSTED_ASSISTANT_PROVIDER=openai` plus `OPENAI_API_KEY` for Codex hosted assistant execution through direct OpenAI; host Codex bridge/proxy env is not accepted
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
 - opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, and `MAPBOX_ACCESS_TOKEN`; native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
 

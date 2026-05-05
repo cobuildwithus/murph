@@ -81,7 +81,7 @@ const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
   path.join(webDir, "src", "lib", "health-commons", "generated-experiment-artifacts.ts"),
   path.join(webDir, "src", "lib", "health-commons", "measurement-method-detail.ts"),
 ];
-const HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER = "vercel-ai-gateway";
+const HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER = "openai";
 
 export interface HostedLocalDevStack {
   config: HostedLocalDevConfig;
@@ -831,7 +831,7 @@ function requireHostedLocalAssistantProviderEnv(env: NodeJS.ProcessEnv): void {
   if (provider !== HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER) {
     throw new Error(
       [
-        "HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway is required for local hosted dev.",
+        "HOSTED_ASSISTANT_PROVIDER=openai is required for local hosted dev.",
         "The host-side Codex bridge has been removed.",
       ].join(" "),
     );
@@ -839,9 +839,9 @@ function requireHostedLocalAssistantProviderEnv(env: NodeJS.ProcessEnv): void {
   env.HOSTED_ASSISTANT_PROVIDER = HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER;
 
   requireEnvValue(
-    "VERCEL_AI_API_KEY",
-    env.VERCEL_AI_API_KEY,
-    "Set VERCEL_AI_API_KEY for hosted runner Codex app-server access through Vercel AI Gateway.",
+    "OPENAI_API_KEY",
+    env.OPENAI_API_KEY,
+    "Set OPENAI_API_KEY for hosted runner Codex app-server access through OpenAI.",
   );
 }
 
@@ -857,7 +857,6 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "GOOGLE_AI_API_KEY",
   "GOOGLE_API_KEY",
   "HF_TOKEN",
-  "OPENAI_API_KEY",
   "VENICE_API_KEY",
   "XAI_API_KEY",
 ] as const;

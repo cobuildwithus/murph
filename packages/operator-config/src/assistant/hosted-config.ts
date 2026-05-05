@@ -12,7 +12,7 @@ import {
   type AssistantProviderConfigInput,
 } from './provider-config.js'
 import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+  resolveAssistantCodexModelProviderConfig,
 } from './target-runtime.js'
 
 export const HOSTED_ASSISTANT_CONFIG_SCHEMA = 'murph.hosted-assistant-config.v1'
@@ -228,8 +228,9 @@ export function resolveHostedAssistantProfileLabel(input: {
   modelProvider?: string | null
   provider?: AssistantChatProvider | null
 }): string {
-  if (input.modelProvider === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID) {
-    return 'Vercel AI Gateway'
+  const modelProvider = resolveAssistantCodexModelProviderConfig(input.modelProvider)
+  if (modelProvider) {
+    return modelProvider.name
   }
 
   return input.provider === 'codex-cli'

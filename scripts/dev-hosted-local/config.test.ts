@@ -118,8 +118,8 @@ describe("printHelp", () => {
     const output = writes.join("");
     expect(output).toContain("MURPH_DEV_DATABASE_URL=...");
     expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
-    expect(output).toContain("HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway");
-    expect(output).toContain("VERCEL_AI_API_KEY=...");
+    expect(output).toContain("HOSTED_ASSISTANT_PROVIDER=openai");
+    expect(output).toContain("OPENAI_API_KEY=...");
     expect(output).not.toContain("MURPH_DEV_CODEX_BRIDGE");
     expect(output).not.toContain("MURPH_DEV_CODEX_COMMAND");
     expect(output).toContain("MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1");

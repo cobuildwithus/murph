@@ -8,7 +8,7 @@ import {
   createHostedAssistantProfile,
 } from '../src/assistant/hosted-config.ts'
 import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
 } from '../src/assistant/target-runtime.ts'
 
 afterEach(() => {
@@ -45,7 +45,7 @@ async function loadHostedAssistantModule(options?: {
   }
 }
 
-function assertCodexGatewayProfile(
+function assertCodexOpenAiProfile(
   profile: HostedAssistantConfig['profiles'][number] | undefined,
   expectedModel: string | null = null,
 ) {
@@ -56,7 +56,7 @@ function assertCodexGatewayProfile(
   }
 
   assert.equal(profile.target.model, expectedModel)
-  assert.equal(profile.target.modelProvider, 'vercel-ai-gateway')
+  assert.equal(profile.target.modelProvider, 'openai')
 }
 
 test('hosted assistant config parsing and readiness helpers normalize Codex hosted profiles', async () => {
@@ -81,7 +81,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     providerConfig: {
       provider: 'codex-cli',
       model: ' gpt-5.5 ',
-      modelProvider: ' vercel-ai-gateway ',
+      modelProvider: ' openai ',
       reasoningEffort: ' medium ',
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
@@ -91,7 +91,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     id: 'member-provider-only',
     providerConfig: {
       provider: 'codex-cli',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
     },
   })
   const config = createHostedAssistantConfig({
@@ -116,7 +116,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     codexCommand: null,
     codexHome: null,
     model: 'gpt-5.5',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -128,7 +128,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
     codexCommand: null,
     codexHome: null,
     model: 'gpt-5.5',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -167,12 +167,12 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
   assert.throws(() => parseHostedAssistantConfig(null), /required/u)
 })
 
-test('hosted assistant bootstrap maps Vercel AI Gateway env to Codex model provider config', async () => {
+test('hosted assistant bootstrap maps OpenAI env to Codex model provider config', async () => {
   const hostedConfigModule = await loadHostedAssistantModule({
     readOperatorConfigResult: null,
   })
 
-  vi.stubEnv('HOSTED_ASSISTANT_PROVIDER', 'vercel-ai-gateway')
+  vi.stubEnv('HOSTED_ASSISTANT_PROVIDER', 'openai')
   vi.stubEnv('HOSTED_ASSISTANT_REASONING_EFFORT', 'medium')
   vi.stubEnv('HOSTED_ASSISTANT_APPROVAL_POLICY', 'never')
   vi.stubEnv('HOSTED_ASSISTANT_SANDBOX', 'danger-full-access')
@@ -196,10 +196,10 @@ test('hosted assistant bootstrap maps Vercel AI Gateway env to Codex model provi
 
   const savedProfile = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
     ?.profiles?.[0]
-  assertCodexGatewayProfile(savedProfile)
+  assertCodexOpenAiProfile(savedProfile)
   assert.equal(
-    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey,
-    'VERCEL_AI_API_KEY',
+    OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey,
+    'OPENAI_API_KEY',
   )
 })
 
@@ -223,8 +223,8 @@ test('hosted assistant bootstrap rejects removed local Codex bridge env', async 
       error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
       error.message.includes('HOSTED_ASSISTANT_PROVIDER=local-codex') &&
-      error.message.includes('HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway') &&
-      error.message.includes('VERCEL_AI_API_KEY'),
+      error.message.includes('HOSTED_ASSISTANT_PROVIDER=openai') &&
+      error.message.includes('OPENAI_API_KEY'),
   )
   assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 0)
 })
@@ -303,7 +303,7 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
     providerConfig: {
       provider: 'codex-cli',
       model: 'gpt-5.4',
-      modelProvider: 'vercel-ai-gateway',
+      modelProvider: 'openai',
     },
   })
   const existingConfig = createHostedAssistantConfig({
@@ -321,7 +321,7 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
   const updated = await updatedModule.ensureHostedAssistantOperatorDefaults({
     allowMissing: false,
     env: {
-      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_PROVIDER: 'openai',
     },
   })
   assert.deepEqual(updated, {
@@ -331,7 +331,7 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
     source: 'hosted-env',
   })
   assert.equal(updatedModule.saveHostedAssistantConfig.mock.calls.length, 1)
-  assertCodexGatewayProfile(updatedModule.saveHostedAssistantConfig.mock.calls[0]?.[0]?.profiles?.[0])
+  assertCodexOpenAiProfile(updatedModule.saveHostedAssistantConfig.mock.calls[0]?.[0]?.profiles?.[0])
 
   const unchangedModule = await loadHostedAssistantModule({
     readOperatorConfigResult: {
@@ -344,7 +344,7 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
             providerConfig: {
               approvalPolicy: 'never',
               provider: 'codex-cli',
-              modelProvider: 'vercel-ai-gateway',
+              modelProvider: 'openai',
               reasoningEffort: 'medium',
               sandbox: 'danger-full-access',
             },
@@ -358,7 +358,7 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
   const unchanged = await unchangedModule.ensureHostedAssistantOperatorDefaults({
     allowMissing: false,
     env: {
-      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_PROVIDER: 'openai',
     },
   })
   assert.deepEqual(unchanged, {
@@ -388,7 +388,7 @@ test('hosted assistant bootstrap rejects unsupported hosted provider aliases', a
       (error) =>
         error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
         error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-        /vercel-ai-gateway/u.test(error.message),
+        /openai/u.test(error.message),
     )
   }
 
@@ -397,7 +397,7 @@ test('hosted assistant bootstrap rejects unsupported hosted provider aliases', a
       moduleWithProfile.ensureHostedAssistantOperatorDefaults({
         allowMissing: false,
         env: {
-          HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+          HOSTED_ASSISTANT_PROVIDER: 'openai',
           HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
           HOSTED_ASSISTANT_BASE_URL: 'https://gateway.internal.test/v1',
         },

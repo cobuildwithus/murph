@@ -164,10 +164,10 @@ describe("runHostedExecutionChild", () => {
           runtime: {
             forwardedEnv: {
               HOSTED_ASSISTANT_MODEL: "gpt-test",
-              HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+              HOSTED_ASSISTANT_PROVIDER: "openai",
               LINQ_API_TOKEN: "linq-token",
               NODE_ENV: "development",
-              VERCEL_AI_API_KEY: "fixture-gateway-code",
+              OPENAI_API_KEY: "fixture-openai-code",
             },
           },
         },
@@ -184,7 +184,7 @@ describe("runHostedExecutionChild", () => {
         component: "child",
         details: expect.objectContaining({
           forwardedEnvKeyCount: 5,
-          hostedAssistantVercelAiGatewayConfigured: true,
+          hostedAssistantOpenAiConfigured: true,
           modelCredentialConfigured: true,
           nodeEnvConfigured: true,
         }),
@@ -226,14 +226,14 @@ describe("runHostedExecutionChild", () => {
       .join("\n");
     expect(debugOutput).toContain('"hostedAssistantModelConfigured":true');
     expect(debugOutput).toContain('"hostedAssistantProviderConfigured":true');
-    expect(debugOutput).toContain('"hostedAssistantVercelAiGatewayConfigured":true');
+    expect(debugOutput).toContain('"hostedAssistantOpenAiConfigured":true');
     expect(debugOutput).toContain('"linqApiConfigured":true');
     expect(debugOutput).toContain('"modelCredentialConfigured":true');
     expect(debugOutput).toContain('"nodeEnvConfigured":true');
     expect(debugOutput).not.toContain("gpt-test");
-    expect(debugOutput).not.toContain("vercel-ai-gateway");
+    expect(debugOutput).not.toContain("openai");
     expect(debugOutput).not.toContain("linq-token");
-    expect(debugOutput).not.toContain("fixture-gateway-code");
+    expect(debugOutput).not.toContain("fixture-openai-code");
   });
 
   it("uses proxy mailbox decoding in the child when no local proxy base URL is present", async () => {
@@ -345,10 +345,10 @@ describe("runHostedExecutionChild", () => {
           },
           runtime: {
             forwardedEnv: {
-              HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+              HOSTED_ASSISTANT_PROVIDER: "openai",
               MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN: "fixture-local-code",
               MURPH_DEV_CODEX_APP_SERVER_PROXY_URL: "tcp://host.docker.internal:3456",
-              VERCEL_AI_API_KEY: "fixture-gateway-code",
+              OPENAI_API_KEY: "fixture-openai-code",
             },
           },
         },
@@ -370,21 +370,21 @@ describe("runHostedExecutionChild", () => {
       "MURPH_DEV_CODEX_APP_SERVER_PROXY_URL",
     );
     expect(payload.error?.message).not.toContain("fixture-local-code");
-    expect(payload.error?.message).not.toContain("fixture-gateway-code");
+    expect(payload.error?.message).not.toContain("fixture-openai-code");
   });
 
   it("redacts runtime failure diagnostics before writing the child result payload", async () => {
     const stdout = { write: vi.fn() };
     const setExitCode = vi.fn();
     const runtimeError = new Error(
-      'failed for person@example.test +15555550123 with VERCEL_AI_API_KEY=fixture "MURPH_HOSTED_CLI_BRIDGE_TOKEN":"bridge-secret" VERCEL_AI_API_KEY: "colon-secret" base_url = "https://gateway.example.test/v1" /tmp/hosted-runner/private-file',
+      'failed for person@example.test +15555550123 with OPENAI_API_KEY=fixture "MURPH_HOSTED_CLI_BRIDGE_TOKEN":"bridge-secret" OPENAI_API_KEY: "colon-secret" base_url = "https://gateway.example.test/v1" /tmp/hosted-runner/private-file',
     ) as Error & { details?: Record<string, unknown> };
     runtimeError.details = {
       assistantProviderErrorMessage:
         ["Bearer", "provider-token at /tmp/hosted-runner/provider-detail"].join(" "),
       nested: {
         MURPH_HOSTED_CLI_BRIDGE_TOKEN: "nested-bridge-secret",
-        VERCEL_AI_API_KEY: "nested-gateway-secret",
+        OPENAI_API_KEY: "nested-gateway-secret",
       },
     };
     runtimeError.stack =
@@ -420,9 +420,9 @@ describe("runHostedExecutionChild", () => {
     const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
 
     expect(payload.ok).toBe(false);
-    expect(payload.error?.message).toContain("VERCEL_AI_API_KEY=<redacted>");
+    expect(payload.error?.message).toContain("OPENAI_API_KEY=<redacted>");
     expect(payload.error?.message).toContain('"MURPH_HOSTED_CLI_BRIDGE_TOKEN":<redacted>');
-    expect(payload.error?.message).toContain("VERCEL_AI_API_KEY: <redacted>");
+    expect(payload.error?.message).toContain("OPENAI_API_KEY: <redacted>");
     expect(payload.error?.message).toContain("base_url=<redacted>");
     expect(payload.error?.message).toContain("<redacted-path>");
     expect(payload.error?.message).toContain("<redacted-email>");
