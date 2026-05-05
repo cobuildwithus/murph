@@ -1684,6 +1684,83 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
 
+  it('records resumed Codex diagnostics for structural error objects', async () => {
+    const expectedError = {
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+        retryable: false,
+      },
+      message:
+        'Codex app-server turn failed. status failed. raw provider body should not be logged',
+    }
+    const traceEvents: AssistantProviderTraceEvent[] = []
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(
+      expectedError,
+    )
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: [
+        {
+          method: 'turn/completed',
+          params: {
+            turn: {
+              status: 'failed',
+            },
+          },
+        },
+      ],
+      providerActionCount: 0,
+      providerSessionId: 'resume-thread',
+      providerTurnId: 'turn-failed',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resumeProviderSessionId: 'resume-thread',
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) {
+      throw new Error('expected failed provider attempt')
+    }
+    expect(attempt.error).toBe(expectedError)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(traceEvents).toHaveLength(1)
+    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+      codexResumeFailureCodexFailureStage: 'turn_failed',
+      codexResumeFailureCodexTurnStatus: 'failed',
+      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
+      codexResumeFailureErrorKind: 'turn-failed',
+      codexResumeFailureErrorMessageLength: expectedError.message.length,
+      codexResumeFailureErrorMessagePresent: true,
+      codexResumeFailureErrorPhrases: ['codex-turn-failed', 'status-failed'],
+      codexResumeFailureEventCount: 1,
+      codexResumeFailureEventMethods: ['turn/completed'],
+      codexResumeFailureEventStatuses: ['failed'],
+      codexResumeFailurePhase: 'resume-failed',
+      codexResumeFailureProviderActionCount: 0,
+      codexResumeFailureResumeMatchesFailureSession: true,
+      codexResumeFailureResumeSessionPresent: true,
+      codexResumeFailureRetryable: false,
+      codexResumeFailureSessionPresent: true,
+      codexResumeFailureTraceType: 'failure',
+      codexResumeFailureTurnPresent: true,
+      providerTraceKind: 'codex.resume_failure',
+      schema: 'murph.assistant-codex-resume-failure-diagnostics.v1',
+      type: 'assistant.codex.resume_failure',
+    })
+    expect(JSON.stringify(traceEvents)).not.toContain('raw provider body')
+  })
+
   it('records invalid resumed output diagnostics when fresh-thread fallback fails', async () => {
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',

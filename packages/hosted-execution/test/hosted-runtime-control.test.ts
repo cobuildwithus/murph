@@ -641,6 +641,38 @@ describe("hosted runtime control contracts", () => {
         messageText: 1,
       },
     })).toThrow(/not allowed/u);
+    for (const rawKey of [
+      "authorizationHeaderValue",
+      "bodyJson",
+      "messageContent",
+      "payloadValue",
+      "tokenPreview",
+    ]) {
+      expect(() => parseHostedRuntimeLogEntry({
+        ...entry,
+        redactedJson: {
+          [rawKey]: "redacted",
+        },
+      })).toThrow(/not allowed/u);
+    }
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        authorizationHeaderPresent: false,
+        codexInvalidOutputErrorMessageLength: 96,
+        codexResumeFailureErrorMessageLength: 251,
+        messageStatus: "failed",
+        promptTokenCount: 120,
+        rawPayloadBytes: 2048,
+      },
+    }).redactedJson).toEqual({
+      authorizationHeaderPresent: false,
+      codexInvalidOutputErrorMessageLength: 96,
+      codexResumeFailureErrorMessageLength: 251,
+      messageStatus: "failed",
+      promptTokenCount: 120,
+      rawPayloadBytes: 2048,
+    });
     expect(parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

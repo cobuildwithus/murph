@@ -227,10 +227,12 @@ export async function executeCodexAssistantTurnAttempt(
     })
   } catch (error) {
     const failureContext = readCodexAppServerTurnFailureContext(error)
+    const invalidOutputResumeFailure =
+      error instanceof VaultCliError && isCodexInvalidOutputResumeFailure(error)
     if (
       input.resumeProviderSessionId &&
-      error instanceof VaultCliError &&
-      !isCodexInvalidOutputResumeFailure(error)
+      isCodexDiagnosticTraceError(error) &&
+      !invalidOutputResumeFailure
     ) {
       emitCodexResumeFailureTraceEvent({
         onTraceEvent: input.onTraceEvent,
@@ -254,7 +256,7 @@ export async function executeCodexAssistantTurnAttempt(
     } else if (
       input.resumeProviderSessionId &&
       error instanceof VaultCliError &&
-      isCodexInvalidOutputResumeFailure(error)
+      invalidOutputResumeFailure
     ) {
       emitCodexInvalidOutputTraceEvent({
         onTraceEvent: input.onTraceEvent,
@@ -368,10 +370,12 @@ function hasCodexAssistantProviderUsageData(
   )
 }
 
-function isCodexInvalidOutputResumeFailure(error: VaultCliError): boolean {
+function isCodexInvalidOutputResumeFailure(error: unknown): boolean {
   return (
-    error.code === 'ASSISTANT_CODEX_FAILED' &&
-    /\binput\.\d+\.output:\s*Invalid input\b/iu.test(error.message)
+    readCodexDiagnosticErrorCode(error) === 'ASSISTANT_CODEX_FAILED' &&
+    /\binput\.\d+\.output:\s*Invalid input\b/iu.test(
+      readCodexDiagnosticErrorMessage(error) ?? '',
+    )
   )
 }
 
@@ -394,12 +398,12 @@ interface CodexInvalidOutputEventShapeSummary {
 }
 
 function buildCodexResumeFailureTraceEvent(input: {
-  error: VaultCliError
+  error: unknown
   failureContext: CodexAppServerTurnFailureContext | null
   resumeProviderSessionId: string
 }): CodexInvalidOutputTraceRawEvent {
   const failureContext = input.failureContext
-  const errorContext = asDiagnosticRecord(input.error.context)
+  const errorContext = readCodexDiagnosticErrorContext(input.error)
   const summary = summarizeCodexInvalidOutputEventShapes(
     failureContext?.jsonEvents ?? [],
   )
@@ -421,7 +425,9 @@ function buildCodexResumeFailureTraceEvent(input: {
     codexResumeFailureErrorMessageLength: errorMessageLength,
     codexResumeFailureErrorMessagePresent: errorMessageLength !== null,
     codexResumeFailureErrorPhrases:
-      collectCodexResumeFailureErrorPhrases(input.error.message),
+      collectCodexResumeFailureErrorPhrases(
+        readCodexDiagnosticErrorMessage(input.error) ?? '',
+      ),
     codexResumeFailureEventCount: failureContext?.jsonEvents.length ?? null,
     codexResumeFailureEventKinds: summary.eventKinds,
     codexResumeFailureEventMethods: summary.eventMethods,
@@ -587,15 +593,15 @@ function readCodexInvalidOutputInputIndex(message: string): number | null {
   return Number.isSafeInteger(value) && value >= 0 ? value : null
 }
 
-function classifyCodexResumeFailureErrorKind(error: VaultCliError): string {
+function classifyCodexResumeFailureErrorKind(error: unknown): string {
   if (isCodexInvalidOutputResumeFailure(error)) {
     return 'invalid-input-output'
   }
-  if (error.code === 'ASSISTANT_CODEX_RESUME_STALE') {
+  if (readCodexDiagnosticErrorCode(error) === 'ASSISTANT_CODEX_RESUME_STALE') {
     return 'resume-stale'
   }
 
-  const context = asDiagnosticRecord(error.context)
+  const context = readCodexDiagnosticErrorContext(error)
   const stage = readDiagnosticString(context, 'codexFailureStage')
   if (stage === 'turn_failed') {
     return 'turn-failed'
@@ -604,16 +610,17 @@ function classifyCodexResumeFailureErrorKind(error: VaultCliError): string {
     return 'connection-lost'
   }
 
-  if (error.code === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT') {
+  const errorCode = readCodexDiagnosticErrorCode(error)
+  if (errorCode === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT') {
     return 'timeout'
   }
-  if (error.code === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED') {
+  if (errorCode === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED') {
     return 'rpc-failed'
   }
-  if (error.code === 'ASSISTANT_CODEX_FAILED') {
+  if (errorCode === 'ASSISTANT_CODEX_FAILED') {
     return 'codex-failed'
   }
-  if (error.code === 'ASSISTANT_PROVIDER_UNSUPPORTED') {
+  if (errorCode === 'ASSISTANT_PROVIDER_UNSUPPORTED') {
     return 'provider-unsupported'
   }
 
@@ -642,6 +649,17 @@ function collectCodexResumeFailureErrorPhrases(message: string): string[] {
   return phrases
 }
 
+function isCodexDiagnosticTraceError(error: unknown): boolean {
+  const code = readCodexDiagnosticErrorCode(error)
+  return (
+    code === 'ASSISTANT_CODEX_FAILED' ||
+    code === 'ASSISTANT_CODEX_RESUME_STALE' ||
+    code === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT' ||
+    code === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED' ||
+    code === 'ASSISTANT_PROVIDER_UNSUPPORTED'
+  )
+}
+
 function readCodexDiagnosticErrorCode(error: unknown): string | null {
   if (error instanceof VaultCliError) {
     return normalizeSafeCodexDiagnosticToken(error.code)
@@ -651,16 +669,30 @@ function readCodexDiagnosticErrorCode(error: unknown): string | null {
   return normalizeSafeCodexDiagnosticToken(readDiagnosticString(record, 'code'))
 }
 
-function readCodexDiagnosticErrorMessageLength(error: unknown): number | null {
+function readCodexDiagnosticErrorContext(
+  error: unknown,
+): Record<string, unknown> | null {
+  if (error instanceof VaultCliError) {
+    return asDiagnosticRecord(error.context)
+  }
+
+  return asDiagnosticRecord(asDiagnosticRecord(error)?.context)
+}
+
+function readCodexDiagnosticErrorMessage(error: unknown): string | null {
   if (error instanceof Error) {
-    return error.message.length
+    return error.message
   }
 
   if (typeof error === 'string') {
-    return error.length
+    return error
   }
 
-  return null
+  return readDiagnosticString(asDiagnosticRecord(error), 'message')
+}
+
+function readCodexDiagnosticErrorMessageLength(error: unknown): number | null {
+  return readCodexDiagnosticErrorMessage(error)?.length ?? null
 }
 
 function summarizeCodexInvalidOutputEventShapes(
