@@ -60,102 +60,93 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
   const warmRoot = await resolveHostedRunnerWarmLauncherRoot(input.job);
-  let invocationSucceeded = false;
+
+  if (options?.signal?.aborted) {
+    throw options.signal.reason ?? new Error("Hosted runner job aborted before child launch.");
+  }
+
+  const launcherDirectories = await createHostedRunnerChildLauncherDirectories(warmRoot);
+  const childEntry = resolveNodeRunnerChildEntry();
+  const isTypeScriptChild = childEntry.endsWith(".ts");
+  const child = spawn(
+    process.execPath,
+    isTypeScriptChild
+      ? ["--import", resolveHostedRunnerTsxImportSpecifier(), childEntry]
+      : [childEntry],
+    {
+      cwd: warmRoot,
+      detached: process.platform !== "win32",
+      env: createHostedRunnerChildProcessEnv({
+        forwardedEnv: buildHostedRunnerChildRuntimeEnv({
+          forwardedEnv: input.job.runtime?.forwardedEnv,
+        }),
+        isTypeScriptChild,
+        launcherDirectories,
+      }),
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+
+  const stdoutChunks: string[] = [];
+  let stdoutRemainder = "";
+  let stderrRemainder = "";
+  child.stdout.on("data", (chunk: string) => {
+    stdoutChunks.push(chunk);
+    stdoutRemainder = forwardHostedRuntimeChildOutputChunk({
+      chunk,
+      remainder: stdoutRemainder,
+      sink: process.stdout,
+      suppressResultPayload: true,
+    });
+  });
+  child.stderr.on("data", (chunk: string) => {
+    stderrRemainder = forwardHostedRuntimeChildOutputChunk({
+      chunk,
+      remainder: stderrRemainder,
+      sink: process.stderr,
+      suppressResultPayload: false,
+    });
+  });
+
+  const terminateChild = () => {
+    terminateChildProcess(child.pid);
+    child.kill("SIGKILL");
+  };
+  const abortHandler = () => {
+    terminateChild();
+  };
+  options?.signal?.addEventListener("abort", abortHandler, { once: true });
 
   try {
-    if (options?.signal?.aborted) {
-      throw options.signal.reason ?? new Error("Hosted runner job aborted before child launch.");
+    child.stdin.end(JSON.stringify(input));
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    flushHostedRuntimeChildOutputRemainder({
+      remainder: stdoutRemainder,
+      sink: process.stdout,
+      suppressResultPayload: true,
+    });
+    flushHostedRuntimeChildOutputRemainder({
+      remainder: stderrRemainder,
+      sink: process.stderr,
+      suppressResultPayload: false,
+    });
+    const childResult = parseHostedExecutionRunnerChildResult(stdoutChunks.join(""));
+
+    if (!childResult.ok) {
+      throw createHostedRuntimeChildFailure(childResult.error, code);
     }
 
-    const launcherDirectories = await createHostedRunnerChildLauncherDirectories(warmRoot);
-    const childEntry = resolveNodeRunnerChildEntry();
-    const isTypeScriptChild = childEntry.endsWith(".ts");
-    const child = spawn(
-      process.execPath,
-      isTypeScriptChild
-        ? ["--import", resolveHostedRunnerTsxImportSpecifier(), childEntry]
-        : [childEntry],
-      {
-        cwd: warmRoot,
-        detached: process.platform !== "win32",
-        env: createHostedRunnerChildProcessEnv({
-          forwardedEnv: buildHostedRunnerChildRuntimeEnv({
-            forwardedEnv: input.job.runtime?.forwardedEnv,
-          }),
-          isTypeScriptChild,
-          launcherDirectories,
-        }),
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-
-    const stdoutChunks: string[] = [];
-    let stdoutRemainder = "";
-    let stderrRemainder = "";
-    child.stdout.on("data", (chunk: string) => {
-      stdoutChunks.push(chunk);
-      stdoutRemainder = forwardHostedRuntimeChildOutputChunk({
-        chunk,
-        remainder: stdoutRemainder,
-        sink: process.stdout,
-        suppressResultPayload: true,
-      });
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderrRemainder = forwardHostedRuntimeChildOutputChunk({
-        chunk,
-        remainder: stderrRemainder,
-        sink: process.stderr,
-        suppressResultPayload: false,
-      });
-    });
-
-    const terminateChild = () => {
-      terminateChildProcess(child.pid);
-      child.kill("SIGKILL");
-    };
-    const abortHandler = () => {
-      terminateChild();
-    };
-    options?.signal?.addEventListener("abort", abortHandler, { once: true });
-
-    try {
-      child.stdin.end(JSON.stringify(input));
-      const code = await new Promise<number | null>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", resolve);
-      });
-      flushHostedRuntimeChildOutputRemainder({
-        remainder: stdoutRemainder,
-        sink: process.stdout,
-        suppressResultPayload: true,
-      });
-      flushHostedRuntimeChildOutputRemainder({
-        remainder: stderrRemainder,
-        sink: process.stderr,
-        suppressResultPayload: false,
-      });
-      const childResult = parseHostedExecutionRunnerChildResult(stdoutChunks.join(""));
-
-      if (!childResult.ok) {
-        throw createHostedRuntimeChildFailure(childResult.error, code);
-      }
-
-      const result = childResult.result;
-      const asserted = assertHostedExecutionRunnerJobResult(result, input.job);
-      invocationSucceeded = true;
-      return asserted;
-    } finally {
-      options?.signal?.removeEventListener("abort", abortHandler);
-      terminateChildProcess(child.pid);
-    }
+    const result = childResult.result;
+    return assertHostedExecutionRunnerJobResult(result, input.job);
   } finally {
-    if (!invocationSucceeded) {
-      await evictHostedRunnerWarmLauncherRoot(input.job, warmRoot);
-    }
+    options?.signal?.removeEventListener("abort", abortHandler);
+    terminateChildProcess(child.pid);
   }
 }
 
@@ -201,17 +192,6 @@ async function resolveHostedRunnerWarmLauncherRoot(
   await mkdir(root, { mode: 0o700, recursive: true });
   hostedRunnerWarmLauncherRoots.set(workspaceId, root);
   return root;
-}
-
-async function evictHostedRunnerWarmLauncherRoot(
-  job: HostedExecutionWorkspaceInvocationJobInput,
-  root: string,
-): Promise<void> {
-  const workspaceId = createHostedRunnerWarmWorkspaceId(job.request.userId);
-  if (hostedRunnerWarmLauncherRoots.get(workspaceId) === root) {
-    hostedRunnerWarmLauncherRoots.delete(workspaceId);
-  }
-  await rm(root, { force: true, recursive: true });
 }
 
 function createHostedRunnerWarmWorkspaceId(userId: string): string {

@@ -706,12 +706,10 @@ async function writeHostedCheckpointFullFallbackContinuityFailedLog(params: {
 type HostedWorkspaceCheckpointSnapshotMode = "full" | "hot";
 
 function resolveHostedWorkspaceCheckpointSnapshotMode(
-  reason: HostedWorkspaceCheckpointRequest["reason"],
+  _reason: HostedWorkspaceCheckpointRequest["reason"],
 ): HostedWorkspaceCheckpointSnapshotMode {
-  return reason === "maintenance"
-    || reason === "system_mailbox_receipt"
-    ? "full"
-    : "hot";
+  // Full snapshots are reserved for hot-state bootstrap/fallback paths.
+  return "hot";
 }
 
 async function writeHostedCheckpointSnapshotMetricLog(input: {
