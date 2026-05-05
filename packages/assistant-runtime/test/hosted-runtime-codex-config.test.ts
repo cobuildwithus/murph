@@ -233,6 +233,7 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
     const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
       env: {
         ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
         PATH: result.runtimeEnv.PATH,
       },
       stdio: ["pipe", "pipe", "pipe"],
@@ -252,6 +253,17 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
         type: "item.completed",
       },
     );
+    const continuityLog = await readHostedLocalCodexShimContinuityLog(result.codexHome);
+    const continuityEntries = parseHostedLocalCodexShimContinuityEntries(continuityLog);
+    assert.deepEqual(continuityEntries, [
+      {
+        event: "thread.started",
+        schema: "murph.hosted-e2e-codex-shim-continuity.v1",
+        threadId: "thread_hosted_local_1",
+      },
+    ]);
+    assert.doesNotMatch(continuityLog, /hello hosted local/u);
+    assert.doesNotMatch(continuityLog, /shim response/u);
   } finally {
     await closeHttpServer(server);
   }
@@ -280,6 +292,7 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
     const child = spawn(path.join(result.codexHome, "bin", "codex"), ["app-server"], {
       env: {
         ...process.env,
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
         PATH: result.runtimeEnv.PATH,
       },
       stdio: ["pipe", "pipe", "pipe"],
@@ -297,6 +310,23 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
       readResponsesRequestInput(requests[1]!),
       /Conversation so far:\nAssistant:\nfirst assistant reply/u,
     );
+    const continuityLog = await readHostedLocalCodexShimContinuityLog(result.codexHome);
+    assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(continuityLog), [
+      {
+        event: "thread.started",
+        schema: "murph.hosted-e2e-codex-shim-continuity.v1",
+        threadId: "thread_hosted_local_1",
+      },
+      {
+        event: "thread.resumed",
+        schema: "murph.hosted-e2e-codex-shim-continuity.v1",
+        threadId: "thread_test",
+      },
+    ]);
+    assert.doesNotMatch(continuityLog, /first hosted local prompt/u);
+    assert.doesNotMatch(continuityLog, /second hosted local prompt/u);
+    assert.doesNotMatch(continuityLog, /first assistant reply/u);
+    assert.doesNotMatch(continuityLog, /second assistant reply/u);
   } finally {
     await closeHttpServer(server);
   }
@@ -691,6 +721,22 @@ async function startResponsesStubServer(input: {
 function readResponsesRequestInput(body: string): string {
   const parsed = JSON.parse(body) as Record<string, unknown>;
   return typeof parsed.input === "string" ? parsed.input : "";
+}
+
+async function readHostedLocalCodexShimContinuityLog(codexHome: string): Promise<string> {
+  return await readFile(
+    path.join(codexHome, "rollouts", "hosted-e2e-codex-shim.jsonl"),
+    "utf8",
+  );
+}
+
+function parseHostedLocalCodexShimContinuityEntries(
+  log: string,
+): Record<string, unknown>[] {
+  return log
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 function readServerBaseUrl(server: Server): string {
