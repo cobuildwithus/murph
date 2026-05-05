@@ -1,6 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
+import { assertHostedWebDatabaseUrlConfigured } from "./hosted-web/database-env";
 import { installHostedWebWarningFilters } from "./process-warnings";
 
 const globalForPrisma = globalThis as typeof globalThis & {
@@ -17,11 +18,7 @@ const PRISMA_TRANSACTION_TIMEOUT_MS = 15_000;
 installHostedWebWarningFilters();
 
 function createPrismaAdapter(): PrismaPg {
-  const databaseUrl = process.env.DATABASE_URL;
-
-  if (!databaseUrl) {
-    throw new TypeError("DATABASE_URL is required for the hosted device-sync control plane.");
-  }
+  const databaseUrl = assertHostedWebDatabaseUrlConfigured();
 
   return new PrismaPg({
     connectionString: normalizePrismaConnectionString(databaseUrl),
