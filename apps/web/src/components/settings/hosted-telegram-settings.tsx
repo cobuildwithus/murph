@@ -1,10 +1,11 @@
 "use client";
 
-import { usePrivy, useUser } from "@privy-io/react-auth";
+import { useLinkAccount, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { JoinInviteTelegramAccountSeed } from "@/src/components/hosted-onboarding/join-invite-page-model";
+import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   resolveHostedTelegramSettingsDisplayState,
@@ -16,17 +17,12 @@ import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { HostedTelegramSettingsContent } from "./hosted-telegram-settings-sections";
 import { toErrorMessage } from "./hosted-settings-utils";
 
-type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
-  linkTelegram?: (input?: unknown) => Promise<unknown>;
-};
-
 export function ConnectTelegram(props: {
   authenticated: boolean;
   initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
   const { authenticated, initialTelegramAccount, onSynced } = props;
-  const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
   const syncRequestSequenceRef = useRef(0);
@@ -46,6 +42,20 @@ export function ConnectTelegram(props: {
   const currentTelegram = displayState.currentTelegram;
   const canManageTelegram = authenticated;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
+
+  const { linkTelegram } = useLinkAccount({
+    onError: (_error, details) => {
+      if (!details || details.linkMethod === "telegram") {
+        setIsLinkingTelegram(false);
+        setErrorMessage("Could not link Telegram right now.");
+      }
+    },
+    onSuccess: (params) => {
+      if (params.linkMethod === "telegram") {
+        void handleLinkedTelegramAccount(params.user);
+      }
+    },
+  });
 
   const syncLinkedTelegram = useCallback(async (
     mode: "link" | "resync",
@@ -99,6 +109,19 @@ export function ConnectTelegram(props: {
     }
   }, [onSynced]);
 
+  async function handleLinkedTelegramAccount(linkedUser: HostedPrivyLinkedAccountContainer) {
+    try {
+      const refreshedUser = await refreshUser().catch(() => linkedUser);
+      const refreshedTelegram =
+        resolveHostedTelegramSettingsDisplayState({ user: refreshedUser }).currentTelegram
+        ?? resolveHostedTelegramSettingsDisplayState({ user: linkedUser }).currentTelegram;
+
+      await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
+    } finally {
+      setIsLinkingTelegram(false);
+    }
+  }
+
   useEffect(() => {
     if (!authenticated || isLinkingTelegram || isSyncingTelegram) {
       return;
@@ -136,17 +159,10 @@ export function ConnectTelegram(props: {
     setIsLinkingTelegram(true);
 
     try {
-      await linkTelegram();
-      const refreshedUser = await refreshUser().catch(() => null);
-      const refreshedTelegram = resolveHostedTelegramSettingsDisplayState({
-        user: refreshedUser,
-      }).currentTelegram;
-
-      await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
+      linkTelegram();
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Could not link Telegram right now."));
-    } finally {
       setIsLinkingTelegram(false);
+      setErrorMessage(toErrorMessage(error, "Could not link Telegram right now."));
     }
   }
   return (

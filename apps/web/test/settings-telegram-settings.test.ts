@@ -3,16 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
+type LinkAccountCallbacks = {
+  onError?: (error: unknown, details?: { linkMethod?: string }) => void;
+  onSuccess?: (params: {
+    linkedAccount: unknown;
+    linkMethod: string;
+    user: { linkedAccounts?: unknown };
+  }) => void;
+};
+
 const mocks = vi.hoisted(() => ({
+  linkAccountCallbacks: null as LinkAccountCallbacks | null,
   linkTelegram: vi.fn(),
   refreshUser: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
-  usePrivy: vi.fn(),
+  useLinkAccount: vi.fn(),
   useUser: vi.fn(),
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: mocks.usePrivy,
+  useLinkAccount: mocks.useLinkAccount,
   useUser: mocks.useUser,
 }));
 
@@ -52,7 +62,8 @@ function createDeferredTelegramSync() {
 describe("ConnectTelegram", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.linkTelegram.mockResolvedValue(undefined);
+    mocks.linkAccountCallbacks = null;
+    mocks.linkTelegram.mockReturnValue(undefined);
     mocks.refreshUser.mockResolvedValue({
       linkedAccounts: [],
     });
@@ -62,8 +73,12 @@ describe("ConnectTelegram", () => {
       telegramUserId: "12345",
       telegramUsername: "murph_user",
     });
-    mocks.usePrivy.mockReturnValue({
-      linkTelegram: mocks.linkTelegram,
+    mocks.useLinkAccount.mockImplementation((callbacks: LinkAccountCallbacks) => {
+      mocks.linkAccountCallbacks = callbacks;
+
+      return {
+        linkTelegram: mocks.linkTelegram,
+      };
     });
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
@@ -257,6 +272,29 @@ describe("ConnectTelegram", () => {
       changeButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
+    expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: {
+          id: 67890,
+          type: "telegram",
+          username: "new_user",
+        },
+        linkMethod: "telegram",
+        user: {
+          linkedAccounts: [
+            {
+              id: 67890,
+              type: "telegram",
+              username: "new_user",
+            },
+          ],
+        },
+      });
+    });
+
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
         payload: {
@@ -293,12 +331,71 @@ describe("ConnectTelegram", () => {
     expect(container.textContent).toContain("@new_user");
     expect(container.textContent).not.toContain("@murph_user");
   });
+
+  it("syncs manual Telegram link from the Privy success payload when refreshUser is stale", async () => {
+    const { ConnectTelegram } = await import(
+      "@/src/components/settings/hosted-telegram-settings"
+    );
+    mocks.refreshUser.mockResolvedValueOnce({
+      linkedAccounts: [],
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(ConnectTelegram, {
+        authenticated: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Connect Telegram"),
+    );
+    expect(linkButton).toBeTruthy();
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: {
+          id: 67890,
+          type: "telegram",
+          username: "new_user",
+        },
+        linkMethod: "telegram",
+        user: {
+          linkedAccounts: [
+            {
+              id: 67890,
+              type: "telegram",
+              username: "new_user",
+            },
+          ],
+        },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        payload: {
+          expectedTelegramUserId: "67890",
+        },
+        url: "/api/settings/telegram/sync",
+      });
+    });
+    expect(container.textContent).not.toContain("account details aren't available yet");
+  });
 });
 
 describe("HostedTelegramCardSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.linkTelegram.mockResolvedValue(undefined);
+    mocks.linkAccountCallbacks = null;
+    mocks.linkTelegram.mockReturnValue(undefined);
     mocks.refreshUser.mockResolvedValue({
       linkedAccounts: [
         {
@@ -314,8 +411,12 @@ describe("HostedTelegramCardSettings", () => {
       telegramUserId: "67890",
       telegramUsername: "new_user",
     });
-    mocks.usePrivy.mockReturnValue({
-      linkTelegram: mocks.linkTelegram,
+    mocks.useLinkAccount.mockImplementation((callbacks: LinkAccountCallbacks) => {
+      mocks.linkAccountCallbacks = callbacks;
+
+      return {
+        linkTelegram: mocks.linkTelegram,
+      };
     });
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
@@ -384,6 +485,29 @@ describe("HostedTelegramCardSettings", () => {
 
     await act(async () => {
       linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: {
+          id: 67890,
+          type: "telegram",
+          username: "new_user",
+        },
+        linkMethod: "telegram",
+        user: {
+          linkedAccounts: [
+            {
+              id: 67890,
+              type: "telegram",
+              username: "new_user",
+            },
+          ],
+        },
+      });
     });
 
     await vi.waitFor(() => {
