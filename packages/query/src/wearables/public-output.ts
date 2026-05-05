@@ -1,0 +1,547 @@
+import {
+  summarizeActivityNotes,
+  summarizeBodyStateNotes,
+  summarizeRecoveryNotes,
+} from "./summaries.ts";
+import { summarizeMetricsConfidence } from "./confidence.ts";
+import { resolveWearablePublicSourceProvider } from "./origin.ts";
+import { formatProviderName, resolveMetricTolerance } from "./provider-policy.ts";
+import { uniqueStrings } from "./shared.ts";
+import type {
+  WearableActivityDay,
+  WearableBodyStateDay,
+  WearableMetricCandidate,
+  WearableMetricKey,
+  WearableRecoveryDay,
+  WearableResolvedMetric,
+  WearableSleepNight,
+  WearableSummaryConfidence,
+} from "./types.ts";
+import {
+  ACTIVITY_METRIC_KEYS,
+  BODY_METRIC_KEYS,
+  RECOVERY_METRIC_KEYS,
+  SLEEP_METRIC_KEYS,
+} from "./types.ts";
+
+export function projectWearableActivityDayPublicSources(day: WearableActivityDay): WearableActivityDay {
+  const steps = projectWearableResolvedMetricPublicSources(day.steps);
+  const activeCalories = projectWearableResolvedMetricPublicSources(day.activeCalories);
+  const totalCalories = projectWearableResolvedMetricPublicSources(day.totalCalories);
+  const distanceKm = projectWearableResolvedMetricPublicSources(day.distanceKm);
+  const totalElevationGainMeters = projectWearableResolvedMetricPublicSources(day.totalElevationGainMeters);
+  const altitudeChangeMeters = projectWearableResolvedMetricPublicSources(day.altitudeChangeMeters);
+  const estimatedVo2Max = projectWearableResolvedMetricPublicSources(day.estimatedVo2Max);
+  const activityScore = projectWearableResolvedMetricPublicSources(day.activityScore);
+  const dayStrain = projectWearableResolvedMetricPublicSources(day.dayStrain);
+  const workoutStrain = projectWearableResolvedMetricPublicSources(day.workoutStrain);
+  const maxHeartRate = projectWearableResolvedMetricPublicSources(day.maxHeartRate);
+  const percentRecorded = projectWearableResolvedMetricPublicSources(day.percentRecorded);
+  const sessionMinutes = projectWearableResolvedMetricPublicSources(day.sessionMinutes);
+  const sessionCount = projectWearableResolvedMetricPublicSources(day.sessionCount);
+  const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
+    ["steps", steps],
+    ["activeCalories", activeCalories],
+    ["totalCalories", totalCalories],
+    ["distanceKm", distanceKm],
+    ["totalElevationGainMeters", totalElevationGainMeters],
+    ["altitudeChangeMeters", altitudeChangeMeters],
+    ["estimatedVo2Max", estimatedVo2Max],
+    ["activityScore", activityScore],
+    ["dayStrain", dayStrain],
+    ["workoutStrain", workoutStrain],
+    ["maxHeartRate", maxHeartRate],
+    ["percentRecorded", percentRecorded],
+    ["sessionMinutes", sessionMinutes],
+    ["sessionCount", sessionCount],
+  ];
+  const summaryConfidence = rebuildPublicSummaryConfidence(
+    metrics,
+    day.summaryConfidence,
+    "No activity summary metrics were available for this date.",
+    [
+      day.steps,
+      day.activeCalories,
+      day.totalCalories,
+      day.distanceKm,
+      day.totalElevationGainMeters,
+      day.altitudeChangeMeters,
+      day.estimatedVo2Max,
+      day.activityScore,
+      day.dayStrain,
+      day.workoutStrain,
+      day.maxHeartRate,
+      day.percentRecorded,
+      day.sessionMinutes,
+      day.sessionCount,
+    ],
+  );
+
+  return {
+    ...day,
+    activityScore,
+    activeCalories,
+    altitudeChangeMeters,
+    dayStrain,
+    distanceKm,
+    estimatedVo2Max,
+    maxHeartRate,
+    notes: projectSummaryNotes({
+      metrics: metrics.map(([, metric]) => metric),
+      originalNotes: day.notes,
+      originalSummaryConfidence: day.summaryConfidence,
+      sourceMetrics: [
+        day.steps,
+        day.activeCalories,
+        day.totalCalories,
+        day.distanceKm,
+        day.totalElevationGainMeters,
+        day.altitudeChangeMeters,
+        day.estimatedVo2Max,
+        day.activityScore,
+        day.dayStrain,
+        day.workoutStrain,
+        day.maxHeartRate,
+        day.percentRecorded,
+        day.sessionMinutes,
+        day.sessionCount,
+      ],
+      summaryConfidence,
+      fallbackNotes: summarizeActivityNotes({
+        activityTypes: day.activityTypes,
+        sessionCount,
+        sessionMinutes,
+        summaryConfidence,
+      }),
+    }),
+    percentRecorded,
+    sessionCount,
+    sessionMinutes,
+    steps,
+    summaryConfidence,
+    totalCalories,
+    totalElevationGainMeters,
+    workoutStrain,
+  };
+}
+
+export function projectWearableSleepNightPublicSources(night: WearableSleepNight): WearableSleepNight {
+  const sourceMetrics = [
+    night.averageHeartRate,
+    night.awakeMinutes,
+    night.deepMinutes,
+    night.hrv,
+    night.lightMinutes,
+    night.lowestHeartRate,
+    night.remMinutes,
+    night.respiratoryRate,
+    night.sessionMinutes,
+    night.sleepConsistency,
+    night.sleepEfficiency,
+    night.sleepPerformance,
+    night.sleepScore,
+    night.spo2,
+    night.timeInBedMinutes,
+    night.totalSleepMinutes,
+  ];
+  const averageHeartRate = projectWearableResolvedMetricPublicSources(night.averageHeartRate);
+  const awakeMinutes = projectWearableResolvedMetricPublicSources(night.awakeMinutes);
+  const deepMinutes = projectWearableResolvedMetricPublicSources(night.deepMinutes);
+  const hrv = projectWearableResolvedMetricPublicSources(night.hrv);
+  const lightMinutes = projectWearableResolvedMetricPublicSources(night.lightMinutes);
+  const lowestHeartRate = projectWearableResolvedMetricPublicSources(night.lowestHeartRate);
+  const remMinutes = projectWearableResolvedMetricPublicSources(night.remMinutes);
+  const respiratoryRate = projectWearableResolvedMetricPublicSources(night.respiratoryRate);
+  const sessionMinutes = projectWearableResolvedMetricPublicSources(night.sessionMinutes);
+  const sleepConsistency = projectWearableResolvedMetricPublicSources(night.sleepConsistency);
+  const sleepEfficiency = projectWearableResolvedMetricPublicSources(night.sleepEfficiency);
+  const sleepPerformance = projectWearableResolvedMetricPublicSources(night.sleepPerformance);
+  const sleepScore = projectWearableResolvedMetricPublicSources(night.sleepScore);
+  const spo2 = projectWearableResolvedMetricPublicSources(night.spo2);
+  const timeInBedMinutes = projectWearableResolvedMetricPublicSources(night.timeInBedMinutes);
+  const totalSleepMinutes = projectWearableResolvedMetricPublicSources(night.totalSleepMinutes);
+  const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
+    ["sessionMinutes", sessionMinutes],
+    ["totalSleepMinutes", totalSleepMinutes],
+    ["timeInBedMinutes", timeInBedMinutes],
+    ["sleepEfficiency", sleepEfficiency],
+    ["sleepScore", sleepScore],
+    ["sleepPerformance", sleepPerformance],
+    ["sleepConsistency", sleepConsistency],
+    ["averageHeartRate", averageHeartRate],
+    ["lowestHeartRate", lowestHeartRate],
+    ["hrv", hrv],
+    ["respiratoryRate", respiratoryRate],
+    ["spo2", spo2],
+  ];
+  const projectedMetrics = metrics.map(([, metric]) => metric);
+  const summaryConfidence = rebuildPublicSummaryConfidence(
+    metrics,
+    night.summaryConfidence,
+    "No sleep metrics were available for this date.",
+    sourceMetrics,
+  );
+
+  return {
+    ...night,
+    averageHeartRate,
+    awakeMinutes,
+    deepMinutes,
+    hrv,
+    lightMinutes,
+    lowestHeartRate,
+    notes: projectSummaryNotes({
+      metrics: projectedMetrics,
+      originalNotes: night.notes,
+      originalSummaryConfidence: night.summaryConfidence,
+      sourceMetrics,
+      summaryConfidence,
+    }),
+    provider: sessionMinutes.selection.provider,
+    remMinutes,
+    respiratoryRate,
+    sessionMinutes,
+    sleepConsistency,
+    sleepEfficiency,
+    sleepPerformance,
+    sleepScore,
+    sleepWindowProvider: sessionMinutes.selection.provider,
+    spo2,
+    summaryConfidence,
+    timeInBedMinutes,
+    totalSleepMinutes,
+  };
+}
+
+export function projectWearableRecoveryDayPublicSources(day: WearableRecoveryDay): WearableRecoveryDay {
+  const recoveryScore = projectWearableResolvedMetricPublicSources(day.recoveryScore);
+  const readinessScore = projectWearableResolvedMetricPublicSources(day.readinessScore);
+  const restingHeartRate = projectWearableResolvedMetricPublicSources(day.restingHeartRate);
+  const hrv = projectWearableResolvedMetricPublicSources(day.hrv);
+  const respiratoryRate = projectWearableResolvedMetricPublicSources(day.respiratoryRate);
+  const spo2 = projectWearableResolvedMetricPublicSources(day.spo2);
+  const temperatureDeviation = projectWearableResolvedMetricPublicSources(day.temperatureDeviation);
+  const temperature = projectWearableResolvedMetricPublicSources(day.temperature);
+  const bodyBattery = projectWearableResolvedMetricPublicSources(day.bodyBattery);
+  const stressLevel = projectWearableResolvedMetricPublicSources(day.stressLevel);
+  const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
+    ["recoveryScore", recoveryScore],
+    ["readinessScore", readinessScore],
+    ["restingHeartRate", restingHeartRate],
+    ["hrv", hrv],
+    ["respiratoryRate", respiratoryRate],
+    ["spo2", spo2],
+    ["temperatureDeviation", temperatureDeviation],
+    ["temperature", temperature],
+    ["bodyBattery", bodyBattery],
+    ["stressLevel", stressLevel],
+  ];
+  const summaryConfidence = rebuildPublicSummaryConfidence(
+    metrics,
+    day.summaryConfidence,
+    "No recovery metrics were available for this date.",
+    [
+      day.recoveryScore,
+      day.readinessScore,
+      day.restingHeartRate,
+      day.hrv,
+      day.respiratoryRate,
+      day.spo2,
+      day.temperatureDeviation,
+      day.temperature,
+      day.bodyBattery,
+      day.stressLevel,
+    ],
+  );
+
+  return {
+    ...day,
+    bodyBattery,
+    hrv,
+    notes: projectSummaryNotes({
+      metrics: metrics.map(([, metric]) => metric),
+      originalNotes: day.notes,
+      originalSummaryConfidence: day.summaryConfidence,
+      sourceMetrics: [
+        day.recoveryScore,
+        day.readinessScore,
+        day.restingHeartRate,
+        day.hrv,
+        day.respiratoryRate,
+        day.spo2,
+        day.temperatureDeviation,
+        day.temperature,
+        day.bodyBattery,
+        day.stressLevel,
+      ],
+      summaryConfidence,
+      fallbackNotes: summarizeRecoveryNotes({
+        readinessScore,
+        recoveryScore,
+        summaryConfidence,
+      }),
+    }),
+    readinessScore,
+    recoveryScore,
+    respiratoryRate,
+    restingHeartRate,
+    spo2,
+    stressLevel,
+    summaryConfidence,
+    temperature,
+    temperatureDeviation,
+  };
+}
+
+export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateDay): WearableBodyStateDay {
+  const weightKg = projectWearableResolvedMetricPublicSources(day.weightKg);
+  const bodyFatPercentage = projectWearableResolvedMetricPublicSources(day.bodyFatPercentage);
+  const bmi = projectWearableResolvedMetricPublicSources(day.bmi);
+  const temperature = projectWearableResolvedMetricPublicSources(day.temperature);
+  const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
+    ["weightKg", weightKg],
+    ["bodyFatPercentage", bodyFatPercentage],
+    ["bmi", bmi],
+    ["temperature", temperature],
+  ];
+  const summaryConfidence = rebuildPublicSummaryConfidence(
+    metrics,
+    day.summaryConfidence,
+    "No body-state metrics were available for this date.",
+    [
+      day.weightKg,
+      day.bodyFatPercentage,
+      day.bmi,
+      day.temperature,
+    ],
+  );
+
+  return {
+    ...day,
+    bmi,
+    bodyFatPercentage,
+    notes: projectSummaryNotes({
+      metrics: metrics.map(([, metric]) => metric),
+      originalNotes: day.notes,
+      originalSummaryConfidence: day.summaryConfidence,
+      sourceMetrics: [
+        day.weightKg,
+        day.bodyFatPercentage,
+        day.bmi,
+        day.temperature,
+      ],
+      summaryConfidence,
+      fallbackNotes: summarizeBodyStateNotes({
+        bodyFatPercentage,
+        summaryConfidence,
+        weightKg,
+      }),
+    }),
+    summaryConfidence,
+    temperature,
+    weightKg,
+  };
+}
+
+function projectWearableResolvedMetricPublicSources(
+  resolved: WearableResolvedMetric,
+): WearableResolvedMetric {
+  const selectedCandidate = selectMetricSelectionCandidate(resolved);
+  const selectionProvider = resolved.selection.provider
+    ? selectedCandidate
+      ? resolvePublicSourceProvider(selectedCandidate)
+      : resolveWearablePublicSourceProvider({ provider: resolved.selection.provider })
+    : null;
+  const publicConflictingProviders = collectPublicConflictingProviders(resolved, selectedCandidate, selectionProvider);
+  const sameSourceDisagreement = hasSamePublicSourceDisagreement(resolved, selectedCandidate, selectionProvider);
+  const publicAgreeingProviders = collectPublicAgreeingProviders(resolved);
+
+  return {
+    ...resolved,
+    candidates: resolved.candidates.map((candidate) => ({
+      ...candidate,
+      provider: resolvePublicSourceProvider(candidate),
+      title: candidate.title,
+    })),
+    confidence: {
+      ...resolved.confidence,
+      conflictingProviders: publicConflictingProviders,
+      reasons: projectMetricConfidenceReasons({
+        publicAgreeingProviders,
+        publicConflictingProviders,
+        sameSourceDisagreement,
+        selectedPublicProvider: selectionProvider,
+        sourceReasons: resolved.confidence.reasons,
+      }),
+    },
+    selection: {
+      ...resolved.selection,
+      provider: selectionProvider,
+      title: resolved.selection.title,
+    },
+  };
+}
+
+function rebuildPublicSummaryConfidence(
+  metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]>,
+  original: WearableSummaryConfidence,
+  missingSummaryNote: string,
+  sourceMetrics: readonly WearableResolvedMetric[],
+): WearableSummaryConfidence {
+  const extraNotes = original.notes.filter((note) => !isAutoSummaryConfidenceNote(note, missingSummaryNote));
+  void sourceMetrics;
+
+  return summarizeMetricsConfidence(metrics, {
+    extraNotes,
+    missingSummaryNote,
+  });
+}
+
+function projectSummaryNotes(input: {
+  fallbackNotes?: readonly string[];
+  metrics: readonly WearableResolvedMetric[];
+  originalNotes: readonly string[];
+  originalSummaryConfidence: WearableSummaryConfidence;
+  sourceMetrics: readonly WearableResolvedMetric[];
+  summaryConfidence: WearableSummaryConfidence;
+}): string[] {
+  void input.sourceMetrics;
+  const originalSummaryNotes = new Set(input.originalSummaryConfidence.notes);
+  const projectedOriginalNotes = input.originalNotes
+    .filter((note) => !originalSummaryNotes.has(note));
+
+  return uniqueStrings([
+    ...input.summaryConfidence.notes,
+    ...(input.fallbackNotes ?? []),
+    ...projectedOriginalNotes,
+  ]);
+}
+
+function collectPublicConflictingProviders(
+  resolved: WearableResolvedMetric,
+  selectedCandidate: WearableMetricCandidate | null,
+  selectedPublicProvider: string | null,
+): string[] {
+  if (resolved.selection.value === null || !selectedPublicProvider) {
+    return [];
+  }
+
+  const selectedValue = resolved.selection.value;
+  return uniqueStrings(
+    resolved.candidates
+      .filter((candidate) => candidate.candidateId !== selectedCandidate?.candidateId)
+      .filter((candidate) => resolvePublicSourceProvider(candidate) !== selectedPublicProvider)
+      .filter((candidate) => !isWithinMetricTolerance(resolved.metric, selectedValue, candidate.value))
+      .map(resolvePublicSourceProvider),
+  ).sort();
+}
+
+function hasSamePublicSourceDisagreement(
+  resolved: WearableResolvedMetric,
+  selectedCandidate: WearableMetricCandidate | null,
+  selectedPublicProvider: string | null,
+): boolean {
+  if (resolved.selection.value === null || !selectedPublicProvider) {
+    return false;
+  }
+
+  const selectedValue = resolved.selection.value;
+  return resolved.candidates
+    .filter((candidate) => candidate.candidateId !== selectedCandidate?.candidateId)
+    .some((candidate) =>
+      resolvePublicSourceProvider(candidate) === selectedPublicProvider
+      && !isWithinMetricTolerance(resolved.metric, selectedValue, candidate.value)
+    );
+}
+
+function collectPublicAgreeingProviders(resolved: WearableResolvedMetric): string[] {
+  if (resolved.selection.value === null) {
+    return [];
+  }
+
+  const selectedValue = resolved.selection.value;
+  return uniqueStrings(
+    resolved.candidates
+      .filter((candidate) => isWithinMetricTolerance(resolved.metric, selectedValue, candidate.value))
+      .map(resolvePublicSourceProvider),
+  ).sort();
+}
+
+function projectMetricConfidenceReasons(input: {
+  publicAgreeingProviders: readonly string[];
+  publicConflictingProviders: readonly string[];
+  sameSourceDisagreement: boolean;
+  selectedPublicProvider: string | null;
+  sourceReasons: readonly string[];
+}): string[] {
+  const reasons = input.sourceReasons.flatMap((reason): string[] => {
+    if (reason.startsWith("Conflicting values remained from ")) {
+      if (input.publicConflictingProviders.length > 0) {
+        return [
+          `Conflicting values remained from ${input.publicConflictingProviders.map(formatProviderName).join(", ")}.`,
+        ];
+      }
+
+      if (input.sameSourceDisagreement && input.selectedPublicProvider) {
+        return [
+          `Duplicate evidence from ${formatProviderName(input.selectedPublicProvider)} disagreed after source reconciliation.`,
+        ];
+      }
+
+      return [];
+    }
+
+    if (reason.startsWith("Providers agreed within tolerance: ")) {
+      return input.publicAgreeingProviders.length > 1
+        ? [`Providers agreed within tolerance: ${input.publicAgreeingProviders.map(formatProviderName).join(", ")}.`]
+        : [];
+    }
+
+    return [reason];
+  });
+
+  return uniqueStrings(reasons);
+}
+
+function selectMetricSelectionCandidate(resolved: WearableResolvedMetric): WearableMetricCandidate | null {
+  const selectedRecordIds = new Set(resolved.selection.recordIds);
+
+  return resolved.candidates.find((candidate) =>
+    candidate.provider === resolved.selection.provider
+    && candidate.recordIds.some((recordId) => selectedRecordIds.has(recordId))
+  )
+    ?? resolved.candidates.find((candidate) => candidate.recordIds.some((recordId) => selectedRecordIds.has(recordId)))
+    ?? resolved.candidates.find((candidate) => candidate.provider === resolved.selection.provider)
+    ?? resolved.candidates[0]
+    ?? null;
+}
+
+function resolvePublicSourceProvider(candidate: WearableMetricCandidate): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: candidate.dataOrigin ?? null,
+    externalRef: candidate.externalRef,
+    provider: candidate.provider,
+  });
+}
+
+function isAutoSummaryConfidenceNote(note: string, missingSummaryNote: string): boolean {
+  return note === missingSummaryNote
+    || note.startsWith("Selected evidence came from ")
+    || note.startsWith("Some metrics still conflict across providers:");
+}
+
+function isWithinMetricTolerance(metric: string, left: number, right: number): boolean {
+  const tolerance = isWearableMetricKey(metric) ? resolveMetricTolerance(metric) : 0;
+  return Math.abs(left - right) <= tolerance;
+}
+
+function isWearableMetricKey(metric: string): metric is WearableMetricKey {
+  return ALL_WEARABLE_METRIC_KEYS.has(metric);
+}
+
+const ALL_WEARABLE_METRIC_KEYS: ReadonlySet<string> = new Set([
+  ...ACTIVITY_METRIC_KEYS,
+  ...BODY_METRIC_KEYS,
+  ...RECOVERY_METRIC_KEYS,
+  ...SLEEP_METRIC_KEYS,
+]);

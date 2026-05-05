@@ -1,9 +1,11 @@
 import { collectLatestDate, collectSortedDatesDesc, daysBetweenIsoDates, latestIsoTimestamp, uniqueStrings } from "./shared.ts";
+import { resolveWearablePublicSourceProvider } from "./origin.ts";
 import { formatProviderName } from "./provider-policy.ts";
 import { buildActivitySessionMetricCandidate, buildSleepWindowMetricCandidate } from "./candidates.ts";
 import { buildCandidateExactKey } from "./dedupe.ts";
 import type {
   WearableActivityDay,
+  WearableActivitySessionAggregate,
   WearableBodyStateDay,
   WearableDataset,
   WearableMetricCandidate,
@@ -28,9 +30,9 @@ export function buildWearableSourceHealth(input: {
   sleepNights: readonly WearableSleepNight[];
 }): WearableSourceHealth[] {
   const providers = uniqueStrings([
-    ...input.dataset.metricCandidates.map((candidate) => candidate.provider),
-    ...input.dataset.activitySessionAggregates.map((candidate) => candidate.provider),
-    ...input.dataset.sleepWindows.map((candidate) => candidate.provider),
+    ...input.dataset.metricCandidates.map(resolvePublicSourceProvider),
+    ...input.dataset.activitySessionAggregates.map(resolvePublicSourceProvider),
+    ...input.dataset.sleepWindows.map(resolvePublicSourceProvider),
   ]);
 
   const latestDate = collectLatestDate([
@@ -163,11 +165,15 @@ export function buildWearableSourceHealth(input: {
 
   const rows = providers
     .map((provider) => {
-      const providerMetricCandidates = input.dataset.metricCandidates.filter((candidate) => candidate.provider === provider);
-      const providerActivitySessionAggregates = input.dataset.activitySessionAggregates.filter(
-        (candidate) => candidate.provider === provider,
+      const providerMetricCandidates = input.dataset.metricCandidates.filter(
+        (candidate) => resolvePublicSourceProvider(candidate) === provider,
       );
-      const providerSleepWindows = input.dataset.sleepWindows.filter((candidate) => candidate.provider === provider);
+      const providerActivitySessionAggregates = input.dataset.activitySessionAggregates.filter(
+        (candidate) => resolvePublicSourceProvider(candidate) === provider,
+      );
+      const providerSleepWindows = input.dataset.sleepWindows.filter(
+        (candidate) => resolvePublicSourceProvider(candidate) === provider,
+      );
       const providerDates = collectSortedDatesDesc([
         ...providerMetricCandidates.map((candidate) => candidate.date),
         ...providerActivitySessionAggregates.map((candidate) => candidate.date),
@@ -314,7 +320,7 @@ function countExactDuplicatesByProvider(
     const exactKey = buildCandidateExactKey(candidate);
     const existingProvider = seen.get(exactKey);
     if (!existingProvider) {
-      seen.set(exactKey, candidate.provider);
+      seen.set(exactKey, resolvePublicSourceProvider(candidate));
       continue;
     }
 
@@ -323,6 +329,18 @@ function countExactDuplicatesByProvider(
 
   return counts;
 }
+
+function resolvePublicSourceProvider(
+  candidate: WearableMetricCandidate | WearableSleepNightCandidate | WearableActivitySessionAggregate,
+): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: candidate.dataOrigin ?? null,
+    externalRef: "externalRef" in candidate ? candidate.externalRef : null,
+    provider: candidate.provider,
+  });
+}
+
+type WearableSleepNightCandidate = WearableDataset["sleepWindows"][number];
 
 function countSelectedMetricsByProvider(
   metrics: readonly WearableResolvedMetric[],

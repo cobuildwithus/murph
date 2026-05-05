@@ -20,7 +20,8 @@ import {
 import { formatMetricLabel, formatProviderName, inferDefaultMetricFamily } from "./wearables/provider-policy.ts";
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
 export { collectCanonicalWearableDataset } from "./wearables/canonical-records.ts";
-import { collectLatestDate, collectSortedDatesDesc, latestIsoTimestamp, uniqueStrings } from "./wearables/shared.ts";
+import { wearableDataOriginKey } from "./wearables/origin.ts";
+import { buildCandidateId, collectLatestDate, collectSortedDatesDesc, latestIsoTimestamp, uniqueStrings } from "./wearables/shared.ts";
 import {
   resolveMetric,
   resolveSleepWindowSelection,
@@ -32,6 +33,12 @@ import {
   summarizeRecoveryNotes,
   summarizeSleepNotes,
 } from "./wearables/summaries.ts";
+import {
+  projectWearableActivityDayPublicSources,
+  projectWearableBodyStateDayPublicSources,
+  projectWearableRecoveryDayPublicSources,
+  projectWearableSleepNightPublicSources,
+} from "./wearables/public-output.ts";
 
 import type {
   WearableActivityDay,
@@ -114,7 +121,8 @@ export function listWearableActivityDays(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableActivityDay[] {
-  return listWearableActivityDaysFromDataset(collectWearableDataset(vault, filters));
+  return listWearableActivityDaysFromDataset(collectWearableDataset(vault, filters))
+    .map(projectWearableActivityDayPublicSources);
 }
 
 function listWearableActivityDaysFromDataset(dataset: WearableDataset): WearableActivityDay[] {
@@ -231,7 +239,8 @@ export function listWearableSleepNights(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableSleepNight[] {
-  return listWearableSleepNightsFromDataset(collectWearableDataset(vault, filters));
+  return listWearableSleepNightsFromDataset(collectWearableDataset(vault, filters))
+    .map(projectWearableSleepNightPublicSources);
 }
 
 const ASLEEP_STAGE_TOTAL_METRICS: readonly WearableMetricKey[] = [
@@ -244,9 +253,10 @@ function buildDerivedTotalSleepCandidates(
   date: string,
   candidates: readonly WearableMetricCandidate[],
 ): WearableMetricCandidate[] {
-  return uniqueStrings(candidates.map((candidate) => candidate.provider))
-    .flatMap((provider) => {
-      const providerCandidates = candidates.filter((candidate) => candidate.provider === provider);
+  return groupSleepStageCandidatesByDerivedSource(candidates)
+    .flatMap((providerCandidates) => {
+      const sourceCandidate = providerCandidates.find((candidate) => candidate.dataOrigin) ?? providerCandidates[0] ?? null;
+      const provider = sourceCandidate?.provider ?? "unknown";
       const stageSelections = ASLEEP_STAGE_TOTAL_METRICS.map((metric) =>
         resolveMetric(metric, selectMetricCandidates(providerCandidates, metric), {
           metricFamily: "sleep",
@@ -257,8 +267,10 @@ function buildDerivedTotalSleepCandidates(
         return [];
       }
 
+      const sourceKey = wearableDataOriginKey(sourceCandidate?.dataOrigin);
       return [{
-        candidateId: `${provider}:${date}:derived:totalSleepMinutes:stage-total`,
+        candidateId: buildCandidateId([provider, sourceKey, date, "derived", "totalSleepMinutes", "stage-total"]),
+        dataOrigin: sourceCandidate?.dataOrigin ?? null,
         date,
         externalRef: null,
         metric: "totalSleepMinutes",
@@ -278,6 +290,25 @@ function buildDerivedTotalSleepCandidates(
         ),
       }];
     });
+}
+
+function groupSleepStageCandidatesByDerivedSource(
+  candidates: readonly WearableMetricCandidate[],
+): WearableMetricCandidate[][] {
+  const groups = new Map<string, WearableMetricCandidate[]>();
+
+  for (const candidate of candidates) {
+    const key = `${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(candidate);
+      continue;
+    }
+
+    groups.set(key, [candidate]);
+  }
+
+  return [...groups.values()];
 }
 
 function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableSleepNight[] {
@@ -414,7 +445,8 @@ export function listWearableRecoveryDays(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableRecoveryDay[] {
-  return listWearableRecoveryDaysFromDataset(collectWearableDataset(vault, filters));
+  return listWearableRecoveryDaysFromDataset(collectWearableDataset(vault, filters))
+    .map(projectWearableRecoveryDayPublicSources);
 }
 
 function listWearableRecoveryDaysFromDataset(dataset: WearableDataset): WearableRecoveryDay[] {
@@ -499,7 +531,8 @@ export function listWearableBodyStateDays(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableBodyStateDay[] {
-  return listWearableBodyStateDaysFromDataset(collectWearableDataset(vault, filters));
+  return listWearableBodyStateDaysFromDataset(collectWearableDataset(vault, filters))
+    .map(projectWearableBodyStateDayPublicSources);
 }
 
 function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): WearableBodyStateDay[] {
@@ -559,18 +592,22 @@ function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): {
   const sleepNights = listWearableSleepNightsFromDataset(dataset);
   const recoveryDays = listWearableRecoveryDaysFromDataset(dataset);
   const bodyStateDays = listWearableBodyStateDaysFromDataset(dataset);
+  const publicActivityDays = activityDays.map(projectWearableActivityDayPublicSources);
+  const publicSleepNights = sleepNights.map(projectWearableSleepNightPublicSources);
+  const publicRecoveryDays = recoveryDays.map(projectWearableRecoveryDayPublicSources);
+  const publicBodyStateDays = bodyStateDays.map(projectWearableBodyStateDayPublicSources);
 
   return {
-    activityDays,
-    bodyStateDays,
-    recoveryDays,
-    sleepNights,
+    activityDays: publicActivityDays,
+    bodyStateDays: publicBodyStateDays,
+    recoveryDays: publicRecoveryDays,
+    sleepNights: publicSleepNights,
     sourceHealth: buildWearableSourceHealth({
-      activityDays,
-      bodyStateDays,
+      activityDays: publicActivityDays,
+      bodyStateDays: publicBodyStateDays,
       dataset,
-      recoveryDays,
-      sleepNights,
+      recoveryDays: publicRecoveryDays,
+      sleepNights: publicSleepNights,
     }),
   };
 }
