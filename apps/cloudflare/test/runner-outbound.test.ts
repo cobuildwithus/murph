@@ -160,19 +160,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     path: "/api/internal/hosted-workspace/checkpoint",
   },
   {
-    body: undefined,
-    name: "hosted runtime crypto context",
-    path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-  },
-  {
-    body: {
-      domain: "ingress",
-      rootKeyId: "udrk:ingress:test-root",
-    },
-    name: "hosted runtime crypto root",
-    path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
-  },
-  {
     body: {
       entries: [
         {
@@ -467,6 +454,54 @@ describe("handleRunnerOutboundRequest", () => {
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      body: undefined,
+      name: "hosted runtime crypto context",
+      path: HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    },
+    {
+      body: {
+        domain: "ingress",
+        rootKeyId: "udrk:ingress:test-root",
+      },
+      name: "hosted runtime crypto root",
+      path: HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+    },
+  ])("rejects raw crypto web-control proxy path: $name", async ({ body, path }) => {
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path,
+    })).toBe(false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${path}`, {
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        headers: createRunnerProxyHeaders(
+          body === undefined
+            ? {}
+            : {
+                "content-type": "application/json; charset=utf-8",
+              },
+        ),
         method: "POST",
       }),
       createRunnerOutboundEnv({

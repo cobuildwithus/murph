@@ -15,6 +15,7 @@ import {
   buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
+  buildHostedRunnerLegacyDeviceSyncPlatformEnv,
   buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
@@ -416,7 +417,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       TELEGRAM_BOT_TOKEN: "user-telegram-token",
     };
     const forwardedEnv = buildHostedRunnerContainerEnv(configSource);
-    const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
+    const platformEnv = buildHostedRunnerLegacyDeviceSyncPlatformEnv(configSource, {
       rewriteLoopbackUrlsForContainer: true,
     });
 
@@ -692,7 +693,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   });
 
   it("drops worker-only secret material from explicit forwarded env", () => {
-    expect(buildHostedRunnerJobRuntimeConfig({
+    const runtime = buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
@@ -700,20 +701,18 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         OPENAI_API_KEY: "fixture-worker-key",
       },
       runnerSecrets: {},
-    })).toMatchObject({
+    });
+
+    expect(runtime).toMatchObject({
       forwardedEnv: {
         OPENAI_API_KEY: "fixture-worker-key",
       },
-      platformEnv: {
-        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
-        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
-      },
       userEnv: {},
     });
+    expect(runtime.platformEnv).toBeUndefined();
   });
 
-  it("keeps platform private JWKs out of runtime child, forwarded, and user env", () => {
+  it("keeps platform private JWKs out of hosted runtime job, child, forwarded, and user env", () => {
     const configSource = {
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
@@ -736,13 +735,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       forwardedEnv: runtime.forwardedEnv ?? {},
     });
 
-    expect(runtime.platformEnv).toEqual({
-      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
-        '{"kty":"EC","d":"automation"}',
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
-        '{"kty":"EC","d":"callback"}',
-    });
+    expect(runtime.platformEnv).toBeUndefined();
     expect(childEnv.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
     expect(childEnv.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
     expect(runtime.forwardedEnv?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
@@ -752,7 +745,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   });
 
   it("keeps loopback runner callback urls intact when the runtime envelope already has forwarded env", () => {
-    expect(buildHostedRunnerJobRuntimeConfig({
+    const runtime = buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
         HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
         LINQ_API_BASE_URL: "http://localhost:4011",
@@ -760,20 +753,19 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
       },
       runnerSecrets: {},
-    })).toMatchObject({
+    });
+
+    expect(runtime).toMatchObject({
       forwardedEnv: {
         LINQ_API_BASE_URL: "http://localhost:4011",
       },
-      platformEnv: {
-        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
-        TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
-      },
       userEnv: {},
     });
+    expect(runtime.platformEnv).toBeUndefined();
   });
 
-  it("rewrites Telegram platform urls for container runtime even when they are not forwarded to user code", () => {
-    expect(buildHostedRunnerJobRuntimeConfig({
+  it("does not serialize Telegram platform authority for container runtime", () => {
+    const runtime = buildHostedRunnerJobRuntimeConfig({
       configSource: {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
@@ -784,20 +776,17 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       forwardedEnv: {},
       rewritePlatformUrlsForContainer: true,
       runnerSecrets: {},
-    })).toMatchObject({
+    });
+
+    expect(runtime).toMatchObject({
       forwardedEnv: {},
-      platformEnv: {
-        HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000/",
-        TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-        TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
-      },
       userEnv: {},
     });
+    expect(runtime.platformEnv).toBeUndefined();
   });
 
   it("keeps Telegram platform env out of runner secrets even when operators try to allowlist it", () => {
-    expect(buildHostedRunnerJobRuntimeConfig({
+    const runtime = buildHostedRunnerJobRuntimeConfig({
       configSource: {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
           "TELEGRAM_API_BASE_URL",
@@ -814,15 +803,13 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         TELEGRAM_BOT_TOKEN: "telegram-user",
         TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       },
-    })).toMatchObject({
+    });
+
+    expect(runtime).toMatchObject({
       forwardedEnv: {},
-      platformEnv: {
-        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
-      },
       userEnv: {},
     });
+    expect(runtime.platformEnv).toBeUndefined();
   });
 
   it("preserves an explicit resolved config override when the caller already computed semantics", () => {
@@ -844,11 +831,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toEqual({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
-      platformEnv: {
-        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
-      },
       resolvedConfig: {
         channelCapabilities: {
           emailSendReady: false,
@@ -881,11 +863,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
 
     expect(runtime.forwardedEnv).toEqual({});
-    expect(runtime.platformEnv).toEqual({
-      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
-      TELEGRAM_BOT_TOKEN: "telegram-token",
-      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
-    });
+    expect(runtime.platformEnv).toBeUndefined();
     expect(runtime.resolvedConfig).toBeDefined();
     expect(runtime.resolvedConfig?.channelCapabilities.telegramBotConfigured).toBe(true);
     expect(runtime.resolvedConfig?.deviceSync).toEqual({
@@ -908,7 +886,16 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         JUNCTION_API_KEY: "sk_us_fixture",
         JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
         JUNCTION_ENV: "sandbox",
+        JUNCTION_PROVIDER_FILTER: "garmin,oura",
+        JUNCTION_RECONCILE_DAYS: "14",
+        JUNCTION_RECONCILE_INTERVAL_MS: "3600000",
         JUNCTION_REGION: "us",
+        JUNCTION_REQUEST_TIMEOUT_MS: "30000",
+        JUNCTION_SUMMARY_BACKFILL_DAYS: "7",
+        JUNCTION_SUMMARY_RESOURCES: "sleep,profile",
+        JUNCTION_TIMESERIES_BACKFILL_DAYS: "3",
+        JUNCTION_TIMESERIES_RESOURCES: "steps,heart_rate",
+        JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "300000",
         JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
       },
       forwardedEnv: {},
@@ -920,8 +907,18 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       JUNCTION_API_KEY: "sk_us_fixture",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_ENV: "sandbox",
+      JUNCTION_PROVIDER_FILTER: "garmin,oura",
+      JUNCTION_RECONCILE_DAYS: "14",
+      JUNCTION_RECONCILE_INTERVAL_MS: "3600000",
       JUNCTION_REGION: "us",
+      JUNCTION_REQUEST_TIMEOUT_MS: "30000",
+      JUNCTION_SUMMARY_BACKFILL_DAYS: "7",
+      JUNCTION_SUMMARY_RESOURCES: "sleep,profile",
+      JUNCTION_TIMESERIES_BACKFILL_DAYS: "3",
+      JUNCTION_TIMESERIES_RESOURCES: "steps,heart_rate",
+      JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "300000",
     });
+    expect(runtime.platformEnv).not.toHaveProperty("JUNCTION_WEBHOOK_SECRET");
     expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).toMatchObject({
       environment: "sandbox",
       region: "us",

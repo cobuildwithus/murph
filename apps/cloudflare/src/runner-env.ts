@@ -4,6 +4,9 @@ import type {
   HostedAssistantRuntimeResolvedConfig,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
+  HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
+} from "@murphai/assistant-runtime/hosted-assistant-env-constants";
+import {
   buildHostedRuntimeChildEnv,
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
@@ -19,6 +22,9 @@ import {
 import {
   createHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
+
+const HOSTED_LEGACY_DEVICE_SYNC_PLATFORM_ENV_KEYS =
+  new Set<string>(HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES);
 
 export function buildHostedRunnerSupervisorEnv(input: {
   port: number;
@@ -102,6 +108,21 @@ export function buildHostedRunnerPlatformEnv(
   );
 }
 
+export function buildHostedRunnerLegacyDeviceSyncPlatformEnv(
+  source: Readonly<Record<string, unknown>>,
+  options: {
+    rewriteLoopbackUrlsForContainer?: boolean;
+  } = {},
+): Record<string, string> {
+  const platformEnv = buildHostedRunnerPlatformEnv(source, options);
+
+  return Object.fromEntries(
+    Object.entries(platformEnv).filter(([key]) =>
+      HOSTED_LEGACY_DEVICE_SYNC_PLATFORM_ENV_KEYS.has(key)
+    ),
+  );
+}
+
 export function buildHostedRunnerJobRuntimeConfig(input: {
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
@@ -110,7 +131,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
+  const platformEnv = buildHostedRunnerLegacyDeviceSyncPlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
   const localE2eParserToolchain =
@@ -123,7 +144,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     configSource,
     forwardedEnv: input.forwardedEnv,
     parserToolchain: localE2eParserToolchain ?? undefined,
-    platformEnv: Object.keys(platformEnv).length === 0 ? undefined : platformEnv,
+    platformEnv,
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: input.runnerSecrets,
   });

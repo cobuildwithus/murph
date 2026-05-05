@@ -387,6 +387,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "assistant.automation_detail",
   "assistant.pass_finished",
   "device-sync.job_failed",
+  "device-sync.legacy_platform_env_present",
   "mailbox.appended",
   "mailbox.dedupe_conflict",
   "mailbox.imported",
