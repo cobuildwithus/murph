@@ -15,6 +15,9 @@ import {
   readConfiguredDeviceSyncProviderConfigs,
 } from '@murphai/device-syncd/config'
 import {
+  DEVICE_SYNC_SECRET_ENV_KEYS,
+} from '@murphai/device-syncd/client'
+import {
   DEVICE_SYNC_BASE_URL_ENV,
   resolveDeviceSyncBaseUrl,
   resolveDeviceSyncControlToken,
@@ -41,12 +44,15 @@ import {
   removeManagedControlToken,
   readDeviceDaemonState,
   resolveManagedControlToken,
+  resolveManagedEncryptionSecret,
   writeManagedControlToken,
   writeDeviceDaemonState,
+  writeManagedEncryptionSecret,
 } from './device-daemon/state.js'
 import type {
   DeviceDaemonDependencies,
   DeviceDaemonDependencyOverrides,
+  DeviceDaemonPaths,
   DeviceDaemonStartResult,
   DeviceDaemonStateRecord,
   DeviceDaemonStatusResult,
@@ -56,6 +62,7 @@ import {
   DEVICE_DAEMON_START_TIMEOUT_MS,
   DEVICE_DAEMON_STOP_TIMEOUT_MS,
 } from './device-daemon/types.js'
+import { readEnvValue } from './env-values.js'
 import { VaultCliError } from './vault-cli-errors.js'
 export type { DeviceDaemonPaths } from './device-daemon/types.js'
 
@@ -279,6 +286,11 @@ export async function startManagedDeviceSyncDaemon(input: {
     throw buildMissingProviderCredentialsError(baseUrl)
   }
 
+  const encryptionSecret = await resolveManagedDeviceSyncEncryptionSecret({
+    paths,
+    env,
+    dependencies,
+  })
   const controlToken =
     explicitControlToken ?? generateDeviceSyncControlToken()
   const child = await dependencies.spawnProcess({
@@ -287,6 +299,7 @@ export async function startManagedDeviceSyncDaemon(input: {
     env: buildManagedDeviceSyncEnvironment({
       baseUrl,
       controlToken,
+      encryptionSecret,
       env,
       paths,
       vault,
@@ -627,6 +640,34 @@ function readBaseUrlPort(baseUrl: string): string | null {
 
 function generateDeviceSyncControlToken(): string {
   return randomBytes(24).toString('hex')
+}
+
+function generateDeviceSyncEncryptionSecret(): string {
+  return randomBytes(32).toString('hex')
+}
+
+async function resolveManagedDeviceSyncEncryptionSecret(input: {
+  paths: DeviceDaemonPaths
+  env: NodeJS.ProcessEnv
+  dependencies: Pick<DeviceDaemonDependencies, 'mkdir' | 'writeFile' | 'chmod'>
+}): Promise<string> {
+  const explicitSecret = readEnvValue(input.env, DEVICE_SYNC_SECRET_ENV_KEYS)
+  if (explicitSecret) {
+    return explicitSecret
+  }
+
+  const existingSecret = resolveManagedEncryptionSecret(input.paths)
+  if (existingSecret) {
+    return existingSecret
+  }
+
+  const generatedSecret = generateDeviceSyncEncryptionSecret()
+  await writeManagedEncryptionSecret(
+    input.paths,
+    generatedSecret,
+    input.dependencies,
+  )
+  return generatedSecret
 }
 
 function readManagedControlToken(vaultRoot: string): string | null {

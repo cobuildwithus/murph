@@ -21,6 +21,7 @@ What it does:
 - owns OAuth connection state
 - stores encrypted provider tokens in SQLite under `.runtime/operations/device-sync/state.sqlite`
 - keeps `.runtime/operations/device-sync/**` local-only; those secrets, cursors, launcher artifacts, and logs are excluded from hosted workspace snapshots because the hosted lane uses a web-owned hosted device-sync control plane plus narrow signed runtime callbacks instead of the local daemon store
+- treats the managed control bearer and managed OAuth encryption secret as separate local files, so bearer rotation does not invalidate encrypted provider tokens
 - accepts provider webhooks when a provider supports them
 - runs background backfill and reconcile jobs
 - serializes active jobs per account so rotating refresh-token flows do not race

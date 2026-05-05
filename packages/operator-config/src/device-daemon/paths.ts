@@ -4,7 +4,6 @@ import { URL } from 'node:url'
 import {
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
   DEVICE_SYNC_SECRET_ENV,
-  DEVICE_SYNC_SECRET_ENV_KEYS,
 } from '@murphai/device-syncd/client'
 import {
   resolveDeviceSyncRuntimePaths,
@@ -118,6 +117,7 @@ export function buildManagedDeviceSyncEnvironment(input: {
   vault: string
   baseUrl: string
   controlToken: string
+  encryptionSecret: string
   env: NodeJS.ProcessEnv
   paths: DeviceDaemonPaths
 }): NodeJS.ProcessEnv {
@@ -138,13 +138,7 @@ export function buildManagedDeviceSyncEnvironment(input: {
     [DEVICE_SYNC_PUBLIC_BASE_URL_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ||
       input.baseUrl,
-    // device-syncd still needs a stable service secret for local token
-    // encryption, so managed launches seed DEVICE_SYNC_SECRET from the
-    // operator-provided secret when available and otherwise reuse the managed
-    // control token value.
-    [DEVICE_SYNC_SECRET_ENV]:
-      readEnvValue(input.env, DEVICE_SYNC_SECRET_ENV_KEYS) ||
-      input.controlToken,
+    [DEVICE_SYNC_SECRET_ENV]: input.encryptionSecret,
     [DEVICE_SYNC_CONTROL_TOKEN_ENV]:
       input.env[DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
       input.controlToken,

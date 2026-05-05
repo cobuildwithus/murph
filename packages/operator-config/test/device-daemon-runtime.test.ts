@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -47,7 +47,9 @@ import {
   readDeviceDaemonState,
   removeManagedControlToken,
   resolveManagedControlToken,
+  resolveManagedEncryptionSecret,
   writeDeviceDaemonState,
+  writeManagedEncryptionSecret,
   writeManagedControlToken,
 } from '../src/device-daemon/state.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
@@ -326,6 +328,7 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
       vault,
       baseUrl: 'http://127.0.0.1:4318/base',
       controlToken: 'generated-token',
+      encryptionSecret: 'operator-secret',
       env: {
         DEVICE_SYNC_CONTROL_TOKEN: ' explicit-token ',
         DEVICE_SYNC_HOST: ' localhost ',
@@ -351,6 +354,7 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
       vault,
       baseUrl: 'https://127.0.0.1/device',
       controlToken: 'generated-token',
+      encryptionSecret: 'stable-managed-secret',
       env: {},
       paths,
     }),
@@ -359,7 +363,7 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
       DEVICE_SYNC_HOST: '127.0.0.1',
       DEVICE_SYNC_PORT: '443',
       DEVICE_SYNC_PUBLIC_BASE_URL: 'https://127.0.0.1/device',
-      DEVICE_SYNC_SECRET: 'generated-token',
+      DEVICE_SYNC_SECRET: 'stable-managed-secret',
       DEVICE_SYNC_STATE_DB_PATH: paths.stateDbPath,
       DEVICE_SYNC_VAULT_ROOT: vault,
     },
@@ -1284,6 +1288,134 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
     managed: false,
     started: false,
   })
+})
+
+test('managed device-sync daemon keeps encryption secret stable across stop and restart', async () => {
+  const vault = await createTempVault('operator-config-device-daemon-secret-')
+  const paths = resolveDeviceDaemonPaths(vault)
+  const livePids = new Set<number>()
+  const spawnedEnvironments: NodeJS.ProcessEnv[] = []
+  let nextPid = 9500
+
+  const dependencies = {
+    now: () => new Date('2026-04-08T00:00:00.000Z'),
+    sleep: async () => undefined,
+    fetchImpl: async () =>
+      new Response(null, {
+        status: livePids.size > 0 ? 200 : 503,
+      }),
+    isProcessAlive: (pid: number) => livePids.has(pid),
+    killProcess: (pid: number) => {
+      livePids.delete(pid)
+    },
+    resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+    spawnProcess: async (input: { env: NodeJS.ProcessEnv }) => {
+      spawnedEnvironments.push(input.env)
+      const pid = nextPid
+      nextPid += 1
+      livePids.add(pid)
+      return { pid }
+    },
+  }
+
+  await startManagedDeviceSyncDaemon({
+    vault,
+    env: TEST_WHOOP_PROVIDER_ENV,
+    dependencies,
+  })
+  const firstControlToken = resolveManagedControlToken(paths)
+  const firstEncryptionSecret = resolveManagedEncryptionSecret(paths)
+  assert.match(firstControlToken ?? '', /^[a-f0-9]{48}$/u)
+  assert.match(firstEncryptionSecret ?? '', /^[a-f0-9]{64}$/u)
+  assert.equal(spawnedEnvironments[0]?.DEVICE_SYNC_CONTROL_TOKEN, firstControlToken)
+  assert.equal(spawnedEnvironments[0]?.DEVICE_SYNC_SECRET, firstEncryptionSecret)
+
+  await stopManagedDeviceSyncDaemon({
+    vault,
+    dependencies,
+  })
+  assert.equal(resolveManagedControlToken(paths), null)
+  assert.equal(resolveManagedEncryptionSecret(paths), firstEncryptionSecret)
+
+  await startManagedDeviceSyncDaemon({
+    vault,
+    env: TEST_WHOOP_PROVIDER_ENV,
+    dependencies,
+  })
+  const secondControlToken = resolveManagedControlToken(paths)
+  assert.match(secondControlToken ?? '', /^[a-f0-9]{48}$/u)
+  assert.notEqual(secondControlToken, firstControlToken)
+  assert.equal(resolveManagedEncryptionSecret(paths), firstEncryptionSecret)
+  assert.equal(spawnedEnvironments[1]?.DEVICE_SYNC_CONTROL_TOKEN, secondControlToken)
+  assert.equal(spawnedEnvironments[1]?.DEVICE_SYNC_SECRET, firstEncryptionSecret)
+
+  livePids.clear()
+  await startManagedDeviceSyncDaemon({
+    vault,
+    env: TEST_WHOOP_PROVIDER_ENV,
+    dependencies,
+  })
+  const crashRestartControlToken = resolveManagedControlToken(paths)
+  assert.match(crashRestartControlToken ?? '', /^[a-f0-9]{48}$/u)
+  assert.notEqual(crashRestartControlToken, secondControlToken)
+  assert.equal(resolveManagedEncryptionSecret(paths), firstEncryptionSecret)
+  assert.equal(spawnedEnvironments[2]?.DEVICE_SYNC_CONTROL_TOKEN, crashRestartControlToken)
+  assert.equal(spawnedEnvironments[2]?.DEVICE_SYNC_SECRET, firstEncryptionSecret)
+})
+
+test('managed device-sync encryption secret fails closed on invalid existing state', async () => {
+  const permissionVault = await createTempVault('operator-config-device-daemon-secret-perms-')
+  const permissionPaths = resolveDeviceDaemonPaths(permissionVault)
+  await writeManagedEncryptionSecret(
+    permissionPaths,
+    'stable-secret-for-tests',
+    createFileDependencies(),
+  )
+  await chmod(path.dirname(permissionPaths.launcherStatePath), 0o777)
+  await chmod(
+    path.join(path.dirname(permissionPaths.launcherStatePath), 'encryption-secret'),
+    0o644,
+  )
+
+  assert.equal(resolveManagedEncryptionSecret(permissionPaths), 'stable-secret-for-tests')
+  assert.equal(
+    (await stat(path.dirname(permissionPaths.launcherStatePath))).mode & 0o777,
+    0o700,
+  )
+  assert.equal(
+    (await stat(path.join(path.dirname(permissionPaths.launcherStatePath), 'encryption-secret'))).mode & 0o777,
+    0o600,
+  )
+
+  const symlinkVault = await createTempVault('operator-config-device-daemon-secret-symlink-')
+  const symlinkPaths = resolveDeviceDaemonPaths(symlinkVault)
+  const symlinkDirectory = path.dirname(symlinkPaths.launcherStatePath)
+  await mkdir(symlinkDirectory, { recursive: true })
+  await writeFile(path.join(symlinkDirectory, 'target-secret'), 'stable-secret-for-tests\n', 'utf8')
+  await symlink(
+    path.join(symlinkDirectory, 'target-secret'),
+    path.join(symlinkDirectory, 'encryption-secret'),
+  )
+
+  assert.throws(
+    () => resolveManagedEncryptionSecret(symlinkPaths),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_SECRET_INVALID' &&
+      /encryption secret file is invalid/u.test(error.message),
+  )
+
+  const emptyVault = await createTempVault('operator-config-device-daemon-secret-empty-')
+  const emptyPaths = resolveDeviceDaemonPaths(emptyVault)
+  await writeManagedEncryptionSecret(emptyPaths, '', createFileDependencies())
+
+  assert.throws(
+    () => resolveManagedEncryptionSecret(emptyPaths),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_SECRET_INVALID' &&
+      /encryption secret is empty/u.test(error.message),
+  )
 })
 
 test('device-daemon lifecycle handles startup cleanup and stop edge cases deterministically', async () => {
