@@ -708,7 +708,13 @@ type HostedWorkspaceCheckpointSnapshotMode = "full" | "hot";
 function resolveHostedWorkspaceCheckpointSnapshotMode(
   reason: HostedWorkspaceCheckpointRequest["reason"],
 ): HostedWorkspaceCheckpointSnapshotMode {
-  return reason === "maintenance" || reason === "system_mailbox_receipt" ? "full" : "hot";
+  return reason === "maintenance"
+    || reason === "outbox_intent"
+    || reason === "outbox_sending"
+    || reason === "system_mailbox_sending"
+    || reason === "system_mailbox_receipt"
+    ? "full"
+    : "hot";
 }
 
 async function writeHostedCheckpointSnapshotMetricLog(input: {

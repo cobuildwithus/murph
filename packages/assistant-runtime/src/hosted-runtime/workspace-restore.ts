@@ -33,6 +33,7 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
+const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_BUNDLE_KEY_PREFIX = "cloudflare-workspace-hot-state/";
 
 export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 
@@ -68,6 +69,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     };
   }
 
+  let baseProvidesCodexProviderContinuity = false;
   if (baseSnapshotRef) {
     const baseBundle = await readHostedWorkspaceRuntimeBundle({
       platform: input.platform,
@@ -84,6 +86,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       ref: baseSnapshotRef,
       restored,
     });
+    baseProvidesCodexProviderContinuity = hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: baseRepair.bundle,
+    });
   }
 
   if (hotSnapshotRef) {
@@ -95,6 +100,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       bundle: hotBundle,
       platform: input.platform,
       snapshotLayer: "hot",
+      skipLegacyContinuityRepair: (
+        baseProvidesCodexProviderContinuity
+        && isHostedAssistantRuntimeHotStateBundleRef(hotSnapshotRef)
+      ),
     });
     const hotBundleRepaired =
       hotRepair.removedMalformedSessionCount > 0 || hotRepair.scrubbedSessionCount > 0;
@@ -123,12 +132,21 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
   bundle: Uint8Array | ArrayBuffer;
   platform: HostedRuntimePlatform;
+  skipLegacyContinuityRepair?: boolean;
   snapshotLayer: "base" | "hot";
 }): Promise<{
   bundle: Uint8Array | ArrayBuffer;
   removedMalformedSessionCount: number;
   scrubbedSessionCount: number;
 }> {
+  if (input.skipLegacyContinuityRepair === true) {
+    return {
+      bundle: input.bundle,
+      removedMalformedSessionCount: 0,
+      scrubbedSessionCount: 0,
+    };
+  }
+
   const repair = repairLegacyHostedWorkspaceSnapshotProviderContinuity({
     bundle: input.bundle,
   });
@@ -152,6 +170,10 @@ async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
     platform: input.platform,
   });
   return repair;
+}
+
+function isHostedAssistantRuntimeHotStateBundleRef(ref: HostedExecutionBundleRef): boolean {
+  return ref.key.startsWith(HOSTED_ASSISTANT_RUNTIME_HOT_STATE_BUNDLE_KEY_PREFIX);
 }
 
 async function restoreHostedWorkspaceRuntimeBundle(input: {

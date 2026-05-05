@@ -251,17 +251,9 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
   vaultRoot: string;
 }): Promise<HostedAssistantRuntimeHotStateSnapshot> {
   const vaultRoot = path.resolve(input.vaultRoot);
-  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
-  const codexHomeSnapshotDiagnostics = operatorHomeRoot
-    ? await collectHostedCodexHomeSnapshotDiagnostics({
-        hashSecret: input.codexHomeSnapshotHashSecret ?? null,
-        operatorHomeRoot,
-      })
-    : null;
   await ensureAssistantStateDirectory(assistantStateRoot);
   await assertHostedAssistantRuntimeHotStatePreBundleBudget({
-    operatorHomeRoot,
     vaultRoot,
   });
 
@@ -275,18 +267,6 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
           return shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath);
         },
       },
-      ...(operatorHomeRoot
-        ? [
-            {
-              optional: true,
-              root: operatorHomeRoot,
-              rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
-              shouldIncludeRelativePath(relativePath: string) {
-                return shouldIncludeHostedAssistantRuntimeHotStateOperatorHomeRelativePath(relativePath);
-              },
-            },
-          ]
-        : []),
     ],
   });
 
@@ -299,14 +279,10 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
     ...metrics,
     bundleBytes: bundle.byteLength,
   });
-  assertHostedWorkspaceSnapshotProviderContinuityComplete({
-    bundle,
-    createError: (reason) => new HostedAssistantRuntimeHotStateIncompleteError(reason),
-  });
   return {
     bundle,
     bundleBytes: bundle.byteLength,
-    codexHomeSnapshotDiagnostics,
+    codexHomeSnapshotDiagnostics: null,
     fileCount: metrics.fileCount,
     inlineBytes: metrics.inlineBytes,
   };
@@ -477,23 +453,12 @@ export async function materializeHostedExecutionArtifacts(input: {
 }
 
 async function assertHostedAssistantRuntimeHotStatePreBundleBudget(input: {
-  operatorHomeRoot?: string | null;
   vaultRoot: string;
 }): Promise<void> {
   const metrics = await collectHostedAssistantRuntimeHotStateBudgetMetrics({
     shouldIncludeRelativePath: shouldIncludeHostedAssistantRuntimeHotStateRelativePath,
     root: input.vaultRoot,
   });
-  if (input.operatorHomeRoot) {
-    const operatorHomeMetrics = await collectHostedAssistantRuntimeHotStateBudgetMetrics({
-      optional: true,
-      shouldIncludeRelativePath: shouldIncludeHostedAssistantRuntimeHotStateOperatorHomeRelativePath,
-      root: input.operatorHomeRoot,
-    });
-    metrics.fileCount += operatorHomeMetrics.fileCount;
-    metrics.inlineBytes += operatorHomeMetrics.inlineBytes;
-    metrics.minimumBundleBytes += operatorHomeMetrics.minimumBundleBytes;
-  }
   assertHostedAssistantRuntimeHotStateBudget({
     bundleBytes: metrics.minimumBundleBytes,
     fileCount: metrics.fileCount,
@@ -615,19 +580,6 @@ function shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath: s
     normalizedRelativePath === includedPath
     || normalizedRelativePath.startsWith(`${includedPath}${path.posix.sep}`)
     || includedPath.startsWith(`${normalizedRelativePath}${path.posix.sep}`)
-  );
-}
-
-function shouldIncludeHostedAssistantRuntimeHotStateOperatorHomeRelativePath(relativePath: string): boolean {
-  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
-  if (!hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH)) {
-    return false;
-  }
-
-  return shouldIncludeHostedCodexHomeRelativePath(
-    normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
-      ? ""
-      : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length),
   );
 }
 

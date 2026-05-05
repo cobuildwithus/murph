@@ -33,7 +33,7 @@ import type {
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace restore Codex continuity", () => {
-  test("restores live Codex provider continuity as authoritative over base state", async () => {
+  test("preserves base Codex provider continuity when hot state omits Codex home", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-restore-"));
 
     try {
@@ -41,7 +41,6 @@ describe("hosted workspace restore Codex continuity", () => {
       const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
       const sourceBaseOperatorHomeRoot = path.join(workspaceRoot, "base-operator-home");
       const sourceHotVaultRoot = path.join(workspaceRoot, "hot-vault");
-      const sourceHotOperatorHomeRoot = path.join(workspaceRoot, "hot-operator-home");
       const baseAssistantRoot = resolveAssistantStatePaths(sourceBaseVaultRoot).assistantStateRoot;
       await mkdir(path.join(baseAssistantRoot, "outbox"), { recursive: true });
       await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
@@ -86,16 +85,7 @@ describe("hosted workspace restore Codex continuity", () => {
         }) + "\n",
         "utf8",
       );
-      await mkdir(path.join(sourceHotOperatorHomeRoot, ".codex-hosted", "sessions"), {
-        recursive: true,
-      });
-      await writeFile(
-        path.join(sourceHotOperatorHomeRoot, ".codex-hosted", "sessions", "latest.json"),
-        "{\"codex\":\"latest\"}\n",
-        "utf8",
-      );
       const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
-        operatorHomeRoot: sourceHotOperatorHomeRoot,
         vaultRoot: sourceHotVaultRoot,
       });
       const baseHash = sha256HostedBundleHex(baseBundle);
@@ -120,7 +110,7 @@ describe("hosted workspace restore Codex continuity", () => {
             }),
             hot: createBundleRef({
               hash: hotHash,
-              key: "users/bundles/member-synthetic/hot.bundle.json",
+              key: `cloudflare-workspace-hot-state/${hotHash}.bundle`,
               size: hotSnapshot.bundle.byteLength,
             }),
           }),
@@ -146,12 +136,12 @@ describe("hosted workspace restore Codex continuity", () => {
         path.dirname(restoredVaultRoot),
         `${path.basename(restoredVaultRoot)}-operator-home`,
       );
-      await assert.rejects(
-        readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"), "utf8"),
-      );
       assert.equal(
-        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "latest.json"), "utf8"),
-        "{\"codex\":\"latest\"}\n",
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"), "utf8"),
+        "{\"codex\":\"old\"}\n",
+      );
+      await assert.rejects(
+        readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "latest.json"), "utf8"),
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
