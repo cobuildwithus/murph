@@ -194,6 +194,47 @@ describe("deploy preflight helpers", () => {
     ).toContain("production deploys must set HOSTED_CRYPTO_ENV=production.");
   });
 
+  it("requires Junction runtime env to be configured all-or-none", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          JUNCTION_ENV: "sandbox",
+          JUNCTION_REGION: "us",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "Junction runtime env must set JUNCTION_API_KEY, JUNCTION_CLIENT_USER_ID_SECRET, JUNCTION_ENV, JUNCTION_REGION together.",
+    );
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          JUNCTION_API_KEY: "junction-api-key",
+          JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+          JUNCTION_ENV: "sandbox",
+          JUNCTION_REGION: "us",
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(
+      "Junction runtime env must set JUNCTION_API_KEY, JUNCTION_CLIENT_USER_ID_SECRET, JUNCTION_ENV, JUNCTION_REGION together.",
+    );
+  });
+
+  it("allows deploys without Junction runtime env", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          JUNCTION_PROVIDER_FILTER: "garmin",
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(
+      "Junction runtime env must set JUNCTION_API_KEY, JUNCTION_CLIENT_USER_ID_SECRET, JUNCTION_ENV, JUNCTION_REGION together.",
+    );
+  });
+
   it("rejects malformed deploy contexts before deployment", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "prod",

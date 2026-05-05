@@ -53,6 +53,7 @@ type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
 type HostedDirtyDeviceSyncStateSkipReason =
   | "connection_missing"
   | "local_account_missing"
+  | "provider_mismatch"
   | "provider_not_registered";
 
 const HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT = 10;
@@ -321,6 +322,16 @@ function applyHostedDirtyDeviceSyncState(input: {
     reportHostedDirtyDeviceSyncStateSkipped({
       dirtyState: input.dirtyState,
       reason: "local_account_missing",
+      wake: input.wake,
+    });
+    return null;
+  }
+
+  if (account.provider !== input.dirtyState.provider) {
+    reportHostedDirtyDeviceSyncStateSkipped({
+      account,
+      dirtyState: input.dirtyState,
+      reason: "provider_mismatch",
       wake: input.wake,
     });
     return null;
