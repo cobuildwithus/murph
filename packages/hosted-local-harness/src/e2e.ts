@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
 import process from "node:process";
 
-import { repoRoot } from "../../../scripts/dev-hosted-local/constants.ts";
+import {
+  HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
+  repoRoot,
+} from "../../../scripts/dev-hosted-local/constants.ts";
 import { cleanupHostedRunnerContainers } from "../../../scripts/dev-hosted-local/runtime.ts";
 import { runForegroundCommand } from "./process.ts";
 
@@ -105,20 +109,20 @@ export async function runHostedLocalE2eSuite(
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
-  const vitestEnv = buildHostedLocalVitestEnv({
+  const suiteEnv = buildHostedLocalE2eSuiteEnv({
     env,
     injectSkipRunnerBundleEnv,
   });
 
   try {
     if (prepareRunnerBundle) {
-      await prepareHostedLocalRunnerBundle({ env, scenarios });
+      await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
     }
-    await runHostedLocalVitest({ env: vitestEnv, scenarios });
+    await runHostedLocalVitest({ env: suiteEnv, scenarios });
   } finally {
     await cleanupHostedRunnerContainers({
       cwd: repoRoot,
-      env: vitestEnv,
+      env: suiteEnv,
       ignoreErrors: true,
     });
   }
@@ -167,18 +171,20 @@ async function runHostedLocalVitest(input: {
   });
 }
 
-function buildHostedLocalVitestEnv(input: {
+function buildHostedLocalE2eSuiteEnv(input: {
   env: NodeJS.ProcessEnv;
   injectSkipRunnerBundleEnv: boolean;
 }): NodeJS.ProcessEnv {
-  if (!input.injectSkipRunnerBundleEnv) {
-    return input.env;
-  }
-
   const env: NodeJS.ProcessEnv = {
     ...input.env,
-    MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
+    [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]:
+      input.env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim()
+      || input.env.MURPH_HOSTED_LOCAL_RUN_ID?.trim()
+      || `hosted-local-e2e-${randomUUID()}`,
   };
+  if (input.injectSkipRunnerBundleEnv) {
+    env.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
+  }
   delete env.MURPH_DEV_CF_WRANGLER_LOG_LEVEL;
   return env;
 }
