@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  sendHostedProviderLinqChatAction,
   sendHostedProviderLinqMessage,
   sendHostedProviderTelegramChatAction,
 } from "../src/hosted-provider-effects.ts";
@@ -124,5 +125,40 @@ describe("hosted provider effects", () => {
       String(fetchMock.mock.calls[2]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats",
     );
+  });
+
+  it("starts and stops Linq typing inside the provider effect", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(null, {
+      status: 204,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const dependencies = {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+    };
+
+    await sendHostedProviderLinqChatAction({
+      action: "typing",
+      target: "chat_123",
+    }, dependencies);
+    await sendHostedProviderLinqChatAction({
+      action: "typing_stop",
+      target: "chat_123",
+    }, dependencies);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    assert.equal(
+      String(fetchMock.mock.calls[0]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/chats/chat_123/typing",
+    );
+    assert.equal(
+      String(fetchMock.mock.calls[1]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/chats/chat_123/typing",
+    );
+    assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
+    assert.equal(fetchMock.mock.calls[1]?.[1]?.method, "DELETE");
   });
 });

@@ -169,7 +169,7 @@ export function parseHostedRunnerLinqChatActionRequest(
 ): HostedRuntimeLinqChatActionRequest {
   const record = requireRecord(value, "Hosted Linq chat action request");
   return {
-    action: parseTypingAction(record.action, "action"),
+    action: parseLinqChatAction(record.action, "action"),
     target: readRequiredString(record.target, "target"),
   };
 }
@@ -353,4 +353,14 @@ function parseTypingAction(value: unknown, label: string): "typing" {
     return value;
   }
   throw new TypeError(`Hosted runner provider effect ${label} must be typing.`);
+}
+
+function parseLinqChatAction(
+  value: unknown,
+  label: string,
+): HostedRuntimeLinqChatActionRequest["action"] {
+  if (value === "typing" || value === "typing_stop") {
+    return value;
+  }
+  throw new TypeError(`Hosted runner Linq provider effect ${label} must be typing or typing_stop.`);
 }

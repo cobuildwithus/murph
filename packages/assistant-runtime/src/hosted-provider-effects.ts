@@ -7,6 +7,7 @@ import {
   markLinqChatRead,
   probeLinqApi,
   startLinqChatTypingIndicator,
+  stopLinqChatTypingIndicator,
 } from "@murphai/operator-config/linq-runtime";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
@@ -106,13 +107,27 @@ export async function sendHostedProviderLinqChatAction(
   request: HostedRuntimeLinqChatActionRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<void> {
-  assertTypingAction(request.action);
-  await startLinqChatTypingIndicator({
-    chatId: request.target,
-  }, {
-    env: dependencies.env,
-    signal: dependencies.signal,
-  });
+  if (request.action === "typing") {
+    await startLinqChatTypingIndicator({
+      chatId: request.target,
+    }, {
+      env: dependencies.env,
+      signal: dependencies.signal,
+    });
+    return;
+  }
+
+  if (request.action === "typing_stop") {
+    await stopLinqChatTypingIndicator({
+      chatId: request.target,
+    }, {
+      env: dependencies.env,
+      signal: dependencies.signal,
+    });
+    return;
+  }
+
+  throw new TypeError("Hosted provider Linq chat action must be typing or typing_stop.");
 }
 
 export async function markHostedProviderLinqRead(

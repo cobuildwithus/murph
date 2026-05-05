@@ -173,17 +173,24 @@ test("hosted typing prefers provider effects when available", async () => {
     userEnv: {},
   });
 
-  await typing.startLinqTyping?.({
+  const linqHandle = await typing.startLinqTyping?.({
     target: "linq_chat_123",
   });
+  await linqHandle?.stop();
   await typing.startTelegramTyping?.({
     target: "telegram_chat_123",
   });
 
-  assert.deepEqual(sendLinqChatAction.mock.calls, [[{
-    action: "typing",
-    target: "linq_chat_123",
-  }]]);
+  assert.deepEqual(sendLinqChatAction.mock.calls, [
+    [{
+      action: "typing",
+      target: "linq_chat_123",
+    }],
+    [{
+      action: "typing_stop",
+      target: "linq_chat_123",
+    }],
+  ]);
   assert.deepEqual(sendTelegramChatAction.mock.calls, [[{
     action: "typing",
     target: "telegram_chat_123",

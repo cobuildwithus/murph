@@ -1455,7 +1455,9 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("routes Linq lightweight effects without echoing provider tokens", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(null, {
       status: 204,
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -1467,6 +1469,19 @@ describe("handleRunnerOutboundRequest", () => {
       new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH}`, {
         body: JSON.stringify({
           action: "typing",
+          target: "linq_chat_123",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+    const chatActionStopResponse = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH}`, {
+        body: JSON.stringify({
+          action: "typing_stop",
           target: "linq_chat_123",
         }),
         headers: createMailboxPayloadDecodeHeaders(),
@@ -1502,16 +1517,40 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(chatActionResponse.status).toBe(200);
+    expect(chatActionStopResponse.status).toBe(200);
     expect(markReadResponse.status).toBe(200);
     expect(deleteResponse.status).toBe(200);
     const chatActionPayload = await chatActionResponse.json();
+    const chatActionStopPayload = await chatActionStopResponse.json();
     const markReadPayload = await markReadResponse.json();
     const deletePayload = await deleteResponse.json();
     expect(chatActionPayload).toEqual({ ok: true });
+    expect(chatActionStopPayload).toEqual({ ok: true });
     expect(markReadPayload).toEqual({ ok: true });
     expect(deletePayload).toEqual({ ok: true });
-    expect(JSON.stringify([chatActionPayload, markReadPayload, deletePayload])).not.toContain("linq-token");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify([
+      chatActionPayload,
+      chatActionStopPayload,
+      markReadPayload,
+      deletePayload,
+    ])).not.toContain("linq-token");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.linqapp.com/api/partner/v3/chats/linq_chat_123/typing",
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "https://api.linqapp.com/api/partner/v3/chats/linq_chat_123/typing",
+    );
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
+      "https://api.linqapp.com/api/partner/v3/chats/linq_chat_123/read",
+    );
+    expect(String(fetchMock.mock.calls[3]?.[0])).toBe(
+      "https://api.linqapp.com/api/partner/v3/messages/linq_message_123",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("DELETE");
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[3]?.[1]?.method).toBe("DELETE");
   });
 
   it("proxies the hosted workspace read route through web-control GET", async () => {

@@ -76,12 +76,20 @@ export function createHostedAssistantChannelTypingDependencies(input: {
 }): AssistantChannelTypingDependencies {
   return {
     startLinqTyping: async (request) => {
-      if (input.effectsPort?.sendLinqChatAction) {
-        await input.effectsPort.sendLinqChatAction({
+      const sendLinqChatAction = input.effectsPort?.sendLinqChatAction;
+      if (sendLinqChatAction) {
+        await sendLinqChatAction({
           action: "typing",
           target: request.target,
         });
-        return;
+        return {
+          async stop() {
+            await sendLinqChatAction({
+              action: "typing_stop",
+              target: request.target,
+            });
+          },
+        };
       }
 
       return startLinqTypingIndicator(request, {
