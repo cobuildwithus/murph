@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, test } from "vitest";
 
+import {
+  executeCodexAppServerTurn,
+} from "@murphai/assistant-engine/assistant-codex";
 import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
@@ -30,6 +33,8 @@ import {
 } from "../src/hosted-runtime/codex-config.ts";
 
 const temporaryPaths: string[] = [];
+const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
+const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
 
 afterEach(async () => {
   await Promise.all(
@@ -67,16 +72,18 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
 
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.doesNotMatch(config, /^model = /mu);
-  assert.match(config, /model_provider = "hosted-openai"/u);
+  assert.match(config, /^model_provider = "hosted-openai"$/mu);
   assert.match(config, /model_reasoning_effort = "medium"/u);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
+  assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
   assert.match(config, /base_url = "https:\/\/api\.openai\.com\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
-  assert.match(config, /requires_openai_auth = false/u);
+  assert.match(config, /^requires_openai_auth = false$/mu);
+  assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "none"/u);
   assert.match(config, /include_only = \[/u);
@@ -350,6 +357,93 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
     await closeHttpServer(server);
   }
 });
+
+testHostedCodexAuthE2e(
+  "hosted Codex runtime authenticates but the legacy built-in OpenAI config fails",
+  async () => {
+    const operatorHomeRoot = await createTemporaryDirectory();
+    const requests: string[] = [];
+    const authorizationHeaders: string[] = [];
+    const expectedAuthorization = "Bearer hosted-auth-regression-key";
+    const server = await startResponsesStubServer({
+      authorizationHeaders,
+      requiredAuthorization: expectedAuthorization,
+      requests,
+      responseText: "auth regression ok",
+    });
+
+    try {
+      const result = await prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            `${readServerBaseUrl(server)}/v1`,
+          NODE_ENV: "test",
+          OPENAI_API_KEY: "hosted-auth-regression-key",
+          PATH: process.env.PATH ?? "",
+        },
+      });
+      const config = await readFile(result.codexConfigPath, "utf8");
+
+      assert.match(config, /^model_provider = "openai-local-test"$/mu);
+      assert.match(config, /\[model_providers\."openai-local-test"\]/u);
+      assert.match(config, /^env_key = "OPENAI_API_KEY"$/mu);
+      assert.match(config, /^requires_openai_auth = false$/mu);
+      assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
+
+      const fixedResult = await executeCodexAppServerTurn({
+        approvalPolicy: "never",
+        codexHome: result.runtimeEnv.CODEX_HOME,
+        env: {
+          CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+          HOME: operatorHomeRoot,
+          OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
+          PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
+        },
+        prompt: "hello hosted auth regression",
+        sandbox: "danger-full-access",
+        workingDirectory: operatorHomeRoot,
+      });
+
+      assert.equal(requests.length, 1);
+      assert.equal(fixedResult.finalMessage, "auth regression ok");
+      assert.equal(authorizationHeaders[0], expectedAuthorization);
+      assert.match(requests[0]!, /hello hosted auth regression/u);
+
+      const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
+        baseUrl: `${readServerBaseUrl(server)}/v1`,
+        operatorHomeRoot,
+      });
+      let legacyError: unknown = null;
+      try {
+        await executeCodexAppServerTurn({
+          abortSignal: AbortSignal.timeout(3_000),
+          approvalPolicy: "never",
+          codexHome: legacyCodexHome,
+          env: {
+            CODEX_HOME: legacyCodexHome,
+            HOME: operatorHomeRoot,
+            OPENAI_API_KEY: "hosted-auth-regression-key",
+            PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
+          },
+          prompt: "hello legacy hosted auth regression",
+          sandbox: "danger-full-access",
+          workingDirectory: operatorHomeRoot,
+        });
+      } catch (error) {
+        legacyError = error;
+      }
+
+      assert.notEqual(authorizationHeaders[1], expectedAuthorization);
+      assert(legacyError instanceof Error);
+    } finally {
+      await closeHttpServer(server);
+    }
+  },
+  20_000,
+);
 
 test("hosted Codex runtime config rejects the removed local Codex provider", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
@@ -692,6 +786,8 @@ async function createTemporaryDirectory(): Promise<string> {
 }
 
 async function startResponsesStubServer(input: {
+  authorizationHeaders?: string[];
+  requiredAuthorization?: string;
   requests: string[];
   responseText?: string;
   responseTexts?: readonly string[];
@@ -703,7 +799,13 @@ async function startResponsesStubServer(input: {
       chunks.push(Buffer.from(chunk));
     });
     request.on("end", () => {
-      input.requests.push(Buffer.concat(chunks).toString("utf8"));
+      const body = Buffer.concat(chunks).toString("utf8");
+      input.requests.push(body);
+      input.authorizationHeaders?.push(
+        typeof request.headers.authorization === "string"
+          ? request.headers.authorization
+          : "",
+      );
 
       if (request.method !== "POST" || request.url !== "/v1/responses") {
         response.statusCode = 404;
@@ -711,18 +813,58 @@ async function startResponsesStubServer(input: {
         return;
       }
 
+      if (
+        input.requiredAuthorization
+        && request.headers.authorization !== input.requiredAuthorization
+      ) {
+        response.statusCode = 401;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({
+          error: {
+            message: "Missing Bearer auth for hosted Codex regression.",
+            type: "invalid_request_error",
+          },
+        }));
+        return;
+      }
+
       response.setHeader("content-type", "application/json; charset=utf-8");
       const responseText = responseTexts.shift() ?? input.responseText ?? "shim response";
+      const parsedBody = parseJsonObject(body);
+      if (parsedBody?.stream === true) {
+        writeResponsesStubStream({
+          response,
+          responseId: `resp_hosted_codex_config_${input.requests.length}`,
+          responseText,
+        });
+        return;
+      }
+
       response.end(JSON.stringify({
+        created_at: Math.floor(Date.now() / 1000),
+        id: `resp_hosted_codex_config_${input.requests.length}`,
+        model: "gpt-5.5",
         output: [
           {
             content: [
               {
+                annotations: [],
                 text: responseText,
+                type: "output_text",
               },
             ],
+            id: `msg_hosted_codex_config_${input.requests.length}`,
+            role: "assistant",
+            type: "message",
           },
         ],
+        usage: {
+          input_tokens: 24,
+          input_tokens_details: null,
+          output_tokens: 11,
+          output_tokens_details: null,
+          total_tokens: 35,
+        },
       }));
     });
   });
@@ -736,6 +878,120 @@ async function startResponsesStubServer(input: {
   });
 
   return server;
+}
+
+async function prepareLegacyBuiltInOpenAiCodexHome(input: {
+  baseUrl: string;
+  operatorHomeRoot: string;
+}): Promise<string> {
+  const codexHome = path.join(input.operatorHomeRoot, ".codex-legacy-openai");
+  await mkdir(codexHome, {
+    mode: 0o700,
+    recursive: true,
+  });
+  await chmod(codexHome, 0o700);
+  await writeFile(
+    path.join(codexHome, "config.toml"),
+    [
+      'model = "gpt-5.5"',
+      'model_provider = "openai"',
+      `openai_base_url = ${JSON.stringify(input.baseUrl)}`,
+      'model_reasoning_effort = "medium"',
+      'approval_policy = "never"',
+      'sandbox_mode = "danger-full-access"',
+      "",
+      "[skills]",
+      "include_instructions = false",
+      "",
+      "[skills.bundled]",
+      "enabled = false",
+      "",
+    ].join("\n"),
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await chmod(path.join(codexHome, "config.toml"), 0o600);
+  return codexHome;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeResponsesStubStream(input: {
+  response: ServerResponse;
+  responseId: string;
+  responseText: string;
+}): void {
+  const messageId = `msg_${input.responseId}`;
+  const outputItem = {
+    content: [
+      {
+        annotations: [],
+        text: input.responseText,
+        type: "output_text",
+      },
+    ],
+    id: messageId,
+    role: "assistant",
+    status: "completed",
+    type: "message",
+  };
+  const completedResponse = {
+    created_at: Math.floor(Date.now() / 1000),
+    id: input.responseId,
+    model: "gpt-5.5",
+    output: [outputItem],
+    status: "completed",
+    usage: {
+      input_tokens: 24,
+      input_tokens_details: null,
+      output_tokens: 11,
+      output_tokens_details: null,
+      total_tokens: 35,
+    },
+  };
+
+  input.response.statusCode = 200;
+  input.response.setHeader("cache-control", "no-cache");
+  input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  writeResponsesStubSseEvent(input.response, "response.created", {
+    response: {
+      ...completedResponse,
+      output: [],
+      status: "in_progress",
+    },
+    type: "response.created",
+  });
+  writeResponsesStubSseEvent(input.response, "response.output_item.done", {
+    item: outputItem,
+    output_index: 0,
+    type: "response.output_item.done",
+  });
+  writeResponsesStubSseEvent(input.response, "response.completed", {
+    response: completedResponse,
+    type: "response.completed",
+  });
+  input.response.write("data: [DONE]\n\n");
+  input.response.end();
+}
+
+function writeResponsesStubSseEvent(
+  response: ServerResponse,
+  event: string,
+  payload: Record<string, unknown>,
+): void {
+  response.write(`event: ${event}\n`);
+  response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function readResponsesRequestInput(body: string): string {

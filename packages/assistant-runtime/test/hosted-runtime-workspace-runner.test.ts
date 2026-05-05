@@ -3144,7 +3144,7 @@ async function writePendingHostedUsageRecord(
       occurredAt: TEST_NOW,
       outputTokens: 5,
       provider: "codex-cli",
-      providerName: "Vercel AI Gateway",
+      providerName: "OpenAI",
       providerRequestId: null,
       rawUsageJson: null,
       rawUsageJsonHash: null,

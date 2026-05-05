@@ -173,7 +173,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       ...createRuntime(),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
-        VERCEL_AI_API_KEY: "sk-runtime",
+        OPENAI_API_KEY: "sk-runtime",
       },
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",

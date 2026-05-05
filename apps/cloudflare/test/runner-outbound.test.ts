@@ -112,11 +112,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     path: "/api/internal/hosted-execution/usage/record",
   },
   {
-    body: undefined,
-    name: "delegated billing Stripe customer lookup",
-    path: "/api/internal/hosted-execution/billing/stripe/customer/resolve",
-  },
-  {
     body: {
       provider: "google",
       returnPath: "/settings/sync",

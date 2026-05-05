@@ -495,71 +495,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("resolves delegated billing Stripe customers through the signed hosted web callback route", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      stripeCustomerId: "cus_123",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test",
-    });
-
-    const billing = await platform.billingPort!.resolveVercelAiGatewayStripeCustomerId();
-
-    expect(billing).toEqual({
-      stripeCustomerId: "cus_123",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const { init, input: url } = requireFetchCallArgs(
-      fetchMock.mock.calls[0],
-      "delegated billing fetch",
-    );
-    expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/billing/stripe/customer/resolve",
-    );
-    expect(init?.method).toBe("POST");
-    expect(init?.body).toBeUndefined();
-    const headers = new Headers(init?.headers);
-    expect(headers.get("content-type")).toBeNull();
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(headers.get("x-hosted-execution-signing-key-id")).toBe("v1");
-  });
-
-  it("rejects malformed delegated billing JSON from the signed hosted web callback route", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      stripeCustomerId: 123,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test",
-    });
-
-    await expect(platform.billingPort!.resolveVercelAiGatewayStripeCustomerId()).rejects.toThrow(
-      "Hosted delegated billing Stripe customer lookup returned invalid JSON.",
-    );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
   it("rejects direct hosted web control base URLs with non-root paths", async () => {
     const fetchMock = vi.fn();
     const platform = buildHostedExecutionRuntimePlatform({
@@ -612,38 +547,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
       userId: "member_123",
     });
-  });
-
-  it("routes delegated billing Stripe customer lookup through the worker proxy when callback signing stays outside the child", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      stripeCustomerId: "cus_123",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-    });
-
-    const billing = await platform.billingPort!.resolveVercelAiGatewayStripeCustomerId();
-
-    expect(billing).toEqual({
-      stripeCustomerId: "cus_123",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "proxied delegated billing fetch");
-    expect(request.url).toBe(
-      "http://web-control.worker/api/internal/hosted-execution/billing/stripe/customer/resolve",
-    );
-    expect(request.method).toBe("POST");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.headers.get("content-type")).toBeNull();
   });
 
   it("routes hosted mailbox fetches through the worker proxy without run adoption fields", async () => {

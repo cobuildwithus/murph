@@ -53,10 +53,10 @@ beforeEach(() => {
 });
 
 describe("hosted system mailbox notification execution context", () => {
-  it("keeps delegated Vercel Gateway billing context on queued notification wakes", async () => {
+  it("keeps hosted member context on queued notification wakes", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "assistant.notification.requested:gateway-billing",
+      eventId: "assistant.notification.requested:member-context",
       memberId: "member_123",
       notification: {
         instructions: "Send the prepared account update.",
@@ -77,7 +77,6 @@ describe("hosted system mailbox notification execution context", () => {
     const executionContext: AssistantExecutionContext = {
       hosted: {
         memberId: "member_123",
-        stripeCustomerId: "cus_platform_gateway",
         userEnvKeys: [],
       },
     };
@@ -109,7 +108,6 @@ describe("hosted system mailbox notification execution context", () => {
           executionContext: expect.objectContaining({
             hosted: expect.objectContaining({
               memberId: "member_123",
-              stripeCustomerId: "cus_platform_gateway",
             }),
           }),
           forceQueueOnlyAssistantNotification: true,

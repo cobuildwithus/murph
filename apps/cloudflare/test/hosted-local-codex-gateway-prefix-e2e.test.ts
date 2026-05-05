@@ -67,8 +67,8 @@ describe("hosted local Codex Gateway prefix e2e", () => {
 
     expect(requireScenario().runtimeEnv).toMatchObject({
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "stub-local-openai-key",
     });
     expect(
       requireScenario().runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV],
@@ -415,7 +415,7 @@ function sanitizeDiagnosticText(value: string): string {
     .replace(/\/Users\/[^/"\\\s]+/gu, "<HOME_DIR>")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gu, "Bearer <REDACTED>")
     .replace(/(?:sk|rk|pk)_[A-Za-z0-9_-]{8,}/gu, "<REDACTED_KEY>")
-    .replace(/stub-local-vercel-ai-gateway-key/gu, "<REDACTED_KEY>")
+    .replace(/stub-local-openai-key/gu, "<REDACTED_KEY>")
     .replace(/linq-local-(?:test-token|webhook-secret)/gu, "<REDACTED>")
     .replace(/member_local_codex_gateway_prefix_\d+/gu, "<TEST_MEMBER>")
     .replace(/chat_local_codex_gateway_prefix_\d+/gu, "<TEST_CHAT>")
@@ -470,7 +470,7 @@ async function startLinqScenario(): Promise<void> {
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: undefined,
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
@@ -478,7 +478,7 @@ async function startLinqScenario(): Promise<void> {
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_E2E_ASSISTANT_PROVIDER_MODE: "live",
-      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
+      OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderMode: "live",
     assistantProviderMaxResponsesApiRequestBodies: maxRecordedResponsesApiRequestBodies,

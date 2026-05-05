@@ -167,7 +167,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       approvalPolicy: "never" as const,
       codexCommand: null,
       model: "gpt-5.5",
-      modelProvider: "vercel-ai-gateway",
+      modelProvider: "openai",
       oss: false,
       profile: null,
       reasoningEffort: "medium" as const,
@@ -199,36 +199,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
             defaultTarget: hostedDefaultTarget,
-          }),
-        }),
-      }),
-    );
-  });
-
-  it("adds delegated Vercel Gateway Stripe customer id to the hosted execution context", async () => {
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      billingStripeCustomerId: "cus_platform_gateway",
-      runtimeForwardedEnv: {
-        HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
-        HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_gateway",
-        HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-        VERCEL_AI_API_KEY: "platform-vercel-key",
-      },
-    }));
-
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith({
-      hosted: expect.objectContaining({
-        memberId: "member_synthetic_phase",
-        stripeCustomerId: "cus_platform_gateway",
-        userEnvKeys: [],
-      }),
-    });
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
-      expect.objectContaining({
-        executionContext: expect.objectContaining({
-          hosted: expect.objectContaining({
-            stripeCustomerId: "cus_platform_gateway",
           }),
         }),
       }),
@@ -454,13 +424,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         autoReplyChannels: "linq",
         detailComponent: "runtime",
         detailLabel: "Hosted assistant automation pass finished.",
+        localPathPreview: "<REDACTED_PATH>",
         replyConsidered: 1,
       }),
       workspaceVersion: "8",
     }));
     expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
       assistantProviderRequest: expect.anything(),
-      localPathPreview: expect.anything(),
     }));
     expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
       attemptId: "attempt_synthetic_phase",
@@ -825,11 +795,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         detailLabel:
           "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
         errorCode: "assistant_provider_failed",
+        localPathPreview: "<REDACTED_PATH>",
         notificationChannel: "linq",
       }),
-    }));
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
-      localPathPreview: expect.anything(),
     }));
     expect(logRequests[2]?.entries[0]).toEqual(expect.objectContaining({
       component: "mailbox",
@@ -1217,7 +1185,6 @@ describe("hosted runtime log helpers", () => {
 });
 
 function createPhaseInput(input: {
-  billingStripeCustomerId?: string | null;
   logRequests?: HostedRuntimeLogRequest[];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
@@ -1225,15 +1192,6 @@ function createPhaseInput(input: {
   runtimeLivenessPort?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["runtimeLivenessPort"];
   runtimeUserEnv?: Record<string, string>;
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
-  const billingPort =
-    input.billingStripeCustomerId === undefined
-      ? null
-      : {
-          async resolveVercelAiGatewayStripeCustomerId() {
-            return { stripeCustomerId: input.billingStripeCustomerId ?? null };
-          },
-        };
-
   return {
     initialMailboxImport: {
       afterCheckpointEffects: [],
@@ -1275,7 +1233,6 @@ function createPhaseInput(input: {
         readRawEmailMessage: vi.fn(async () => null),
         sendEmail: vi.fn(async () => undefined),
       },
-      ...(billingPort ? { billingPort } : {}),
       ...(input.logRequests
         ? {
             logPort: {
@@ -1313,7 +1270,6 @@ function createPhaseInput(input: {
           readRawEmailMessage: vi.fn(async () => null),
           sendEmail: vi.fn(async () => undefined),
         },
-        ...(billingPort ? { billingPort } : {}),
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
       },

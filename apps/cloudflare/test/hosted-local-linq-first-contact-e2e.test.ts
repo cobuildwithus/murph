@@ -564,13 +564,12 @@ describe("hosted local Linq first-contact e2e", () => {
 
     expect(requireScenario().runtimeEnv).toMatchObject({
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "stub-local-openai-key",
     });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
-    expect(requireScenario().runtimeEnv.OPENAI_API_KEY).toBeUndefined();
     const assistantProviderResponseRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(assistantProviderResponseCountBefore);
@@ -734,14 +733,14 @@ async function startLinqScenario(
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqFirstContactLocalInboundAllowlist(),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
+      OPENAI_API_KEY: "stub-local-openai-key",
       ...additionalEnv,
     },
     assistantProviderStubModelId: productionLikeAssistantModel,

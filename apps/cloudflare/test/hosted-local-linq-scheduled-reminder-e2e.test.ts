@@ -144,13 +144,13 @@ async function startScenario(): Promise<void> {
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
+      OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
     localDatabaseUrl,
@@ -306,14 +306,14 @@ async function writeSyntheticHostedAssistantConfig(operatorHomeRoot: string): Pr
     profiles: [
       {
         id: hostedAssistantProfileId,
-        label: "Vercel AI Gateway",
+        label: "OpenAI",
         managedBy: "platform",
         target: {
           adapter: "codex-cli",
           approvalPolicy: "never",
           codexCommand: null,
           model: productionLikeAssistantModel,
-          modelProvider: "vercel-ai-gateway",
+          modelProvider: "openai",
           oss: false,
           profile: null,
           reasoningEffort: "medium",

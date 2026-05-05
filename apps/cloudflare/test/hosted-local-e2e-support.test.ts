@@ -118,7 +118,7 @@ describe("startAssistantProviderStubServer", () => {
 });
 
 describe("resolveHostedAssistantLocalDevEnv", () => {
-  it("seeds Codex Vercel AI Gateway config in local stub mode", () => {
+  it("seeds Codex OpenAI config in local stub mode", () => {
     const env = resolveHostedAssistantLocalDevEnv(
       {
         HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
@@ -132,12 +132,12 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
 
     expect(env).toMatchObject({
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "12345",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:1234/v1",
       NODE_ENV: "test",
-      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
+      OPENAI_API_KEY: "stub-local-openai-key",
     });
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
@@ -159,7 +159,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     for (const key of HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS) {
       expect(env[key]).toBeUndefined();
     }
-    expect(env.VERCEL_AI_API_KEY).toBe("stub-local-vercel-ai-gateway-key");
+    expect(env.OPENAI_API_KEY).toBe("stub-local-openai-key");
   });
 
   it("clears device-sync provider env that would otherwise leak into scenarios", () => {
@@ -191,7 +191,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
       resolveHostedAssistantLocalDevEnv(
         {
           HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
           HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "23456",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             "http://127.0.0.1:4567/v1",

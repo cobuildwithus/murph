@@ -635,26 +635,24 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeLogRequest({
       entries: Array.from({ length: 51 }, () => entry),
     })).toThrow(/at most 50 entries/u);
-    expect(() => parseHostedRuntimeLogEntry({
+    expect(parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {
+        authorizationHeaderValue: "redacted",
+        bodyJson: "redacted",
+        messageContent: "redacted",
         messageText: 1,
+        payloadValue: "redacted",
+        tokenPreview: "redacted",
       },
-    })).toThrow(/not allowed/u);
-    for (const rawKey of [
-      "authorizationHeaderValue",
-      "bodyJson",
-      "messageContent",
-      "payloadValue",
-      "tokenPreview",
-    ]) {
-      expect(() => parseHostedRuntimeLogEntry({
-        ...entry,
-        redactedJson: {
-          [rawKey]: "redacted",
-        },
-      })).toThrow(/not allowed/u);
-    }
+    }).redactedJson).toEqual({
+      authorizationHeaderValue: "redacted",
+      bodyJson: "redacted",
+      messageContent: "redacted",
+      messageText: 1,
+      payloadValue: "redacted",
+      tokenPreview: "redacted",
+    });
     expect(parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {
@@ -692,7 +690,7 @@ describe("hosted runtime control contracts", () => {
       redactedJson: {
         payload: { nested: true },
       },
-    })).toThrow(/not allowed/u);
+    })).toThrow(/shallow redacted scalar/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

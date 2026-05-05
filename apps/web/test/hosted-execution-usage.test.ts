@@ -11,9 +11,9 @@ import {
 } from "@/src/lib/hosted-execution/usage";
 
 const BASE_USAGE_RECORD = {
-  apiKeyEnv: "VERCEL_AI_API_KEY",
+  apiKeyEnv: "OPENAI_API_KEY",
   attemptCount: 1,
-  baseUrl: "https://ai-gateway.vercel.sh/v1",
+  baseUrl: "https://api.openai.com/v1",
   cacheWriteTokens: 3,
   cachedInputTokens: 12,
   credentialSource: "platform",
@@ -30,9 +30,9 @@ const BASE_USAGE_RECORD = {
       ignored: undefined,
     },
     prompt: "redacted test prompt",
-    provider: "vercel-ai-gateway",
+    provider: "openai",
   },
-  providerName: "vercel-ai-gateway",
+  providerName: "openai",
   providerRequestId: "req_123",
   providerSessionId: "session_123",
   rawUsageJson: {
@@ -131,7 +131,7 @@ describe("importHostedAiUsageRecords", () => {
     expect(JSON.stringify(upsertCall?.create?.rawUsageJson)).not.toContain("authorization");
   });
 
-  it("does not delegate Vercel AI Gateway rows or read billing refs while usage billing is disabled", async () => {
+  it("does not read billing refs while usage billing is disabled", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const findUnique = vi.fn(async () => {
       throw new Error("billing ref lookup should not run while usage billing is disabled");
@@ -150,14 +150,7 @@ describe("importHostedAiUsageRecords", () => {
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
-        usage: [
-          {
-            ...BASE_USAGE_RECORD,
-            baseUrl: "https://ai-gateway.vercel.sh/v1",
-            providerName: "vercel-ai-gateway",
-            stripeMeterSource: "vercel-ai-gateway",
-          },
-        ],
+        usage: [BASE_USAGE_RECORD],
       }),
     ).resolves.toMatchObject({
       recordedIds: ["turn_123.attempt-1"],
@@ -527,12 +520,12 @@ describe("importHostedAiUsageRecords", () => {
     );
   });
 
-  it("accepts an existing usage row when the stored billing outcome already differs", async () => {
+  it("rejects an existing usage row when the stored Stripe meter source differs", async () => {
     const prisma = {
       hostedAiUsage: {
         upsert: vi.fn(async (args: { create: Record<string, unknown> }) => ({
           ...args.create,
-          stripeMeterSource: "vercel-ai-gateway",
+          stripeMeterSource: "external-meter",
         })),
       },
       hostedMemberBillingRef: {
@@ -547,9 +540,9 @@ describe("importHostedAiUsageRecords", () => {
         trustedUserId: "member_123",
         usage: [BASE_USAGE_RECORD],
       }),
-    ).resolves.toMatchObject({
-      recordedIds: ["turn_123.attempt-1"],
-    });
+    ).rejects.toThrow(
+      "Hosted AI usage already exists with different immutable fields: stripeMeterSource.",
+    );
   });
 
   it("rejects usage rows whose memberId does not match the trusted hosted execution user", async () => {
@@ -588,17 +581,11 @@ describe("importHostedAiUsageRecords", () => {
     );
   });
 
-  it("persists upstream Vercel AI Gateway metering rows as delegated", async () => {
+  it("rejects unsupported meter source payloads", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
-    const findUnique = vi.fn(async () => ({
-      memberId: "member_123",
-      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-customer-id",
-        memberId: "member_123",
-        value: "cus_123",
-      }),
-      stripeSubscriptionIdEncrypted: null,
-    }));
+    const findUnique = vi.fn(async () => {
+      throw new Error("billing ref lookup should not run for usage imports");
+    });
     const prisma = {
       hostedAiUsage: {
         upsert: hostedAiUsageUpsert,
@@ -608,145 +595,24 @@ describe("importHostedAiUsageRecords", () => {
       },
     };
 
-    await importHostedAiUsageRecords({
-      aiUsageBillingMode: "stripe_meter",
-      prisma: prisma as never,
-      trustedUserId: "member_123",
-      usage: [
-        {
-          ...BASE_USAGE_RECORD,
-          baseUrl: "https://ai-gateway.vercel.sh/v1",
-          providerName: "vercel-ai-gateway",
-          stripeMeterSource: "vercel-ai-gateway",
-        },
-      ],
-    });
-
-    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        stripeMeterError:
-          "Delegated Stripe token metering is handled upstream by Vercel AI Gateway.",
-        stripeMeterSource: "vercel-ai-gateway",
-        stripeMeterStatus: "delegated",
+    await expect(
+      importHostedAiUsageRecords({
+        aiUsageBillingMode: "stripe_meter",
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [
+          {
+            ...BASE_USAGE_RECORD,
+            stripeMeterSource: "external-meter",
+          },
+        ],
       }),
-    }));
-  });
+    ).rejects.toThrow(
+      "Hosted AI usage import contains an invalid usage record.",
+    );
 
-  it("persists Codex Vercel AI Gateway metering rows as delegated", async () => {
-    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
-    const prisma = {
-      hostedAiUsage: {
-        upsert: hostedAiUsageUpsert,
-      },
-      hostedMemberBillingRef: {
-        findUnique: vi.fn(async () => ({
-          memberId: "member_123",
-          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-customer-id",
-            memberId: "member_123",
-            value: "cus_123",
-          }),
-          stripeSubscriptionIdEncrypted: null,
-        })),
-      },
-    };
-
-    await importHostedAiUsageRecords({
-      aiUsageBillingMode: "stripe_meter",
-      prisma: prisma as never,
-      trustedUserId: "member_123",
-      usage: [
-        {
-          ...BASE_USAGE_RECORD,
-          baseUrl: null,
-          provider: "codex-cli",
-          providerName: "vercel-ai-gateway",
-          stripeMeterSource: "vercel-ai-gateway",
-        },
-      ],
-    });
-
-    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        stripeMeterError:
-          "Delegated Stripe token metering is handled upstream by Vercel AI Gateway.",
-        stripeMeterSource: "vercel-ai-gateway",
-        stripeMeterStatus: "delegated",
-      }),
-    }));
-  });
-
-  it("fails closed back to Murph metering when delegated rows are missing a trusted Stripe customer id", async () => {
-    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
-    const prisma = {
-      hostedAiUsage: {
-        upsert: hostedAiUsageUpsert,
-      },
-      hostedMemberBillingRef: {
-        findUnique: vi.fn(async () => null),
-      },
-    };
-
-    await importHostedAiUsageRecords({
-      aiUsageBillingMode: "stripe_meter",
-      prisma: prisma as never,
-      trustedUserId: "member_123",
-      usage: [
-        {
-          ...BASE_USAGE_RECORD,
-          baseUrl: "https://ai-gateway.vercel.sh/v1",
-          providerName: "vercel-ai-gateway",
-          stripeMeterSource: "vercel-ai-gateway",
-        },
-      ],
-    });
-
-    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        stripeMeterSource: "murph",
-      }),
-    }));
-  });
-
-  it("fails closed back to Murph metering when delegated rows are not trusted gateway records", async () => {
-    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
-    const prisma = {
-      hostedAiUsage: {
-        upsert: hostedAiUsageUpsert,
-      },
-      hostedMemberBillingRef: {
-        findUnique: vi.fn(async () => ({
-          memberId: "member_123",
-          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-customer-id",
-            memberId: "member_123",
-            value: "cus_123",
-          }),
-          stripeSubscriptionIdEncrypted: null,
-        })),
-      },
-    };
-
-    await importHostedAiUsageRecords({
-      aiUsageBillingMode: "stripe_meter",
-      prisma: prisma as never,
-      trustedUserId: "member_123",
-      usage: [
-        {
-          ...BASE_USAGE_RECORD,
-          baseUrl: "https://api.example.test/v1",
-          provider: "unsupported-provider",
-          providerName: "example",
-          stripeMeterSource: "vercel-ai-gateway",
-        },
-      ],
-    });
-
-    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        stripeMeterSource: "murph",
-      }),
-    }));
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
   });
 });
 

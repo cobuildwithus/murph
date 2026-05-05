@@ -30,7 +30,7 @@ describe("hosted runtime parser coverage", () => {
           },
         },
         userEnv: {
-          VERCEL_AI_API_KEY: "secret",
+          OPENAI_API_KEY: "secret",
         },
       }),
     ).toEqual({
@@ -73,7 +73,7 @@ describe("hosted runtime parser coverage", () => {
         ],
       },
       userEnv: {
-        VERCEL_AI_API_KEY: "secret",
+        OPENAI_API_KEY: "secret",
       },
     });
   });

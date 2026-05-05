@@ -4,9 +4,6 @@ import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   isHostedAssistantApiKeyEnvName,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
-import {
-  HOSTED_AI_USAGE_BILLING_MODE_ENV,
-} from "@murphai/hosted-execution";
 
 import { buildHostedWorkerSecretsPayload } from "../scripts/deploy-automation/secrets.ts";
 import {
@@ -48,34 +45,12 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(env.OPENAI_API_KEY).toBe("openai-secret");
   });
 
-  it("forwards delegated billing config only through the assistant env profile", () => {
-    const env = buildHostedRunnerContainerEnv({
-      ...requiredHostedAssistantProvider,
-      [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
-      HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
-      HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
-    });
-
-    expect(env[HOSTED_AI_USAGE_BILLING_MODE_ENV]).toBe("stripe_meter");
-    expect(env.HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY).toBe("rk_test_123");
-    expect(env.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED).toBe("true");
-  });
-
   it("requires the direct OpenAI hosted assistant provider at the runner boundary", () => {
     expect(() =>
       buildHostedRunnerContainerEnv({
         OPENAI_API_KEY: "openai-secret",
       })
     ).toThrow("HOSTED_ASSISTANT_PROVIDER must be openai for hosted runner execution.");
-  });
-
-  it("does not allow runner secrets to override the platform billing mode", () => {
-    expect(isHostedRunnerSecretKeyAllowed(
-      HOSTED_AI_USAGE_BILLING_MODE_ENV,
-      {
-        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: HOSTED_AI_USAGE_BILLING_MODE_ENV,
-      },
-    )).toBe(false);
   });
 
   it("does not allow runner secrets to override hosted control-plane prefixes", () => {
@@ -163,14 +138,6 @@ describe("buildHostedWorkerSecretsPayload", () => {
     expect(payload.STRIPE_SECRET_KEY).toBeUndefined();
   });
 
-  it("includes the delegated billing restricted Stripe key in the worker secret payload", () => {
-    const payload = buildHostedWorkerSecretsPayload({
-      ...requiredWorkerSecrets,
-      HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
-    });
-
-    expect(payload.HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY).toBe("rk_test_123");
-  });
 });
 
 describe("isHostedAssistantApiKeyEnvName", () => {
