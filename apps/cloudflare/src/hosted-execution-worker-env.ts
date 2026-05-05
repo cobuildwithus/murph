@@ -13,6 +13,7 @@ export interface HostedExecutionWorkerEnvironment {
   hostedCryptoCloudflareAutomationPrivateJwk: string;
   hostedCryptoCloudflareAutomationPrivateKeyringJson: string | null;
   hostedCryptoEnv: string;
+  hostedWebAllowHttpHosts?: readonly string[];
   hostedWebBaseUrl: string;
   maxEventAttempts: number;
   retryDelayMs: number;
@@ -72,6 +73,9 @@ export function readHostedExecutionWorkerEnvironment(
       source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
     ),
     hostedCryptoEnv,
+    ...(options.allowHostedWebHttpHosts && options.allowHostedWebHttpHosts.length > 0
+      ? { hostedWebAllowHttpHosts: options.allowHostedWebHttpHosts }
+      : {}),
     hostedWebBaseUrl: requireHostedExecutionBaseUrl(
       source.HOSTED_WEB_BASE_URL,
       "HOSTED_WEB_BASE_URL",
@@ -140,8 +144,12 @@ function requireHostedExecutionBaseUrl(
     throw new TypeError(`${label} must be a valid absolute URL.`);
   }
 
-  if (rejectHttpLoopbackInProduction && isHostedExecutionHttpLoopbackBaseUrl(normalized)) {
-    throw new TypeError(`${label} must not use HTTP loopback in production.`);
+  if (rejectHttpLoopbackInProduction && isHostedExecutionHttpBaseUrl(normalized)) {
+    if (isHostedExecutionHttpLoopbackBaseUrl(normalized)) {
+      throw new TypeError(`${label} must not use HTTP loopback in production.`);
+    }
+
+    throw new TypeError(`${label} must not use HTTP in production.`);
   }
 
   return normalized;
@@ -177,4 +185,8 @@ function isHostedExecutionHttpLoopbackBaseUrl(value: string): boolean {
   const url = new URL(value);
   return url.protocol.toLowerCase() === "http:"
     && HOSTED_EXECUTION_LOOPBACK_HOSTS.has(url.hostname.toLowerCase());
+}
+
+function isHostedExecutionHttpBaseUrl(value: string): boolean {
+  return new URL(value).protocol.toLowerCase() === "http:";
 }

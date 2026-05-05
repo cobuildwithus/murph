@@ -28,7 +28,9 @@ export function readHostedExecutionEnvironment(
   source: StringEnvSource = process.env,
 ): HostedExecutionEnvironment {
   assertHostedLocalInternalProxyEnvironment(source);
-  const workerEnvironment = readHostedExecutionWorkerEnvironment(source);
+  const workerEnvironment = readHostedExecutionWorkerEnvironment(source, {
+    allowHostedWebHttpHosts: readHostedLocalProxyHttpHostAllowlist(source),
+  });
 
   return {
     ...workerEnvironment,
@@ -64,4 +66,23 @@ export function readHostedExecutionEnvironment(
     vercelOidcValidation: requireHostedExecutionVercelOidcValidationEnvironment(source),
     webCallbackSigning: readHostedWebCallbackSigningEnvironment(source),
   };
+}
+
+function readHostedLocalProxyHttpHostAllowlist(
+  source: StringEnvSource,
+): readonly string[] | undefined {
+  const localInternalProxyBaseUrl =
+    source.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim();
+
+  if (
+    !localInternalProxyBaseUrl
+    || source.ALLOW_LOCAL_INTERNAL_PROXY?.trim() !== "true"
+    || source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?.trim() !== "development"
+  ) {
+    return undefined;
+  }
+
+  const url = new URL(localInternalProxyBaseUrl);
+
+  return url.protocol.toLowerCase() === "http:" ? [url.hostname] : undefined;
 }
