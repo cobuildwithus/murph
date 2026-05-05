@@ -8,7 +8,7 @@ import type {
   AssistantUsageRecord,
 } from "@murphai/runtime-state/node/assistant-usage";
 import {
-  isHostedAiUsageAllowancePricedModelId,
+  normalizeHostedAiUsageAllowancePricedModelId,
   type HostedAiUsageAllowancePricedModel,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -125,7 +125,7 @@ export function priceHostedAiUsageForAllowance(
     };
   }
 
-  if (!model || !isHostedAiUsageAllowancePricedModelId(model)) {
+  if (!model) {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the model.");
   }
 
@@ -709,13 +709,14 @@ function normalizeAssistantUsageCredentialSource(
   return value === "member" || value === "platform" ? value : "unknown";
 }
 
-function normalizeHostedAiUsageAllowanceModel(value: string | null): string | null {
+function normalizeHostedAiUsageAllowanceModel(
+  value: string | null,
+): HostedAiUsageAllowancePricedModel | null {
   if (typeof value !== "string") {
     return null;
   }
 
-  const normalized = value.trim().toLowerCase();
-  return normalized.length > 0 ? normalized : null;
+  return normalizeHostedAiUsageAllowancePricedModelId(value);
 }
 
 function buildHostedAiUsageGateLimitNotice(

@@ -39,12 +39,29 @@ export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
+export const HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS = [
+  ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
+  "openai/gpt-5.4-mini",
+  "openai/gpt-5.5",
+] as const;
+
 export function isHostedAiUsageAllowancePricedModelId(
   value: string,
 ): value is HostedAiUsageAllowancePricedModel {
   return HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS.includes(
     value as HostedAiUsageAllowancePricedModel,
   );
+}
+
+export function normalizeHostedAiUsageAllowancePricedModelId(
+  value: string,
+): HostedAiUsageAllowancePricedModel | null {
+  const normalized = value.trim().toLowerCase();
+  const openAiModel = normalized.startsWith("openai/")
+    ? normalized.slice("openai/".length)
+    : normalized;
+
+  return isHostedAiUsageAllowancePricedModelId(openAiModel) ? openAiModel : null;
 }
 
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";

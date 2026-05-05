@@ -2,8 +2,8 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
 import {
-  HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
-  isHostedAiUsageAllowancePricedModelId,
+  HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS,
+  normalizeHostedAiUsageAllowancePricedModelId,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -194,11 +194,11 @@ export function listHostedDeployEnvironmentInvariantErrors(
   const hostedAssistantModel = normalizeOptionalString(source.HOSTED_ASSISTANT_MODEL);
   if (!hostedAssistantModel) {
     errors.push(
-      `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS.join(", ")} for hosted AI usage allowance pricing.`,
+      `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );
-  } else if (!isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)) {
+  } else if (!normalizeHostedAiUsageAllowancePricedModelId(hostedAssistantModel)) {
     errors.push(
-      `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS.join(", ")} for hosted AI usage allowance pricing.`,
+      `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );
   }
 
