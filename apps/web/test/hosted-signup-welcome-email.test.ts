@@ -112,13 +112,13 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Best thing to do right now is connect your wearable.",
+        "Best thing to do right now is sync your health data and text Murph.",
       );
       expect(payload.text).toContain(
         "Shoot Murph a text at (+1) 555-010-0099 to start your first experiment.",
       );
       expect(payload.text).not.toContain(
-        "connect your wearable and start your first experiment",
+        "connect your wearable",
       );
       expect(payload.html).toContain('href="sms:+15550100099"');
       expect(payload.html).toContain(">(+1) 555-010-0099</a>");

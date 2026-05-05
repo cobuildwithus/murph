@@ -248,8 +248,8 @@ function buildHostedSignupWelcomeEmailText(input: {
 }): string {
   const murphStartLine = normalizeNullableString(input.murphStartLine);
   const nextStep = murphStartLine
-    ? "At the end you see what actually improved. Best thing to do right now is connect your wearable."
-    : "At the end you see what actually improved. Best thing to do right now is connect your wearable and start your first experiment!";
+    ? "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph."
+    : "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph to start your first experiment!";
 
   return [
     "Hey, welcome to Murph!",
@@ -276,8 +276,8 @@ function buildHostedSignupWelcomeEmailHtml(input: {
     input.murphStartAction?.line ?? input.murphStartLine,
   );
   const nextStep = murphStartLine
-    ? "At the end you see what actually improved. Best thing to do right now is connect your wearable."
-    : "At the end you see what actually improved. Best thing to do right now is connect your wearable and start your first experiment!";
+    ? "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph."
+    : "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph to start your first experiment!";
   const paragraphs = [
     "Hey, welcome to Murph!",
     `I'm ${input.founderName}, the founder of Murph. I built Murph because I had a WHOOP and kept looking at my scores every morning without really using the data.`,
