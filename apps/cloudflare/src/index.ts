@@ -58,7 +58,10 @@ import {
   unauthorized,
 } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
-import type { HostedExecutionContainerNamespaceLike } from "./runner-container.ts";
+import {
+  resolveHostedExecutionRunnerContainerName,
+  type HostedExecutionContainerNamespaceLike,
+} from "./runner-container.ts";
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import { handleLegacyHostedRunnerWakeQueue } from "./legacy-runner-wake-queue.ts";
@@ -1040,7 +1043,12 @@ async function ownsLocalInternalProxyTokenForUser(input: {
   token: string;
   userId: string;
 }): Promise<boolean> {
-  const stub = input.env.RUNNER_CONTAINER.getByName(input.userId);
+  const stub = input.env.RUNNER_CONTAINER.getByName(
+    resolveHostedExecutionRunnerContainerName({
+      source: input.env,
+      userId: input.userId,
+    }),
+  );
   return typeof stub.ownsInternalWorkerProxyToken === "function"
     ? await stub.ownsInternalWorkerProxyToken({
         ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),

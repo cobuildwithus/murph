@@ -22,6 +22,7 @@ import {
   HostedExecutionConfigurationError,
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
+  resolveHostedExecutionRunnerContainerName,
   RunnerContainer,
 } from "../src/runner-container.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.ts";
@@ -1437,6 +1438,73 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("uses an explicit runner container name without changing the job user identity", async () => {
+    const invoke = vi.fn(async () => createRunnerResult());
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      async destroyInstance() {},
+      invoke,
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    await invokeHostedExecutionContainerRunner({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_namespace"),
+      },
+      runnerContainerName: "member_123--v-version-123",
+      runnerContainerNamespace: { getByName },
+      timeoutMs: 45_000,
+      userId: "member_123",
+    });
+
+    expect(getByName).toHaveBeenCalledWith("member_123--v-version-123");
+    const firstCall = invoke.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the runner container stub to be invoked.");
+    }
+    const body = requireObject(firstCall.at(0), "Runner container invoke payload");
+    expect(body).toMatchObject({
+      timeoutMs: 45_000,
+      userId: "member_123",
+    });
+  });
+
+  it("resolves runner container names from worker version metadata", () => {
+    expect(resolveHostedExecutionRunnerContainerName({
+      source: {
+        CF_VERSION_METADATA: {
+          id: " version/123 ",
+        },
+      },
+      userId: "member_123",
+    })).toBe("member_123--v-version-123");
+  });
+
+  it("falls back to the user id when worker version metadata is unavailable", () => {
+    expect(resolveHostedExecutionRunnerContainerName({
+      source: {},
+      userId: "member_123",
+    })).toBe("member_123");
+    expect(resolveHostedExecutionRunnerContainerName({
+      source: {
+        CF_VERSION_METADATA: {
+          id: "   ",
+        },
+      },
+      userId: "member_123",
+    })).toBe("member_123");
+  });
+
   it("rejects mismatched route and job identities before selecting a container", async () => {
     const invoke = vi.fn(async () => createRunnerResult());
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
@@ -1696,31 +1764,39 @@ describe("RunnerContainer", () => {
 
   it("destroys the named runner container instance and skips null namespaces", async () => {
     const destroyInstance = vi.fn(async () => {});
+    const getByName = vi.fn(() => ({
+      destroyInstance,
+      invoke: vi.fn(async () => createRunnerResult()),
+      ownsInternalWorkerProxyToken: vi.fn(async () => false),
+      smokeHealth: vi.fn(async () => ({
+        ok: true,
+        runnerBundle: null,
+        service: "cloudflare-hosted-runner-node",
+        status: 200,
+      })),
+    } satisfies HostedExecutionContainerStubLike));
 
     await destroyHostedExecutionContainer({
       runnerContainerNamespace: {
-        getByName() {
-          return {
-            destroyInstance,
-            invoke: vi.fn(async () => createRunnerResult()),
-            ownsInternalWorkerProxyToken: vi.fn(async () => false),
-            smokeHealth: vi.fn(async () => ({
-              ok: true,
-              runnerBundle: null,
-              service: "cloudflare-hosted-runner-node",
-              status: 200,
-            })),
-          } satisfies HostedExecutionContainerStubLike;
-        },
+        getByName,
       },
       userId: "member_123",
+    });
+    await destroyHostedExecutionContainer({
+      runnerContainerName: "member_789--v-version-123",
+      runnerContainerNamespace: {
+        getByName,
+      },
+      userId: "member_789",
     });
     await destroyHostedExecutionContainer({
       runnerContainerNamespace: null,
       userId: "member_456",
     });
 
-    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(getByName).toHaveBeenNthCalledWith(1, "member_123");
+    expect(getByName).toHaveBeenNthCalledWith(2, "member_789--v-version-123");
+    expect(destroyInstance).toHaveBeenCalledTimes(2);
   });
 });
 
