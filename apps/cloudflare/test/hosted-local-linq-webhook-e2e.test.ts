@@ -357,8 +357,8 @@ describe("hosted local Linq webhook e2e", () => {
       expectedAttachmentDownloadPath,
       expectedAttachmentDownloadUrl,
       "pdfEvidencePath:",
-      "stub-local-vercel-ai-gateway-key",
-      "VERCEL_AI_API_KEY",
+      "stub-local-openai-key",
+      "OPENAI_API_KEY",
     ]);
   }, 300_000);
 });

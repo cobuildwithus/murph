@@ -1083,8 +1083,6 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_REQUIRED_SECRET_NAMES).toContain("OPENAI_API_KEY");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
-        "HOSTED_AI_USAGE_BILLING_MODE",
-        "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
         "HOSTED_ASSISTANT_PROVIDER",
         "WHOOP_SCOPES",
       ]),

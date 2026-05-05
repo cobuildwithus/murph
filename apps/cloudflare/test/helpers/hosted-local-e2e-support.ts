@@ -422,13 +422,13 @@ export function resolveHostedAssistantLocalDevEnv(
     return {
       ...buildHostedAssistantStubEnvClearances(),
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         normalizedAssistantProviderStubBaseUrl,
       NODE_ENV: "test",
-      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
+      OPENAI_API_KEY: "stub-local-openai-key",
     };
   }
 

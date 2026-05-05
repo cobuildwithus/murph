@@ -39,7 +39,7 @@ test("hosted Linq read and typing share the same forwarded plus user env", async
   const forwardedEnv = {
     LINQ_API_BASE_URL: "https://api.linq.example",
     LINQ_API_TOKEN: "platform-linq-token",
-    VERCEL_AI_API_KEY: "platform-vercel-token",
+    OPENAI_API_KEY: "platform-vercel-token",
   };
   const userEnv = {
     LINQ_API_TOKEN: "user-linq-token",
@@ -126,7 +126,7 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
   const telegramEnv = buildHostedTelegramChannelEnv({
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
-      VERCEL_AI_API_KEY: "platform-vercel-token",
+      OPENAI_API_KEY: "platform-vercel-token",
       TELEGRAM_BOT_TOKEN: "untrusted-forwarded-token",
       TELEGRAM_FILE_BASE_URL: "https://forwarded-files.telegram.example",
     },
@@ -146,7 +146,7 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
-      VERCEL_AI_API_KEY: "platform-vercel-token",
+      OPENAI_API_KEY: "platform-vercel-token",
       TELEGRAM_BOT_TOKEN: "untrusted-forwarded-token",
     },
     platformEnv: telegramEnv,

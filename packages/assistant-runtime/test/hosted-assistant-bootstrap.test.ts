@@ -21,7 +21,7 @@ const CODEX_VERCEL_GATEWAY_TARGET = {
   approvalPolicy: "never",
   codexCommand: null,
   model: "gpt-5.5",
-  modelProvider: "vercel-ai-gateway",
+  modelProvider: "openai",
   oss: false,
   profile: null,
   reasoningEffort: "medium",
@@ -31,7 +31,7 @@ const CODEX_VERCEL_GATEWAY_TARGET = {
 const CODEX_VERCEL_GATEWAY_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
   HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-  HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+  HOSTED_ASSISTANT_PROVIDER: "openai",
   HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
 } as const;
@@ -45,13 +45,13 @@ afterEach(async () => {
 });
 
 describe("ensureHostedAssistantOperatorDefaults", () => {
-  it("accepts only hosted Codex App Server profiles with Vercel AI Gateway as the model provider", () => {
+  it("accepts only hosted Codex App Server profiles with OpenAI as the model provider", () => {
     const hostedConfig = {
       activeProfileId: "platform-default",
       profiles: [
         {
           id: "platform-default",
-          label: "Vercel AI Gateway",
+          label: "OpenAI",
           managedBy: "platform",
           target: CODEX_VERCEL_GATEWAY_TARGET,
         },
@@ -119,7 +119,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     }
   });
 
-  it("seeds Codex App Server defaults from hosted Vercel AI Gateway env", async () => {
+  it("seeds Codex App Server defaults from hosted OpenAI env", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
     const result = await ensureHostedAssistantOperatorDefaults({
@@ -140,7 +140,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       profiles: [
         {
           id: "platform-default",
-          label: "Vercel AI Gateway",
+          label: "OpenAI",
           managedBy: "platform",
           target: CODEX_VERCEL_GATEWAY_TARGET,
         },

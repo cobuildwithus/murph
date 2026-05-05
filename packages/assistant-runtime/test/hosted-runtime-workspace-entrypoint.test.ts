@@ -77,8 +77,8 @@ const TEST_NOW = "2026-04-27T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_entrypoint";
 const TEST_HOSTED_CODEX_FORWARDED_ENV = {
   HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
-  HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-  VERCEL_AI_API_KEY: "test-vercel-key",
+  HOSTED_ASSISTANT_PROVIDER: "openai",
+  OPENAI_API_KEY: "test-vercel-key",
 } as const;
 
 describe("hosted workspace runtime entrypoint", () => {

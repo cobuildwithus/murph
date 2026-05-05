@@ -86,7 +86,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
 
     spawnMock.mockImplementation((_command, _args, options) => {
       expect(options?.env).toMatchObject({
-        VERCEL_AI_API_KEY: "vercel-key",
+        OPENAI_API_KEY: "vercel-key",
       });
       expect(options?.env?.CODEX_HOME).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBeUndefined();
@@ -136,7 +136,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
             HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
             HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
             HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
-            VERCEL_AI_API_KEY: "vercel-key",
+            OPENAI_API_KEY: "vercel-key",
           },
           userEnv: {},
         },
@@ -216,7 +216,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       queueMicrotask(() => {
         child.stderr.write("Bearer secret-token\n");
         child.stderr.write(
-          "VERCEL_AI_API_KEY=secret-value person@example.test +15555550123 /tmp/hosted-runner/path",
+          "OPENAI_API_KEY=secret-value person@example.test +15555550123 /tmp/hosted-runner/path",
         );
         child.stderr.end();
         child.stdout.end(module.formatHostedExecutionChildResult({
@@ -236,7 +236,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
 
     const forwarded = stderrWriteSpy.mock.calls.map((call) => String(call[0])).join("");
     expect(forwarded).toContain("Bearer <redacted>");
-    expect(forwarded).toContain("VERCEL_AI_API_KEY=<redacted>");
+    expect(forwarded).toContain("OPENAI_API_KEY=<redacted>");
     expect(forwarded).toContain("<redacted-email>");
     expect(forwarded).toContain("<redacted-phone>");
     expect(forwarded).toContain("<redacted-path>");
@@ -277,7 +277,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
                 "Bearer detail-token /tmp/hosted-runner/detail-path",
             },
             message:
-              "VERCEL_AI_API_KEY=secret-value model_provider = vercel-ai-gateway /tmp/hosted-runner/private-file",
+              "OPENAI_API_KEY=secret-value model_provider = openai /tmp/hosted-runner/private-file",
             name: "Error",
             stack:
               "Error: failed\n    at run (/tmp/hosted-runner/private-file.ts:7:3)",
@@ -304,7 +304,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       throw new Error("Expected isolated child failure to throw.");
     }
 
-    expect(thrown.message).toContain("VERCEL_AI_API_KEY=<redacted>");
+    expect(thrown.message).toContain("OPENAI_API_KEY=<redacted>");
     expect(thrown.message).toContain("model_provider=<redacted>");
     expect(thrown.message).toContain("<redacted-path>");
     expect(thrown.stack).toContain("<redacted-path>");
@@ -312,7 +312,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       "Bearer <redacted> <redacted-path>",
     );
     expect(thrown.message).not.toContain("secret-value");
-    expect(thrown.message).not.toContain("vercel-ai-gateway");
+    expect(thrown.message).not.toContain("openai");
     expect(thrown.message).not.toContain("/tmp/hosted-runner/private-file");
     expect(thrown.stack ?? "").not.toContain("/tmp/hosted-runner/private-file");
     expect(JSON.stringify(thrown.details)).not.toContain("detail-token");

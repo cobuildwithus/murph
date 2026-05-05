@@ -1206,7 +1206,6 @@ describe("assistant execution context normalization", () => {
           ],
           issueDeviceConnectLink,
           memberId: " member-1 ",
-          stripeCustomerId: " cus_123 ",
           userEnvKeys: [" CODEX_API_KEY ", "", " CUSTOM_KEY ", "   "],
         },
       })
@@ -1218,7 +1217,6 @@ describe("assistant execution context normalization", () => {
         ],
         issueDeviceConnectLink,
         memberId: "member-1",
-        stripeCustomerId: "cus_123",
         userEnvKeys: ["CODEX_API_KEY", "CUSTOM_KEY"],
       },
     });

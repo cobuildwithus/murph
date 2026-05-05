@@ -384,7 +384,7 @@ function createHostedCodexSessionTarget(): AssistantModelTarget {
     codexCommand: null,
     codexHome: null,
     model: "gpt-5.5",
-    modelProvider: "vercel-ai-gateway",
+    modelProvider: "openai",
     oss: false,
     profile: null,
     reasoningEffort: "medium",

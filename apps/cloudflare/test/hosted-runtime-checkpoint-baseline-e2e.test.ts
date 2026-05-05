@@ -46,9 +46,9 @@ const BASELINE_TRANSCRIPT_RELATIVE_PATH =
 const BASELINE_RUNTIME = {
   forwardedEnv: {
     HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
-    HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+    HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_LOG_FINGERPRINT_SECRET: "synthetic-log-secret",
-    VERCEL_AI_API_KEY: "test-vercel-key",
+    OPENAI_API_KEY: "test-openai-key",
   },
 };
 

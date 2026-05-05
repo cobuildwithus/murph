@@ -96,8 +96,7 @@ describe("assistant usage attribution", () => {
       memberId: "member_123",
       reportingSecret: "reporting-secret",
       surface: " Hosted Web ",
-      stripeCustomerId: " cus_123 ",
-      stripeMeterSource: "vercel-ai-gateway",
+      stripeMeterSource: "murph",
       triggerKind: " Manual Ask ",
     });
     const expectedReportingUserId = `musr_${createHmac("sha256", "reporting-secret")
@@ -125,8 +124,7 @@ describe("assistant usage attribution", () => {
         "credential:platform",
       ],
       reportingUserId: expectedReportingUserId,
-      stripeCustomerId: "cus_123",
-      stripeMeterSource: "vercel-ai-gateway",
+      stripeMeterSource: "murph",
     });
     expect(expectedReportingUserId).not.toBe(legacyReportingUserId);
 
