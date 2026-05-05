@@ -7,6 +7,7 @@ import {
   JoinInviteCheckoutPlanButtonIsland,
   JoinInviteLegalConsentIsland,
   JoinInviteMessagingSetupIsland,
+  JoinInvitePhoneVerificationIsland,
   JoinInviteStatusRefreshIsland,
 } from "@/src/components/hosted-onboarding/join-invite-islands";
 import {
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
+  hostedEmailAuthProps: null as Record<string, unknown> | null,
   hostedPhoneAuthProps: null as Record<string, unknown> | null,
   useHostedInviteStatusRefresh: vi.fn(),
 }));
@@ -46,6 +48,19 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
         "data-hosted-phone-auth": "true",
       },
       "Hosted phone auth",
+    );
+  },
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-email-auth-button", () => ({
+  HostedEmailAuthButton(props: Record<string, unknown>) {
+    mocks.hostedEmailAuthProps = props;
+    return createElement(
+      "div",
+      {
+        "data-hosted-email-auth": "true",
+      },
+      "Hosted email auth",
     );
   },
 }));
@@ -107,6 +122,7 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.hostedEmailAuthProps = null;
   mocks.hostedPhoneAuthProps = null;
 });
 
@@ -324,6 +340,30 @@ test("JoinInviteMessagingSetupIsland keeps phone first without a Telegram seed",
   expect(mocks.hostedPhoneAuthProps).toMatchObject({
     intent: "link",
   });
+  await cleanup();
+});
+
+test("JoinInvitePhoneVerificationIsland uses email auth for invite email verification", async () => {
+  const { cleanup, container } = await renderClientComponent(
+    createElement(JoinInvitePhoneVerificationIsland, {
+      inviteCode: "invite-code",
+      phoneAuthTarget: {
+        kind: "manual",
+      },
+      phoneHint: null,
+      verificationMode: "invite_email",
+    }),
+    { requireButton: false },
+  );
+
+  expect(container.querySelector('[data-hosted-email-auth="true"]')).toBeTruthy();
+  expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeNull();
+  expect(mocks.hostedEmailAuthProps).toMatchObject({
+    active: true,
+    inline: true,
+    inviteCode: "invite-code",
+  });
+  expect(mocks.hostedPhoneAuthProps).toBeNull();
   await cleanup();
 });
 

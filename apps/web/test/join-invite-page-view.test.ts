@@ -119,6 +119,41 @@ test("JoinInvitePageView keeps manual phone fallback copy out of Telegram setup"
   assert.doesNotMatch(markup, /Telegram/);
 });
 
+test("JoinInvitePageView renders invite email verification without phone setup copy", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        status: createStatus({
+          invite: {
+            code: "invite-code",
+            expiresAt: "2026-03-27T12:00:00.000Z",
+            phoneAuthTarget: {
+              kind: "manual",
+            },
+            phoneHint: null,
+            verificationMode: "invite_email",
+          },
+          messagingSetupRequired: false,
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /Verify your email/);
+  assert.match(markup, /Use the iMessage email address that received this join link\./);
+  assert.match(markup, /data-phone-verification-island="true"/);
+  assert.doesNotMatch(markup, /Add your phone/);
+  assert.doesNotMatch(markup, /Add your phone or Telegram/);
+  expect(mocks.phoneVerificationProps).toMatchObject({
+    inviteCode: "invite-code",
+    phoneAuthTarget: {
+      kind: "manual",
+    },
+    phoneHint: null,
+    verificationMode: "invite_email",
+  });
+});
+
 test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
   const model = createModel({
     launchConsent: {
