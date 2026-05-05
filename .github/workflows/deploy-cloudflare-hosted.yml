@@ -28,6 +28,11 @@ on:
         options:
           - gradual
           - immediate
+      hosted_email_send_binding:
+        description: Render the optional native hosted-email send binding
+        required: true
+        default: true
+        type: boolean
       smoke_user_id:
         description: Optional hosted user id for a manual /run smoke test
         required: false
@@ -305,6 +310,7 @@ jobs:
       CF_DEFAULT_ALARM_DELAY_MS: ${{ vars.CF_DEFAULT_ALARM_DELAY_MS }}
       CF_LOG_HEAD_SAMPLING_RATE: ${{ vars.CF_LOG_HEAD_SAMPLING_RATE }}
       CF_MAX_EVENT_ATTEMPTS: ${{ vars.CF_MAX_EVENT_ATTEMPTS }}
+      CF_HOSTED_EMAIL_SEND_BINDING_ENABLED: ${{ inputs.hosted_email_send_binding }}
       CF_PUBLIC_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       CF_RETRY_DELAY_MS: ${{ vars.CF_RETRY_DELAY_MS }}
       CF_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.CF_RUNNER_COMMIT_TIMEOUT_MS }}

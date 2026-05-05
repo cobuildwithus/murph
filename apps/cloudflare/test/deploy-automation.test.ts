@@ -270,6 +270,30 @@ describe("hosted deploy automation helpers", () => {
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
   });
 
+  it("can omit the optional hosted email send binding for deploy tokens without that permission", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_HOSTED_EMAIL_SEND_BINDING_ENABLED: "false",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+    });
+    const config = buildHostedWranglerDeployConfig(environment) as {
+      send_email?: unknown;
+      vars: Record<string, string>;
+    };
+
+    expect(config).not.toHaveProperty("send_email");
+    expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
+    expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
+    expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
+    expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
+  });
+
   it("keeps the checked-in wrangler scaffold aligned with generated container sizing and durable object config", async () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
