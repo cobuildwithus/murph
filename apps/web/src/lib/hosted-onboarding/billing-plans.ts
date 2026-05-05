@@ -8,6 +8,50 @@ export const HOSTED_BILLING_PLAN_CODES = [
 export type HostedBillingPlanCode = (typeof HOSTED_BILLING_PLAN_CODES)[number];
 export type HostedBillingPlanInterval = "month";
 
+export const HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS = [
+  "pulse_trial_7d",
+] as const;
+
+export type HostedPublicBillingCheckoutOffer =
+  (typeof HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS)[number];
+
+export const HOSTED_INTERNAL_BILLING_CHECKOUT_OFFERS = [
+  "standard",
+  "pulse_trial_7d",
+] as const;
+
+export type HostedBillingCheckoutOffer =
+  (typeof HOSTED_INTERNAL_BILLING_CHECKOUT_OFFERS)[number];
+
+export const HOSTED_BILLING_PHASES = [
+  "trial",
+  "paid",
+] as const;
+
+export type HostedBillingPhase = (typeof HOSTED_BILLING_PHASES)[number];
+
+export const HOSTED_STANDARD_CHECKOUT_OFFER = "standard" as const;
+export const HOSTED_PULSE_TRIAL_OFFER = "pulse_trial_7d" as const;
+export const HOSTED_PULSE_TRIAL_DAYS = 7;
+export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 2_500_000n;
+export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
+  "pulse-trial-2026-05-05-v1";
+
+export const HOSTED_PULSE_TRIAL_POLICIES = {
+  [HOSTED_PULSE_TRIAL_POLICY_VERSION]: {
+    durationDays: HOSTED_PULSE_TRIAL_DAYS,
+    usageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+  },
+} as const;
+
+export type HostedPulseTrialPolicyVersion =
+  keyof typeof HOSTED_PULSE_TRIAL_POLICIES;
+
+export interface HostedPulseTrialPolicy {
+  durationDays: number;
+  usageLimitUsdMicros: bigint;
+}
+
 export interface HostedBillingPlanDefinition {
   readonly badge: string | null;
   readonly code: HostedBillingPlanCode;
@@ -76,6 +120,44 @@ export function parseHostedBillingPlanCode(
   return typeof value === "string" && hasHostedBillingPlanCode(value)
     ? value
     : null;
+}
+
+export function parseHostedPublicBillingCheckoutOffer(
+  value: unknown,
+): HostedPublicBillingCheckoutOffer | null {
+  return typeof value === "string" &&
+    HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS.includes(value as HostedPublicBillingCheckoutOffer)
+    ? value as HostedPublicBillingCheckoutOffer
+    : null;
+}
+
+export function parseHostedBillingCheckoutOffer(
+  value: unknown,
+): HostedBillingCheckoutOffer | null {
+  return typeof value === "string" &&
+    HOSTED_INTERNAL_BILLING_CHECKOUT_OFFERS.includes(value as HostedBillingCheckoutOffer)
+    ? value as HostedBillingCheckoutOffer
+    : null;
+}
+
+export function parseHostedBillingPhase(value: unknown): HostedBillingPhase | null {
+  return typeof value === "string" &&
+    HOSTED_BILLING_PHASES.includes(value as HostedBillingPhase)
+    ? value as HostedBillingPhase
+    : null;
+}
+
+export function requireHostedPulseTrialPolicy(
+  policyVersion: string | null | undefined,
+): HostedPulseTrialPolicy | null {
+  if (
+    typeof policyVersion !== "string" ||
+    !Object.prototype.hasOwnProperty.call(HOSTED_PULSE_TRIAL_POLICIES, policyVersion)
+  ) {
+    return null;
+  }
+
+  return HOSTED_PULSE_TRIAL_POLICIES[policyVersion as HostedPulseTrialPolicyVersion];
 }
 
 export function listHostedBillingPlanPresentations(input?: {

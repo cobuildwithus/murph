@@ -23,8 +23,12 @@ import {
 import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
+  coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
+import {
+  HOSTED_PULSE_TRIAL_OFFER,
+} from "./billing-plans";
 import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
@@ -222,6 +226,8 @@ async function processHostedStripeEventRecord(
         await applyStripeCheckoutCompleted(
           payload as Stripe.Checkout.Session,
           prisma,
+          dispatchContext,
+          processingContext.checkoutSessionSubscription,
         ),
       );
     case "checkout.session.expired":
@@ -282,6 +288,7 @@ async function processHostedStripeEventRecord(
 type HostedStripeEventProcessingContext = {
   canonicalBillingStatus: HostedBillingStatus | null;
   canonicalSubscription: Stripe.Subscription | null;
+  checkoutSessionSubscription: Stripe.Subscription | null;
   customerId: string | null;
 };
 
@@ -289,6 +296,8 @@ async function prepareHostedStripeEventProcessingContext(
   event: Stripe.Event,
 ): Promise<HostedStripeEventProcessingContext> {
   const canonicalSubscription = await resolveHostedStripeEventCanonicalSubscription(event);
+  const checkoutSessionSubscription =
+    await resolveHostedStripeCheckoutSessionSubscriptionForProcessing(event);
   const canonicalBillingStatus = canonicalSubscription
     ? mapStripeSubscriptionStatusToHostedBillingStatus(canonicalSubscription.status)
     : null;
@@ -297,6 +306,7 @@ async function prepareHostedStripeEventProcessingContext(
     return {
       canonicalBillingStatus,
       canonicalSubscription,
+      checkoutSessionSubscription,
       customerId: null,
     };
   }
@@ -310,8 +320,38 @@ async function prepareHostedStripeEventProcessingContext(
   return {
     canonicalBillingStatus,
     canonicalSubscription,
+    checkoutSessionSubscription,
     customerId: customerContext.customerId,
   };
+}
+
+async function resolveHostedStripeCheckoutSessionSubscriptionForProcessing(
+  event: Stripe.Event,
+): Promise<Stripe.Subscription | null> {
+  if (event.type !== "checkout.session.completed") {
+    return null;
+  }
+
+  const session = event.data.object as Stripe.Checkout.Session;
+  if (session.metadata?.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
+    return null;
+  }
+
+  const subscriptionId = coerceStripeSubscriptionId(session.subscription);
+  if (!subscriptionId) {
+    return null;
+  }
+
+  if (
+    session.subscription &&
+    typeof session.subscription === "object" &&
+    "id" in session.subscription &&
+    session.subscription.id === subscriptionId
+  ) {
+    return session.subscription as Stripe.Subscription;
+  }
+
+  return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
 }
 
 async function resolveHostedStripeEventCanonicalSubscription(

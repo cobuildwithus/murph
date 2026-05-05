@@ -6,8 +6,15 @@ import {
 import { getPrisma } from "../prisma";
 import { buildStripeCancelUrl, buildStripeSuccessUrl } from "./billing";
 import {
+  HOSTED_PULSE_TRIAL_DAYS,
+  HOSTED_PULSE_TRIAL_OFFER,
+  HOSTED_PULSE_TRIAL_POLICY_VERSION,
+  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+  HOSTED_STANDARD_CHECKOUT_OFFER,
   getHostedDefaultBillingPlanCode,
+  type HostedBillingCheckoutOffer,
   type HostedBillingPlanCode,
+  type HostedPublicBillingCheckoutOffer,
 } from "./billing-plans";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
@@ -36,6 +43,7 @@ import { normalizeNullableString } from "./shared";
 
 export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
+  checkoutOffer?: HostedPublicBillingCheckoutOffer | null;
   inviteCode: string;
   linkedAccounts?: readonly PrivyLinkedAccountLike[];
   member?: HostedBillingCheckoutAuthenticatedMember;
@@ -78,9 +86,11 @@ export async function createHostedBillingCheckout(
 ): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
   const billingPlanCode = input.billingPlanCode ?? getHostedDefaultBillingPlanCode();
+  const checkoutOffer = input.checkoutOffer ?? HOSTED_STANDARD_CHECKOUT_OFFER;
   const now = input.now ?? new Date();
   const timing = startHostedOnboardingTiming("hosted-onboarding.billing.create-checkout", {
     billingPlanCode,
+    checkoutOffer,
   });
 
   try {
@@ -137,23 +147,31 @@ export async function createHostedBillingCheckout(
       });
     }
 
+    const currentBillingRef = await readHostedMemberStripeBillingRef({
+      memberId: invite.member.id,
+      prisma,
+    });
+    const resolvedOffer = resolveHostedBillingCheckoutOffer({
+      billingPlanCode,
+      checkoutOffer,
+      currentBillingRef,
+    });
     const { priceId, stripe, usagePriceId } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-    const customerId = await resolveHostedStripeCustomerId({
-      memberId: invite.member.id,
-      prisma,
-    });
+    const customerId = currentBillingRef?.stripeCustomerId ?? null;
     const verifiedEmail = customerId
       ? null
       : extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
-    const checkoutMetadata: Record<string, string> = {
+    const checkoutMetadata = buildHostedBillingCheckoutMetadata({
       billingPlanCode,
+      checkoutOffer: resolvedOffer,
       memberId: invite.member.id,
-    };
+    });
     const checkoutIdempotencyKey = buildHostedBillingCheckoutIdempotencyKey({
       billingPlanCode,
+      checkoutOffer: resolvedOffer,
       inviteCode: invite.inviteCode,
       memberId: invite.member.id,
       priceId,
@@ -175,6 +193,9 @@ export async function createHostedBillingCheckout(
       payment_method_types: ["card"],
       subscription_data: {
         metadata: checkoutMetadata,
+        ...(resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
+          ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
+          : {}),
       },
       success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode),
     }, {
@@ -215,34 +236,9 @@ async function resolveHostedBillingCheckoutAuth(
   throw new TypeError("Hosted billing checkout requires the authenticated hosted member.");
 }
 
-async function resolveHostedStripeCustomerId(input: {
-  memberId: string;
-  prisma: PrismaClient;
-}): Promise<string | null> {
-  const timing = startHostedOnboardingTiming("hosted-onboarding.billing.resolve-stripe-customer");
-  const currentBillingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const currentStripeCustomerId = currentBillingRef?.stripeCustomerId ?? null;
-  const customerPath = currentStripeCustomerId ? "existing" : "checkout-create";
-
-  try {
-    finishHostedOnboardingTiming(timing, "completed", {
-      customerPath,
-    });
-    return currentStripeCustomerId;
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      customerPath,
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-    });
-    throw error;
-  }
-}
-
 export function buildHostedBillingCheckoutIdempotencyKey(input: {
   billingPlanCode: HostedBillingPlanCode;
+  checkoutOffer?: HostedBillingCheckoutOffer;
   inviteCode: string;
   memberId: string;
   priceId: string;
@@ -258,14 +254,117 @@ export function buildHostedBillingCheckoutIdempotencyKey(input: {
     priceId: input.priceId,
     usagePriceId: input.usagePriceId,
   });
+  const offerBindingKey = deriveHostedBillingCheckoutOfferBindingKey({
+    checkoutOffer: input.checkoutOffer ?? HOSTED_STANDARD_CHECKOUT_OFFER,
+  });
   return [
     "hosted-billing-checkout",
     input.memberId,
     input.inviteCode,
     input.billingPlanCode,
+    offerBindingKey,
     lineItemBindingKey,
     customerBindingKey,
   ].join(":");
+}
+
+export function deriveHostedBillingCheckoutOfferBindingKey(input: {
+  checkoutOffer: HostedBillingCheckoutOffer;
+  trialDurationDays?: number | null;
+  trialPolicyVersion?: string | null;
+  trialUsageLimitUsdMicros?: bigint | null;
+}): string {
+  const binding = {
+    checkoutOffer: input.checkoutOffer,
+    trialDurationDays: input.trialDurationDays ?? (
+      input.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER ? HOSTED_PULSE_TRIAL_DAYS : null
+    ),
+    trialPolicyVersion: input.trialPolicyVersion ?? (
+      input.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+        ? HOSTED_PULSE_TRIAL_POLICY_VERSION
+        : null
+    ),
+    trialUsageLimitUsdMicros: (
+      input.trialUsageLimitUsdMicros ?? (
+        input.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+          ? HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS
+          : null
+      )
+    )?.toString() ?? null,
+  };
+
+  return `offer:${sha256Hex(JSON.stringify(binding)).slice(0, 12)}`;
+}
+
+function resolveHostedBillingCheckoutOffer(input: {
+  billingPlanCode: HostedBillingPlanCode;
+  checkoutOffer: HostedBillingCheckoutOffer;
+  currentBillingRef: Awaited<ReturnType<typeof readHostedMemberStripeBillingRef>>;
+}): HostedBillingCheckoutOffer {
+  if (input.checkoutOffer === HOSTED_STANDARD_CHECKOUT_OFFER) {
+    return input.checkoutOffer;
+  }
+
+  if (input.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_OFFER_UNSUPPORTED",
+      message: "That hosted checkout offer is not supported.",
+      httpStatus: 400,
+    });
+  }
+
+  if (input.billingPlanCode !== "launch_monthly") {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_OFFER_PLAN_MISMATCH",
+      message: "Pulse Trial is only available for the Pulse plan.",
+      httpStatus: 400,
+    });
+  }
+
+  if (!isHostedPulseTrialCheckoutEnabled()) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_CHECKOUT_DISABLED",
+      message: "Pulse Trial checkout is not available yet.",
+      httpStatus: 404,
+    });
+  }
+
+  if (input.currentBillingRef?.pulseTrialRedeemedAt) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED",
+      message: "This hosted account has already used its Pulse Trial. Continue with Pulse instead.",
+      httpStatus: 409,
+    });
+  }
+
+  return input.checkoutOffer;
+}
+
+function isHostedPulseTrialCheckoutEnabled(): boolean {
+  return process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED === "1";
+}
+
+function buildHostedBillingCheckoutMetadata(input: {
+  billingPlanCode: HostedBillingPlanCode;
+  checkoutOffer: HostedBillingCheckoutOffer;
+  memberId: string;
+}): Record<string, string> {
+  if (input.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
+    return {
+      billingPlanCode: input.billingPlanCode,
+      checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
+      memberId: input.memberId,
+    };
+  }
+
+  return {
+    billingPlanCode: "launch_monthly",
+    checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+    memberId: input.memberId,
+    trialDurationDays: HOSTED_PULSE_TRIAL_DAYS.toString(),
+    trialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+    trialUsageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString(),
+  };
 }
 
 function deriveHostedBillingCheckoutLineItemBindingKey(input: {

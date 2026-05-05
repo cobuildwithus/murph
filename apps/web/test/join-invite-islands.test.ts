@@ -153,6 +153,52 @@ test("JoinInviteCheckoutPlanButtonIsland sends the clicked plan code to checkout
   await cleanup();
 });
 
+test("JoinInviteCheckoutPlanButtonIsland sends Pulse Trial checkout offer to checkout", async () => {
+  mocks.requestHostedBillingCheckout.mockResolvedValue({
+    alreadyActive: false,
+    url: "https://stripe.example.test/trial",
+  });
+
+  const { assign, button, cleanup } = await renderClientComponent(
+    createElement(JoinInviteCheckoutPlanButtonIsland, {
+      billingReady: true,
+      checkoutOffer: "pulse_trial_7d",
+      idleLabel: "Start 7-day trial",
+      inviteCode: "invite-code",
+      planCode: "launch_monthly",
+    }),
+  );
+
+  await act(async () => {
+    button.click();
+  });
+
+  expect(mocks.requestHostedBillingCheckout).toHaveBeenCalledWith({
+    billingPlanCode: "launch_monthly",
+    checkoutOffer: "pulse_trial_7d",
+    inviteCode: "invite-code",
+  });
+  expect(assign).toHaveBeenCalledWith("https://stripe.example.test/trial");
+  await cleanup();
+});
+
+test("JoinInviteCheckoutPlanButtonIsland uses the disabled label when trial checkout is not ready", async () => {
+  const { button, cleanup } = await renderClientComponent(
+    createElement(JoinInviteCheckoutPlanButtonIsland, {
+      billingReady: false,
+      checkoutOffer: "pulse_trial_7d",
+      disabledLabel: "Trial unavailable",
+      idleLabel: "Start 7-day trial",
+      inviteCode: "invite-code",
+      planCode: "launch_monthly",
+    }),
+  );
+
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(button.textContent).toBe("Trial unavailable");
+  await cleanup();
+});
+
 test("JoinInviteCheckoutPlanButtonIsland refreshes instead of redirecting when checkout is already active", async () => {
   mocks.requestHostedBillingCheckout.mockResolvedValue({
     alreadyActive: true,

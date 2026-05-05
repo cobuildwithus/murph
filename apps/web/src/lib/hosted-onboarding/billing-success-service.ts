@@ -1,6 +1,7 @@
 import { type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { nudgeHostedRunnerBestEffort } from "../hosted-runner/control";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -16,7 +17,7 @@ import {
 import {
   listHostedStripeCheckoutSessionMemberIds,
 } from "./stripe-billing-lookup";
-import { bindHostedStripeBillingRefsFromCheckoutSessionTx } from "./stripe-billing-events";
+import { applyStripeCheckoutCompleted } from "./stripe-billing-events";
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
@@ -49,11 +50,12 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     session,
   });
 
-  await applyHostedCheckoutSessionSuccess({
+  const activationOutcome = await applyHostedCheckoutSessionSuccess({
     memberId: invite.memberId,
     prisma,
     session,
   });
+  await nudgeHostedCheckoutSuccessActivationRunner(activationOutcome);
 
   return getHostedInviteStatus({
     authenticatedMember: input.member,
@@ -66,7 +68,18 @@ async function applyHostedCheckoutSessionSuccess(input: {
   memberId: string;
   prisma: PrismaClient;
   session: Stripe.Checkout.Session;
-}): Promise<void> {
+}): Promise<{
+  activatedMemberId: string | null;
+  hostedExecutionEventId: string | null;
+}> {
+  let activationOutcome: {
+    activatedMemberId: string | null;
+    hostedExecutionEventId: string | null;
+  } = {
+    activatedMemberId: null,
+    hostedExecutionEventId: null,
+  };
+
   await input.prisma.$transaction(async (tx) => {
     const memberCore = await readHostedMemberCoreState({
       memberId: input.memberId,
@@ -81,12 +94,24 @@ async function applyHostedCheckoutSessionSuccess(input: {
       });
     }
 
-    await bindHostedStripeBillingRefsFromCheckoutSessionTx({
-      memberId: memberCore.id,
-      session: input.session,
-      tx,
-    });
+    activationOutcome = await applyStripeCheckoutCompleted(input.session, tx);
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  return activationOutcome;
+}
+
+async function nudgeHostedCheckoutSuccessActivationRunner(input: {
+  activatedMemberId: string | null;
+  hostedExecutionEventId: string | null;
+}): Promise<void> {
+  if (!input.activatedMemberId || !input.hostedExecutionEventId) {
+    return;
+  }
+
+  await nudgeHostedRunnerBestEffort({
+    context: "stripe.checkout-success",
+    userId: input.activatedMemberId,
+  });
 }
 
 function assertHostedCheckoutSessionReadyForSuccessRedirect(session: Stripe.Checkout.Session) {

@@ -846,6 +846,40 @@ describe("hosted onboarding routes", () => {
     });
   });
 
+  it("forwards Pulse Trial checkout offer through the hosted billing checkout route", async () => {
+    mocks.requireHostedInviteCodeFromRequest.mockResolvedValueOnce({
+      body: {
+        checkoutOffer: "pulse_trial_7d",
+        inviteCode: "invite-code",
+      },
+      inviteCode: "invite-code",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+
+    const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+      body: JSON.stringify({
+        checkoutOffer: "pulse_trial_7d",
+        inviteCode: "invite-code",
+      }),
+      headers: SAME_ORIGIN_HEADERS,
+      method: "POST",
+    });
+
+    const response = await billingCheckoutRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
+      checkoutOffer: "pulse_trial_7d",
+      inviteCode: "invite-code",
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+  });
+
   it("does not forward wallet state from the hosted billing checkout request body", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
       body: JSON.stringify({

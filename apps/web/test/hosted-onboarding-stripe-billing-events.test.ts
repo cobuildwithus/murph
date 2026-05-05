@@ -55,6 +55,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
 import {
   applyStripeInvoicePaid,
+  applyStripeInvoicePaymentFailed,
   applyStripeSubscriptionUpdated,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
@@ -267,11 +268,276 @@ describe("hosted onboarding stripe billing events", () => {
       }),
     );
   });
+
+  it("keeps subscription.active trial updates in trial phase until the paid conversion invoice arrives", async () => {
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        currentPeriodEnd: 1_745_020_800,
+        currentPeriodStart: 1_744_416_000,
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "active",
+        trialEnd: 1_745_020_800,
+        trialStart: 1_744_416_000,
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_trial_sub_active",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPhase: "trial",
+        currentCheckoutOffer: "pulse_trial_7d",
+      }),
+    );
+  });
+
+  it("ignores the initial zero-dollar Pulse Trial invoice", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await expect(
+      applyStripeInvoicePaid(
+        makeStripeInvoice({
+          billingReason: "subscription_create",
+          id: "in_trial_initial",
+          subscription: "sub_123",
+        }),
+        {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_trial_initial",
+          sourceType: "stripe.invoice.paid",
+        },
+        {} as never,
+        HostedBillingStatus.active,
+        makeStripeSubscription({
+          metadata: {
+            checkoutOffer: "pulse_trial_7d",
+          },
+          status: "trialing",
+        }),
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("promotes a Pulse Trial to paid only on the accepted conversion invoice", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeInvoicePaid(
+      makeStripeInvoice({
+        billingReason: "subscription_cycle",
+        id: "in_trial_conversion",
+        subscription: "sub_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_trial_conversion",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        currentPeriodEnd: 1_747_612_800,
+        currentPeriodStart: 1_745_020_800,
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "active",
+        trialEnd: 1_745_020_800,
+        trialStart: 1_744_416_000,
+      }),
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      currentBillingPhase: "paid",
+      currentCheckoutOffer: "pulse_trial_7d",
+      freshnessPolicy: "positive-invoice-entitlement",
+    }));
+  });
+
+  it("does not promote a Pulse Trial when the paid invoice subscription does not match the canonical subscription", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await expect(
+      applyStripeInvoicePaid(
+        makeStripeInvoice({
+          billingReason: "subscription_cycle",
+          id: "in_trial_mismatch",
+          subscription: "sub_other",
+        }),
+        {
+          eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+          occurredAt: "2026-04-19T00:00:00.000Z",
+          sourceEventId: "evt_trial_mismatch",
+          sourceType: "stripe.invoice.paid",
+        },
+        {} as never,
+        HostedBillingStatus.active,
+        makeStripeSubscription({
+          id: "sub_123",
+          metadata: {
+            checkoutOffer: "pulse_trial_7d",
+          },
+          status: "active",
+        }),
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("clears paid allowance phase on trial conversion payment failure", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeInvoicePaymentFailed(
+      makeStripeInvoice({
+        billingReason: "subscription_cycle",
+        id: "in_trial_failed",
+        subscription: "sub_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_trial_failed",
+        sourceType: "stripe.invoice.payment_failed",
+      },
+      {} as never,
+      HostedBillingStatus.past_due,
+      makeStripeSubscription({
+        id: "sub_123",
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "past_due",
+        trialEnd: 1_745_020_800,
+        trialStart: 1_744_416_000,
+      }),
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      billingStatus: HostedBillingStatus.past_due,
+      currentBillingPhase: null,
+      currentCheckoutOffer: "pulse_trial_7d",
+    }));
+  });
+
+  it("does not treat a later standard Pulse invoice as a trial invoice just because a trial was redeemed before", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "standard",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_standard_123",
+      },
+    }));
+
+    await applyStripeInvoicePaid(
+      makeStripeInvoice({
+        billingReason: "subscription_create",
+        id: "in_standard_after_trial",
+        subscription: "sub_standard_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        occurredAt: "2026-04-25T00:00:00.000Z",
+        sourceEventId: "evt_standard_after_trial",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        id: "sub_standard_123",
+        metadata: {
+          checkoutOffer: "standard",
+        },
+        status: "active",
+      }),
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      currentBillingPhase: "paid",
+      currentCheckoutOffer: "standard",
+      stripeSubscriptionId: "sub_standard_123",
+    }));
+  });
 });
 
-function makeMemberSnapshot(): HostedMemberBillingSnapshot {
+function makeMemberSnapshot(input?: {
+  billingRef?: HostedMemberBillingSnapshot["billingRef"];
+}): HostedMemberBillingSnapshot {
   return {
-    billingRef: {
+    billingRef: input?.billingRef ?? {
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -288,6 +554,7 @@ function makeMemberSnapshot(): HostedMemberBillingSnapshot {
 
 function makeStripeInvoice(
   overrides?: Partial<{
+    billingReason: string | null;
     customer: string | null;
     customerEmail: string | null;
     id: string;
@@ -296,6 +563,7 @@ function makeStripeInvoice(
 ): Stripe.Invoice {
   // @ts-expect-error - the synthetic fixture is intentionally narrower than Stripe.Invoice.
   return {
+    billing_reason: overrides?.billingReason ?? null,
     customer: overrides?.customer ?? "cus_123",
     customer_email: overrides?.customerEmail ?? null,
     id: overrides?.id ?? "in_123",
@@ -306,14 +574,22 @@ function makeStripeInvoice(
 function makeStripeSubscription(
   overrides?: Partial<{
     customer: string | null;
+    currentPeriodEnd: number | null;
+    currentPeriodStart: number | null;
     id: string;
     items: string[];
+    metadata: Record<string, string>;
     status: Stripe.Subscription.Status;
+    trialEnd: number | null;
+    trialStart: number | null;
   }>,
 ): Stripe.Subscription {
+  // @ts-expect-error - the synthetic fixture is intentionally narrower than Stripe.Subscription.
   return {
     customer: overrides?.customer ?? "cus_123",
     id: overrides?.id ?? "sub_123",
+    current_period_end: overrides?.currentPeriodEnd ?? 1_747_612_800,
+    current_period_start: overrides?.currentPeriodStart ?? 1_745_020_800,
     items: {
       data: (overrides?.items ?? []).map((priceId) => ({
         price: {
@@ -321,6 +597,9 @@ function makeStripeSubscription(
         },
       })),
     },
+    metadata: overrides?.metadata ?? {},
     status: overrides?.status ?? "active",
+    trial_end: overrides?.trialEnd ?? null,
+    trial_start: overrides?.trialStart ?? null,
   } as Stripe.Subscription;
 }

@@ -4,11 +4,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
+  activateHostedMemberForPositiveSourceTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
+  listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
+  requireHostedStripeApi: vi.fn(),
+  retrieveStripeSubscription: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
+  writeHostedMemberStripeBillingTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
+  activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
@@ -47,8 +56,24 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   return {
     ...actual,
     findMemberForStripeCheckoutSession: mocks.findMemberForStripeCheckoutSession,
+    listHostedStripeCheckoutSessionMemberIds: mocks.listHostedStripeCheckoutSessionMemberIds,
   };
 });
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy")
+  >("@/src/lib/hosted-onboarding/stripe-billing-policy");
+
+  return {
+    ...actual,
+    writeHostedMemberStripeBillingTx: mocks.writeHostedMemberStripeBillingTx,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedStripeApi: mocks.requireHostedStripeApi,
+}));
 
 import { applyStripeCheckoutCompleted } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
@@ -57,9 +82,16 @@ describe("applyStripeCheckoutCompleted", () => {
     vi.clearAllMocks();
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue(makeMemberSnapshot());
+    mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
+    mocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: mocks.retrieveStripeSubscription,
+      },
+    });
+    mocks.retrieveStripeSubscription.mockResolvedValue(makePulseTrialSubscription());
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
-      lastStripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+      lastStripeEventCreatedAt: new Date("2025-04-12T00:00:00.000Z"),
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -72,6 +104,27 @@ describe("applyStripeCheckoutCompleted", () => {
         collectedAt: new Date(1_744_416_000 * 1000),
       },
       verifiedEmail: null,
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentPeriodEnd: new Date("2025-04-19T00:00:00.000Z"),
+        currentPeriodStart: new Date("2025-04-12T00:00:00.000Z"),
+        currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
+        currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
+        memberId: "member_123",
+        pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+    mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValue({
+      activated: true,
+      hostedExecutionEventId: "wake_123",
+      memberId: "member_123",
     });
   });
 
@@ -94,13 +147,14 @@ describe("applyStripeCheckoutCompleted", () => {
       hostedExecutionEventId: null,
     });
 
-    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(expect.objectContaining({
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeEventCreatedAt: new Date(1_744_416_000 * 1000),
       stripeSubscriptionId: "sub_123",
       tx: {},
-    });
+    }));
     expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
       address: "payer@example.com",
       collectedAt: new Date(1_744_416_000 * 1000),
@@ -143,7 +197,237 @@ describe("applyStripeCheckoutCompleted", () => {
       prisma: {},
     });
   });
+
+  it("activates a metadata-gated Pulse Trial checkout when the expanded subscription is trialing", async () => {
+    await expect(
+      applyStripeCheckoutCompleted(
+        makePulseTrialCheckoutSession() as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
+      currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
+      freshnessPolicy: "trial-checkout-entitlement",
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    }));
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
+      dispatchContext: expect.objectContaining({
+        sourceEventId: "checkout.session:cs_trial_123",
+        sourceType: "stripe.checkout.session.completed",
+      }),
+      memberId: "member_123",
+      prisma: {},
+      skipIfBillingAlreadyActive: false,
+    });
+  });
+
+  it("activates Pulse Trial checkout with the pre-resolved subscription from event processing", async () => {
+    await expect(
+      applyStripeCheckoutCompleted(
+        {
+          ...makePulseTrialCheckoutSession(),
+          subscription: "sub_123",
+        } as never,
+        {} as never,
+        undefined,
+        makePulseTrialSubscription() as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+    });
+
+    expect(mocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      currentBillingPhase: "trial",
+      stripeSubscriptionId: "sub_123",
+    }));
+  });
+
+  it.each([
+    [
+      "wrong trial policy",
+      {
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "pulse_trial_7d",
+          memberId: "member_123",
+          trialPolicyVersion: "old-policy",
+        },
+      },
+    ],
+    [
+      "wrong member metadata",
+      {
+        client_reference_id: "member_123",
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "pulse_trial_7d",
+          memberId: "member_456",
+          trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        },
+      },
+    ],
+    [
+      "expired trial subscription",
+      {
+        subscription: {
+          ...makePulseTrialSubscription(),
+          trial_end: 1_744_415_999,
+        },
+      },
+    ],
+    [
+      "customer mismatch",
+      {
+        subscription: {
+          ...makePulseTrialSubscription(),
+          customer: "cus_other",
+        },
+      },
+    ],
+  ])("does not activate Pulse Trial checkout for %s", async (_name, overrides) => {
+    await expect(
+      applyStripeCheckoutCompleted(
+        {
+          ...makePulseTrialCheckoutSession(),
+          ...overrides,
+        } as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("does not activate Pulse Trial checkout when Stripe ownership resolves ambiguously", async () => {
+    mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValueOnce([
+      "member_123",
+      "member_456",
+    ]);
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        makePulseTrialCheckoutSession() as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("does not activate Pulse Trial checkout after a trial has already been redeemed", async () => {
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        makePulseTrialCheckoutSession() as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("does not let a stale trial checkout overwrite an already paid billing phase", async () => {
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "standard",
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_paid_123",
+      },
+    }));
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        makePulseTrialCheckoutSession() as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
+
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
 });
+
+function makePulseTrialCheckoutSession(): Record<string, unknown> {
+  return {
+    client_reference_id: "member_123",
+    created: 1_744_416_000,
+    customer: "cus_123",
+    customer_details: {
+      email: " payer@example.com ",
+    },
+    id: "cs_trial_123",
+    metadata: {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+    },
+    mode: "subscription",
+    status: "complete",
+    subscription: {
+      id: "sub_123",
+      customer: "cus_123",
+      current_period_end: 1_745_020_800,
+      current_period_start: 1_744_416_000,
+      status: "trialing",
+      trial_end: 1_745_020_800,
+      trial_start: 1_744_416_000,
+    },
+  };
+}
+
+function makePulseTrialSubscription(): Record<string, unknown> {
+  return {
+    id: "sub_123",
+    customer: "cus_123",
+    current_period_end: 1_745_020_800,
+    current_period_start: 1_744_416_000,
+    status: "trialing",
+    trial_end: 1_745_020_800,
+    trial_start: 1_744_416_000,
+  };
+}
 
 function makeMemberSnapshot(overrides?: {
   billingRef?: HostedMemberBillingSnapshot["billingRef"];
@@ -156,10 +440,10 @@ function makeMemberSnapshot(overrides?: {
     },
     core: {
       billingStatus: HostedBillingStatus.not_started,
-      createdAt: new Date("2026-04-12T00:00:00.000Z"),
+      createdAt: new Date("2025-04-12T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
-      updatedAt: new Date("2026-04-12T00:00:00.000Z"),
+      updatedAt: new Date("2025-04-12T00:00:00.000Z"),
     },
   };
 }

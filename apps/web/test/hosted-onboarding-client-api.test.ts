@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HostedOnboardingApiError, requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedBillingCheckout,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 
 describe("hosted onboarding client api", () => {
   beforeEach(() => {
@@ -107,6 +111,40 @@ describe("hosted onboarding client api", () => {
       message: "Verify your phone to continue.",
       retryable: true,
     }));
+  });
+
+  it("posts checkout offer in billing checkout requests", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      alreadyActive: false,
+      url: "https://stripe.example.test/trial",
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedBillingCheckout({
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      inviteCode: "invite-code",
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://stripe.example.test/trial",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/checkout", {
+      body: JSON.stringify({
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        inviteCode: "invite-code",
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+      },
+      keepalive: false,
+      method: "POST",
+    });
   });
 
   it("fails cleanly when a successful response has an empty body", async () => {

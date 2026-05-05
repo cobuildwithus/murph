@@ -27,11 +27,17 @@ import {
 } from "./shared";
 
 export interface HostedMemberStripeBillingRefSnapshot {
+  currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
+  currentCheckoutOffer?: string | null;
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
+  currentTrialEndsAt?: Date | null;
+  currentTrialStartedAt?: Date | null;
   lastStripeEventCreatedAt?: Date | null;
   memberId: string;
+  pulseTrialPolicyVersion?: string | null;
+  pulseTrialRedeemedAt?: Date | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
 }
@@ -47,10 +53,16 @@ export interface HostedMemberStripeBillingLookup {
 }
 
 export interface HostedMemberStripeBillingRefWriteInput {
+  currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
+  currentCheckoutOffer?: string | null;
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
+  currentTrialEndsAt?: Date | null;
+  currentTrialStartedAt?: Date | null;
   memberId: string;
+  pulseTrialPolicyVersion?: string | null;
+  pulseTrialRedeemedAt?: Date | null;
   stripeEventCreatedAt?: Date | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
@@ -257,9 +269,15 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
         }
       : {}),
     currentBillingPlanCode: billingRef.currentBillingPlanCode,
+    currentBillingPhase: billingRef.currentBillingPhase,
+    currentCheckoutOffer: billingRef.currentCheckoutOffer,
     currentPeriodEnd: billingRef.currentPeriodEnd,
     currentPeriodStart: billingRef.currentPeriodStart,
+    currentTrialEndsAt: billingRef.currentTrialEndsAt,
+    currentTrialStartedAt: billingRef.currentTrialStartedAt,
     memberId: billingRef.memberId,
+    pulseTrialPolicyVersion: billingRef.pulseTrialPolicyVersion,
+    pulseTrialRedeemedAt: billingRef.pulseTrialRedeemedAt,
     stripeCustomerId: privateState.stripeCustomerId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,
   };
@@ -323,9 +341,15 @@ async function buildHostedMemberBillingRefCreateData(
       stripeCustomerId: input.stripeCustomerId ?? null,
       stripeSubscriptionId: input.stripeSubscriptionId ?? null,
     })),
+    currentBillingPhase: input.currentBillingPhase ?? null,
     currentBillingPlanCode: input.currentBillingPlanCode ?? null,
+    currentCheckoutOffer: input.currentCheckoutOffer ?? null,
     currentPeriodEnd: input.currentPeriodEnd ?? null,
     currentPeriodStart: input.currentPeriodStart ?? null,
+    currentTrialEndsAt: input.currentTrialEndsAt ?? null,
+    currentTrialStartedAt: input.currentTrialStartedAt ?? null,
+    pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
+    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
     stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(input.stripeCustomerId ?? null),
     stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(
       input.stripeSubscriptionId ?? null,
@@ -344,11 +368,29 @@ async function buildHostedMemberBillingRefUpdateData(
   if (input.currentBillingPlanCode !== undefined) {
     data.currentBillingPlanCode = input.currentBillingPlanCode;
   }
+  if (input.currentBillingPhase !== undefined) {
+    data.currentBillingPhase = input.currentBillingPhase;
+  }
+  if (input.currentCheckoutOffer !== undefined) {
+    data.currentCheckoutOffer = input.currentCheckoutOffer;
+  }
   if (input.currentPeriodStart !== undefined) {
     data.currentPeriodStart = input.currentPeriodStart;
   }
   if (input.currentPeriodEnd !== undefined) {
     data.currentPeriodEnd = input.currentPeriodEnd;
+  }
+  if (input.currentTrialStartedAt !== undefined) {
+    data.currentTrialStartedAt = input.currentTrialStartedAt;
+  }
+  if (input.currentTrialEndsAt !== undefined) {
+    data.currentTrialEndsAt = input.currentTrialEndsAt;
+  }
+  if (input.pulseTrialRedeemedAt !== undefined) {
+    data.pulseTrialRedeemedAt = input.pulseTrialRedeemedAt;
+  }
+  if (input.pulseTrialPolicyVersion !== undefined) {
+    data.pulseTrialPolicyVersion = input.pulseTrialPolicyVersion;
   }
   if (input.stripeCustomerId !== undefined) {
     data.stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
