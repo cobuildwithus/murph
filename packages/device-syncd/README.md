@@ -146,6 +146,8 @@ Strava settings:
 - `STRAVA_RECONCILE_DAYS`
 - `STRAVA_RECONCILE_INTERVAL_MS`
 - `STRAVA_REQUEST_TIMEOUT_MS`
+- `STRAVA_WEBHOOK_SIGNING_SECRET` when direct Strava webhook POST delivery is enabled; Strava POST events fail closed without a valid `X-Strava-Signature`
+- `STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
 - `STRAVA_WEBHOOK_VERIFY_TOKEN` when you want the Strava provider config to answer webhook preflight challenges and maintain the single app-global Strava webhook subscription
 
 ## Run

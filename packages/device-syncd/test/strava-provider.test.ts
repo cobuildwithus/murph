@@ -1,8 +1,19 @@
+import { createHmac } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
 import { resolveStravaWebhookPreflightResponse } from "../src/providers/strava.ts";
-import type { DeviceSyncAccount, StoredDeviceSyncAccount } from "../src/types.ts";
+import type {
+  DeviceSyncAccount,
+  DeviceSyncOAuthProvider,
+  DeviceWebhookHandler,
+  StoredDeviceSyncAccount,
+} from "../src/types.ts";
+
+const STRAVA_WEBHOOK_SIGNING_SECRET = "strava-webhook-signing-secret";
+const STRAVA_WEBHOOK_NOW = "2026-04-16T00:00:00.000Z";
+const STRAVA_WEBHOOK_TIMESTAMP = String(Math.floor(Date.parse(STRAVA_WEBHOOK_NOW) / 1000));
 
 type DeviceSyncAccountOverrides = Partial<Omit<DeviceSyncAccount, "credential">> & {
   accessToken?: string;
@@ -91,6 +102,34 @@ function requireStravaOAuthTokens(account: DeviceSyncAccount) {
   }
 
   return account.credential.tokens;
+}
+
+function signedStravaWebhookHeaders(
+  rawBody: Buffer,
+  options: {
+    secret?: string;
+    timestamp?: string;
+  } = {},
+): Headers {
+  const timestamp = options.timestamp ?? STRAVA_WEBHOOK_TIMESTAMP;
+  const signature = createHmac("sha256", options.secret ?? STRAVA_WEBHOOK_SIGNING_SECRET)
+    .update(Buffer.concat([Buffer.from(`${timestamp}.`, "utf8"), rawBody]))
+    .digest("hex");
+
+  return new Headers({
+    "x-strava-signature": `t=${timestamp},v1=${signature}`,
+  });
+}
+
+function requireStravaWebhookVerifier(
+  provider: DeviceSyncOAuthProvider,
+): NonNullable<DeviceWebhookHandler["verifyAndParseWebhook"]> {
+  const verifyAndParseWebhook = provider.webhookHandler?.verifyAndParseWebhook;
+  if (!verifyAndParseWebhook) {
+    throw new TypeError("Strava provider must define verifyAndParseWebhook.");
+  }
+
+  return verifyAndParseWebhook;
 }
 
 describe("Strava device-sync provider", () => {
@@ -447,23 +486,123 @@ describe("Strava device-sync provider", () => {
     ).toThrow(/did not include the configured verify token/u);
   });
 
+  it("rejects Strava webhook events without a valid delivery signature", async () => {
+    const rawBody = Buffer.from(JSON.stringify({
+      aspect_type: "create",
+      event_time: 1_776_297_600,
+      object_id: 987654321,
+      object_type: "activity",
+      owner_id: 12345,
+      subscription_id: 444,
+    }));
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
+      webhookTimestampToleranceMs: 60_000,
+    });
+    const verifyAndParseWebhook = requireStravaWebhookVerifier(provider);
+
+    await expect(
+      verifyAndParseWebhook({
+        headers: new Headers(),
+        rawBody,
+        now: STRAVA_WEBHOOK_NOW,
+      }),
+    ).rejects.toMatchObject({
+      code: "STRAVA_WEBHOOK_SIGNATURE_MISSING",
+    });
+
+    await expect(
+      verifyAndParseWebhook({
+        headers: new Headers({
+          "x-strava-signature": `t=${STRAVA_WEBHOOK_TIMESTAMP},v1=${"0".repeat(64)}`,
+        }),
+        rawBody,
+        now: STRAVA_WEBHOOK_NOW,
+      }),
+    ).rejects.toMatchObject({
+      code: "STRAVA_WEBHOOK_SIGNATURE_INVALID",
+    });
+
+    await expect(
+      verifyAndParseWebhook({
+        headers: signedStravaWebhookHeaders(rawBody, {
+          timestamp: "1",
+        }),
+        rawBody,
+        now: STRAVA_WEBHOOK_NOW,
+      }),
+    ).rejects.toMatchObject({
+      code: "STRAVA_WEBHOOK_TIMESTAMP_STALE",
+    });
+
+    const providerWithoutSecret = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+    });
+    const verifyWithoutSecret = requireStravaWebhookVerifier(providerWithoutSecret);
+
+    await expect(
+      verifyWithoutSecret({
+        headers: signedStravaWebhookHeaders(rawBody),
+        rawBody,
+        now: STRAVA_WEBHOOK_NOW,
+      }),
+    ).rejects.toMatchObject({
+      code: "STRAVA_WEBHOOK_SIGNING_SECRET_MISSING",
+    });
+  });
+
+  it("rejects malformed Strava webhook payloads on signature verification before JSON parsing", async () => {
+    const rawBody = Buffer.from("{not-json");
+    const wrongSignedBody = Buffer.from(JSON.stringify({
+      aspect_type: "create",
+      event_time: 1_776_297_600,
+      object_id: 987654321,
+      object_type: "activity",
+      owner_id: 12345,
+      subscription_id: 444,
+    }));
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
+      webhookTimestampToleranceMs: 60_000,
+    });
+    const verifyAndParseWebhook = requireStravaWebhookVerifier(provider);
+
+    await expect(
+      verifyAndParseWebhook({
+        headers: signedStravaWebhookHeaders(wrongSignedBody),
+        rawBody,
+        now: STRAVA_WEBHOOK_NOW,
+      }),
+    ).rejects.toMatchObject({
+      code: "STRAVA_WEBHOOK_SIGNATURE_INVALID",
+    });
+  });
+
   it("parses Strava activity webhook events into resource or delete jobs", async () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "strava-client-id",
       clientSecret: "strava-client-secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
     });
+    const verifyAndParseWebhook = requireStravaWebhookVerifier(provider);
+    const createBody = Buffer.from(JSON.stringify({
+      aspect_type: "create",
+      event_time: 1_776_297_600,
+      object_id: 987654321,
+      object_type: "activity",
+      owner_id: 12345,
+      subscription_id: 444,
+    }));
 
-    const createResult = await provider.webhookHandler?.verifyAndParseWebhook?.({
-      headers: new Headers(),
-      rawBody: Buffer.from(JSON.stringify({
-        aspect_type: "create",
-        event_time: 1_776_297_600,
-        object_id: 987654321,
-        object_type: "activity",
-        owner_id: 12345,
-        subscription_id: 444,
-      })),
-      now: "2026-04-16T00:00:00.000Z",
+    const createResult = await verifyAndParseWebhook({
+      headers: signedStravaWebhookHeaders(createBody),
+      rawBody: createBody,
+      now: STRAVA_WEBHOOK_NOW,
     });
 
     expect(createResult?.externalAccountId).toBe("12345");
@@ -482,17 +621,18 @@ describe("Strava device-sync provider", () => {
       },
     ]);
 
-    const deleteResult = await provider.webhookHandler?.verifyAndParseWebhook?.({
-      headers: new Headers(),
-      rawBody: Buffer.from(JSON.stringify({
-        aspect_type: "delete",
-        event_time: 1_776_297_600,
-        object_id: 987654321,
-        object_type: "activity",
-        owner_id: 12345,
-        subscription_id: 444,
-      })),
-      now: "2026-04-16T00:00:00.000Z",
+    const deleteBody = Buffer.from(JSON.stringify({
+      aspect_type: "delete",
+      event_time: 1_776_297_600,
+      object_id: 987654321,
+      object_type: "activity",
+      owner_id: 12345,
+      subscription_id: 444,
+    }));
+    const deleteResult = await verifyAndParseWebhook({
+      headers: signedStravaWebhookHeaders(deleteBody),
+      rawBody: deleteBody,
+      now: STRAVA_WEBHOOK_NOW,
     });
 
     expect(deleteResult?.jobs).toEqual([
@@ -514,22 +654,25 @@ describe("Strava device-sync provider", () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "strava-client-id",
       clientSecret: "strava-client-secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
     });
+    const verifyAndParseWebhook = requireStravaWebhookVerifier(provider);
+    const rawBody = Buffer.from(JSON.stringify({
+      aspect_type: "update",
+      event_time: 1_776_297_600,
+      object_id: 12345,
+      object_type: "athlete",
+      owner_id: 12345,
+      subscription_id: 444,
+      updates: {
+        authorized: "false",
+      },
+    }));
 
-    const result = await provider.webhookHandler?.verifyAndParseWebhook?.({
-      headers: new Headers(),
-      rawBody: Buffer.from(JSON.stringify({
-        aspect_type: "update",
-        event_time: 1_776_297_600,
-        object_id: 12345,
-        object_type: "athlete",
-        owner_id: 12345,
-        subscription_id: 444,
-        updates: {
-          authorized: "false",
-        },
-      })),
-      now: "2026-04-16T00:00:00.000Z",
+    const result = await verifyAndParseWebhook({
+      headers: signedStravaWebhookHeaders(rawBody),
+      rawBody,
+      now: STRAVA_WEBHOOK_NOW,
     });
 
     expect(result).toMatchObject({
@@ -608,6 +751,7 @@ describe("Strava device-sync provider", () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "12345",
       clientSecret: "secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = typeof input === "string"
           ? input
@@ -917,6 +1061,7 @@ describe("Strava device-sync provider", () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "12345",
       clientSecret: "secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = typeof input === "string"
           ? input
@@ -1030,29 +1175,34 @@ describe("Strava device-sync provider", () => {
       code: "STRAVA_DELETE_JOB_INVALID",
     });
 
+    const invalidJsonBody = Buffer.from("{not-json");
+    const verifyAndParseWebhook = requireStravaWebhookVerifier(provider);
+
     await expect(
-      provider.webhookHandler?.verifyAndParseWebhook?.({
-        headers: new Headers(),
-        rawBody: Buffer.from("{not-json"),
-        now: "2026-04-16T00:00:00.000Z",
+      verifyAndParseWebhook({
+        headers: signedStravaWebhookHeaders(invalidJsonBody),
+        rawBody: invalidJsonBody,
+        now: STRAVA_WEBHOOK_NOW,
       }),
     ).rejects.toMatchObject({
       code: "STRAVA_WEBHOOK_JSON_INVALID",
     });
 
+    const athleteUpdateBody = Buffer.from(JSON.stringify({
+      aspect_type: "update",
+      object_type: "athlete",
+      owner_id: 12345,
+      object_id: 12345,
+      updates: {
+        authorized: true,
+      },
+    }));
+
     await expect(
-      provider.webhookHandler?.verifyAndParseWebhook?.({
-        headers: new Headers(),
-        rawBody: Buffer.from(JSON.stringify({
-          aspect_type: "update",
-          object_type: "athlete",
-          owner_id: 12345,
-          object_id: 12345,
-          updates: {
-            authorized: true,
-          },
-        })),
-        now: "2026-04-16T00:00:00.000Z",
+      verifyAndParseWebhook({
+        headers: signedStravaWebhookHeaders(athleteUpdateBody),
+        rawBody: athleteUpdateBody,
+        now: STRAVA_WEBHOOK_NOW,
       }),
     ).resolves.toMatchObject({
       eventType: "athlete.update",

@@ -32,6 +32,7 @@ import {
   STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS,
   STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS,
   STRAVA_SCOPES_ENV_KEYS,
+  STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
   WHOOP_BACKFILL_DAYS_ENV_KEYS,
   WHOOP_BASE_URL_ENV_KEYS,
   WHOOP_CLIENT_ID_ENV_KEYS,
@@ -127,6 +128,7 @@ const SERIALIZABLE_PROVIDER_FIELDS = {
     reconcileIntervalMs: "number",
     requestTimeoutMs: "number",
     scopes: "string[]",
+    webhookTimestampToleranceMs: "number",
   },
 } as const;
 const SERIALIZABLE_PROVIDER_DISALLOWED_FIELDS = {
@@ -149,6 +151,8 @@ const SERIALIZABLE_PROVIDER_DISALLOWED_FIELDS = {
   },
   strava: {
     fetchImpl: "is not supported in serialized runtime config.",
+    webhookSigningSecret:
+      "is a provider-owned webhook signing secret and is not supported in serialized runtime config.",
     webhookVerifyToken:
       "is a provider-owned admin secret and is not supported in serialized runtime config.",
   },
@@ -376,6 +380,10 @@ function readSerializableStravaConfig(
   const reconcileDays = parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS);
   const reconcileIntervalMs = parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS);
   const requestTimeoutMs = parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS);
+  const webhookTimestampToleranceMs = parseIntegerEnv(
+    env,
+    STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
+  );
   if (authBaseUrl !== undefined) config.authBaseUrl = authBaseUrl;
   if (apiBaseUrl !== undefined) config.apiBaseUrl = apiBaseUrl;
   if (scopes !== undefined) config.scopes = scopes;
@@ -383,6 +391,9 @@ function readSerializableStravaConfig(
   if (reconcileDays !== undefined) config.reconcileDays = reconcileDays;
   if (reconcileIntervalMs !== undefined) config.reconcileIntervalMs = reconcileIntervalMs;
   if (requestTimeoutMs !== undefined) config.requestTimeoutMs = requestTimeoutMs;
+  if (webhookTimestampToleranceMs !== undefined) {
+    config.webhookTimestampToleranceMs = webhookTimestampToleranceMs;
+  }
 
   return { strava: config };
 }

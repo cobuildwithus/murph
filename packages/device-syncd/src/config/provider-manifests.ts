@@ -68,6 +68,8 @@ import {
   STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS,
   STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS,
   STRAVA_SCOPES_ENV_KEYS,
+  STRAVA_WEBHOOK_SIGNING_SECRET_ENV_KEYS,
+  STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
   STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS,
   WHOOP_BACKFILL_DAYS_ENV_KEYS,
   WHOOP_BASE_URL_ENV_KEYS,
@@ -502,6 +504,8 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
       reconcileDays: parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS),
       reconcileIntervalMs: parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS),
       requestTimeoutMs: parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS),
+      webhookSigningSecret: optionalEnv(env, STRAVA_WEBHOOK_SIGNING_SECRET_ENV_KEYS),
+      webhookTimestampToleranceMs: parseIntegerEnv(env, STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
       webhookVerifyToken: optionalEnv(env, STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS),
     };
   },
@@ -516,9 +520,12 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
     reconcileIntervalMs: "number",
     requestTimeoutMs: "number",
     scopes: "string[]",
+    webhookTimestampToleranceMs: "number",
   },
   disallowedSerializableFields: {
     ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
+    webhookSigningSecret:
+      "is a provider-owned webhook signing secret and is not supported in serialized runtime config.",
     webhookVerifyToken:
       "is a provider-owned admin secret and is not supported in serialized runtime config.",
   },

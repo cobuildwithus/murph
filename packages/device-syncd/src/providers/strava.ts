@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 import {
   resolveDeviceProviderDescriptor,
   requireDeviceProviderOAuthDescriptor,
@@ -76,6 +78,7 @@ const STRAVA_REFRESH_SKEW_MS = 60 * 60_000;
 const STRAVA_ACTIVITY_WEBHOOK_PRIORITY = 90;
 const STRAVA_DELETE_WEBHOOK_PRIORITY = 95;
 const STRAVA_DEAUTHORIZE_WEBHOOK_PRIORITY = 100;
+const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
 
 type StravaWebhookResourceType = "activity" | "athlete";
 
@@ -132,8 +135,15 @@ export interface StravaDeviceSyncProviderConfig {
   reconcileDays?: number;
   reconcileIntervalMs?: number;
   requestTimeoutMs?: number;
+  webhookSigningSecret?: string;
+  webhookTimestampToleranceMs?: number;
   webhookVerifyToken?: string;
   fetchImpl?: typeof fetch;
+}
+
+interface StravaWebhookSignatureHeader {
+  timestamp: string;
+  signatures: string[];
 }
 
 function normalizeStravaScopes(value: unknown): string[] {
@@ -331,6 +341,123 @@ function buildDeleteMarker(input: {
   };
 }
 
+function parseStravaWebhookSignatureHeader(value: string | null): StravaWebhookSignatureHeader | null {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  let timestamp: string | null = null;
+  const signatures: string[] = [];
+
+  for (const part of normalized.split(",")) {
+    const index = part.indexOf("=");
+    if (index <= 0) {
+      continue;
+    }
+
+    const key = part.slice(0, index).trim();
+    const partValue = part.slice(index + 1).trim();
+
+    if (key === "t" && partValue) {
+      timestamp = partValue;
+    } else if (key === "v1" && partValue) {
+      signatures.push(partValue);
+    }
+  }
+
+  return timestamp && signatures.length > 0
+    ? {
+        timestamp,
+        signatures,
+      }
+    : null;
+}
+
+function strictHexDigest(value: string): Buffer | null {
+  if (!/^[0-9a-f]{64}$/iu.test(value)) {
+    return null;
+  }
+
+  return Buffer.from(value, "hex");
+}
+
+function constantTimeHexDigestMatch(expected: Buffer, candidates: readonly string[]): boolean {
+  for (const candidate of candidates) {
+    const actual = strictHexDigest(candidate);
+    if (actual && actual.length === expected.length && timingSafeEqual(actual, expected)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function verifyStravaWebhookSignature(input: {
+  headers: Headers;
+  now: string;
+  rawBody: Buffer;
+  signingSecret: string | null;
+  timestampToleranceMs: number;
+}): void {
+  const parsed = parseStravaWebhookSignatureHeader(input.headers.get("x-strava-signature"));
+
+  if (!parsed) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_SIGNATURE_MISSING",
+      message: "Strava webhook signature header is missing.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+
+  if (!input.signingSecret) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_SIGNING_SECRET_MISSING",
+      message: "Strava webhook signing secret is not configured.",
+      retryable: false,
+      httpStatus: 500,
+    });
+  }
+
+  const timestampNumber = Number(parsed.timestamp);
+  if (!Number.isFinite(timestampNumber)) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_TIMESTAMP_INVALID",
+      message: "Strava webhook signature timestamp was invalid.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+
+  const timestampMs = timestampNumber < 10_000_000_000
+    ? timestampNumber * 1000
+    : timestampNumber;
+  const nowMs = Date.parse(input.now);
+
+  if (Number.isFinite(nowMs) && Math.abs(nowMs - timestampMs) > input.timestampToleranceMs) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_TIMESTAMP_STALE",
+      message: "Strava webhook signature timestamp fell outside the allowed replay window.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+
+  const expected = createHmac("sha256", input.signingSecret)
+    .update(Buffer.concat([Buffer.from(`${parsed.timestamp}.`, "utf8"), input.rawBody]))
+    .digest();
+
+  if (!constantTimeHexDigestMatch(expected, parsed.signatures)) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_SIGNATURE_INVALID",
+      message: "Strava webhook signature verification failed.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+}
+
 function buildStravaWebhookPreflightResponse(input: {
   method: string;
   url: URL;
@@ -406,6 +533,11 @@ export function createStravaDeviceSyncProvider(
   const reconcileDays = Math.max(1, config.reconcileDays ?? DEFAULT_RECONCILE_DAYS);
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const webhookSigningSecret = normalizeString(config.webhookSigningSecret) ?? null;
+  const webhookTimestampToleranceMs = Math.max(
+    1_000,
+    config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS,
+  );
   const webhookVerifyToken = normalizeString(config.webhookVerifyToken) ?? null;
   const descriptor = {
     ...STRAVA_PROVIDER_DESCRIPTOR,
@@ -857,6 +989,14 @@ export function createStravaDeviceSyncProvider(
       });
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
+      verifyStravaWebhookSignature({
+        headers: context.headers,
+        now: context.now,
+        rawBody: context.rawBody,
+        signingSecret: webhookSigningSecret,
+        timestampToleranceMs: webhookTimestampToleranceMs,
+      });
+
       let payload: unknown;
 
       try {

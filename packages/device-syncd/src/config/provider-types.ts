@@ -24,7 +24,10 @@ export interface SerializableConfiguredDeviceSyncProviderConfigByKey {
   >;
   oura: Omit<OuraDeviceSyncProviderConfig, "fetchImpl" | "webhookVerificationToken">;
   whoop: Omit<WhoopDeviceSyncProviderConfig, "fetchImpl">;
-  strava: Omit<StravaDeviceSyncProviderConfig, "fetchImpl" | "webhookVerifyToken">;
+  strava: Omit<
+    StravaDeviceSyncProviderConfig,
+    "fetchImpl" | "webhookSigningSecret" | "webhookVerifyToken"
+  >;
 }
 
 export type SerializableConfiguredDeviceSyncProviderConfigs =
