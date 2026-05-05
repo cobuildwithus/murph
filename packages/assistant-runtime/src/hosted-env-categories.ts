@@ -24,12 +24,30 @@ export const HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES = [
   "TELEGRAM_FILE_BASE_URL",
 ] as const;
 
+export const HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES = [
+  "JUNCTION_API_KEY",
+  "JUNCTION_CLIENT_USER_ID_SECRET",
+  "JUNCTION_ENV",
+  "JUNCTION_PROVIDER_FILTER",
+  "JUNCTION_RECONCILE_DAYS",
+  "JUNCTION_RECONCILE_INTERVAL_MS",
+  "JUNCTION_REGION",
+  "JUNCTION_REQUEST_TIMEOUT_MS",
+  "JUNCTION_SUMMARY_BACKFILL_DAYS",
+  "JUNCTION_SUMMARY_RESOURCES",
+  "JUNCTION_TIMESERIES_BACKFILL_DAYS",
+  "JUNCTION_TIMESERIES_RESOURCES",
+  "JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
+] as const;
+
 // Platform-owned runtime vars must never be user-controlled. Telegram routing
 // vars authorize privileged Bot API traffic, and mailbox platform vars fetch
-// and unwrap hosted mailbox payload roots.
+// and unwrap hosted mailbox payload roots. Junction runtime vars hydrate
+// provider-owned execution credentials without serializing them into user env.
 export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
   ...HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES,
   ...HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
+  ...HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
 ] as const;
 
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {

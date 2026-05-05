@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
-import { describe, test } from "vitest";
+import { beforeEach, describe, test, vi } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
@@ -35,8 +35,26 @@ import {
 import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
+const hostedExecutionMocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: hostedExecutionMocks.emitHostedExecutionStructuredLog,
+  };
+});
+
 const DEVICE_SYNC_SECRET = "secret-for-tests";
 type ApplyUpdatesRequest = Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0];
+
+beforeEach(() => {
+  hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
+});
 
 function requireStoredOAuthCredential(
   account: StoredDeviceSyncAccount | null | undefined,
@@ -199,6 +217,7 @@ function buildRuntimeSnapshot(input: {
     nextReconcileAt?: string | null;
   };
   metadata?: Record<string, unknown>;
+  provider?: string;
   setupExpiresAt?: string | null;
   setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
   status?: HostedExecutionDeviceSyncRuntimeConnectionStatus;
@@ -248,7 +267,7 @@ function buildRuntimeSnapshot(input: {
           metadata: input.metadata ?? {
             hosted: true,
           },
-          provider: "demo",
+          provider: input.provider ?? "demo",
           scopes: ["offline", "read:data"],
           ...(input.setupExpiresAt === undefined ? {} : { setupExpiresAt: input.setupExpiresAt }),
           ...(input.setupPhase === undefined ? {} : { setupPhase: input.setupPhase }),
@@ -277,6 +296,33 @@ function buildEmptyRuntimeSnapshot(): HostedExecutionDeviceSyncRuntimeSnapshotRe
     connections: [],
     generatedAt: "2026-04-04T09:10:00.000Z",
     userId: "member_123",
+  };
+}
+
+function buildDirtyState(input: {
+  connectionId: string;
+  dirtyRevision?: string;
+  dirtyResources?: HostedExecutionDeviceSyncDirtyStateResponse["dirtyResources"];
+  eventCount?: string;
+  provider?: string;
+  resourceCategoryCounts?: Record<string, number>;
+  sourceProviderCounts?: Record<string, number>;
+  windowEnd?: string | null;
+  windowStart?: string | null;
+}): HostedExecutionDeviceSyncDirtyStateResponse {
+  return {
+    connectionId: input.connectionId,
+    dirtyRevision: input.dirtyRevision ?? "1",
+    dirtyResources: input.dirtyResources ?? [],
+    eventCount: input.eventCount ?? "1",
+    latestDirtyAt: "2026-04-04T10:00:00.000Z",
+    processedRevision: "0",
+    provider: input.provider ?? "demo",
+    resourceCategoryCounts: input.resourceCategoryCounts ?? {},
+    sourceProviderCounts: input.sourceProviderCounts ?? {},
+    userId: "member_123",
+    windowEnd: input.windowEnd ?? null,
+    windowStart: input.windowStart ?? null,
   };
 }
 
@@ -1092,7 +1138,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.deepEqual(pendingRequests, [
         {
-          limit: 1,
+          limit: 10,
         },
       ]);
       assert.deepEqual(state.pendingDirtyAck, {
@@ -1213,7 +1259,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.deepEqual(pendingRequests, [
         {
-          limit: 1,
+          limit: 10,
         },
       ]);
       assert.deepEqual(state.pendingDirtyAck, {
@@ -1227,6 +1273,184 @@ describe("hosted device-sync runtime", () => {
       assert.equal(
         jobs[0]?.dedupeKey,
         "hosted-dirty:demo:resource:garmin:summary:sleep:2026-04-03T00:00:00.000Z:2026-04-04T00:00:00.000Z",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("pending dirty state skips unmapped rows and processes the first executable row", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+    const pendingRequests: Array<{ limit?: number | null }> = [];
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-supported-after-missing",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_supported",
+        externalAccountId: connected.account.externalAccountId,
+      });
+      const missingDirtyState = buildDirtyState({
+        connectionId: "hosted_conn_dirty_missing",
+        dirtyRevision: "8",
+      });
+      const supportedDirtyState = buildDirtyState({
+        connectionId: "hosted_conn_dirty_supported",
+        dirtyRevision: "9",
+        dirtyResources: [
+          {
+            count: 2,
+            jobKind: "resource",
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        eventCount: "2",
+        resourceCategoryCounts: {
+          timeseries: 2,
+        },
+        sourceProviderCounts: {
+          garmin: 2,
+        },
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates(input = {}) {
+            pendingRequests.push(input);
+            return {
+              hasMore: false,
+              items: [missingDirtyState, supportedDirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(pendingRequests, [
+        {
+          limit: 10,
+        },
+      ]);
+      assert.deepEqual(state.pendingDirtyAck, {
+        connectionId: "hosted_conn_dirty_supported",
+        localAccountId: connected.account.id,
+        nextWakeAt: null,
+        processedRevision: "9",
+      });
+      assert.equal(readJobsForAccount(service, connected.account.id).length, 1);
+      assert.equal(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.length, 1);
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
+        "dirty_state.connection_missing",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("pending dirty state for an unregistered provider is not enqueued or acknowledged", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_junction_dirty",
+        credential: {
+          kind: "provider_config",
+          credentialMetadata: {},
+          providerConfigKey: "junction",
+        },
+        externalAccountId: "junction-user-123",
+        provider: "junction",
+      });
+      const dirtyState = buildDirtyState({
+        connectionId: "hosted_conn_junction_dirty",
+        dirtyRevision: "5",
+        dirtyResources: [
+          {
+            count: 1,
+            jobKind: "resource",
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        provider: "junction",
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const stored = getStore(service).getAccountByExternalAccount("junction", "junction-user-123");
+
+      assert.equal(state.pendingDirtyAck, null);
+      assert.ok(stored);
+      assert.equal(readJobsForAccount(service, stored.id).length, 0);
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
+        "dirty_state.provider_not_registered",
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);

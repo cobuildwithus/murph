@@ -202,6 +202,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const dirtyDeviceSyncMetrics = shouldRunDirtyDeviceSyncWorkSource
         ? await runHostedDeviceSyncWakeLane({
             deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+            platformEnv: input.runtime.platformEnv,
             runtimeLogPlatform: input.runtime.platform,
             resolvedConfig: input.runtime.resolvedConfig,
             timeoutMs: input.runtime.commitTimeoutMs,

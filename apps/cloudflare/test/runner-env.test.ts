@@ -866,6 +866,38 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       secret: "runtime-codec-secret",
     });
   });
+
+  it("keeps Junction execution credentials in platform env while resolved config stays serializable", () => {
+    const runtime = buildHostedRunnerJobRuntimeConfig({
+      configSource: {
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://murph.example/api/device-sync",
+        DEVICE_SYNC_SECRET: "runtime-codec-secret",
+        JUNCTION_API_KEY: "sk_us_fixture",
+        JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+        JUNCTION_ENV: "sandbox",
+        JUNCTION_REGION: "us",
+        JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
+      },
+      forwardedEnv: {},
+      runnerSecrets: {},
+    });
+
+    expect(runtime.forwardedEnv).toEqual({});
+    expect(runtime.platformEnv).toEqual({
+      JUNCTION_API_KEY: "sk_us_fixture",
+      JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    });
+    expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).toMatchObject({
+      environment: "sandbox",
+      region: "us",
+    });
+    expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).not.toHaveProperty("apiKey");
+    expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).not.toHaveProperty(
+      "clientUserIdSecret",
+    );
+  });
 });
 
 describe("buildHostedRunnerChildRuntimeEnv", () => {

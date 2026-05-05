@@ -121,6 +121,8 @@ describe("hosted runtime event coverage", () => {
       bootstrapResult: null,
       conversationMetrics: null,
       mailboxLane: "member-activated",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
       redactedLogEntries: [],
     });
   });
@@ -146,10 +148,13 @@ describe("hosted runtime event coverage", () => {
       bootstrapResult: null,
       conversationMetrics: null,
       mailboxLane: "device-sync",
+      nextWakeAt: "2026-04-08T00:20:00.000Z",
+      postCheckpointRecord: null,
       redactedLogEntries: [],
     });
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith({
       deviceSyncPort: null,
+      platformEnv: {},
       runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
       timeoutMs: null,

@@ -26,6 +26,9 @@ import type {
 import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
@@ -47,6 +50,12 @@ export interface HostedDeviceSyncRuntimeSyncState {
 type HostedRuntimeDeviceSyncStore = ReturnType<typeof requireHostedRuntimeDeviceSyncStore>;
 type HostedAccountHydrationInput = Parameters<HostedRuntimeDeviceSyncStore["hydrateHostedAccount"]>[0];
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
+type HostedDirtyDeviceSyncStateSkipReason =
+  | "connection_missing"
+  | "local_account_missing"
+  | "provider_not_registered";
+
+const HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT = 10;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -269,20 +278,24 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   wake: HostedRuntimeEvent;
 }): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
   const pending = await input.deviceSyncPort.fetchDirtyStates({
-    limit: 1,
+    limit: HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
   });
-  const dirtyState = pending.items[0] ?? null;
-  if (!dirtyState) {
-    return null;
+
+  for (const dirtyState of pending.items) {
+    const ack = applyHostedDirtyDeviceSyncState({
+      dirtyState,
+      hostedToLocalAccountIds: input.hostedToLocalAccountIds,
+      nextWakeAt: pending.nextWakeAt,
+      service: input.service,
+      wake: input.wake,
+    });
+
+    if (ack) {
+      return ack;
+    }
   }
 
-  return applyHostedDirtyDeviceSyncState({
-    dirtyState,
-    hostedToLocalAccountIds: input.hostedToLocalAccountIds,
-    nextWakeAt: pending.nextWakeAt,
-    service: input.service,
-    wake: input.wake,
-  });
+  return null;
 }
 
 function applyHostedDirtyDeviceSyncState(input: {
@@ -294,12 +307,32 @@ function applyHostedDirtyDeviceSyncState(input: {
 }): HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"] {
   const localAccountId = input.hostedToLocalAccountIds.get(input.dirtyState.connectionId) ?? null;
   if (!localAccountId) {
+    reportHostedDirtyDeviceSyncStateSkipped({
+      dirtyState: input.dirtyState,
+      reason: "connection_missing",
+      wake: input.wake,
+    });
     return null;
   }
 
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
   const account = store.getAccountById(localAccountId);
   if (!account) {
+    reportHostedDirtyDeviceSyncStateSkipped({
+      dirtyState: input.dirtyState,
+      reason: "local_account_missing",
+      wake: input.wake,
+    });
+    return null;
+  }
+
+  if (!input.service.registry.get(account.provider)) {
+    reportHostedDirtyDeviceSyncStateSkipped({
+      account,
+      dirtyState: input.dirtyState,
+      reason: "provider_not_registered",
+      wake: input.wake,
+    });
     return null;
   }
 
@@ -322,6 +355,28 @@ function applyHostedDirtyDeviceSyncState(input: {
     nextWakeAt: input.nextWakeAt,
     processedRevision: input.dirtyState.dirtyRevision,
   };
+}
+
+function reportHostedDirtyDeviceSyncStateSkipped(input: {
+  account?: Pick<StoredDeviceSyncAccount, "provider"> | null;
+  dirtyState: HostedExecutionDeviceSyncDirtyStateResponse;
+  reason: HostedDirtyDeviceSyncStateSkipReason;
+  wake: HostedRuntimeEvent;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      dirtyConnectionId: input.dirtyState.connectionId,
+      dirtyProvider: input.dirtyState.provider,
+      eventCode: `dirty_state.${input.reason}`,
+      localProvider: input.account?.provider ?? null,
+      reason: input.reason,
+    },
+    level: "warn",
+    message: `Hosted device-sync dirty state skipped: dirty_state.${input.reason}.`,
+    phase: "wake.running",
+    wake: input.wake,
+  });
 }
 
 function buildHostedDirtyDeviceSyncJobs(

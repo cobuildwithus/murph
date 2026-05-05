@@ -354,6 +354,8 @@ describe("executeHostedMailboxEvent", () => {
       bootstrapResult,
       conversationMetrics: null,
       mailboxLane: "assistant-notification",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
       redactedLogEntries: [
         {
           component: "runtime",
@@ -796,6 +798,8 @@ describe("executeHostedMailboxEvent", () => {
       bootstrapResult: null,
       conversationMetrics: null,
       mailboxLane: "member-channels-updated",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
       redactedLogEntries: [],
     });
   });
