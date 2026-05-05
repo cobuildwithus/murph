@@ -52,6 +52,13 @@ const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_PRODUCTION_BASE_URL",
 ] as const;
 
+const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
+  "JUNCTION_API_KEY",
+  "JUNCTION_CLIENT_USER_ID_SECRET",
+  "JUNCTION_ENV",
+  "JUNCTION_REGION",
+] as const;
+
 const PRODUCTION_DEPLOY_URL_INVARIANT_LABELS = [
   "CF_PUBLIC_BASE_URL",
   "HOSTED_WEB_BASE_URL",
@@ -200,6 +207,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
     );
   }
 
+  const missingJunctionEnv = listMissingPartialGroupEnvNames(
+    source,
+    JUNCTION_RUNTIME_REQUIRED_ENV_NAMES,
+  );
+  if (
+    missingJunctionEnv.length > 0
+    && missingJunctionEnv.length < JUNCTION_RUNTIME_REQUIRED_ENV_NAMES.length
+  ) {
+    errors.push(
+      `Junction runtime env must set ${JUNCTION_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
+    );
+  }
+
   if (deployContext !== "production") {
     return errors;
   }
@@ -283,6 +303,16 @@ function listMissingRequiredEnvNames(
   names: readonly string[],
 ): string[] {
   return names.filter((name) => normalizeOptionalString(source[name]) === null);
+}
+
+function listMissingPartialGroupEnvNames(
+  source: EnvSource,
+  names: readonly string[],
+): string[] {
+  const configured = names.filter((name) => normalizeOptionalString(source[name]) !== null);
+  return configured.length === 0
+    ? [...names]
+    : names.filter((name) => normalizeOptionalString(source[name]) === null);
 }
 
 function normalizeHostedDeployContext(value: string | undefined): HostedDeployContext | null {

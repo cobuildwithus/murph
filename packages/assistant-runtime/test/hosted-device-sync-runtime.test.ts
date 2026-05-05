@@ -1458,6 +1458,91 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("pending dirty state with a provider mismatch is not enqueued or acknowledged", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-provider-mismatch",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_provider_mismatch",
+        externalAccountId: connected.account.externalAccountId,
+        provider: "demo",
+      });
+      const dirtyState = buildDirtyState({
+        connectionId: "hosted_conn_dirty_provider_mismatch",
+        dirtyRevision: "11",
+        dirtyResources: [
+          {
+            count: 1,
+            jobKind: "resource",
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        provider: "junction",
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.equal(state.pendingDirtyAck, null);
+      assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
+        "dirty_state.provider_mismatch",
+      );
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.dirtyProvider,
+        "junction",
+      );
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.localProvider,
+        "demo",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("same-connection device-sync wake hints enqueue both distinct jobs", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
