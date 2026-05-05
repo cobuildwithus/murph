@@ -38,8 +38,8 @@ import {
   createDefaultHostedManagedAutoReplyChannels,
 } from "./managed-auto-reply.ts";
 import {
-  resolveHostedCodexLocalTestModelProviderId,
-} from "./codex-config.ts";
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "./codex-runtime-env.ts";
 
 interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
@@ -319,9 +319,9 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
   };
 }
 
-export async function readHostedAssistantExecutionDefaultTarget(
-  runtimeEnv: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<AssistantModelTarget | null> {
+export async function readHostedAssistantExecutionDefaultTarget(): Promise<
+  AssistantModelTarget | null
+> {
   const operatorConfig = await readOperatorConfig();
   const hostedAssistantConfig = operatorConfig?.hostedAssistant
     ?? (await resolveHostedAssistantConfig());
@@ -331,7 +331,9 @@ export async function readHostedAssistantExecutionDefaultTarget(
   );
 
   return applyHostedCodexRuntimeModelProviderTarget({
-    runtimeEnv,
+    modelProviderId: normalizeHostedContextString(
+      process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    ),
     target,
   });
 }
@@ -357,24 +359,31 @@ export async function hydrateHostedExecutionDefaultTarget(
   };
 }
 
+function normalizeHostedContextString(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 function applyHostedCodexRuntimeModelProviderTarget(input: {
-  runtimeEnv: Readonly<Record<string, string | undefined>>;
+  modelProviderId?: string | null;
   target: AssistantModelTarget | null;
 }): AssistantModelTarget | null {
   if (!input.target || input.target.adapter !== "codex-cli") {
     return input.target;
   }
 
-  const runtimeModelProvider = resolveHostedCodexLocalTestModelProviderId({
-    runtimeEnv: input.runtimeEnv,
-  });
-  if (!runtimeModelProvider || runtimeModelProvider === input.target.modelProvider) {
+  if (
+    !input.modelProviderId
+    || input.modelProviderId === input.target.modelProvider
+  ) {
     return input.target;
   }
 
   return {
     ...input.target,
-    modelProvider: runtimeModelProvider,
+    modelProvider: input.modelProviderId,
   };
 }
 

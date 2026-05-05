@@ -29,6 +29,9 @@ import {
 import {
   maybeInstallHostedE2ECodexAppServerStub,
 } from "./codex-e2e-app-server-stub.ts";
+import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "./codex-runtime-env.ts";
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
@@ -85,24 +88,6 @@ export interface HostedCodexRuntimeEnvironmentResult {
   runtimeEnv: Record<string, string>;
 }
 
-export function resolveHostedCodexLocalTestModelProviderId(input: {
-  runtimeEnv: Readonly<Record<string, string | undefined>>;
-}): string | null {
-  const hasLocalTestOverride =
-    normalizeHostedCodexEnvString(
-      input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
-    ) !== null;
-
-  if (!hasLocalTestOverride) {
-    return null;
-  }
-
-  return resolveHostedCodexModelProviderConfig({
-    provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
-    runtimeEnv: input.runtimeEnv,
-  }).id;
-}
-
 export async function prepareHostedCodexRuntimeEnvironment(
   input: HostedCodexRuntimeEnvironmentInput,
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
@@ -142,6 +127,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     HOSTED_ASSISTANT_SANDBOX:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_SANDBOX)
       ?? DEFAULT_HOSTED_CODEX_SANDBOX,
+    [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: providerConfig.id,
   });
 
   await mkdir(codexHome, {

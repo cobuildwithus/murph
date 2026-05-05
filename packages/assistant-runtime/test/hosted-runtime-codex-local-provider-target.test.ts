@@ -13,8 +13,8 @@ import {
   readHostedAssistantExecutionDefaultTarget,
 } from "../src/hosted-runtime/context.ts";
 import {
-  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
-} from "../src/hosted-runtime/launch-spec.ts";
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "../src/hosted-runtime/codex-runtime-env.ts";
 
 const HOSTED_ASSISTANT_ENV = {
   HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
@@ -26,17 +26,12 @@ const HOSTED_ASSISTANT_ENV = {
 
 test("hosted assistant default target uses the local Codex recorder provider only for test overrides", async () => {
   await withTemporaryHostedAssistantEnv(async () => {
-    const productionTarget = await readHostedAssistantExecutionDefaultTarget({
-      ...HOSTED_ASSISTANT_ENV,
-    });
+    const productionTarget = await readHostedAssistantExecutionDefaultTarget();
     assert.equal(productionTarget?.modelProvider, "openai");
 
-    const localTarget = await readHostedAssistantExecutionDefaultTarget({
-      ...HOSTED_ASSISTANT_ENV,
-      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
-        "http://127.0.0.1:4567/v1",
-      NODE_ENV: "test",
-    });
+    process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] =
+      "openai-local-test";
+    const localTarget = await readHostedAssistantExecutionDefaultTarget();
     assert.equal(localTarget?.modelProvider, "openai-local-test");
   });
 });
@@ -47,6 +42,7 @@ async function withTemporaryHostedAssistantEnv(
   const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-target-"));
   const previousEnv = captureEnv([
     "HOME",
+    HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
     ...Object.keys(HOSTED_ASSISTANT_ENV),
   ]);
 

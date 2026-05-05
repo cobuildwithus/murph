@@ -20,11 +20,13 @@ import {
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
 } from "../src/hosted-runtime/launch-spec.ts";
+import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "../src/hosted-runtime/codex-runtime-env.ts";
 
 import {
   buildHostedCodexConfigToml,
   prepareHostedCodexRuntimeEnvironment,
-  resolveHostedCodexLocalTestModelProviderId,
 } from "../src/hosted-runtime/codex-config.ts";
 
 const temporaryPaths: string[] = [];
@@ -53,6 +55,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(result.codexHome, path.join(operatorHomeRoot, ".codex-hosted"));
   assert.equal(result.codexConfigPath, path.join(operatorHomeRoot, ".codex-hosted", "config.toml"));
   assert.equal(result.runtimeEnv.CODEX_HOME, result.codexHome);
+  assert.equal(result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV], "openai");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "medium");
@@ -160,6 +163,11 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
     },
   });
 
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "openai-local-test",
+  );
+
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /model_provider = "openai-local-test"/u);
   assert.match(config, /\[model_providers\."openai-local-test"\]/u);
@@ -168,36 +176,6 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /request_max_retries = 0/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
-});
-
-test("hosted Codex runtime model provider id follows the local test base URL override", () => {
-  assert.equal(
-    resolveHostedCodexLocalTestModelProviderId({
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-      },
-    }),
-    null,
-  );
-
-  assert.equal(
-    resolveHostedCodexLocalTestModelProviderId({
-      runtimeEnv: {
-        HOSTED_ASSISTANT_PROVIDER: "openai",
-        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
-          "http://127.0.0.1:4567/v1",
-        NODE_ENV: "test",
-      },
-    }),
-    "openai-local-test",
-  );
-
-  assert.equal(
-    resolveHostedCodexLocalTestModelProviderId({
-      runtimeEnv: {},
-    }),
-    null,
-  );
 });
 
 test("hosted Codex runtime config accepts a Linux Docker bridge model provider override", async () => {
