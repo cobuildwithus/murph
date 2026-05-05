@@ -4,7 +4,9 @@ Last verified: 2026-05-05
 
 ## Decision
 
-Hosted execution is hard-cut to a mailbox plus workspace-checkpoint protocol.
+Hosted execution is hard-cut to an exact-event mailbox plus
+workspace-checkpoint protocol, with device-sync webhook freshness represented by
+web-owned dirty state instead of mailbox fanout.
 There is no executor-facing `HostedRun` protocol.
 
 The live ownership split is:
@@ -17,6 +19,12 @@ The live ownership split is:
   Cloudflare Email ingress appends the same canonical mailbox item through a
   signed web callback and uses a signed pointer-only web callback to start that
   same durable nudge workflow.
+  Device-sync webhook freshness is different: web records per-webhook
+  trace/audit facts, upserts per-connection dirty resources/revisions,
+  completes trace acceptance in the same transaction, and best-effort nudges the
+  runner directly. The runtime pulls pending dirty rows through the required
+  signed dirty-pending callback and acks checkpoint-safe handoff through the
+  required dirty-ack callback.
   Stripe webhook ingress verifies the raw Stripe request locally, records only
   minimal receipt state in Postgres, and may start a separate Vercel Workflow
   with only the Stripe event id to retry reconciliation plus any activation
@@ -37,10 +45,11 @@ The live ownership split is:
 The final seam is:
 
 ```text
-append encrypted mailbox item
+append encrypted mailbox item or upsert device-sync dirty state
 nudge runner
 restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
+pull pending device-sync dirty rows
 checkpoint after import
 run best-effort local inbox projection/parser enrichment and checkpoint it
 run local runtime work until idle or budget
@@ -83,10 +92,10 @@ Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
 
-Hosted producers append one `HostedMailboxItem` in the same transaction as the
-product/control-plane mutation that made work necessary. Large payloads use
-`HostedMailboxPayload`; lane sequence allocation uses
-`HostedMailboxLaneCounter`.
+Hosted producers for exact user-visible events append one `HostedMailboxItem` in
+the same transaction as the product/control-plane mutation that made work
+necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
+uses `HostedMailboxLaneCounter`.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
@@ -109,6 +118,18 @@ hardening for exact workflow-start failure journaling.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and runner
 nudges only coalesce pending work.
+
+Hosted device-sync webhook freshness does not append mailbox work and does not
+start the pointer nudge workflow. The route claims the exact provider trace,
+writes sparse audit/signal facts, widens the per-connection dirty row and safe
+dirty resource/window map, completes the trace in the same transaction, then
+best-effort nudges the user runner. The dirty sweeper is the bounded recovery
+backstop for missed direct nudges. The runtime must support dirty-pending and
+dirty-ack callbacks; dirty ack means the dirty revision was handed off into the
+checkpointed local device-sync job store, not that upstream provider sync
+succeeded. Connection-established and disconnect lifecycle commands may still
+use coarse device-sync mailbox wakes because they are explicit lifecycle events,
+not high-cardinality freshness hints.
 
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the
@@ -277,7 +298,7 @@ assistant channel enablement state, outbox truth, or durable queue history.
 
 ### Vercel Workflow Owns
 
-- accepted pointer-only nudge workflow run state for Linq, Telegram, device-sync, and Cloudflare Email ingress handoff
+- accepted pointer-only nudge workflow run state for Linq, Telegram, and Cloudflare Email ingress handoff
 - Stripe event-id reconciliation workflow run state after local Stripe signature verification and receipt recording
 - workflow event logs for opaque mailbox item ids, Stripe event ids, channel/source labels, retry status, and step errors
 - runner nudge handoff and retry state after web-owned verification and mailbox append have committed and the workflow start is accepted

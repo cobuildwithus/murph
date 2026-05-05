@@ -304,7 +304,6 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
       provider: input.account.provider,
     }),
     eventType: input.webhook.eventType,
-    jobs: input.webhook.jobs ?? [],
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
@@ -411,7 +410,6 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   connectionId: string;
   dirtyResources: readonly HostedDeviceSyncDirtyResource[];
   eventType: string;
-  jobs: readonly DeviceSyncJobInput[];
   occurredAt: string;
   provider: string;
   resourceCategory?: string | null;
@@ -420,8 +418,6 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   userId: string;
 }): Promise<void> {
   let runnerWakeRequested = false;
-  let legacyWakeMailboxItemId: string | null = null;
-  let legacyWakeInserted = false;
 
   await input.store.prisma.$transaction(async (tx) => {
     await input.store.createSignal({
@@ -448,45 +444,6 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       userId: input.userId,
     });
     runnerWakeRequested = dirty.shouldRequestWake;
-    if (dirty.shouldRequestWake) {
-      const dirtyRevision = dirty.dirty.dirtyRevision.toString();
-      const legacyWake = buildHostedDeviceSyncWake({
-        connectionId: input.connectionId,
-        eventId: buildHostedDeviceSyncDirtyCompatWakeEventId({
-          connectionId: input.connectionId,
-          dirtyRevision,
-          provider: input.provider,
-          userId: input.userId,
-        }),
-        hint: {
-          dirtyConnectionId: input.connectionId,
-          dirtyRevision,
-          eventType: input.eventType,
-          jobs: normalizeHostedDeviceSyncJobHints({
-            connectionId: input.connectionId,
-            jobs: input.jobs,
-            occurredAt: input.occurredAt,
-            provider: input.provider,
-            reason: "webhook_hint",
-            traceId: input.traceId,
-          }),
-          occurredAt: input.occurredAt,
-          reason: "dirty-transition-compat",
-          resourceCategory: input.resourceCategory ?? null,
-          traceId: input.traceId,
-        },
-        occurredAt: input.occurredAt,
-        provider: input.provider,
-        source: "webhook-dirty-compat",
-        userId: input.userId,
-      });
-      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-        envelope: legacyWake,
-        tx,
-      });
-      legacyWakeMailboxItemId = mailboxAppend.item.id;
-      legacyWakeInserted = mailboxAppend.inserted;
-    }
 
     if (input.traceId) {
       await input.store.completeWebhookTrace(input.provider, input.traceId, tx);
@@ -502,24 +459,10 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
     provider: input.provider,
     traceIdPresent: input.traceId !== null,
   };
-  if (legacyWakeInserted && legacyWakeMailboxItemId) {
-    try {
-      await startHostedWebhookNudgeWorkflow({
-        mailboxItemId: legacyWakeMailboxItemId,
-        source: "device-sync",
-      });
-    } catch (error) {
-      console.warn("Hosted device-sync legacy wake workflow was not started after durable acceptance.", {
-        connectionId: nudgeLogMetadata.connectionId,
-        errorType: error instanceof Error ? error.name : typeof error,
-        provider: nudgeLogMetadata.provider,
-        traceIdPresent: nudgeLogMetadata.traceIdPresent,
-      });
-    }
-  }
 
   const nudge = await nudgeHostedRunnerUserBestEffortResult({
     context: "hosted-device-sync-dirty-webhook",
+    timeoutMs: 5_000,
     userId: input.userId,
   });
   if (!nudge.accepted) {
@@ -553,27 +496,9 @@ function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): stri
       return "disconnected";
     case "scheduled-reconcile":
       return "reconcile_due";
-    case "webhook-dirty-compat":
-      return "webhook_hint";
     default:
       throw new Error(`Unsupported hosted device-sync wake source: ${String(source)}`);
   }
-}
-
-function buildHostedDeviceSyncDirtyCompatWakeEventId(input: {
-  connectionId: string;
-  dirtyRevision: string;
-  provider: string;
-  userId: string;
-}): string {
-  return [
-    "device-sync",
-    "dirty-compat",
-    input.userId,
-    input.provider,
-    input.connectionId,
-    input.dirtyRevision,
-  ].join(":");
 }
 
 function normalizeHostedDeviceSyncJobHints(input: {

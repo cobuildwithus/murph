@@ -79,6 +79,21 @@ import {
   runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
 
+function createMaintenanceDeviceSyncPortStub() {
+  return {
+    ackDirtyStateProcessed: vi.fn(),
+    applyUpdates: vi.fn(),
+    createConnectLink: vi.fn(),
+    fetchDirtyStates: vi.fn(async () => ({
+      hasMore: false,
+      items: [],
+      nextWakeAt: null,
+      userId: "member_123",
+    })),
+    fetchSnapshot: vi.fn(),
+  };
+}
+
 type InboxServices = import("@murphai/inbox-services").InboxServices;
 type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
@@ -815,11 +830,7 @@ describe("runHostedDeviceSyncPass", () => {
       },
       "/tmp/vault-root",
       DEVICE_SYNC_CONFIG,
-      {
-        applyUpdates: vi.fn(),
-        createConnectLink: vi.fn(),
-        fetchSnapshot: vi.fn(),
-      },
+      createMaintenanceDeviceSyncPortStub(),
       45_000,
     );
 
@@ -864,11 +875,7 @@ describe("runHostedDeviceSyncPass", () => {
       },
       "/tmp/vault-root",
       DEVICE_SYNC_CONFIG,
-      {
-        applyUpdates: vi.fn(),
-        createConnectLink: vi.fn(),
-        fetchSnapshot: vi.fn(),
-      },
+      createMaintenanceDeviceSyncPortStub(),
       45_000,
     );
 
@@ -951,11 +958,7 @@ describe("runHostedDeviceSyncPass", () => {
       },
       "/tmp/vault-root",
       DEVICE_SYNC_CONFIG,
-      {
-        applyUpdates: vi.fn(),
-        createConnectLink: vi.fn(),
-        fetchSnapshot: vi.fn(),
-      },
+      createMaintenanceDeviceSyncPortStub(),
       45_000,
       {
         runtimeLogPlatform: {
@@ -1037,11 +1040,7 @@ describe("runHostedDeviceSyncPass", () => {
         },
         "/tmp/vault-root",
         DEVICE_SYNC_CONFIG,
-        {
-          applyUpdates: vi.fn(),
-          createConnectLink: vi.fn(),
-          fetchSnapshot: vi.fn(),
-        },
+        createMaintenanceDeviceSyncPortStub(),
         45_000,
       ),
     ).rejects.toThrow("sync failed");
@@ -1074,11 +1073,7 @@ describe("runHostedDeviceSyncPass", () => {
         },
         "/tmp/vault-root",
         DEVICE_SYNC_CONFIG,
-        {
-          applyUpdates: vi.fn(),
-          createConnectLink: vi.fn(),
-          fetchSnapshot: vi.fn(),
-        },
+        createMaintenanceDeviceSyncPortStub(),
         45_000,
       ),
     ).rejects.toThrow("reconcile failed");
@@ -1405,8 +1400,15 @@ describe("runHostedDeviceSyncWakeLane", () => {
 
     const result = await runHostedDeviceSyncWakeLane({
       deviceSyncPort: {
+        ackDirtyStateProcessed: vi.fn(),
         applyUpdates: vi.fn(),
         createConnectLink: vi.fn(),
+        fetchDirtyStates: vi.fn(async () => ({
+          hasMore: false,
+          items: [],
+          nextWakeAt: null,
+          userId: "member_123",
+        })),
         fetchSnapshot: vi.fn(),
       },
       wake: {

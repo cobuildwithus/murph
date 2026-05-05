@@ -582,7 +582,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
     case "device-sync.dirty-processed":
-      if (!input.runtime.platform.deviceSyncPort?.ackDirtyStateProcessed) {
+      if (!input.runtime.platform.deviceSyncPort) {
         throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
       }
       const response = await input.runtime.platform.deviceSyncPort.ackDirtyStateProcessed({

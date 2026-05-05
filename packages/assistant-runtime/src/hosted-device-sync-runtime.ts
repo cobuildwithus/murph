@@ -116,20 +116,18 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   if (input.wake.kind === "device-sync.wake") {
-    state.pendingDirtyAck = await applyHostedDeviceSyncWakeHint({
-      deviceSyncPort: client,
+    await applyHostedDeviceSyncWakeHint({
       wake: input.wake,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
-    });
-  } else {
-    state.pendingDirtyAck = await applyHostedPendingDirtyDeviceSyncState({
-      deviceSyncPort: client,
-      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
-      service: input.service,
-      wake: input.wake,
     });
   }
+  state.pendingDirtyAck = await applyHostedPendingDirtyDeviceSyncState({
+    deviceSyncPort: client,
+    hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+    service: input.service,
+    wake: input.wake,
+  });
 
   return state;
 }
@@ -202,36 +200,26 @@ function resolveHostedDeviceSyncRuntimeClientForUser(
 }
 
 async function applyHostedDeviceSyncWakeHint(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
   wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
-}): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
+}): Promise<void> {
   if (input.wake.kind !== "device-sync.wake") {
-    return null;
+    return;
   }
 
   const wake = resolveHostedDeviceSyncWakeContext(input.wake);
-  const dirtyAck = await applyHostedDirtyDeviceSyncWakeHint({
-    deviceSyncPort: input.deviceSyncPort,
-    hostedToLocalAccountIds: input.hostedToLocalAccountIds,
-    service: input.service,
-    wake: input.wake,
-  });
-  if (dirtyAck) {
-    return dirtyAck;
-  }
   const localAccountId = wake.connectionId ? input.hostedToLocalAccountIds.get(wake.connectionId) ?? null : null;
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   if (!localAccountId) {
-    return null;
+    return;
   }
 
   const account = store.getAccountById(localAccountId);
 
   if (!account) {
-    return null;
+    return;
   }
 
   if (input.wake.reason === "disconnected") {
@@ -242,14 +230,14 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
       "Hosted device-sync wake marked the connection as disconnected.",
     );
-    return null;
+    return;
   }
 
   if (input.wake.reason === "reauthorization_required") {
     store.patchAccount(localAccountId, {
       status: "reauthorization_required",
     });
-    return null;
+    return;
   }
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
@@ -272,43 +260,6 @@ async function applyHostedDeviceSyncWakeHint(input: {
   if (wakePatch) {
     store.patchAccount(localAccountId, wakePatch);
   }
-
-  return null;
-}
-
-async function applyHostedDirtyDeviceSyncWakeHint(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
-  hostedToLocalAccountIds: Map<string, string>;
-  service: DeviceSyncService;
-  wake: Extract<HostedRuntimeEvent, { kind: "device-sync.wake" }>;
-}): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
-  const hint = input.wake.hint;
-  const dirtyConnectionId = hint?.dirtyConnectionId ?? input.wake.connectionId ?? null;
-  const dirtyRevision = hint?.dirtyRevision ?? null;
-
-  if (!dirtyConnectionId || !dirtyRevision) {
-    return null;
-  }
-
-  if (!input.deviceSyncPort.fetchDirtyState) {
-    throw new Error("Hosted dirty device-sync wake requires a dirty-state runtime port.");
-  }
-
-  const dirtyState = await input.deviceSyncPort.fetchDirtyState({
-    connectionId: dirtyConnectionId,
-    dirtyRevision,
-  });
-  if (!dirtyState) {
-    return null;
-  }
-
-  return applyHostedDirtyDeviceSyncState({
-    dirtyState,
-    hostedToLocalAccountIds: input.hostedToLocalAccountIds,
-    nextWakeAt: null,
-    service: input.service,
-    wake: input.wake,
-  });
 }
 
 async function applyHostedPendingDirtyDeviceSyncState(input: {
@@ -317,10 +268,6 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   service: DeviceSyncService;
   wake: HostedRuntimeEvent;
 }): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
-  if (!input.deviceSyncPort.fetchDirtyStates) {
-    return null;
-  }
-
   const pending = await input.deviceSyncPort.fetchDirtyStates({
     limit: 1,
   });

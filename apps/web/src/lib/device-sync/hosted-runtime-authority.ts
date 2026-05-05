@@ -6,7 +6,6 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
-  parseHostedExecutionDeviceSyncDirtyStateRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   type HostedExecutionDeviceSyncRuntimeApplyEntry,
@@ -312,28 +311,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     updates,
     userId: input.trustedUserId,
   };
-}
-
-export async function readHostedDeviceSyncDirtyState(input: {
-  request: Request;
-  trustedUserId: string;
-}): Promise<HostedExecutionDeviceSyncDirtyStateResponse | null> {
-  const parsed = parseHostedExecutionDeviceSyncDirtyStateRequest(
-    await input.request.json(),
-    input.trustedUserId,
-  );
-  const requestedRevision = BigInt(parsed.dirtyRevision);
-  const controlPlane = createHostedDeviceSyncControlPlane(input.request);
-  const dirty = await controlPlane.store.getDirtyConnection({
-    connectionId: parsed.connectionId,
-    userId: input.trustedUserId,
-  });
-
-  if (!dirty || dirty.dirtyRevision < requestedRevision || dirty.processedRevision >= dirty.dirtyRevision) {
-    return null;
-  }
-
-  return mapHostedDeviceSyncDirtyStateResponse(dirty, input.trustedUserId);
 }
 
 export async function readHostedDeviceSyncPendingDirtyState(input: {

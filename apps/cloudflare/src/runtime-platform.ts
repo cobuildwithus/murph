@@ -38,13 +38,11 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_STATE_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckResponse,
   parseHostedExecutionDeviceSyncDirtyPendingResponse,
-  parseHostedExecutionDeviceSyncDirtyStateResponse,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -691,62 +689,21 @@ function createHostedWebDeviceSyncPort(input: {
 
       return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(payload);
     },
-    async fetchDirtyState(runtimeInput: {
-      connectionId: string;
-      dirtyRevision: string;
-    }) {
-      let payload: unknown;
-      try {
-        payload = await fetchHostedWebControlPlaneJson({
-          body: {
-            connectionId: runtimeInput.connectionId,
-            dirtyRevision: runtimeInput.dirtyRevision,
-            userId: input.boundUserId,
-          },
-          boundUserId: input.boundUserId,
-          description: "Hosted device-sync dirty state",
-          fetchImpl: input.fetchImpl,
-          path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_STATE_PATH,
-          timeoutMs: input.timeoutMs,
-          transport: input.transport,
-        });
-      } catch (error) {
-        if (readHostedWebControlErrorStatus(error) === 404) {
-          return null;
-        }
-        throw error;
-      }
-
-      return parseHostedExecutionDeviceSyncDirtyStateResponse(payload);
-    },
     async fetchDirtyStates(runtimeInput?: {
       limit?: number | null;
     }) {
-      let payload: unknown;
-      try {
-        payload = await fetchHostedWebControlPlaneJson({
-          body: {
-            ...(runtimeInput?.limit === undefined ? {} : { limit: runtimeInput.limit }),
-            userId: input.boundUserId,
-          },
-          boundUserId: input.boundUserId,
-          description: "Hosted device-sync pending dirty state",
-          fetchImpl: input.fetchImpl,
-          path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
-          timeoutMs: input.timeoutMs,
-          transport: input.transport,
-        });
-      } catch (error) {
-        if (readHostedWebControlErrorStatus(error) === 404) {
-          return {
-            hasMore: false,
-            items: [],
-            nextWakeAt: null,
-            userId: input.boundUserId,
-          };
-        }
-        throw error;
-      }
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {
+          ...(runtimeInput?.limit === undefined ? {} : { limit: runtimeInput.limit }),
+          userId: input.boundUserId,
+        },
+        boundUserId: input.boundUserId,
+        description: "Hosted device-sync pending dirty state",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
 
       return parseHostedExecutionDeviceSyncDirtyPendingResponse(payload);
     },
@@ -754,35 +711,19 @@ function createHostedWebDeviceSyncPort(input: {
       connectionId: string;
       processedRevision: string;
     }) {
-      let payload: unknown;
-      try {
-        payload = await fetchHostedWebControlPlaneJson({
-          body: {
-            connectionId: runtimeInput.connectionId,
-            processedRevision: runtimeInput.processedRevision,
-            userId: input.boundUserId,
-          },
-          boundUserId: input.boundUserId,
-          description: "Hosted device-sync dirty ack",
-          fetchImpl: input.fetchImpl,
-          path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
-          timeoutMs: input.timeoutMs,
-          transport: input.transport,
-        });
-      } catch (error) {
-        if (readHostedWebControlErrorStatus(error) === 404) {
-          return {
-            connectionId: runtimeInput.connectionId,
-            dirtyRevision: runtimeInput.processedRevision,
-            nextWakeAt: null,
-            processedRevision: runtimeInput.processedRevision,
-            recorded: false,
-            stillDirty: false,
-            userId: input.boundUserId,
-          };
-        }
-        throw error;
-      }
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {
+          connectionId: runtimeInput.connectionId,
+          processedRevision: runtimeInput.processedRevision,
+          userId: input.boundUserId,
+        },
+        boundUserId: input.boundUserId,
+        description: "Hosted device-sync dirty ack",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
 
       return parseHostedExecutionDeviceSyncDirtyAckResponse(payload);
     },

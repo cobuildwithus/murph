@@ -9,8 +9,7 @@ import { toJsonRecord } from "./shared";
 export type HostedDeviceSyncWakeSource =
   | "connection-established"
   | "disconnect"
-  | "scheduled-reconcile"
-  | "webhook-dirty-compat";
+  | "scheduled-reconcile";
 
 export function buildHostedDeviceSyncWake(input: {
   connectionId: string;
@@ -83,8 +82,6 @@ export function mapHostedDeviceSyncWakeReason(
       return "disconnected";
     case "scheduled-reconcile":
       return "reconcile_due";
-    case "webhook-dirty-compat":
-      return "webhook_hint";
     default:
       throw new Error(`Unsupported hosted device-sync wake source: ${String(source)}`);
   }

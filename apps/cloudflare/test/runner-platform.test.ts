@@ -370,7 +370,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       webControlBaseUrl: "https://web.example.test",
     });
 
-    const pending = await platform.deviceSyncPort!.fetchDirtyStates?.({
+    const pending = await platform.deviceSyncPort!.fetchDirtyStates({
       limit: 1,
     });
 
@@ -391,54 +391,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
-  });
-
-  it("treats missing hosted device-sync dirty routes as empty during staggered deploys", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("not found", {
-      status: 404,
-    }));
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test",
-    });
-
-    await expect(platform.deviceSyncPort!.fetchDirtyState?.({
-      connectionId: "conn_123",
-      dirtyRevision: "7",
-    })).resolves.toBeNull();
-    await expect(platform.deviceSyncPort!.fetchDirtyStates?.({
-      limit: 1,
-    })).resolves.toEqual({
-      hasMore: false,
-      items: [],
-      nextWakeAt: null,
-      userId: "member_123",
-    });
-    await expect(platform.deviceSyncPort!.ackDirtyStateProcessed?.({
-      connectionId: "conn_123",
-      processedRevision: "7",
-    })).resolves.toEqual({
-      connectionId: "conn_123",
-      dirtyRevision: "7",
-      nextWakeAt: null,
-      processedRevision: "7",
-      recorded: false,
-      stillDirty: false,
-      userId: "member_123",
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
-    expect(urls).toEqual([
-      "https://web.example.test/api/internal/device-sync/runtime/dirty-state",
-      "https://web.example.test/api/internal/device-sync/runtime/dirty-pending",
-      "https://web.example.test/api/internal/device-sync/runtime/dirty-ack",
-    ]);
   });
 
   it("forces hosted device-sync connect-link creation through the signed POST callback route", async () => {

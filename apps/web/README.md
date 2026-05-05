@@ -9,12 +9,15 @@ device-sync control-plane authority, the hosted AI usage ledger,
 and the hosted mailbox, latest workspace checkpoint pointer, and redacted
 runtime logs/status projection.
 
-Every hosted producer appends an encrypted mailbox item in Postgres. Webhook
-and email ingress then hand execution off through a pointer-only Vercel Workflow
-whose step performs the narrow authenticated Cloudflare runner nudge. Hosted
-execution no longer flows through a web-owned acquire/commit/finalize run
-protocol; the restored local runtime imports mailbox items and checkpoints its
-own workspace state.
+Exact hosted message/event producers append encrypted mailbox items in Postgres.
+Webhook and email ingress then hand execution off through a pointer-only Vercel
+Workflow whose step performs the narrow authenticated Cloudflare runner nudge.
+Device-sync webhook freshness is a dirty-state path instead: web records
+trace/audit facts, widens per-connection dirty resources, completes the trace in
+that transaction, and best-effort nudges the runner to pull pending dirty rows.
+Hosted execution no longer flows through a web-owned acquire/commit/finalize run
+protocol; the restored local runtime imports mailbox items, pulls dirty
+device-sync state, and checkpoints its own workspace state.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
@@ -516,6 +519,8 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link`
 - `POST /api/internal/device-sync/runtime/snapshot`
 - `POST /api/internal/device-sync/runtime/apply`
+- `POST /api/internal/device-sync/runtime/dirty-pending`
+- `POST /api/internal/device-sync/runtime/dirty-ack`
 - `GET /api/internal/hosted-execution/usage/cron`
 - `GET /api/internal/hosted-execution/stale-runner-cleanup/cron`
 - `POST /api/internal/hosted-execution/usage/record`
@@ -563,8 +568,10 @@ The onboarding lane is intentionally thin:
   positive entitlement source.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
-- Cloudflare-bound execution from onboarding and hosted device-sync trigger
-  paths always appends canonical hosted mailbox input first.
+- Cloudflare-bound execution from onboarding and exact message ingress appends
+  canonical hosted mailbox input first. Device-sync webhook freshness records
+  dirty state first and uses direct runner nudges plus the dirty sweeper for
+  recovery.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 

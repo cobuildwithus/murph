@@ -525,28 +525,14 @@ function createLivenessGuardedHostedRuntimePlatform(
     ...(platform.deviceSyncPort
       ? {
           deviceSyncPort: {
-            ...(platform.deviceSyncPort.ackDirtyStateProcessed
-              ? {
-                  ackDirtyStateProcessed: (ackInput) =>
-                    guard(() => platform.deviceSyncPort!.ackDirtyStateProcessed!(ackInput)),
-                }
-              : {}),
+            ackDirtyStateProcessed: (ackInput) =>
+              guard(() => platform.deviceSyncPort!.ackDirtyStateProcessed(ackInput)),
             applyUpdates: (applyInput) =>
               guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
             createConnectLink: (connectInput) =>
               guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
-            ...(platform.deviceSyncPort.fetchDirtyState
-              ? {
-                  fetchDirtyState: (dirtyInput) =>
-                    guard(() => platform.deviceSyncPort!.fetchDirtyState!(dirtyInput)),
-                }
-              : {}),
-            ...(platform.deviceSyncPort.fetchDirtyStates
-              ? {
-                  fetchDirtyStates: (dirtyInput) =>
-                    guard(() => platform.deviceSyncPort!.fetchDirtyStates!(dirtyInput)),
-                }
-              : {}),
+            fetchDirtyStates: (dirtyInput) =>
+              guard(() => platform.deviceSyncPort!.fetchDirtyStates(dirtyInput)),
             fetchSnapshot: platform.deviceSyncPort.fetchSnapshot,
           },
         }

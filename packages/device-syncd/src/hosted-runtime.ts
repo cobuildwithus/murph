@@ -4,8 +4,6 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
-export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_STATE_PATH =
-  "/api/internal/device-sync/runtime/dirty-state";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH =
   "/api/internal/device-sync/runtime/dirty-pending";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
@@ -212,12 +210,6 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   windowStart: string | null;
 }
 
-export interface HostedExecutionDeviceSyncDirtyStateRequest {
-  connectionId: string;
-  dirtyRevision: string;
-  userId: string;
-}
-
 export interface HostedExecutionDeviceSyncDirtyPendingRequest {
   limit?: number | null;
   userId: string;
@@ -284,8 +276,6 @@ export interface HostedExecutionDeviceSyncJobHint {
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
-  dirtyConnectionId?: string | null;
-  dirtyRevision?: string | null;
   eventType?: string | null;
   jobs?: HostedExecutionDeviceSyncJobHint[];
   nextReconcileAt?: string | null;
@@ -432,19 +422,6 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
       "Hosted device-sync runtime apply response updates",
     ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index)),
     userId: requireString(record.userId, "Hosted device-sync runtime apply response userId"),
-  };
-}
-
-export function parseHostedExecutionDeviceSyncDirtyStateRequest(
-  value: unknown,
-  trustedUserId: string | null = null,
-): HostedExecutionDeviceSyncDirtyStateRequest {
-  const record = requireObject(value, "Hosted device-sync dirty state request");
-
-  return {
-    connectionId: requireString(record.connectionId, "Hosted device-sync dirty state request connectionId"),
-    dirtyRevision: requireBigIntString(record.dirtyRevision, "Hosted device-sync dirty state request dirtyRevision"),
-    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
   };
 }
 
@@ -616,20 +593,6 @@ export function parseHostedExecutionDeviceSyncWakeHint(
 
   const record = requireObject(value, "Hosted execution device-sync.wake hint");
   const next: HostedExecutionDeviceSyncWakeHint = {};
-
-  if (record.dirtyConnectionId !== undefined) {
-    next.dirtyConnectionId = readNullableStringValue(
-      record.dirtyConnectionId,
-      "Hosted execution device-sync.wake hint dirtyConnectionId",
-    );
-  }
-
-  if (record.dirtyRevision !== undefined) {
-    next.dirtyRevision = readNullableBigIntString(
-      record.dirtyRevision,
-      "Hosted execution device-sync.wake hint dirtyRevision",
-    );
-  }
 
   if (record.eventType !== undefined) {
     next.eventType = readNullableStringValue(
