@@ -247,6 +247,7 @@ describe("hosted runtime internal web routes", () => {
           conversationImportedSeq: "12",
           state: "idle",
         },
+        browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_2_hash"),
         snapshotRef: createBundleRef("snapshot_2"),
       },
     ));
@@ -269,6 +270,7 @@ describe("hosted runtime internal web routes", () => {
         conversationImportedSeq: "12",
         state: "idle",
       },
+      browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_2_hash"),
       snapshotRef: createBundleRef("snapshot_2"),
       userId: "member_routes_1",
     });
@@ -280,6 +282,7 @@ describe("hosted runtime internal web routes", () => {
         expectedWorkspaceVersion: "4",
         leaseGeneration: "3",
         reason: "idle",
+        browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_stale_hash"),
         snapshotRef: createBundleRef("snapshot_stale"),
       },
     ));
@@ -564,5 +567,19 @@ function createBundleRef(id: string) {
     key: `bundles/vault/${id}.bundle.json`,
     size: 128,
     updatedAt: FIXED_NOW,
+  };
+}
+
+function createBrowserVaultReplicaRef(sourceBundleHash: string) {
+  return {
+    byteLength: 256,
+    dataVersion: "internal-route-test",
+    generatedAt: FIXED_NOW,
+    keyId: "browser-key-internal-route",
+    objectKey: "browser-vault/member-routes/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:internal-route",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
   };
 }

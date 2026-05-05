@@ -14,6 +14,9 @@ import type {
   HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/contracts";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -36,6 +39,12 @@ export interface HostedRuntimeArtifactStore {
     bytes: Uint8Array;
     sha256: string;
   }): Promise<void>;
+}
+
+export interface HostedRuntimeBrowserVaultReplicaPort {
+  write(input: {
+    replica: unknown;
+  }): Promise<HostedBrowserVaultReplicaRef>;
 }
 
 type HostedRuntimeEffectsPortBase = {
@@ -121,6 +130,7 @@ export type HostedRuntimeActiveTurnInputCheckpoint = (
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   billingPort?: HostedRuntimeBillingPort | null;
+  browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
