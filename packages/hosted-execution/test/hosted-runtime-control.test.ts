@@ -631,6 +631,16 @@ describe("hosted runtime control contracts", () => {
         messageText: 1,
       },
     })).toThrow(/not allowed/u);
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        failureAssistantProviderErrorBodyMessage: "provider rejected the request",
+        safeErrorMessage: "Codex app-server failed before producing a reply.",
+      },
+    }).redactedJson).toEqual({
+      failureAssistantProviderErrorBodyMessage: "provider rejected the request",
+      safeErrorMessage: "Codex app-server failed before producing a reply.",
+    });
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

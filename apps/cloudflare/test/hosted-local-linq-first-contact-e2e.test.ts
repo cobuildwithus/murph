@@ -735,6 +735,8 @@ async function startLinqScenario(
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+        buildLinqFirstContactLocalInboundAllowlist(),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
@@ -750,6 +752,15 @@ async function startLinqScenario(
     scenarioLabel: "Local hosted Linq e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+function buildLinqFirstContactLocalInboundAllowlist(): string {
+  return [
+    directReplyUserId,
+    duplicateWelcomeUserId,
+    fastReplyUserId,
+    postAssistantReplyUserId,
+  ].map(buildLinqRecipientPhoneNumber).join(",");
 }
 
 async function sleep(ms: number): Promise<void> {

@@ -532,6 +532,34 @@ describe("hosted runtime log store", () => {
     });
   });
 
+  it("allows bounded safe runtime diagnostic text keys", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "assistant",
+      errorCode: "ASSISTANT_CODEX_FAILED",
+      eventCode: "assistant.automation_detail",
+      level: "warn",
+      phase: "invoke",
+      redacted: {
+        failureAssistantProviderErrorMessage: "provider rejected the request",
+        safeErrorMessage: "Codex app-server failed before producing a reply.",
+      },
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(result.redactedJson).toEqual({
+      failureAssistantProviderErrorMessage: "provider rejected the request",
+      safeErrorMessage: "Codex app-server failed before producing a reply.",
+    });
+  });
+
   it("rejects unsafe or oversized redacted log metadata before persistence", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({

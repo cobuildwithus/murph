@@ -95,6 +95,12 @@ const FORBIDDEN_REDACTED_KEY_PARTS = [
   "text",
   "token",
 ] as const;
+const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEYS = new Set([
+  "failureAssistantProviderErrorBodyMessage",
+  "failureAssistantProviderErrorMessage",
+  "failureAssistantProviderErrorStatusText",
+  "safeErrorMessage",
+]);
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 48;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
@@ -1137,6 +1143,10 @@ function parseHostedRuntimeRedactedScalar(
 }
 
 function assertAllowedRedactedKey(key: string, label: string): void {
+  if (SAFE_DIAGNOSTIC_TEXT_REDACTED_KEYS.has(key)) {
+    return;
+  }
+
   const normalized = key.toLowerCase();
 
   for (const forbidden of FORBIDDEN_REDACTED_KEY_PARTS) {

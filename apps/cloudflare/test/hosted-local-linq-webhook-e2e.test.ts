@@ -31,6 +31,7 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const hostedLinqVoiceNoteTranscriptText = "Remember to log the voice note";
 const hostedLinqVoiceNoteAssistantReplyText = "Logged the voice note.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
+const linqWebhookRunId = Date.now();
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -471,7 +472,7 @@ async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebh
 
 async function createActiveLinqWebhookMember(label: string): Promise<ActiveLinqWebhookMember> {
   linqWebhookMemberCounter += 1;
-  const userId = `member_local_linq_webhook_${label}_${Date.now()}_${linqWebhookMemberCounter}`;
+  const userId = `member_local_linq_webhook_${label}_${linqWebhookRunId}_${linqWebhookMemberCounter}`;
 
   return await activateLinqWebhookMember(userId);
 }
@@ -486,6 +487,8 @@ async function startLinqScenario(
     typeof additionalEnv === "function" ? additionalEnv(requireLinqStub()) : additionalEnv;
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+        buildLinqWebhookLocalInboundAllowlist(),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
@@ -498,4 +501,14 @@ async function startLinqScenario(
     scenarioLabel: "Local hosted Linq webhook e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+function buildLinqWebhookLocalInboundAllowlist(): string {
+  return ["reply", "rapid", "voice", "pdf"]
+    .map((label, index) =>
+      buildLinqRecipientPhoneNumber(
+        `member_local_linq_webhook_${label}_${linqWebhookRunId}_${index + 1}`,
+      )
+    )
+    .join(",");
 }
