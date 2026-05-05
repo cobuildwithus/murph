@@ -89,6 +89,19 @@ describe("hosted AI usage allowance pricing", () => {
       });
     }
   });
+
+  it("prices Vercel AI Gateway provider-prefixed OpenAI model ids", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "openai/gpt-5.5",
+      servedModel: "openai/gpt-5.5",
+    })).toMatchObject({
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.5",
+      },
+    });
+  });
 });
 
 describe("accountHostedAiUsageForAllowanceTx", () => {
