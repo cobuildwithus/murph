@@ -123,6 +123,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       assert.equal(result.stateChanged, true);
       assert.equal(result.importResult.importedCount, 1);
       assert.equal(result.checkpoint?.checkpointed, true);
+      assert.equal(result.checkpointDeferred, false);
       assert.deepEqual(observedStateAtCheckpoint, ["1"]);
       assert.deepEqual(fetchRequests, [
         {
@@ -210,6 +211,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       });
 
       assert.equal(result.stateChanged, true);
+      assert.equal(result.checkpointDeferred, false);
       assert.deepEqual(order, ["import", "checkpoint"]);
       assert.equal(result.afterCheckpointEffects.length, 1);
       const effectResult = await result.afterCheckpointEffects[0]?.();
@@ -272,9 +274,72 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       });
 
       assert.equal(result.stateChanged, true);
+      assert.equal(result.checkpointDeferred, false);
       assert.equal(effectRan, false);
       assert.equal(result.afterCheckpointEffects.length, 1);
       assert.equal(result.state.watermarks.conversation, "1");
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "1",
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("can defer an imported mailbox checkpoint while preserving local state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_deferred",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [item],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const order: string[] = [];
+    const workspacePort: HostedRuntimeWorkspacePort = {
+      async checkpoint(request): Promise<HostedWorkspaceCheckpointResponse> {
+        checkpointRequests.push(request);
+        return createCheckpointResponse(request);
+      },
+    };
+
+    try {
+      const result = await importHostedMailboxPrefixAndCheckpoint({
+        deferCheckpoint: true,
+        expectedUserId: TEST_USER_ID,
+        createCheckpointRequest() {
+          throw new Error("Deferred imports should not create a checkpoint request.");
+        },
+        async importItem() {
+          order.push("import");
+          return {
+            afterCheckpoint: async () => {
+              order.push("afterCheckpoint");
+              return createInboxProjectionEffectResult();
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        mailboxPort,
+        now: () => TEST_NOW,
+        requestId: "request_synthetic_checkpoint_deferred",
+        vaultRoot,
+        workspacePort,
+      });
+
+      assert.equal(result.stateChanged, true);
+      assert.equal(result.checkpoint, null);
+      assert.equal(result.checkpointDeferred, true);
+      assert.equal(result.importResult.importedCount, 1);
+      assert.equal(result.afterCheckpointEffects.length, 1);
+      assert.deepEqual(order, ["import"]);
+      assert.deepEqual(checkpointRequests, []);
       assert.equal(
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
         "1",
@@ -325,6 +390,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
 
       assert.equal(result.stateChanged, false);
       assert.equal(result.checkpoint, null);
+      assert.equal(result.checkpointDeferred, false);
       assert.deepEqual(result.previousState, initialState);
       assert.deepEqual(result.importResult.state, initialState);
       assert.deepEqual(checkpointRequests, []);

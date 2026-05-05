@@ -64,6 +64,8 @@ Updated: 2026-05-06
 - 2026-05-06 follow-up implementation: keep warm launcher roots across failed child runs because durable restore replays state on the next attempt, and route all checkpoint reasons through the hot layered snapshot path unless hot bootstrap/fallback requires a full snapshot.
 - 2026-05-06 active-input latency decision: skip the timer-lane device-sync sweep when mailbox import brought in fresh input so conversation replies are not blocked by background health-sync jobs; dedicated device-sync wakes still run the sync lane.
 - 2026-05-06 live follow-up: treat webhook nudges as active input for the device-sync skip even when import accounting is stale or split across phases.
+- 2026-05-06 warm-path decision: consume and rewrite a local hot-restore marker only after successful workspace checkpoints so a warm nudge can skip re-fetching/materializing already-restored hot state, while failed children still force durable restore replay.
+- 2026-05-06 active-input checkpoint decision: defer the initial mailbox import checkpoint on nudge runs and let the assistant/outbox checkpoint carry the imported mailbox state; if the assistant makes no durable progress, write a deferred import checkpoint after the assistant phase.
 
 ## Current evidence
 
@@ -73,6 +75,7 @@ Updated: 2026-05-06
 - The first post-fix warm retry restored the unchanged base with `cacheHit: true` in 0ms and finished restore in roughly 2.6s, then a later maintenance checkpoint attempted repeated full snapshot uploads, hit memory limits, and lost the warm cache before the next live text.
 - Live traces also showed a 15-25s gap between device-connect context logging and assistant automation start. That code path runs device-sync scheduler work before auto-reply; for fresh imported user input this is background work on the critical text reply path.
 - The post-deploy live probe confirmed hot checkpointing fixed the memory-pressure path: import/outbox checkpoints stayed hot-state at roughly 430 KB and Cloudflare observability showed no memory-limit errors. The remaining live gap was device sync still running before assistant automation on the nudge path, plus one retryable Linq send that succeeded on the next warm retry.
+- The next live warm probe showed base restore at 0ms but still spent about 2.4s restoring hot state, about 2.6s on the pre-assistant import checkpoint, and about 2.4s on the pre-send outbox checkpoint; the patch under test removes the hot restore/materialize repeat and the pre-assistant import checkpoint from the active nudge path.
 
 ## Verification
 
@@ -95,3 +98,6 @@ Updated: 2026-05-06
   - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-workspace-assistant-phase.test.ts test/hosted-runtime-maintenance.test.ts`
   - `pnpm --dir packages/assistant-runtime typecheck`
   - `git diff --check -- packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-mailbox-checkpoint.test.ts test/hosted-runtime-workspace-runner.test.ts test/hosted-runtime-workspace-restore-codex-continuity.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts test/hosted-runtime-workspace-assistant-phase-diagnostics.test.ts test/hosted-runtime-maintenance.test.ts test/hosted-runtime-workspace-entrypoint.test.ts`
+  - `pnpm --dir packages/assistant-runtime typecheck`
+  - `git diff --check -- packages/assistant-runtime/src/hosted-runtime.ts packages/assistant-runtime/src/hosted-runtime/mailbox-checkpoint.ts packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts packages/assistant-runtime/src/hosted-runtime/workspace-runner.ts packages/assistant-runtime/test/hosted-runtime-mailbox-checkpoint.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-restore-codex-continuity.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase-diagnostics.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`
