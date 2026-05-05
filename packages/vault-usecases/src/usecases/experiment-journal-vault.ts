@@ -349,7 +349,7 @@ const experimentPlanPayloadSchema = z
         body: z.string().optional(),
       })
       .strict(),
-    commonsProtocolRef: commonsProtocolRefSchema,
+    commonsProtocolRef: commonsProtocolRefSchema.optional(),
     protocol: privateProtocolPlanInputSchema.optional(),
     protocolRef: privateProtocolRefInputSchema.optional(),
     effectiveProtocolSnapshot: effectiveProtocolSnapshotSchema.optional(),
@@ -390,13 +390,14 @@ const experimentPlanPayloadSchema = z
     }
 
     if (
+      payload.commonsProtocolRef !== undefined &&
       payload.protocol === undefined &&
       payload.protocolRef === undefined &&
       payload.effectiveProtocolSnapshot === undefined
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Experiment plans without a private protocol payload require effectiveProtocolSnapshot.',
+        message: 'Health Commons protocol-backed plans require effectiveProtocolSnapshot.',
         path: ['effectiveProtocolSnapshot'],
       })
     }
@@ -406,7 +407,8 @@ type ExperimentPlanPayload = z.infer<typeof experimentPlanPayloadSchema>
 
 export interface PlanExperimentRecordInput {
   vault: string
-  inputFile: string
+  inputFile?: string
+  payload?: JsonObject
 }
 
 export interface StartExperimentFromPlanInput extends PlanExperimentRecordInput {}
@@ -552,7 +554,31 @@ function buildEffectiveProtocolSnapshotFromPrivateProtocol(
 
 async function readExperimentPlanPayload(inputFile: string): Promise<ExperimentPlanPayload> {
   return experimentPlanPayloadSchema.parse(
-    await readJsonPayload(inputFile, 'experiment plan payload'),
+    await readJsonPayload(inputFile, 'experiment start payload'),
+  )
+}
+
+async function resolveExperimentPlanPayload(
+  input: PlanExperimentRecordInput,
+): Promise<ExperimentPlanPayload> {
+  if (input.inputFile !== undefined && input.payload !== undefined) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Experiment start accepts either an internal payload object or an input file, not both.',
+    )
+  }
+
+  if (input.payload !== undefined) {
+    return experimentPlanPayloadSchema.parse(input.payload)
+  }
+
+  if (input.inputFile !== undefined) {
+    return readExperimentPlanPayload(input.inputFile)
+  }
+
+  throw new VaultCliError(
+    'invalid_payload',
+    'Experiment start requires a typed plan payload.',
   )
 }
 
@@ -583,7 +609,7 @@ function toCurrentProtocolRef(
 }
 
 export async function planExperimentRecord(input: PlanExperimentRecordInput) {
-  const payload = await readExperimentPlanPayload(input.inputFile)
+  const payload = await resolveExperimentPlanPayload(input)
 
   return {
     vault: input.vault,
@@ -592,7 +618,7 @@ export async function planExperimentRecord(input: PlanExperimentRecordInput) {
 }
 
 export async function startExperimentFromPlanRecord(input: StartExperimentFromPlanInput) {
-  const payload = await readExperimentPlanPayload(input.inputFile)
+  const payload = await resolveExperimentPlanPayload(input)
   const core = await loadExperimentJournalVaultCoreRuntime()
   let protocol: {
     protocolId: string
@@ -643,7 +669,7 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
   if (privateProtocolRef !== undefined && effectiveProtocolSnapshot === undefined) {
     throw new VaultCliError(
       'invalid_payload',
-      'Private protocol-backed experiment plans require effectiveProtocolSnapshot.',
+      'Private protocol-backed experiment starts require effectiveProtocolSnapshot.',
     )
   }
 
@@ -718,7 +744,7 @@ export async function applyExperimentOnboardingRecord(
   if (!hasExperimentOnboardingApplyPatch(input)) {
     throw new VaultCliError(
       'invalid_payload',
-      'Experiment onboarding apply requires at least one protocol, run plan, analysis, onboarding, or assistant-support field. Use experiment update for status-only changes.',
+      'Experiment edit requires at least one protocol, run plan, analysis, onboarding, assistant-support, or scalar field.',
     )
   }
 
@@ -748,7 +774,7 @@ export async function applyExperimentOnboardingRecord(
   ) {
     throw new VaultCliError(
       'invalid_payload',
-      'Applying a Health Commons protocol reference requires an effectiveProtocolSnapshot; use experiment plan/start for protocol-backed runs.',
+      'Applying a Health Commons protocol reference requires an effectiveProtocolSnapshot; use typed experiment start for protocol-backed runs.',
     )
   }
 
@@ -2008,7 +2034,7 @@ async function buildRunScheduleForOnboardingApply(
   if (sourceCount > 1) {
     throw new VaultCliError(
       'invalid_payload',
-      'Provide only one schedule source: a structured schedule object, --schedule-json, or --schedule-kind flags.',
+      'Provide only one schedule source: a structured schedule object, schedule input file, or schedule-kind fields.',
     )
   }
 
@@ -2019,7 +2045,7 @@ async function buildRunScheduleForOnboardingApply(
   if (input.scheduleInputFile !== undefined) {
     return parseExperimentRunScheduleIntent(
       await readJsonPayload(input.scheduleInputFile, 'ExperimentRunScheduleIntent payload'),
-      'schedule-json',
+      'schedule input file',
     )
   }
 

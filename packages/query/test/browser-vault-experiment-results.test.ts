@@ -167,6 +167,37 @@ test("builds active baseline results using generatedAt as the default asOf", () 
   assert.equal(Object.hasOwn(result, "events"), false);
 });
 
+test("reports missing browser setup without pretending wearable data is missing", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-04T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          omitRunPlan: true,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, {
+    slug: "finnish-sauna-run",
+  });
+
+  assert.ok(result);
+  assert.equal(result.experiment.phase, "planned");
+  assert.equal(result.progress?.phase, "planned");
+  assert.equal(result.progress?.dayInRun, null);
+  assert.equal(result.progress?.dataCoverage.status, "insufficient");
+  assert.deepEqual(result.progress?.setupReadiness, {
+    status: "incomplete",
+    blockingReasons: [
+      "missing_run_plan",
+      "missing_baseline_window",
+      "missing_intervention_window",
+    ],
+  });
+});
+
 test("builds active intervention progress and preserves schedule session statuses", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -957,6 +988,7 @@ function experimentEntity(input: {
   analysisPlan?: Record<string, unknown>;
   expectedSignalDescriptions?: unknown[];
   id?: string;
+  omitRunPlan?: boolean;
   occurredAt?: string;
   runPlan?: Record<string, unknown>;
   slug?: string;
@@ -980,14 +1012,18 @@ function experimentEntity(input: {
       },
       expectedSignalDescriptions: input.expectedSignalDescriptions,
       experimentId: id,
-      runPlan: input.runPlan ?? {
-        baselineStart: "2026-04-01",
-        baselineEnd: "2026-04-07",
-        interventionStart: "2026-04-08",
-        interventionEnd: "2026-04-21",
-        targetSessions: 6,
-        minimumUsefulSessions: 4,
-      },
+      ...(input.omitRunPlan
+        ? {}
+        : {
+            runPlan: input.runPlan ?? {
+              baselineStart: "2026-04-01",
+              baselineEnd: "2026-04-07",
+              interventionStart: "2026-04-08",
+              interventionEnd: "2026-04-21",
+              targetSessions: 6,
+              minimumUsefulSessions: 4,
+            },
+          }),
       slug,
       status,
     },

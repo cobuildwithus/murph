@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
@@ -16,7 +16,7 @@ test('experiment help uses generic id selectors while journal keeps date selecto
 })
 
 test.sequential(
-  'experiment create accepts richer frontmatter options and experiment reads resolve by slug or id',
+  'experiment start accepts typed frontmatter options and experiment reads resolve by slug or id',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-'))
 
@@ -26,11 +26,13 @@ test.sequential(
       assert.equal(requireData(initResult).created, true)
 
       const activeExperiment = await runCli<{
-        experimentId: string
-        experimentPath: string
+        experiment: {
+          experimentId: string
+          experimentPath: string
+        } | null
       }>([
         'experiment',
-        'create',
+        'start',
         'focus-sprint',
         '--title',
         'Focus Sprint',
@@ -40,14 +42,22 @@ test.sequential(
         '2026-03-10',
         '--status',
         'active',
+        '--intervention-start',
+        '2026-03-10',
+        '--intervention-days',
+        '7',
+        '--primary-biomarker-key',
+        'biomarker:sleep-efficiency',
         '--vault',
         vaultRoot,
       ])
       const completedExperiment = await runCli<{
-        experimentId: string
+        experiment: {
+          experimentId: string
+        } | null
       }>([
         'experiment',
-        'create',
+        'start',
         'magnesium-trial',
         '--title',
         'Magnesium Trial',
@@ -57,9 +67,20 @@ test.sequential(
         '2026-03-11',
         '--status',
         'completed',
+        '--intervention-start',
+        '2026-03-11',
+        '--intervention-days',
+        '7',
+        '--primary-biomarker-key',
+        'biomarker:sleep-efficiency',
         '--vault',
         vaultRoot,
       ])
+      const activeExperimentData = requireData(activeExperiment).experiment
+      const completedExperimentData = requireData(completedExperiment).experiment
+
+      assert.ok(activeExperimentData)
+      assert.ok(completedExperimentData)
 
       const showBySlug = await runCli<{
         entity: {
@@ -83,7 +104,7 @@ test.sequential(
       }>([
         'experiment',
         'show',
-        requireData(completedExperiment).experimentId,
+        completedExperimentData.experimentId,
         '--vault',
         vaultRoot,
       ])
@@ -107,13 +128,13 @@ test.sequential(
       ])
 
       assert.equal(activeExperiment.ok, true)
-      assert.equal(activeExperiment.meta?.command, 'experiment create')
-      assert.match(requireData(activeExperiment).experimentPath, /bank\/experiments\/focus-sprint\.md/u)
+      assert.equal(activeExperiment.meta?.command, 'experiment start')
+      assert.match(activeExperimentData.experimentPath, /bank\/experiments\/focus-sprint\.md/u)
       assert.equal(completedExperiment.ok, true)
 
       assert.equal(showBySlug.ok, true)
       assert.equal(showBySlug.meta?.command, 'experiment show')
-      assert.equal(requireData(showBySlug).entity.id, requireData(activeExperiment).experimentId)
+      assert.equal(requireData(showBySlug).entity.id, activeExperimentData.experimentId)
       assert.equal(requireData(showBySlug).entity.kind, 'experiment')
       assert.equal(requireData(showBySlug).entity.title, 'Focus Sprint')
       assert.equal(requireData(showBySlug).entity.data.startedOn, '2026-03-10')
@@ -124,7 +145,7 @@ test.sequential(
       )
 
       assert.equal(showById.ok, true)
-      assert.equal(requireData(showById).entity.id, requireData(completedExperiment).experimentId)
+      assert.equal(requireData(showById).entity.id, completedExperimentData.experimentId)
       assert.equal(requireData(showById).entity.title, 'Magnesium Trial')
 
       assert.equal(completedList.ok, true)
@@ -132,7 +153,7 @@ test.sequential(
       assert.equal(requireData(completedList).count, 1)
       assert.deepEqual(
         requireData(completedList).items.map((item) => item.id),
-        [requireData(completedExperiment).experimentId],
+        [completedExperimentData.experimentId],
       )
       assert.deepEqual(
         requireData(completedList).items.map((item) => item.kind),
@@ -227,143 +248,6 @@ test.sequential(
         ['journal_day'],
       )
       assert.equal(requireData(rangedList).items[0]?.data.dayKey, '2026-03-12')
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'vault show and stats surface read-only vault metadata and counts',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-'))
-
-    try {
-      await runCli(['init', '--vault', vaultRoot])
-      await runCli([
-        'experiment',
-        'create',
-        'focus-sprint',
-        '--title',
-        'Focus Sprint',
-        '--started-on',
-        '2026-03-10',
-        '--vault',
-        vaultRoot,
-      ])
-      await runCli([
-        'journal',
-        'ensure',
-        '2026-03-12',
-        '--vault',
-        vaultRoot,
-      ])
-
-      const showResult = await runCli<{
-        formatVersion: number | null
-        vaultId: string | null
-        title: string | null
-        corePath: string | null
-        coreTitle: string | null
-      }>([
-        'vault',
-        'show',
-        '--vault',
-        vaultRoot,
-      ])
-      const statsResult = await runCli<{
-        counts: {
-          experiments: number
-          journalEntries: number
-          events: number
-          audits: number
-        }
-        latest: {
-          journalDate: string | null
-          experimentTitle: string | null
-        }
-      }>([
-        'vault',
-        'stats',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(showResult.ok, true)
-      assert.equal(showResult.meta?.command, 'vault show')
-      assert.equal(requireData(showResult).formatVersion, 1)
-      assert.match(requireData(showResult).vaultId ?? '', /^vault_/u)
-      assert.equal(requireData(showResult).corePath, 'CORE.md')
-      assert.equal(requireData(showResult).title !== null, true)
-      assert.equal(requireData(showResult).coreTitle !== null, true)
-
-      assert.equal(statsResult.ok, true)
-      assert.equal(statsResult.meta?.command, 'vault stats')
-      assert.equal(requireData(statsResult).counts.experiments, 1)
-      assert.equal(requireData(statsResult).counts.journalEntries, 1)
-      assert.equal(requireData(statsResult).counts.events >= 1, true)
-      assert.equal(requireData(statsResult).counts.audits >= 1, true)
-      assert.equal(requireData(statsResult).latest.journalDate, '2026-03-12')
-      assert.equal(requireData(statsResult).latest.experimentTitle, 'Focus Sprint')
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'vault show and stats reject invalid vault metadata',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-invalid-'))
-
-    try {
-      await runCli(['init', '--vault', vaultRoot])
-      const metadataPath = path.join(vaultRoot, 'vault.json')
-      const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>
-      metadata.paths = {
-        coreDocument: 'CORE.md',
-      }
-      await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`)
-
-      const showResult = await runCli([
-        'vault',
-        'show',
-        '--vault',
-        vaultRoot,
-      ])
-      const statsResult = await runCli([
-        'vault',
-        'stats',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(showResult.ok, false)
-      assert.equal(showResult.error?.code, 'invalid_metadata')
-      assert.equal(statsResult.ok, false)
-      assert.equal(statsResult.error?.code, 'invalid_metadata')
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'vault paths is not a registered command',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-paths-'))
-
-    try {
-      await runCli(['init', '--vault', vaultRoot])
-      const pathsResult = await runCli([
-        'vault',
-        'paths',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(pathsResult.ok, false)
-      assert.equal(pathsResult.error?.code, 'COMMAND_NOT_FOUND')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

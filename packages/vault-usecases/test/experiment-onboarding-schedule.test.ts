@@ -179,7 +179,7 @@ test("experiment onboarding writers do not preserve legacy string run-plan sched
     "packages/cli/config.schema.json",
   ];
   const generatedPatterns = [
-    /experiment apply-onboarding[^\n]*schedule\?: string/u,
+    /experiment edit[^\n]*schedule\?: string/u,
     /Plain-language schedule string for the run plan/u,
   ];
   const violations: string[] = [];

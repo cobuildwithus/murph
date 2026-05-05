@@ -176,7 +176,7 @@ const EXPERIMENT_COVERAGE_STATUSES = [
 ] as const;
 const EXPERIMENT_ANALYSIS_STATUSES = ["not_ready", "ready", "generated"] as const;
 export const EXPERIMENT_OUTCOME_SCHEMA_VERSION = "murph.experiment-outcome.v1" as const;
-export const EXPERIMENT_PROGRESS_SCHEMA_VERSION = "murph.experiment-progress.v1" as const;
+export const EXPERIMENT_PROGRESS_SCHEMA_VERSION = "murph.experiment-progress.v2" as const;
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
   relationship: 120,
@@ -1421,6 +1421,22 @@ export const experimentWindowSummarySchema = z
   })
   .strict();
 
+const experimentProgressReadinessReasonSchema = z.enum([
+  "missing_run_plan",
+  "missing_baseline_window",
+  "missing_intervention_window",
+  "missing_analysis_plan",
+  "missing_primary_biomarker",
+  "missing_metric_window",
+]);
+
+const experimentProgressReadinessSchema = z
+  .object({
+    status: z.enum(["ready", "incomplete"]),
+    blockingReasons: z.array(experimentProgressReadinessReasonSchema),
+  })
+  .strict();
+
 export const experimentProgressSnapshotSchema = z
   .object({
     schemaVersion: z.literal(EXPERIMENT_PROGRESS_SCHEMA_VERSION),
@@ -1448,6 +1464,8 @@ export const experimentProgressSnapshotSchema = z
       })
       .strict(),
     dayInRun: integerSchema(1).nullable(),
+    setupReadiness: experimentProgressReadinessSchema,
+    analysisReadiness: experimentProgressReadinessSchema,
     experiment: z
       .object({
         id: idSchema(ID_PREFIXES.experiment),

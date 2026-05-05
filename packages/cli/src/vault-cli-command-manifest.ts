@@ -27,6 +27,7 @@ import {
 } from './commands/capture.js'
 import {
   commonsGetResultSchema,
+  commonsProtocolExploreResultSchema,
   commonsProtocolListResultSchema,
   commonsProtocolShowResultSchema,
   commonsSearchResultSchema,
@@ -552,6 +553,12 @@ export const vaultCliCommandDescriptors = [
         description:
           'Show one public Health Commons protocol variant by key, slug, or alias, including exact revision ids.',
         output: commonsProtocolShowResultSchema,
+      },
+      {
+        path: ['commons', 'protocol', 'explore'],
+        description:
+          'Explore candidate public Health Commons protocol variants for a broad or fuzzy protocol request.',
+        output: commonsProtocolExploreResultSchema,
       },
       {
         path: ['commons', 'source', 'list'],
@@ -1146,16 +1153,8 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['experiment'],
     leafCommands: [
       {
-        path: ['experiment', 'create'],
-        description: 'Create a baseline experiment document.',
-      },
-      {
-        path: ['experiment', 'plan'],
-        description: 'Validate an explicit experiment start plan payload without writing vault records.',
-      },
-      {
         path: ['experiment', 'start'],
-        description: 'Start an explicit experiment plan payload, creating or reusing a private protocol when requested.',
+        description: 'Start a typed experiment run, hydrating protocol defaults when a Health Commons protocol key is supplied.',
       },
       {
         path: ['experiment', 'show'],
@@ -1166,16 +1165,12 @@ export const vaultCliCommandDescriptors = [
         description: 'List experiments through the query read model.',
       },
       {
-        path: ['experiment', 'update'],
-        description: 'Update simple scalar experiment fields by id or slug.',
+        path: ['experiment', 'edit'],
+        description: 'Edit scalar fields and structured experiment setup fields using typed options.',
       },
       {
         path: ['experiment', 'checkpoint'],
         description: 'Append one experiment checkpoint event using typed fields.',
-      },
-      {
-        path: ['experiment', 'checkpoint-json'],
-        description: 'Advanced JSON import escape hatch for appending one experiment checkpoint event from a payload file or stdin.',
       },
       {
         path: ['experiment', 'stop'],
@@ -1190,16 +1185,8 @@ export const vaultCliCommandDescriptors = [
         description: 'Log one structured intervention session for an experiment using typed fields.',
       },
       {
-        path: ['experiment', 'session', 'log-json'],
-        description: 'Advanced JSON import escape hatch for logging one structured intervention session from a payload file or stdin.',
-      },
-      {
         path: ['experiment', 'context', 'log'],
         description: 'Log one experiment-linked context, note, or supplement-intake record using typed fields.',
-      },
-      {
-        path: ['experiment', 'context', 'log-json'],
-        description: 'Advanced JSON import escape hatch for logging one experiment-linked context record from a payload file or stdin.',
       },
       {
         path: ['experiment', 'outcome', 'analyze'],
@@ -1209,20 +1196,22 @@ export const vaultCliCommandDescriptors = [
         path: ['experiment', 'outcome', 'write'],
         description: 'Run the deterministic final analysis for one experiment and persist the outcome record.',
       },
+      {
+        path: ['experiment', 'followup', 'due'],
+        description:
+          'Evaluate deterministic missed-log or weekly-digest follow-up due logic for one experiment.',
+      },
     ],
     directVaultServiceBindings: {
       core: [
-        'createExperiment',
         'planExperiment',
         'startExperiment',
         'updateExperiment',
+        'applyExperimentOnboarding',
         'checkpointExperiment',
-        'checkpointExperimentJson',
         'stopExperiment',
         'logExperimentSession',
-        'logExperimentSessionJson',
         'logExperimentContext',
-        'logExperimentContextJson',
         'writeExperimentOutcome',
       ],
       query: [

@@ -358,7 +358,7 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
-  it('points richer experiment setup at the typed apply-onboarding command', () => {
+  it('points richer experiment setup at the typed edit command', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       allowSensitiveHealthContext: true,
@@ -378,8 +378,10 @@ describe('assistant experiment onboarding guidance', () => {
       vaultOverview: null,
     })
 
-    expect(prompt).toContain('vault-cli experiment apply-onboarding <id>')
-    expect(prompt).toContain('--schema --format json')
+    expect(prompt).toContain('vault-cli experiment start <slug>')
+    expect(prompt).toContain('vault-cli experiment edit <id>')
+    expect(prompt).toContain('--dry-run --format json')
+    expect(prompt).toContain('using typed flags only')
     expect(prompt).toContain('commonsProtocolRef')
     expect(prompt).toContain('Match the user\'s energy')
     expect(prompt).toContain('Never restate information the user has already acknowledged')
@@ -416,7 +418,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('first_session_prep_reminder_at')
     expect(prompt).toContain('first_session_prep_automation_slug')
     expect(prompt).toContain(
-      'apply them immediately after run creation with `vault-cli experiment apply-onboarding <id> --setup-answer first_session_start_at=<ISO timestamp>',
+      'apply them immediately after run creation with `vault-cli experiment edit <id> --setup-answer first_session_start_at=<ISO timestamp>',
     )
     expect(prompt).toContain(
       'do not silently treat a user-provided time as session one',

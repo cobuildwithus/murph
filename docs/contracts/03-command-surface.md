@@ -67,8 +67,10 @@ vault-cli device daemon status --vault <path> [--baseUrl <url>]
 vault-cli device daemon start --vault <path> [--baseUrl <url>]
 vault-cli device daemon stop --vault <path> [--baseUrl <url>]
 vault-cli commons search <query> [--limit <n>]
+vault-cli commons get <key-or-slug>
 vault-cli commons protocol list [--query <query>] [--category <category>] [--limit <n>]
 vault-cli commons protocol show <key-or-slug>
+vault-cli commons protocol explore <query> [--limit <n>]
 vault-cli commons source list --protocol <key-or-slug> [--limit <n>]
 vault-cli provider scaffold --vault <path> [--request-id <id>]
 vault-cli provider import-json --vault <path> --input @file.json [--request-id <id>]
@@ -130,20 +132,15 @@ vault-cli samples show <id> --vault <path> [--request-id <id>]
 vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--request-id <id>]
 vault-cli samples batch show <id> --vault <path> [--request-id <id>]
 vault-cli samples batch list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
-vault-cli experiment create <slug> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--request-id <id>]
-vault-cli experiment plan --vault <path> --input @file.json [--request-id <id>]
-vault-cli experiment start --vault <path> --input @file.json [--request-id <id>]
+vault-cli experiment start <slug> --vault <path> [--protocol-key protocol_variant:<key>] [--test-plan-id <id>] [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--intervention-start <date>] [--intervention-end <date>] [--baseline-start <date>] [--baseline-end <date>] [--baseline-days <n>] [--intervention-days <n>] [--schedule-kind dailyLocal|cron] [--schedule-local-time <HH:MM>] [--schedule-cron <expr>] [--schedule-time-zone <zone>] [--dose <text>] [--session-field <id> ...] [--primary-biomarker-key biomarker:<key>] [--secondary-biomarker-key biomarker:<key> ...] [--dry-run] [--request-id <id>]
 vault-cli experiment show <id> --vault <path> [--request-id <id>]
 vault-cli experiment list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
-vault-cli experiment update <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--request-id <id>]
-vault-cli experiment apply-onboarding <id> --vault <path> [--protocol-key protocol_variant:<key>] [--page-revision-id sha256:<64-hex>] [--run-spec-revision-id sha256:<64-hex>] [--test-plan-id <id>] [--baseline-days <n>] [--intervention-days <n>] [--intervention-start <date>] [--schedule <text>] [--dose <text>] [--session-field <id> ...] [--setup-answer <id=value> ...] [--reminder-policy <id>] [--missed-log-followup <policy>] [--request-id <id>]
+vault-cli experiment edit <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--protocol-key protocol_variant:<key>] [--page-revision-id sha256:<64-hex>] [--run-spec-revision-id sha256:<64-hex>] [--test-plan-id <id>] [--baseline-days <n>] [--intervention-days <n>] [--intervention-start <date>] [--schedule-kind dailyLocal|cron] [--schedule-local-time <HH:MM>] [--schedule-cron <expr>] [--schedule-time-zone <zone>] [--dose <text>] [--session-field <id> ...] [--setup-answer <id=value> ...] [--reminder-policy <id>] [--missed-log-followup <policy>] [--request-id <id>]
 vault-cli experiment checkpoint <lookup> --vault <path> [--occurred-at <ts>] [--title <title>] [--note <text>] [--request-id <id>]
-vault-cli experiment checkpoint-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note "..."] [--request-id <id>]
 vault-cli experiment session log <lookup> --vault <path> [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--intervention-type <type>] [--status completed|partial|missed|skipped] [--session-status completed|partial|missed|skipped] [--duration-minutes <n>] [--protocol-id <id>] [--timing <text>] [--temperature-c <number>] [--after-exercise] [--symptoms <text> ...] [--confounders <text> ...] [--confounder <key=value> ...] [--request-id <id>]
-vault-cli experiment session log-json <id> --vault <path> --input @file.json [--request-id <id>]
 vault-cli experiment context log <lookup> --vault <path> [--kind experiment_context|note|supplement_intake] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--context-type <slug>] [--severity info|potential_confounder|safety|blocking] [--tag <tag> ...] [--supplement-name <name>] [--dose <number>] [--unit <unit>] [--request-id <id>]
-vault-cli experiment context log-json <id> --vault <path> --input @file.json [--request-id <id>]
+vault-cli experiment followup due <id> --vault <path> --kind missed-log|weekly-digest [--date <YYYY-MM-DD>] [--request-id <id>]
 vault-cli journal ensure <date> --vault <path> [--request-id <id>]
 vault-cli journal show <date> --vault <path> [--request-id <id>]
 vault-cli journal list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
@@ -635,20 +632,35 @@ Each entry in `imports` represents one stream-specific batch attempt. When a str
 
 `samples import-csv` should make a best-effort pass over real-world device exports: it may infer one shared timestamp column, import every recognizable metric column in the same file, normalize common naive timestamps using the vault timezone, parse obvious numeric suffixes such as `%`, `bpm`, and digit group separators, and skip malformed rows in provenance instead of failing the entire batch. It should fail only for true ambiguity, such as multiple plausible timestamp columns or multiple columns mapping to the same canonical stream.
 
-### `experiment create`
+### `experiment start`
 
 ```json
 {
   "vault": "<path>",
-  "experimentId": "exp_123",
-  "lookupId": "exp_123",
-  "slug": "sleep-window",
-  "experimentPath": "<path>",
-  "created": false
+  "dryRun": false,
+  "plan": {
+    "planId": null,
+    "materialAdaptation": false,
+    "needsPrivateProtocol": false,
+    "reasons": [],
+    "operations": ["experiment_create", "experiment_update"]
+  },
+  "protocol": null,
+  "experiment": {
+    "experimentId": "exp_123",
+    "lookupId": "exp_123",
+    "slug": "sleep-window",
+    "experimentPath": "<path>",
+    "status": "active",
+    "created": false,
+    "updated": true
+  }
 }
 ```
 
-`created: false` is the idempotent retry case when the experiment page already exists with matching baseline attributes.
+The `plan.operations` values are internal core plan operation names, not public CLI command names.
+
+`dryRun: true` validates the same typed start fields without writing vault records and returns `experiment: null`.
 
 ### `journal ensure`
 
@@ -865,7 +877,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save|stop`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|plan|start|update|checkpoint|checkpoint-json|stop`, `experiment session log|log-json`, `experiment context log|log-json`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, and health `<noun> import-json` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
+- `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save|stop`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment start|edit|checkpoint|stop`, `experiment session log`, `experiment context log`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, and health `<noun> import-json` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

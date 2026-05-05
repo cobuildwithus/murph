@@ -44,6 +44,13 @@ export type ExperimentCoverageStatus =
   | "ready_for_review";
 export type ExperimentRecommendationAction = "skip" | "remind" | "summary" | "review";
 export type ExperimentOutcomeConfidenceLevel = "low" | "medium" | "high";
+export type ExperimentProgressReadinessReason =
+  | "missing_run_plan"
+  | "missing_baseline_window"
+  | "missing_intervention_window"
+  | "missing_analysis_plan"
+  | "missing_primary_biomarker"
+  | "missing_metric_window";
 export type ExperimentFollowupKind = "missed-log" | "weekly-digest";
 export type ExperimentFollowupAction = "notify" | "skip";
 export type ExperimentFollowupReason =
@@ -103,6 +110,14 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
     wearableProviders: string[];
   };
   dayInRun: number | null;
+  setupReadiness: {
+    status: "ready" | "incomplete";
+    blockingReasons: ExperimentProgressReadinessReason[];
+  };
+  analysisReadiness: {
+    status: "ready" | "incomplete";
+    blockingReasons: ExperimentProgressReadinessReason[];
+  };
   experiment: {
     id: string;
     slug: string;
@@ -234,8 +249,11 @@ export function summarizeExperimentProgress(
     interventionDaysAvailable,
     primarySignal,
     progressPhase: context.progressPhase,
+    frontmatter: context.frontmatter,
     summariesByDate: context.summariesByDate,
   });
+  const setupReadiness = buildSetupReadiness(context.frontmatter);
+  const analysisReadiness = buildAnalysisReadiness(context.frontmatter);
 
   const result = safeParseContract(experimentProgressSnapshotSchema, {
     schemaVersion: EXPERIMENT_PROGRESS_SCHEMA_VERSION,
@@ -245,6 +263,8 @@ export function summarizeExperimentProgress(
     confounders: context.confounders,
     dataCoverage,
     dayInRun: dayInRun(context.frontmatter, context.asOf),
+    setupReadiness,
+    analysisReadiness,
     experiment: {
       id: context.frontmatter.experimentId,
       slug: context.frontmatter.slug,
@@ -530,6 +550,7 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
 function buildCoverageSummary(input: {
   baselineDaysAvailable: number;
   interventionDaysAvailable: number;
+  frontmatter: ExperimentFrontmatter;
   primarySignal: ExperimentMetricResult | null;
   progressPhase: ExperimentProgressPhase;
   summariesByDate: Map<string, WearableDaySummary | null>;
@@ -537,9 +558,19 @@ function buildCoverageSummary(input: {
   const primaryMetricDaysAvailable =
     (input.primarySignal?.baselineDayCount ?? 0) +
     (input.primarySignal?.interventionDayCount ?? 0);
-  let status: ExperimentCoverageStatus = "no_wearable_data";
+  let status: ExperimentCoverageStatus = "insufficient";
 
-  if (primaryMetricDaysAvailable === 0) {
+  const hasCompleteMetricWindow =
+    input.frontmatter.runPlan?.baselineStart !== undefined &&
+    input.frontmatter.runPlan?.baselineEnd !== undefined &&
+    input.frontmatter.runPlan?.interventionStart !== undefined &&
+    input.frontmatter.runPlan?.interventionEnd !== undefined;
+
+  if (
+    input.primarySignal !== null &&
+    hasCompleteMetricWindow &&
+    primaryMetricDaysAvailable === 0
+  ) {
     status = "no_wearable_data";
   } else if (
     (input.progressPhase === "review_due" || input.progressPhase === "completed") &&
@@ -570,6 +601,55 @@ function buildCoverageSummary(input: {
     status,
     wearableProviders,
   };
+}
+
+function readinessResult(blockingReasons: ExperimentProgressReadinessReason[]) {
+  return {
+    status: blockingReasons.length === 0 ? "ready" : "incomplete",
+    blockingReasons,
+  } as const;
+}
+
+function buildSetupReadiness(
+  frontmatter: ExperimentFrontmatter,
+): ExperimentProgressSummary["setupReadiness"] {
+  const blockingReasons: ExperimentProgressReadinessReason[] = [];
+  const runPlan = frontmatter.runPlan;
+
+  if (!runPlan) {
+    blockingReasons.push("missing_run_plan");
+  }
+  if (!runPlan?.baselineStart || !runPlan.baselineEnd) {
+    blockingReasons.push("missing_baseline_window");
+  }
+  if (!runPlan?.interventionStart || !runPlan.interventionEnd) {
+    blockingReasons.push("missing_intervention_window");
+  }
+
+  return readinessResult(blockingReasons);
+}
+
+function buildAnalysisReadiness(
+  frontmatter: ExperimentFrontmatter,
+): ExperimentProgressSummary["analysisReadiness"] {
+  const blockingReasons: ExperimentProgressReadinessReason[] = [];
+
+  if (!frontmatter.analysisPlan) {
+    blockingReasons.push("missing_analysis_plan");
+  }
+  if (!frontmatter.analysisPlan?.primaryBiomarkerKey) {
+    blockingReasons.push("missing_primary_biomarker");
+  }
+  if (
+    !frontmatter.runPlan?.baselineStart ||
+    !frontmatter.runPlan.baselineEnd ||
+    !frontmatter.runPlan.interventionStart ||
+    !frontmatter.runPlan.interventionEnd
+  ) {
+    blockingReasons.push("missing_metric_window");
+  }
+
+  return readinessResult(blockingReasons);
 }
 
 function buildProgressRecommendation(input: {
@@ -1069,6 +1149,15 @@ function resolveProgressPhase(
     return "planned";
   }
 
+  if (
+    !frontmatter.runPlan?.baselineStart ||
+    !frontmatter.runPlan.baselineEnd ||
+    !frontmatter.runPlan.interventionStart ||
+    !frontmatter.runPlan.interventionEnd
+  ) {
+    return "planned";
+  }
+
   const interventionStart = frontmatter.runPlan?.interventionStart;
   const interventionEnd = frontmatter.runPlan?.interventionEnd;
   const baselineEnd = frontmatter.runPlan?.baselineEnd;
@@ -1165,7 +1254,16 @@ function computeExpectedSessionsByNow(
 }
 
 function dayInRun(frontmatter: ExperimentFrontmatter, asOf: string): number | null {
-  const start = frontmatter.runPlan?.baselineStart ?? frontmatter.startedOn;
+  if (
+    !frontmatter.runPlan?.baselineStart ||
+    !frontmatter.runPlan.baselineEnd ||
+    !frontmatter.runPlan.interventionStart ||
+    !frontmatter.runPlan.interventionEnd
+  ) {
+    return null;
+  }
+
+  const start = frontmatter.runPlan?.baselineStart;
   if (!start || asOf < start) {
     return null;
   }

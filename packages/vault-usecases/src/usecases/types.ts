@@ -680,12 +680,14 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   ): Promise<ExperimentCreateResult>
   planExperiment(
     input: CommandContext & {
-      inputFile: string
+      inputFile?: string
+      payload?: JsonObject
     },
   ): Promise<ExperimentPlanResult>
   startExperiment(
     input: CommandContext & {
-      inputFile: string
+      inputFile?: string
+      payload?: JsonObject
     },
   ): Promise<ExperimentStartResult>
   updateExperiment(

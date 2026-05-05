@@ -1591,7 +1591,7 @@ describe("assistant turn finalizer seam", () => {
           {
             input: {
               apiKey: "synthetic-private-value",
-              command: "vault-cli experiment create",
+              command: "vault-cli experiment start",
             },
             mode: "apply",
             tool: "vault.cli.run",
