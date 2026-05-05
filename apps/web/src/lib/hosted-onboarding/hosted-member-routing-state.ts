@@ -3,7 +3,10 @@ import {
   Prisma,
 } from "@prisma/client";
 
-import { readHostedMemberRoutingPrivateState } from "./member-private-codecs";
+import {
+  readHostedMemberHomeLinqRoutePrivateState,
+  readHostedMemberRoutingPrivateState,
+} from "./member-private-codecs";
 import {
   normalizeHostedLinqParticipantContactKind,
   type HostedLinqParticipantContactClaim,
@@ -27,6 +30,17 @@ export const hostedMemberRoutingStateSelect =
 
 export type HostedMemberRoutingRecord = Prisma.HostedMemberRoutingGetPayload<{
   select: typeof hostedMemberRoutingStateSelect;
+}>;
+
+export const hostedMemberHomeLinqRouteSelect =
+  Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
+    linqChatIdEncrypted: true,
+    linqRecipientPhoneEncrypted: true,
+    memberId: true,
+  });
+
+export type HostedMemberHomeLinqRouteRecord = Prisma.HostedMemberRoutingGetPayload<{
+  select: typeof hostedMemberHomeLinqRouteSelect;
 }>;
 
 export const hostedMemberRoutingLookupSelect =
@@ -75,6 +89,12 @@ export interface HostedMemberRoutingLookupSnapshot {
   memberId: string;
 }
 
+export interface HostedMemberHomeLinqRouteSnapshot {
+  linqChatId: string | null;
+  linqRecipientPhone: string | null;
+  memberId: string;
+}
+
 export type HostedMemberRoutingLookupMatch =
   | "pendingLinqParticipantContactLookupKey"
   | "telegramUserLookupKey"
@@ -114,6 +134,22 @@ export async function projectHostedMemberRoutingState(
     telegramThreadId: privateState.telegramThreadId,
     telegramUserId: privateState.telegramUserId,
     telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
+  };
+}
+
+export async function projectHostedMemberHomeLinqRouteState(
+  routing: HostedMemberHomeLinqRouteRecord,
+  prisma?: HostedOnboardingReadClient,
+): Promise<HostedMemberHomeLinqRouteSnapshot> {
+  const privateState = await readHostedMemberHomeLinqRoutePrivateState(
+    routing,
+    prisma,
+  );
+
+  return {
+    linqChatId: privateState.linqChatId,
+    linqRecipientPhone: privateState.linqRecipientPhone,
+    memberId: routing.memberId,
   };
 }
 

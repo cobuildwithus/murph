@@ -1097,7 +1097,7 @@ https://join.example.test/join/code_first_text`);
       reason: "wake-appended-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
+    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         tx: transactionClient,
@@ -2250,6 +2250,22 @@ https://join.example.test/join/code_first_text`);
             telegramUserLookupKey: null,
           },
         }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-chat-id",
+            memberId: "member_123",
+            value: "chat_home",
+          }),
+          linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-recipient-phone",
+            memberId: "member_123",
+            value: "+15550100001",
+          }),
+          memberId: "member_123",
+        }),
+        upsert: vi.fn(),
       },
     });
 
