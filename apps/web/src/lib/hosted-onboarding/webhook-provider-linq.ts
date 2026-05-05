@@ -23,6 +23,7 @@ import {
   readHostedMemberHomeLinqRoute,
 } from "./hosted-member-routing-store";
 import {
+  HOSTED_LINQ_DAILY_TEXT_LIMIT,
   incrementHostedLinqOutboundDailyState,
   readHostedLinqDailyState,
 } from "./linq-daily-state";
@@ -191,7 +192,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }),
     });
 
-    if (dailyState.inboundCount > 100) {
+    if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
       if (dailyState.quotaReplySentAt) {
         return buildIgnoredLinqWebhookPlan("daily-quota-reached");
       }

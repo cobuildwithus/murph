@@ -1,3 +1,5 @@
+import { HOSTED_LINQ_DAILY_TEXT_LIMIT } from "./linq-daily-state";
+
 export function buildHostedInviteReply(input: {
   joinUrl: string;
 }): string {
@@ -8,7 +10,7 @@ ${input.joinUrl}`;
 }
 
 export function buildHostedDailyQuotaReply(): string {
-  return "You have reached Murph's daily text limit of 100 messages. Try again tomorrow.";
+  return `You have reached Murph's daily text limit of ${HOSTED_LINQ_DAILY_TEXT_LIMIT} messages. Try again tomorrow.`;
 }
 
 export function buildHostedLinqConversationHomeRedirectReply(input: {
