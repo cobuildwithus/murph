@@ -122,8 +122,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
     });
-  }
-  if (!state.pendingDirtyAck) {
+  } else {
     state.pendingDirtyAck = await applyHostedPendingDirtyDeviceSyncState({
       deviceSyncPort: client,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
