@@ -27,12 +27,17 @@ import {
   type HostedMemberRoutingStateSnapshot,
   projectHostedMemberRoutingState,
 } from "./hosted-member-routing-store";
-import { type HostedOnboardingReadClient } from "./shared";
+import {
+  lockHostedMemberRow,
+  type HostedOnboardingReadClient,
+} from "./shared";
 
 const HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD =
   "hosted-member-email-authorization.verified-email";
 const HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD =
   "hosted-member-email-authorization.direct-public-sender";
+const HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD =
+  "hosted-member-email-authorization.stripe-checkout-email";
 
 const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   billingStatus: true,
@@ -54,6 +59,8 @@ const hostedMemberEmailAuthorizationStateSelect =
     directPublicSenderAuthorizedAt: true,
     directPublicSenderLookupKey: true,
     memberId: true,
+    stripeCheckoutEmailAddressEncrypted: true,
+    stripeCheckoutEmailCollectedAt: true,
     verifiedEmailAddressEncrypted: true,
     verifiedEmailLookupKey: true,
     verifiedEmailVerifiedAt: true,
@@ -87,9 +94,15 @@ export interface HostedMemberDirectPublicSenderAuthorizationFact {
   lookupKey: string;
 }
 
+export interface HostedMemberStripeCheckoutEmailFact {
+  address: string;
+  collectedAt: Date;
+}
+
 export interface HostedMemberEmailAuthorizationState {
   directPublicSender: HostedMemberDirectPublicSenderAuthorizationFact | null;
   memberId: string;
+  stripeCheckoutEmail: HostedMemberStripeCheckoutEmailFact | null;
   verifiedEmail: HostedMemberVerifiedEmailFact | null;
 }
 
@@ -106,6 +119,10 @@ export interface HostedMemberEmailAuthorizationWriteInput {
   } | null;
   memberId: string;
   prisma: Prisma.TransactionClient;
+  stripeCheckoutEmail?: {
+    address: string;
+    collectedAt: Date;
+  } | null;
   verifiedEmail?: {
     address: string;
     verifiedAt: Date;
@@ -282,7 +299,11 @@ export async function lookupHostedMemberByVerifiedEmailAddress(input: {
 export async function upsertHostedMemberEmailAuthorization(
   input: HostedMemberEmailAuthorizationWriteInput,
 ): Promise<HostedMemberEmailAuthorizationState> {
-  if (input.verifiedEmail === undefined && input.directPublicSender === undefined) {
+  if (
+    input.verifiedEmail === undefined
+    && input.directPublicSender === undefined
+    && input.stripeCheckoutEmail === undefined
+  ) {
     throw new TypeError("Hosted member email authorization updates require at least one fact.");
   }
 
@@ -296,6 +317,40 @@ export async function upsertHostedMemberEmailAuthorization(
   });
 
   return projectHostedMemberEmailAuthorizationState(record, input.prisma);
+}
+
+export async function upsertHostedMemberStripeCheckoutEmailIfFreshTx(input: {
+  address: string;
+  collectedAt: Date;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMemberEmailAuthorizationState | null> {
+  await lockHostedMemberRow(input.prisma, input.memberId);
+
+  const current = await input.prisma.hostedMemberEmailAuthorization.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      stripeCheckoutEmailCollectedAt: true,
+    },
+  });
+
+  if (
+    current?.stripeCheckoutEmailCollectedAt
+    && input.collectedAt.getTime() <= current.stripeCheckoutEmailCollectedAt.getTime()
+  ) {
+    return null;
+  }
+
+  return upsertHostedMemberEmailAuthorization({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    stripeCheckoutEmail: {
+      address: input.address,
+      collectedAt: input.collectedAt,
+    },
+  });
 }
 
 export async function syncHostedMemberVerifiedEmailAuthorization(
@@ -537,26 +592,35 @@ export async function projectHostedMemberEmailAuthorizationState(
     directPublicSenderAuthorizedAt: Date | null;
     directPublicSenderLookupKey: string | null;
     memberId: string;
+    stripeCheckoutEmailAddressEncrypted: string | null;
+    stripeCheckoutEmailCollectedAt: Date | null;
     verifiedEmailAddressEncrypted: string | null;
     verifiedEmailLookupKey: string | null;
     verifiedEmailVerifiedAt: Date | null;
   },
   prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberEmailAuthorizationState> {
-  const [verifiedEmailAddress, directPublicSenderAddress] = await Promise.all([
-    decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
-      memberId: record.memberId,
-      prisma,
-      value: record.verifiedEmailAddressEncrypted,
-    }),
-    decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD,
-      memberId: record.memberId,
-      prisma,
-      value: record.directPublicSenderAddressEncrypted,
-    }),
-  ]);
+  const [verifiedEmailAddress, directPublicSenderAddress, stripeCheckoutEmailAddress] =
+    await Promise.all([
+      decryptHostedWebNullableString({
+        field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
+        memberId: record.memberId,
+        prisma,
+        value: record.verifiedEmailAddressEncrypted,
+      }),
+      decryptHostedWebNullableString({
+        field: HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD,
+        memberId: record.memberId,
+        prisma,
+        value: record.directPublicSenderAddressEncrypted,
+      }),
+      decryptHostedWebNullableString({
+        field: HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD,
+        memberId: record.memberId,
+        prisma,
+        value: record.stripeCheckoutEmailAddressEncrypted,
+      }),
+    ]);
 
   return {
     directPublicSender:
@@ -570,6 +634,14 @@ export async function projectHostedMemberEmailAuthorizationState(
           }
         : null,
     memberId: record.memberId,
+    stripeCheckoutEmail:
+      stripeCheckoutEmailAddress
+      && record.stripeCheckoutEmailCollectedAt
+        ? {
+            address: stripeCheckoutEmailAddress,
+            collectedAt: record.stripeCheckoutEmailCollectedAt,
+          }
+        : null,
     verifiedEmail:
       verifiedEmailAddress
       && record.verifiedEmailLookupKey
@@ -651,6 +723,20 @@ async function buildHostedMemberEmailAuthorizationMutationData(
     data.directPublicSenderLookupKey = fact.lookupKey;
     data.directPublicSenderAddressEncrypted = fact.addressEncrypted;
     data.directPublicSenderAuthorizedAt = fact.occurredAt;
+  }
+
+  if (input.stripeCheckoutEmail !== undefined) {
+    const fact = await buildHostedMemberEmailFactColumns({
+      address: input.stripeCheckoutEmail?.address ?? null,
+      field: HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD,
+      memberId: input.memberId,
+      occurredAt: input.stripeCheckoutEmail?.collectedAt ?? null,
+      prisma: input.prisma,
+      label: "Hosted Stripe checkout email",
+    });
+
+    data.stripeCheckoutEmailAddressEncrypted = fact.addressEncrypted;
+    data.stripeCheckoutEmailCollectedAt = fact.occurredAt;
   }
 
   return data;

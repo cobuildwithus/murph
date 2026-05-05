@@ -27,7 +27,9 @@ export async function readHostedAccountSettingsSnapshot(input: {
 
   return {
     email: {
-      address: snapshot?.emailAuthorization?.verifiedEmail?.address ?? null,
+      address: snapshot?.emailAuthorization?.verifiedEmail?.address
+        ?? snapshot?.emailAuthorization?.stripeCheckoutEmail?.address
+        ?? null,
       verifiedAt: snapshot?.emailAuthorization?.verifiedEmail?.verifiedAt.toISOString() ?? null,
     },
     phone: {

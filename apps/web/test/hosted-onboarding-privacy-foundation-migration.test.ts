@@ -69,6 +69,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'directPublicSenderLookupKey String? @unique @map("direct_public_sender_lookup_key")',
     'directPublicSenderAddressEncrypted String? @map("direct_public_sender_address_encrypted")',
     'directPublicSenderAuthorizedAt DateTime? @map("direct_public_sender_authorized_at")',
+    'stripeCheckoutEmailAddressEncrypted String? @map("stripe_checkout_email_address_encrypted")',
+    'stripeCheckoutEmailCollectedAt DateTime? @map("stripe_checkout_email_collected_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -178,6 +180,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const stripeCheckoutEmailMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050501_stripe_checkout_email_authorization/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -197,6 +206,8 @@ describe("hosted Prisma baseline migration", () => {
       "2026050401_hosted_ai_usage_sanitized_usage_metadata",
       "2026050402_device_oauth_session_metadata",
       "2026050403_linq_pending_participant_contact",
+      "2026050500_device_sync_dirty_connection",
+      "2026050501_stripe_checkout_email_authorization",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -225,6 +236,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('"access_token_encrypted" TEXT');
     expect(baselineMigrationSql).toContain('"refresh_token_encrypted" TEXT');
     expect(baselineMigrationSql).toContain('"last_stripe_event_created_at" TIMESTAMP(3)');
+    expect(stripeCheckoutEmailMigrationSql).toContain(
+      '"stripe_checkout_email_address_encrypted" TEXT',
+    );
+    expect(stripeCheckoutEmailMigrationSql).toContain(
+      '"stripe_checkout_email_collected_at" TIMESTAMP(3)',
+    );
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_payload" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event_alias" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event" CASCADE');

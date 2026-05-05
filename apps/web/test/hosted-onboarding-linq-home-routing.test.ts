@@ -145,6 +145,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     member.emailAuthorization = {
       directPublicSender: null,
       memberId: "member_123",
+      stripeCheckoutEmail: null,
       verifiedEmail: {
         address: "buddy@icloud.com",
         lookupKey: emailLookupKey,

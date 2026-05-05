@@ -41,7 +41,11 @@ type HostedSignupWelcomeEmailStartAction =
 
 export type HostedSignupWelcomeEmailResult =
   | {
-      reason: "member_not_found" | "member_too_old" | "no_verified_email" | "not_configured";
+      reason:
+        | "member_not_found"
+        | "member_too_old"
+        | "no_welcome_email_recipient"
+        | "not_configured";
       status: "skipped";
     }
   | {
@@ -121,7 +125,7 @@ export async function sendHostedSignupWelcomeEmailForMember(input: {
 
   if (!recipientEmail) {
     return {
-      reason: "no_verified_email",
+      reason: "no_welcome_email_recipient",
       status: "skipped",
     };
   }

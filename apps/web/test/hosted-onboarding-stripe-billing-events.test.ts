@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   activateHostedMemberForPositiveSourceTx: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
+  upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
 
@@ -38,6 +39,18 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-store");
+
+  return {
+    ...actual,
+    upsertHostedMemberStripeCheckoutEmailIfFreshTx:
+      mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
+  };
+});
+
 import { applyStripeInvoicePaid } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
 describe("hosted onboarding stripe billing events", () => {
@@ -51,6 +64,15 @@ describe("hosted onboarding stripe billing events", () => {
       member,
     });
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(member);
+    mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: {
+        address: "payer@example.com",
+        collectedAt: new Date("2026-04-23T00:00:00.000Z"),
+      },
+      verifiedEmail: null,
+    });
     mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValue({
       activated: true,
       hostedExecutionEventId: "wake_123",
@@ -152,12 +174,43 @@ describe("hosted onboarding stripe billing events", () => {
     }));
   });
 
+  it("stores the Stripe invoice customer email as an unverified checkout email hint", async () => {
+    await expect(
+      applyStripeInvoicePaid(
+        makeStripeInvoice({
+          customerEmail: " payer@example.com ",
+          id: "in_paid_email",
+          subscription: "sub_123",
+        }),
+        {
+          eventCreatedAt: new Date("2026-04-25T05:13:09.000Z"),
+          occurredAt: "2026-04-25T05:13:09.000Z",
+          sourceEventId: "evt_paid_email",
+          sourceType: "stripe.invoice.paid",
+        },
+        {} as never,
+        HostedBillingStatus.active,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+    });
+
+    expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
+      address: "payer@example.com",
+      collectedAt: new Date("2026-04-25T05:13:09.000Z"),
+      memberId: "member_123",
+      prisma: {},
+    });
+  });
+
   it("skips invoice.paid activation side effects when the billing write is not applied", async () => {
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
 
     await expect(
       applyStripeInvoicePaid(
         makeStripeInvoice({
+          customerEmail: "stale-payer@example.com",
           id: "in_paid_stale",
           subscription: "sub_123",
         }),
@@ -176,6 +229,7 @@ describe("hosted onboarding stripe billing events", () => {
     });
 
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).not.toHaveBeenCalled();
   });
 });
 
@@ -199,6 +253,7 @@ function makeMemberSnapshot(): HostedMemberBillingSnapshot {
 function makeStripeInvoice(
   overrides?: Partial<{
     customer: string | null;
+    customerEmail: string | null;
     id: string;
     subscription: string | null;
   }>,
@@ -206,6 +261,7 @@ function makeStripeInvoice(
   // @ts-expect-error - the synthetic fixture is intentionally narrower than Stripe.Invoice.
   return {
     customer: overrides?.customer ?? "cus_123",
+    customer_email: overrides?.customerEmail ?? null,
     id: overrides?.id ?? "in_123",
     subscription: overrides?.subscription ?? "sub_123",
   } as Stripe.Invoice;

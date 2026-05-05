@@ -191,6 +191,39 @@ describe("HostedEmailSettings", () => {
     expect(container.textContent).not.toContain("We sent a verification code to");
   });
 
+  it("prefills an unverified server-provided email and lets the member send a verification code", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: {
+          address: "payer@example.com",
+          verifiedAt: null,
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const input = container.querySelector<HTMLInputElement>('input[id="settings-email-address"]');
+    expect(input?.value).toBe("payer@example.com");
+    expect(container.textContent).toContain("Unverified");
+
+    const sendCodeButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Send new code"),
+    );
+    expect(sendCodeButton).toBeTruthy();
+
+    await act(async () => {
+      sendCodeButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.sendCode).toHaveBeenCalledWith({
+      newEmailAddress: "payer@example.com",
+    });
+    expect(mocks.linkEmail).not.toHaveBeenCalled();
+  });
+
   it("syncs the verified email returned by Privy's link flow", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const onSynced = vi.fn();
