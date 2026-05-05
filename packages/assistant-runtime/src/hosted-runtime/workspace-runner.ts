@@ -302,15 +302,39 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a committed checkpoint.");
     }
-    const postCheckpoint = await assistantPhaseResult.afterCheckpoint?.();
-    if (postCheckpoint) {
-      await checkpointHostedWorkspacePostAssistantPhase({
-        checkpointRequestBuilder: checkpointRequestSession,
-        expectedUserId: input.expectedUserId,
-        initialMailboxImport,
-        postCheckpoint,
-        workspacePort: input.platform.workspacePort,
+    let postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
+    try {
+      postCheckpoint = await assistantPhaseResult.afterCheckpoint?.();
+    } catch (error) {
+      await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
+        error,
+        errorCode: "assistant_after_checkpoint_failed",
+        input,
       });
+      postCheckpoint = null;
+    }
+    if (postCheckpoint) {
+      try {
+        await checkpointHostedWorkspacePostAssistantPhase({
+          checkpointRequestBuilder: checkpointRequestSession,
+          expectedUserId: input.expectedUserId,
+          initialMailboxImport,
+          postCheckpoint,
+          workspacePort: input.platform.workspacePort,
+        });
+      } catch (error) {
+        if (
+          error instanceof HostedMailboxImportCheckpointConflictError
+          || error instanceof HostedMailboxImportCheckpointUserMismatchError
+        ) {
+          throw error;
+        }
+        await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
+          error,
+          errorCode: "assistant_after_checkpoint_checkpoint_failed",
+          input,
+        });
+      }
     }
     await drainHostedWorkspaceUsageExportBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
@@ -644,6 +668,37 @@ async function writeHostedMailboxImportRuntimeLog(input: {
     },
     now: input.runnerInput.now,
     platform: input.runnerInput.platform,
+  });
+}
+
+async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(input: {
+  error: unknown;
+  errorCode: "assistant_after_checkpoint_checkpoint_failed" | "assistant_after_checkpoint_failed";
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(input.error);
+  console.warn("Hosted assistant post-checkpoint cleanup failed after durable checkpoint.", {
+    errorCode: input.errorCode,
+    errorName: failure.name ?? (input.error instanceof Error ? input.error.name : typeof input.error),
+  });
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
+      component: "runner",
+      errorCode: input.errorCode,
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "checkpoint",
+      redactedJson: {
+        checkpointed: true,
+        failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
+        failureNames: failure.name ? [failure.name] : [],
+        failureSummaries: failure.summary ? [failure.summary] : [],
+        nestedErrorCode: failure.errorCode,
+      },
+    },
+    now: input.input.now,
+    platform: input.input.platform,
   });
 }
 
