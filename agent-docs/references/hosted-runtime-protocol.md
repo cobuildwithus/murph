@@ -244,10 +244,9 @@ forward the browser-vault replica ref for the current base snapshot explicitly;
 if that continuity is missing or stale, the runner uses a full checkpoint
 instead. `system_mailbox_receipt` remains full because activation can mutate
 canonical vault bootstrap state that must be present for later conversation
-wakes. Maintenance and explicit outbox-intent checkpoints can refresh the
-full/base provider-continuity image, but pre-delivery outbox sending must stay
-hot so user-visible delivery is not gated on compacting or validating large
-native Codex continuity artifacts.
+wakes. Maintenance checkpoints refresh the full/base provider-continuity image,
+but pre-delivery outbox sending must stay hot so user-visible delivery is not
+gated on compacting or validating large native Codex continuity artifacts.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint

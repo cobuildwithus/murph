@@ -69,15 +69,10 @@ describe("hosted runtime control contracts", () => {
       "import",
       "active_turn_input",
       "active_turn_acceptance",
-      "outbox_intent",
       "outbox_sending",
       "outbox_receipt",
-      "system_mailbox_sending",
       "system_mailbox_receipt",
       "maintenance",
-      "idle",
-      "budget_exhausted",
-      "error",
     ]);
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.imported");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.appended");
@@ -88,7 +83,6 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.usage_export_finished");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual(["nudge", "alarm", "retry", "manual"]);
@@ -576,12 +570,12 @@ describe("hosted runtime control contracts", () => {
       attemptId: "attempt_2",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
-      reason: "idle",
+      reason: "maintenance",
     })).toEqual({
       attemptId: "attempt_2",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
-      reason: "idle",
+      reason: "maintenance",
       snapshotRef: null,
     });
   });

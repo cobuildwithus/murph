@@ -659,7 +659,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("outbox_intent")))
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("maintenance")))
       .rejects.toThrow("missing required provider continuity state");
 
     expect(writeLog).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -803,8 +803,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   it("pins the checkpoint snapshot policy for every supported checkpoint reason", async () => {
     const fullReasons = new Set([
       "maintenance",
-      "outbox_intent",
-      "system_mailbox_sending",
       "system_mailbox_receipt",
     ]);
 
@@ -1426,7 +1424,7 @@ function createSystemMailboxImportItem(input: {
 }
 
 function createCheckpointInput(
-  reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "idle",
+  reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "maintenance",
 ) {
   const state = {
     recentStatuses: [],

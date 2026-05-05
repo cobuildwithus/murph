@@ -851,10 +851,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("assistant");
           await writePendingHostedUsageRecord(vaultRoot, "turn_runner_liveness_optional_degraded");
           return {
-            checkpointReason: "outbox_intent",
+            checkpointReason: "outbox_sending",
             progressed: true,
             redactedStatus: {
-              hostedOutboxIntentCheckpointed: true,
+              hostedOutboxSendingCheckpointed: true,
             },
           };
         },
@@ -867,7 +867,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.latestWorkspace?.version, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "outbox_intent",
+        "outbox_sending",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
@@ -881,7 +881,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxImportedCount: 1,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
-        hostedOutboxIntentCheckpointed: true,
+        hostedOutboxSendingCheckpointed: true,
       });
       assert.deepEqual(events, [
         "import:1",
@@ -1841,10 +1841,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("accepted");
 
           return {
-            checkpointReason: "outbox_intent",
+            checkpointReason: "outbox_sending",
             progressed: true,
             redactedStatus: {
-              hostedOutboxIntentCheckpointed: true,
+              hostedOutboxSendingCheckpointed: true,
             },
           };
         },
@@ -1860,7 +1860,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "import",
         "active_turn_input",
         "active_turn_acceptance",
-        "outbox_intent",
+        "outbox_sending",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
@@ -1883,7 +1883,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxImportedCount: 1,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
-        hostedOutboxIntentCheckpointed: true,
+        hostedOutboxSendingCheckpointed: true,
       });
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
@@ -2768,10 +2768,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 code: "PROVIDER_CLEANUP_UNAVAILABLE",
               });
             },
-            checkpointReason: "outbox_intent",
+            checkpointReason: "outbox_sending",
             progressed: true,
             redactedStatus: {
-              hostedOutboxIntentCheckpointed: true,
+              hostedOutboxSendingCheckpointed: true,
             },
           };
         },
@@ -2787,7 +2787,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "optional:post-assistant-cleanup",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_intent",
+        "outbox_sending",
       ]);
       assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
         hostedMailboxBlockedCount: 0,
@@ -2796,7 +2796,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxImportedCount: 0,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
-        hostedOutboxIntentCheckpointed: true,
+        hostedOutboxSendingCheckpointed: true,
       });
 
       const postCheckpointFailureLog = logRequests.flatMap((request) => request.entries)

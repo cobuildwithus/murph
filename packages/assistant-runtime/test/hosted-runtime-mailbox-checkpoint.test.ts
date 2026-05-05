@@ -98,7 +98,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
             leaseGeneration: "1",
             nextWakeAt: null,
             nextWakeReason: null,
-            reason: "idle",
+            reason: "import",
             redactedStatus: {
               hostedMailboxImportedCount: 999,
               unsafeNote: "ciphertext_inline_synthetic_checkpoint",
@@ -186,7 +186,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
             leaseGeneration: "1",
             nextWakeAt: null,
             nextWakeReason: null,
-            reason: "idle",
+            reason: "import",
             redactedStatus: {},
             snapshotRef: null,
           };
@@ -249,7 +249,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
             leaseGeneration: "1",
             nextWakeAt: null,
             nextWakeReason: null,
-            reason: "idle",
+            reason: "import",
             redactedStatus: {},
             snapshotRef: null,
           };

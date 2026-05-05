@@ -1320,7 +1320,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       leaseGeneration: "9",
       nextWakeAt: null,
       nextWakeReason: null,
-      reason: "idle",
+      reason: "maintenance",
       redactedStatus: {},
       snapshotRef: null,
     });
