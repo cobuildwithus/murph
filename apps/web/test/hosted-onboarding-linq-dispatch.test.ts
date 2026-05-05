@@ -15,6 +15,34 @@ const mocks = vi.hoisted(() => {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     finishHostedOnboardingTiming: vi.fn(),
+    hostedOnboardingEnvironment: {
+      aiUsageBillingMode: "disabled",
+      contactPrivacyKeyring: {
+        currentVersion: "v1",
+        keysByVersion: {
+          v1: Buffer.alloc(32, 7),
+        },
+        readVersions: ["v1"],
+      },
+      inviteTtlHours: 24,
+      isProduction: false,
+      linqApiBaseUrl: "https://linq.example.test",
+      linqApiToken: "linq-token",
+      linqConversationPhoneNumbers: [],
+      linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
+      linqMaxActiveMembersPerConversationPhone: null,
+      linqWebhookSecret: null,
+      linqWebhookTimestampToleranceMs: 5 * 60_000,
+      publicBaseUrl: "https://join.example.test",
+      stripePriceIdsByPlan: {
+        launch_edge_monthly: "price_edge_monthly_123",
+        launch_monthly: "price_monthly_123",
+      },
+      stripeSecretKey: "sk_test_123",
+      stripeWebhookSecret: "whsec_123",
+      telegramBotUsername: null,
+      telegramWebhookSecret: null,
+    },
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
@@ -133,33 +161,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 
   return {
     ...actual,
-    getHostedOnboardingEnvironment: () => ({
-      contactPrivacyKeyring: {
-        currentVersion: "v1",
-        keysByVersion: {
-          v1: Buffer.alloc(32, 7),
-        },
-        readVersions: ["v1"],
-      },
-      inviteTtlHours: 24,
-      isProduction: false,
-      linqApiBaseUrl: "https://linq.example.test",
-      linqApiToken: "linq-token",
-      linqConversationPhoneNumbers: [],
-      linqMaxActiveMembersPerConversationPhone: null,
-      linqWebhookSecret: null,
-      linqWebhookTimestampToleranceMs: 5 * 60_000,
-      publicBaseUrl: "https://join.example.test",
-      stripeBillingMode: "payment",
-      stripePriceIdsByPlan: {
-        launch_edge_monthly: "price_edge_monthly_123",
-        launch_monthly: "price_monthly_123",
-      },
-      stripeSecretKey: "sk_test_123",
-      stripeWebhookSecret: "whsec_123",
-      telegramBotUsername: null,
-      telegramWebhookSecret: null,
-    }),
+    getHostedOnboardingEnvironment: () => mocks.hostedOnboardingEnvironment,
     requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
   };
 });
@@ -307,6 +309,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
+    mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -488,6 +491,60 @@ https://join.example.test/join/code_first_text`);
       );
     },
   );
+
+  it("ignores non-allowlisted local Linq inbound messages before member lookup or wake handoff", async () => {
+    mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = ["+15559999999"];
+    const prisma = asPrismaTransactionClient({
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        upsert: vi.fn(),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_local_guard_blocked",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "local-inbound-not-allowlisted",
+    });
+    expect(prisma.hostedMemberIdentity.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
 
   it("preserves all active-member Linq text parts when the inbound part count exceeds the old cap", async () => {
     const prisma = asPrismaTransactionClient({

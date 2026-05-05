@@ -16,6 +16,8 @@ const HOSTED_LOCAL_LINQ_WEBHOOK_EVENT = "message.received";
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
   "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
+const LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS_ENV =
+  "HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS";
 const LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS = 10_000;
 const LINQ_WEBHOOK_TARGET_READY_TIMEOUT_MS = 30_000;
 const LINQ_WEBHOOK_TARGET_READY_INTERVAL_MS = 1_000;
@@ -132,6 +134,9 @@ export async function resolveHostedLocalLinqWebhookSetup(input: {
         "Set both env vars or disable registration with MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1.",
       ].join(" "),
     );
+  }
+  if (hasRequiredLinqEnv) {
+    assertLocalAllowedInboundPhoneNumbersConfigured(input.env);
   }
 
   return {
@@ -915,6 +920,20 @@ function readLinqConversationPhoneNumbers(env: NodeJS.ProcessEnv): readonly stri
     .filter((value) => value.length > 0);
 
   return values.length > 0 ? values : null;
+}
+
+function assertLocalAllowedInboundPhoneNumbersConfigured(env: NodeJS.ProcessEnv): void {
+  const configured = normalizeOptionalString(env[LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS_ENV]);
+  if (configured) {
+    return;
+  }
+
+  throw new Error(
+    [
+      `${LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS_ENV} must be set before enabling local Linq webhook handling with shared Linq credentials.`,
+      "Set it to a comma-separated sender phone allowlist, or disable the local Linq webhook tunnel with MURPH_DEV_LINQ_WEBHOOK_TUNNEL=0.",
+    ].join(" "),
+  );
 }
 
 function hasRequiredLinqWebhookEnvironment(env: NodeJS.ProcessEnv): boolean {

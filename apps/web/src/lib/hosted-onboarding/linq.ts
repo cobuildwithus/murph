@@ -6,6 +6,7 @@ export {
   resolveHostedLinqRecipientPhoneNumber,
   requireHostedLinqMessageReceivedEvent,
   summarizeHostedLinqMessage,
+  shouldIgnoreHostedLinqForLocalInboundGuard,
   parseHostedLinqWebhookEvent,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq-webhook";

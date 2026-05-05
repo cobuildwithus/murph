@@ -129,6 +129,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto");
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG=.tmp/cloudflared-linq-webhook.yml");
     expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...");
+    expect(output).toContain("HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...");
     expect(output).toContain("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1");
     expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
     expect(output).toContain("stripe listen");

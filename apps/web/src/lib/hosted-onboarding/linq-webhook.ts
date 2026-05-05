@@ -185,6 +185,25 @@ export function resolveHostedLinqOccurredAt(event: HostedLinqMessageReceivedEven
   return resolveLinqWebhookOccurredAt(event);
 }
 
+export function shouldIgnoreHostedLinqForLocalInboundGuard(input: {
+  isFromMe: boolean;
+  participantContact: HostedLinqParticipantContact | null;
+}): boolean {
+  if (input.isFromMe) {
+    return false;
+  }
+
+  const allowedPhoneNumbers =
+    getHostedOnboardingEnvironment().linqLocalAllowedInboundPhoneNumbers;
+
+  if (!allowedPhoneNumbers) {
+    return false;
+  }
+
+  return input.participantContact?.kind !== "phone"
+    || !allowedPhoneNumbers.includes(input.participantContact.value);
+}
+
 function resolveHostedLinqOutboundFallbackPhoneNumber(
   event: HostedLinqMessageReceivedEvent,
 ): string | null {
