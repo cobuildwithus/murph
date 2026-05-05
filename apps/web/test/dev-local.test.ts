@@ -3,12 +3,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { test } from "vitest";
+import { afterEach, test } from "vitest";
 
 import {
   assertHostedWebDevRequiredEnv,
   buildHostedWebDevArgv,
   clearConflictingNextDevLock,
+  loadHostedWebDevLocalEnv,
   resolveHostedWebDevCacheLimitBytes,
   resolveHostedWebDevOwnerPid,
   resolveHostedWebDevRuntimePaths,
@@ -20,6 +21,16 @@ function createEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
     ...overrides,
   };
 }
+
+const originalDatabaseUrl = process.env.DATABASE_URL;
+
+afterEach(() => {
+  if (originalDatabaseUrl === undefined) {
+    delete process.env.DATABASE_URL;
+  } else {
+    process.env.DATABASE_URL = originalDatabaseUrl;
+  }
+});
 
 test("hosted web dev disables source maps by default", () => {
   assert.deepEqual(buildHostedWebDevArgv(["--port", "3000"]), [
@@ -35,6 +46,26 @@ test("hosted web dev fails before boot when DATABASE_URL is missing", () => {
     () => assertHostedWebDevRequiredEnv(createEnv({ DATABASE_URL: "" })),
     /DATABASE_URL is required for the hosted web control plane/u,
   );
+});
+
+test("hosted web dev loads local env before checking required database config", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-web-env-"));
+
+  try {
+    delete process.env.DATABASE_URL;
+    await writeFile(
+      path.join(tempDir, ".env.local"),
+      "DATABASE_URL=postgresql://user:pass@example.com/db?sslmode=require\n",
+      "utf8",
+    );
+
+    loadHostedWebDevLocalEnv(tempDir);
+
+    assert.equal(process.env.DATABASE_URL, "postgresql://user:pass@example.com/db?sslmode=require");
+    assert.doesNotThrow(() => assertHostedWebDevRequiredEnv(process.env));
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
 test("hosted web dev respects an explicit webpack flag", () => {
