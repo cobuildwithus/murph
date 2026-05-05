@@ -1,9 +1,10 @@
 "use client";
 
-import { usePrivy, useUser } from "@privy-io/react-auth";
+import { useLinkAccount, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
+import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   resolveHostedTelegramSettingsDisplayState,
@@ -18,17 +19,12 @@ import { toErrorMessage } from "./hosted-settings-utils";
 const MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
 const MURPH_TELEGRAM_BOT_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
 
-type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
-  linkTelegram?: (input?: unknown) => Promise<unknown>;
-};
-
 export function HostedTelegramCardSettings(props: {
   authenticated: boolean;
   initialTelegramAccount?: HostedTelegramSyncOverride | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
   const { authenticated, initialTelegramAccount, onSynced } = props;
-  const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
   const syncRequestSequenceRef = useRef(0);
@@ -47,6 +43,20 @@ export function HostedTelegramCardSettings(props: {
   });
   const currentTelegram = displayState.currentTelegram;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
+
+  const { linkTelegram } = useLinkAccount({
+    onError: (_error, details) => {
+      if (!details || details.linkMethod === "telegram") {
+        setIsLinkingTelegram(false);
+        setErrorMessage("Could not link Telegram right now.");
+      }
+    },
+    onSuccess: (params) => {
+      if (params.linkMethod === "telegram") {
+        void handleLinkedTelegramAccount(params.user);
+      }
+    },
+  });
 
   const syncLinkedTelegram = useCallback(async (
     mode: "link" | "resync",
@@ -99,6 +109,19 @@ export function HostedTelegramCardSettings(props: {
     }
   }, [onSynced]);
 
+  async function handleLinkedTelegramAccount(linkedUser: HostedPrivyLinkedAccountContainer) {
+    try {
+      const refreshedUser = await refreshUser().catch(() => linkedUser);
+      const refreshedTelegram =
+        resolveHostedTelegramSettingsDisplayState({ user: refreshedUser }).currentTelegram
+        ?? resolveHostedTelegramSettingsDisplayState({ user: linkedUser }).currentTelegram;
+
+      await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
+    } finally {
+      setIsLinkingTelegram(false);
+    }
+  }
+
   useEffect(() => {
     if (!authenticated || isLinkingTelegram || isSyncingTelegram) return;
 
@@ -131,17 +154,10 @@ export function HostedTelegramCardSettings(props: {
     setIsLinkingTelegram(true);
 
     try {
-      await linkTelegram();
-      const refreshedUser = await refreshUser().catch(() => null);
-      const refreshedTelegram = resolveHostedTelegramSettingsDisplayState({
-        user: refreshedUser,
-      }).currentTelegram;
-
-      await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
+      linkTelegram();
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Could not link Telegram right now."));
-    } finally {
       setIsLinkingTelegram(false);
+      setErrorMessage(toErrorMessage(error, "Could not link Telegram right now."));
     }
   }
 
