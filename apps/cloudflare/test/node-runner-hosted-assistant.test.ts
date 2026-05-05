@@ -6,16 +6,16 @@ import {
 } from "../src/hosted-env-policy.ts";
 
 describe("hosted assistant runner env policy", () => {
-  it("forwards hosted Codex seed vars and the Vercel AI Gateway key", () => {
+  it("forwards hosted Codex seed vars and the OpenAI key", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
-      VERCEL_AI_API_KEY: "secret-value",
+      OPENAI_API_KEY: "secret-value",
     });
 
     expect(env).toMatchObject({
@@ -23,10 +23,10 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
-      VERCEL_AI_API_KEY: "secret-value",
+      OPENAI_API_KEY: "secret-value",
     });
   });
 
@@ -34,14 +34,14 @@ describe("hosted assistant runner env policy", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "PROVIDER_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       PROVIDER_API_KEY: "secret-value",
     });
 
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.4-mini");
-    expect(env.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
+    expect(env.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(env.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(env.PROVIDER_API_KEY).toBeUndefined();
   });
@@ -50,7 +50,7 @@ describe("hosted assistant runner env policy", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_ENTERPRISE_API_KEY: "secret-value",
     });
 
@@ -61,7 +61,7 @@ describe("hosted assistant runner env policy", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
     });
 
@@ -73,6 +73,6 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
-    expect(isHostedRunnerSecretKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
+    expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(false);
   });
 });

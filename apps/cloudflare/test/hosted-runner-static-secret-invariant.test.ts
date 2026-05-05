@@ -42,7 +42,7 @@ const HOSTED_SECRET_KEY_PATTERN =
   /(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|CLIENT_SECRET|PASSWORD)/iu;
 
 const REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS = [
-  "VERCEL_AI_API_KEY",
+  "OPENAI_API_KEY",
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   "HOSTED_LOG_FINGERPRINT_SECRET",
   "LINQ_API_TOKEN",
@@ -70,7 +70,7 @@ const CURRENT_FORWARDED_SECRET_KEYS = [
   "HOSTED_LOG_FINGERPRINT_SECRET",
   "LINQ_API_TOKEN",
   "MAPBOX_ACCESS_TOKEN",
-  "VERCEL_AI_API_KEY",
+  "OPENAI_API_KEY",
 ] as const;
 
 const CURRENT_PLATFORM_SECRET_KEYS = [
@@ -83,7 +83,7 @@ const CURRENT_PLATFORM_SECRET_KEYS = [
 ] as const;
 
 const CURRENT_USER_SECRET_KEYS = [
-  "VERCEL_AI_API_KEY",
+  "OPENAI_API_KEY",
 ] as const;
 
 const CURRENT_RESOLVED_CONFIG_SECRET_SUFFIXES = [
@@ -218,7 +218,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     DEVICE_SYNC_SECRET: "fixture-device-sync-secret",
     HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
     HOSTED_ASSISTANT_MODEL: "gpt-fixture",
-    HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+    HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
       '{"kty":"EC","d":"fixture-automation"}',
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
@@ -244,7 +244,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     TELEGRAM_API_BASE_URL: "https://telegram.example.test",
     TELEGRAM_BOT_TOKEN: "fixture-telegram-token",
     TELEGRAM_FILE_BASE_URL: "https://telegram-files.example.test",
-    VERCEL_AI_API_KEY: "fixture-vercel-gateway-key",
+    OPENAI_API_KEY: "fixture-vercel-openai-key",
     WHOOP_CLIENT_ID: "fixture-whoop-client-id",
     WHOOP_CLIENT_SECRET: "fixture-whoop-client-secret",
   };

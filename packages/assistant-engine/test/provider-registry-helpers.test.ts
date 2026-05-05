@@ -1395,16 +1395,25 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.providerSessionId).toBe('fresh-thread-after-invalid-output')
   })
 
-  it('does not fresh-thread retry invalid resumed output after provider actions', async () => {
+  it('fresh-thread retries invalid resumed output after provider actions', async () => {
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',
       'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.193.output: Invalid input"}}',
     )
     const rawEvents = [{ method: 'turn/completed' }]
 
-    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(
-      expectedError,
-    )
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(expectedError)
+      .mockResolvedValueOnce({
+        finalMessage: 'final after provider-action invalid resume fallback',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'fresh-thread-after-provider-action-invalid-output',
+        stderr: '',
+        stdout: '',
+        threadId: 'fresh-thread-after-provider-action-invalid-output',
+        turnId: 'turn-fallback-provider-action-invalid-output',
+      })
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
       jsonEvents: rawEvents,
       providerActionCount: 1,
@@ -1421,20 +1430,27 @@ describe('Codex assistant registry helpers', () => {
       workingDirectory: '/tmp/provider-tests',
     })
 
-    expect(attempt).toMatchObject({
-      error: expectedError,
-      metadata: {
-        activityLabels: [],
-        executedToolCount: 0,
-        providerActionCount: 1,
-        rawToolEvents: [],
-      },
-      ok: false,
-      providerSessionId: 'corrupt-thread',
-      providerTurnId: 'turn-invalid-output',
-      rawEvents,
+    expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      resumeSessionId: 'corrupt-thread',
     })
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      resumeSessionId: undefined,
+    })
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+    expect(attempt.result.providerContinuation).toEqual({
+      kind: 'thread-start',
+    })
+    expect(attempt.result.providerSessionId).toBe(
+      'fresh-thread-after-provider-action-invalid-output',
+    )
   })
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {

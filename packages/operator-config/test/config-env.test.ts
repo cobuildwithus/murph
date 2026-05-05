@@ -530,7 +530,7 @@ test('hosted assistant config normalization keeps the active Codex profile ready
           approvalPolicy: null,
           codexCommand: null,
           model: '  gpt-5.5  ',
-          modelProvider: '  vercel-ai-gateway  ',
+          modelProvider: '  openai  ',
           oss: false,
           profile: null,
           reasoningEffort: 'high',
@@ -547,14 +547,14 @@ test('hosted assistant config normalization keeps the active Codex profile ready
     profiles: [
       {
         id: 'platform-profile',
-        label: 'Vercel AI Gateway',
+        label: 'OpenAI',
         managedBy: 'platform',
         target: {
           adapter: 'codex-cli',
           approvalPolicy: null,
           codexCommand: null,
           model: 'gpt-5.5',
-          modelProvider: 'vercel-ai-gateway',
+          modelProvider: 'openai',
           oss: false,
           profile: null,
           reasoningEffort: 'high',
@@ -585,7 +585,7 @@ test('hosted assistant config normalization keeps the active Codex profile ready
     codexCommand: null,
     codexHome: null,
     model: 'gpt-5.5',
-    modelProvider: 'vercel-ai-gateway',
+    modelProvider: 'openai',
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -598,13 +598,13 @@ test('hosted assistant config normalization keeps the active Codex profile ready
   })
   assert.equal(
     readHostedAssistantApiKeyEnvName({
-      VERCEL_AI_API_KEY: 'secret-value',
+      OPENAI_API_KEY: 'secret-value',
     }),
-    'VERCEL_AI_API_KEY',
+    'OPENAI_API_KEY',
   )
   assert.equal(
     readHostedAssistantApiKeyEnvName({
-      [HOSTED_ASSISTANT_API_KEY_ENV]: '  VERCEL_AI_API_KEY  ',
+      [HOSTED_ASSISTANT_API_KEY_ENV]: '  OPENAI_API_KEY  ',
     }),
     null,
   )

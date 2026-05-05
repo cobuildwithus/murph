@@ -39,7 +39,7 @@ const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
   'TMPDIR',
   'TZ',
   'VAULT',
-  'VERCEL_AI_API_KEY',
+  'OPENAI_API_KEY',
   'VERCEL_ENV',
 ] as const
 

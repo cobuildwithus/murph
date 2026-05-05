@@ -26,6 +26,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
     HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+    HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_WEB_BASE_URL: "https://app.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
     HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
@@ -232,7 +233,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5, openai/gpt-5.4-mini, openai/gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
     );
 
     expect(
@@ -243,7 +244,31 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5, openai/gpt-5.4-mini, openai/gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
+    );
+  });
+
+  it("requires the direct OpenAI hosted assistant provider for worker deploys", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_PROVIDER: undefined,
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "HOSTED_ASSISTANT_PROVIDER must be openai for hosted runner execution.",
+    );
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "HOSTED_ASSISTANT_PROVIDER must be openai for hosted runner execution.",
     );
   });
 
@@ -256,7 +281,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5, openai/gpt-5.4-mini, openai/gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
     );
 
     expect(
@@ -267,7 +292,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).not.toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5, openai/gpt-5.4-mini, openai/gpt-5.5 for hosted AI usage allowance pricing.",
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
     );
 
     expect(
@@ -277,8 +302,8 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).not.toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5, openai/gpt-5.4-mini, openai/gpt-5.5 for hosted AI usage allowance pricing.",
+    ).toContain(
+      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
     );
   });
 

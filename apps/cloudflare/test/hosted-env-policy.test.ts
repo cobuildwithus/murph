@@ -20,30 +20,36 @@ const requiredWorkerSecrets = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
 } satisfies Record<string, string>;
+const requiredHostedAssistantProvider = {
+  HOSTED_ASSISTANT_PROVIDER: "openai",
+} as const;
 
 describe("buildHostedRunnerContainerEnv", () => {
   it("does not forward legacy assistant api key selectors or unrelated referenced secrets", () => {
     const env = buildHostedRunnerContainerEnv({
+      ...requiredHostedAssistantProvider,
       HOSTED_ASSISTANT_API_KEY_ENV: "STRIPE_SECRET_KEY",
-      VERCEL_AI_API_KEY: "vercel-secret",
+      OPENAI_API_KEY: "openai-secret",
       STRIPE_SECRET_KEY: "stripe-secret",
     });
 
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
-    expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
+    expect(env.OPENAI_API_KEY).toBe("openai-secret");
     expect(env.STRIPE_SECRET_KEY).toBeUndefined();
   });
 
   it("includes shared allowed hosted assistant api key env names", () => {
     const env = buildHostedRunnerContainerEnv({
-      VERCEL_AI_API_KEY: "vercel-secret",
+      ...requiredHostedAssistantProvider,
+      OPENAI_API_KEY: "openai-secret",
     });
 
-    expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
+    expect(env.OPENAI_API_KEY).toBe("openai-secret");
   });
 
   it("forwards delegated billing config only through the assistant env profile", () => {
     const env = buildHostedRunnerContainerEnv({
+      ...requiredHostedAssistantProvider,
       [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
       HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
@@ -52,6 +58,14 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(env[HOSTED_AI_USAGE_BILLING_MODE_ENV]).toBe("stripe_meter");
     expect(env.HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY).toBe("rk_test_123");
     expect(env.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED).toBe("true");
+  });
+
+  it("requires the direct OpenAI hosted assistant provider at the runner boundary", () => {
+    expect(() =>
+      buildHostedRunnerContainerEnv({
+        OPENAI_API_KEY: "openai-secret",
+      })
+    ).toThrow("HOSTED_ASSISTANT_PROVIDER must be openai for hosted runner execution.");
   });
 
   it("does not allow runner secrets to override the platform billing mode", () => {
@@ -106,7 +120,7 @@ describe("hosted runner log categories", () => {
   it("preserves the forwarded env category summaries used by runner logging", () => {
     expect(summarizeHostedRunnerForwardedEnvLogCategories({
       TELEGRAM_BOT_USERNAME: "murph_bot",
-      VERCEL_AI_API_KEY: "vercel-secret",
+      OPENAI_API_KEY: "openai-secret",
     })).toEqual({
       assistantConfigured: true,
       hostedEmailConfigured: false,
@@ -118,7 +132,7 @@ describe("hosted runner log categories", () => {
   it("preserves the runner secret category summaries used by runner logging", () => {
     expect(summarizeHostedRunnerSecretLogCategories({
       CUSTOM_API_KEY: "custom-secret",
-      VERCEL_AI_API_KEY: "vercel-secret",
+      OPENAI_API_KEY: "openai-secret",
     })).toEqual({
       modelCredentialConfigured: true,
     });
@@ -126,7 +140,7 @@ describe("hosted runner log categories", () => {
 });
 
 describe("buildHostedWorkerSecretsPayload", () => {
-  it("keeps only the Codex Vercel AI Gateway provider secret in the worker payload", () => {
+  it("keeps only the Codex OpenAI provider secret in the worker payload", () => {
     const payload = buildHostedWorkerSecretsPayload({
       ...requiredWorkerSecrets,
       OLLAMA_API_KEY: "ollama-secret",
@@ -135,8 +149,8 @@ describe("buildHostedWorkerSecretsPayload", () => {
     });
 
     expect(payload.OLLAMA_API_KEY).toBeUndefined();
-    expect(payload.OPENAI_API_KEY).toBeUndefined();
-    expect(payload.VERCEL_AI_API_KEY).toBe("vercel-secret");
+    expect(payload.OPENAI_API_KEY).toBe("openai-secret");
+    expect(payload.VERCEL_AI_API_KEY).toBeUndefined();
   });
 
   it("does not include unrelated referenced secrets", () => {
@@ -161,8 +175,9 @@ describe("buildHostedWorkerSecretsPayload", () => {
 
 describe("isHostedAssistantApiKeyEnvName", () => {
   it("accepts only the shared hosted assistant provider env names", () => {
-    expect(isHostedAssistantApiKeyEnvName("VERCEL_AI_API_KEY")).toBe(true);
+    expect(isHostedAssistantApiKeyEnvName("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedAssistantApiKeyEnvName("VERCEL_AI_API_KEY")).toBe(false);
     expect(isHostedAssistantApiKeyEnvName("STRIPE_SECRET_KEY")).toBe(false);
-    expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("VERCEL_AI_API_KEY");
+    expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("OPENAI_API_KEY");
   });
 });

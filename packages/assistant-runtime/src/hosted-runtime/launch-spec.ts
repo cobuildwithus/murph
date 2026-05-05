@@ -14,7 +14,7 @@ import {
   HOSTED_ASSISTANT_PROVIDER_ENV,
 } from "@murphai/operator-config/hosted-assistant-config-constants";
 import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
@@ -249,7 +249,8 @@ function isHostedAssistantConfigEnvKey(key: string): boolean {
 
 function shouldForwardHostedCodexAssistantConfigEnv(source: UnknownEnvSource): boolean {
   const provider = source[HOSTED_ASSISTANT_PROVIDER_ENV];
-  return provider === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID;
+  return typeof provider === "string"
+    && provider.trim() === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
 }
 
 export function buildHostedRuntimeChildEnv(input: {

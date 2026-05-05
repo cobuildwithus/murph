@@ -37,14 +37,19 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
 } as const;
+const REQUIRED_OPENAI_PROVIDER_ENV = {
+  HOSTED_ASSISTANT_PROVIDER: "openai",
+} as const;
 
 describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking unrelated worker vars or parser selectors", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -53,11 +58,13 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("forwards only the default assistant runner env profile", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -66,6 +73,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("forwards opt-in runner env profiles when configured", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
       },
@@ -77,6 +85,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
@@ -92,7 +101,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     Object.defineProperties(source, {
       HOSTED_ASSISTANT_PROVIDER: {
         enumerable: false,
-        value: "vercel-ai-gateway",
+        value: "openai",
       },
       HOSTED_ASSISTANT_MODEL: {
         enumerable: false,
@@ -106,20 +115,20 @@ describe("buildHostedRunnerContainerEnv", () => {
         enumerable: false,
         value: "not-forwarded",
       },
-      VERCEL_AI_API_KEY: {
+      OPENAI_API_KEY: {
         enumerable: false,
-        value: "gateway-key",
+        value: "openai-key",
       },
     });
 
     expect(Object.keys(source)).toEqual([]);
     expect(buildHostedRunnerContainerEnv(source)).toEqual({
       HOSTED_ASSISTANT_MODEL: "gpt-test",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "development",
-      VERCEL_AI_API_KEY: "gateway-key",
+      OPENAI_API_KEY: "openai-key",
     });
   });
 
@@ -127,11 +136,11 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(() =>
       buildHostedRunnerContainerEnv({
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV]: "bridge-token",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "http://127.0.0.1:4555",
         NODE_ENV: "development",
-        VERCEL_AI_API_KEY: "gateway-key",
+        OPENAI_API_KEY: "openai-key",
       })
     ).toThrow(
       "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN, MURPH_DEV_CODEX_APP_SERVER_PROXY_URL are no longer supported for hosted runner config",
@@ -144,35 +153,37 @@ describe("buildHostedRunnerContainerEnv", () => {
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
         HOSTED_ASSISTANT_PROVIDER: "local-codex",
         NODE_ENV: "development",
-        VERCEL_AI_API_KEY: "gateway-key",
+        OPENAI_API_KEY: "openai-key",
       })
     ).toThrow(
-      "HOSTED_ASSISTANT_PROVIDER must be vercel-ai-gateway for hosted runner execution.",
+      "HOSTED_ASSISTANT_PROVIDER must be openai for hosted runner execution.",
     );
   });
 
-  it("forwards Vercel AI Gateway assistant config into runner containers", () => {
+  it("forwards OpenAI assistant config into runner containers", () => {
     expect(buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       NODE_ENV: "development",
-      VERCEL_AI_API_KEY: "gateway-key",
+      OPENAI_API_KEY: "openai-key",
     })).toEqual({
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "development",
-      VERCEL_AI_API_KEY: "gateway-key",
+      OPENAI_API_KEY: "openai-key",
     });
   });
 
   it("does not forward the Linq webhook verification secret into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_API_TOKEN: "linq-token",
@@ -182,12 +193,14 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("keeps hosted email send readiness false without the binding even when ingress config is present", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
@@ -199,6 +212,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("rewrites forwarded loopback runner callback urls to the container-reachable worker bridge host", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
@@ -210,6 +224,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
@@ -226,6 +241,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("keeps loopback runner callback urls unchanged for ambient host execution env", () => {
     expect(buildHostedRunnerAmbientEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
@@ -236,6 +252,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
@@ -250,27 +267,31 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("does not forward worker-only runtime config into the child runner env", () => {
     expect(buildHostedRunnerContainerEnv({
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       NODE_ENV: "production",
-      VERCEL_AI_API_KEY: "fixture-vercel-key",
+      OPENAI_API_KEY: "fixture-openai-key",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
-      VERCEL_AI_API_KEY: "fixture-vercel-key",
+      OPENAI_API_KEY: "fixture-openai-key",
     });
   });
 
   it("does not forward prefix-only provider or channel extras", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       OPENAI_BASE_URL: "https://proxy.example.test/v1",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
       WHOOP_REDIRECT_URI: "https://worker.example.test/callback",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -279,9 +300,11 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("does not forward stale AgentMail hosted vars into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       AGENTMAIL_API_KEY: "agentmail-secret",
       AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -290,9 +313,11 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("ignores stale AgentMail and ffmpeg alias keys", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -301,9 +326,11 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("ignores unknown AgentMail and ffmpeg-prefixed keys", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       AGENTMAIL_TIMEOUT_MS: "5000",
       FFMPEG_THREADS: "2",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -312,8 +339,10 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("does not forward hosted web control tokens into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -322,11 +351,13 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("derives hosted email readiness once without forwarding hosted email env by default", () => {
     expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
@@ -341,15 +372,13 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
-      VERCEL_AI_API_KEY: "fixture-user-key",
+      OPENAI_API_KEY: "fixture-user-key",
       TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-user",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
-    })).toEqual({
-      VERCEL_AI_API_KEY: "fixture-user-key",
-    });
+    })).toEqual({});
   });
 
   it("rejects ingress-only secrets from runner secrets even when explicitly allowlisted", () => {
@@ -371,6 +400,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("keeps Cloudflare as an adapter over the shared hosted runtime launch spec", () => {
     const configSource = {
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
@@ -488,6 +518,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
 
   it("serializes the local e2e parser toolchain only behind the explicit marker", () => {
     const configSource = {
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       [HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV]: "1",
       HOSTED_EMAIL_INGRESS_READY: "true",
@@ -520,6 +551,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
 
   it("keeps parser config out of the worker runtime envelope even when platform config contains parser env", () => {
     const configSource = {
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,parsers",
       LINQ_API_TOKEN: "linq-token",
@@ -528,6 +560,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     };
 
     expect(buildHostedRunnerContainerEnv(configSource)).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_API_TOKEN: "linq-token",
@@ -559,17 +592,17 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       },
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "fixture-worker-key",
+        OPENAI_API_KEY: "fixture-worker-key",
       },
       runnerSecrets: {
         CUSTOM_API_KEY: "custom-user",
-        VERCEL_AI_API_KEY: "fixture-user-key",
+        OPENAI_API_KEY: "fixture-user-key",
         VENICE_API_KEY: "venice-user",
       },
     })).toMatchObject({
       commitTimeoutMs: 45_000,
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "fixture-worker-key",
+        OPENAI_API_KEY: "fixture-worker-key",
       },
       resolvedConfig: {
         channelCapabilities: {
@@ -580,7 +613,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       },
       userEnv: {
         CUSTOM_API_KEY: "custom-user",
-        VERCEL_AI_API_KEY: "fixture-user-key",
       },
     });
   });
@@ -630,7 +662,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("treats explicit platform env as platform-owned and does not backfill missing keys from forwarded env", () => {
     expect(buildHostedRunnerJobRuntime({
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "fixture-worker-key",
+        OPENAI_API_KEY: "fixture-worker-key",
         TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
         TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       },
@@ -642,7 +674,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toMatchObject({
       commitTimeoutMs: 30_000,
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "fixture-worker-key",
+        OPENAI_API_KEY: "fixture-worker-key",
       },
       platformEnv: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
@@ -665,12 +697,12 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
-        VERCEL_AI_API_KEY: "fixture-worker-key",
+        OPENAI_API_KEY: "fixture-worker-key",
       },
       runnerSecrets: {},
     })).toMatchObject({
       forwardedEnv: {
-        VERCEL_AI_API_KEY: "fixture-worker-key",
+        OPENAI_API_KEY: "fixture-worker-key",
       },
       platformEnv: {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
@@ -683,6 +715,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
 
   it("keeps platform private JWKs out of runtime child, forwarded, and user env", () => {
     const configSource = {
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
         '{"kty":"EC","d":"automation"}',
       HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -904,14 +937,16 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
   it("falls back to the ambient runner allowlist instead of forwarding operator-only secrets", () => {
     expect(buildHostedRunnerChildRuntimeEnv({
       ambientSource: {
+        ...REQUIRED_OPENAI_PROVIDER_ENV,
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        VERCEL_AI_API_KEY: "fixture-vercel-key",
+        OPENAI_API_KEY: "fixture-openai-key",
       },
     })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
-      VERCEL_AI_API_KEY: "fixture-vercel-key",
+      OPENAI_API_KEY: "fixture-openai-key",
     });
   });
 
@@ -926,13 +961,13 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
         HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        VERCEL_AI_API_KEY: "fixture-vercel-key",
+        OPENAI_API_KEY: "fixture-openai-key",
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
     })).toEqual({
-      VERCEL_AI_API_KEY: "fixture-vercel-key",
+      OPENAI_API_KEY: "fixture-openai-key",
     });
   });
 });
@@ -1045,7 +1080,7 @@ describe("hosted deploy automation device-sync surface", () => {
         "LINQ_API_TOKEN",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",
-        "VERCEL_AI_API_KEY",
+        "OPENAI_API_KEY",
       ]),
     );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
@@ -1063,7 +1098,6 @@ describe("hosted deploy automation device-sync surface", () => {
       "ANTHROPIC_API_KEY",
       "LITELLM_PROXY_API_KEY",
       "OLLAMA_API_KEY",
-      "OPENAI_API_KEY",
       "OPENROUTER_API_KEY",
       "VENICE_API_KEY",
     ]) {

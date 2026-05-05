@@ -68,7 +68,7 @@ export function assertNoDeprecatedHostedLocalCodexBridgeEnv(
   throw new Error(
     [
       `Deprecated hosted-local Codex bridge env is no longer supported: ${configured.join(", ")}.`,
-      "Use HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway and VERCEL_AI_API_KEY for local hosted dev.",
+      "Use HOSTED_ASSISTANT_PROVIDER=openai and OPENAI_API_KEY for local hosted dev.",
     ].join(" "),
   );
 }
@@ -132,8 +132,8 @@ export function printHelp(): void {
       "Optional environment overrides:",
       "  MURPH_DEV_DATABASE_URL=...          Override the local hosted stack database URL",
       "  MURPH_DEV_FORCE_RESET_LOCAL_DB=1    Reset a local loopback Postgres database before `prisma db push` (used by hosted-local e2e)",
-      "  HOSTED_ASSISTANT_PROVIDER=vercel-ai-gateway  Required hosted assistant provider for local hosted dev",
-      "  VERCEL_AI_API_KEY=...               Required Vercel AI Gateway key for hosted runner Codex app-server access",
+      "  HOSTED_ASSISTANT_PROVIDER=openai  Required hosted assistant provider for local hosted dev",
+      "  OPENAI_API_KEY=...                 Required OpenAI key for hosted runner Codex app-server access",
       "  MURPH_DEV_USE_VERCEL_DATABASE_URL=1 Use the pulled Vercel development DATABASE_URL instead of the default local database",
       "  MURPH_DEV_SKIP_VERCEL_PULL=1        Reuse the current shell env instead of pulling Vercel development env",
       `  ${USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV}=1 Use pulled development hosted crypto/KMS env instead of generated local-only keys`,

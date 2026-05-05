@@ -111,11 +111,10 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced launch model, currently `openai/gpt-5.5` or `openai/gpt-5.4-mini` for Vercel AI Gateway, with unprefixed `gpt-5.5` and `gpt-5.4-mini` accepted as local/direct aliases
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced launch model, currently `gpt-5.5` or `gpt-5.4-mini` for direct OpenAI
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
-- `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter` and `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED` when delegated Vercel AI Gateway billing is enabled
 
 Opt-in runtime integrations:
 
@@ -177,8 +176,7 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 Hosted assistant provider secrets:
 
-- `VERCEL_AI_API_KEY` when the hosted assistant should call Vercel AI Gateway through Codex
-- `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly under `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`
+- `OPENAI_API_KEY` when the hosted assistant should call OpenAI directly through Codex
 
 Hosted usage-reporting secrets:
 

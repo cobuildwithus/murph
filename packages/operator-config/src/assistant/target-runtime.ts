@@ -26,6 +26,15 @@ export interface AssistantCodexModelProviderConfig {
 }
 
 export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID = 'vercel-ai-gateway'
+export const OPENAI_CODEX_MODEL_PROVIDER_ID = 'openai'
+
+export const OPENAI_CODEX_MODEL_PROVIDER_CONFIG = {
+  id: OPENAI_CODEX_MODEL_PROVIDER_ID,
+  name: 'OpenAI',
+  baseUrl: 'https://api.openai.com/v1',
+  envKey: 'OPENAI_API_KEY',
+  wireApi: 'responses',
+} as const satisfies AssistantCodexModelProviderConfig
 
 export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG = {
   id: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
@@ -35,15 +44,18 @@ export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG = {
   wireApi: 'responses',
 } as const satisfies AssistantCodexModelProviderConfig
 
-const ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS = new Map<
+export const ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS = [
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+] as const satisfies readonly AssistantCodexModelProviderConfig[]
+
+export const ASSISTANT_CODEX_MODEL_PROVIDER_IDS =
+  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.id)
+
+const ASSISTANT_CODEX_MODEL_PROVIDER_CONFIG_MAP = new Map<
   string,
   AssistantCodexModelProviderConfig
->([
-  [
-    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
-    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-  ],
-])
+>(ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => [config.id, config]))
 
 export class UnsupportedAssistantRuntimeTargetError extends Error {
   readonly code = 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED'
@@ -181,7 +193,7 @@ export function resolveAssistantCodexModelProviderConfig(
 ): AssistantCodexModelProviderConfig | null {
   const normalized = normalizeAssistantCodexModelProvider(value)
   return normalized
-    ? ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.get(normalized) ?? null
+    ? ASSISTANT_CODEX_MODEL_PROVIDER_CONFIG_MAP.get(normalized) ?? null
     : null
 }
 

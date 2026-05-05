@@ -55,23 +55,27 @@ const RUNNER_SECRET_PROCESS_ENV_OVERRIDE_KEYS = [
 const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
   RUNNER_SECRET_PROCESS_CONTROL_KEYS,
 );
+const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
+const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 
-export const HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER = "vercel-ai-gateway";
+export const HOSTED_RUNNER_DEFAULT_ASSISTANT_PROVIDER =
+  HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER;
+export const HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER =
+  HOSTED_RUNNER_DEFAULT_ASSISTANT_PROVIDER;
 
 export const HOSTED_RUNNER_DEPRECATED_CODEX_APP_SERVER_PROXY_ENV_KEYS = [
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
 ] as const;
 
-const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [
-  ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
-] as const;
+const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [] as const;
 
 const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
   ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,
   ...RUNNER_SECRET_PROCESS_ENV_OVERRIDE_KEYS,
   ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
+  ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   "HOME",
   HOSTED_AI_USAGE_BILLING_MODE_ENV,
   "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
@@ -273,29 +277,34 @@ export function assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(
   }
 
   throw new TypeError(
-    `${configuredKeys.join(", ")} are no longer supported for hosted runner config; configure HOSTED_ASSISTANT_PROVIDER=${HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER} with VERCEL_AI_API_KEY instead.`,
+    `${configuredKeys.join(", ")} are no longer supported for hosted runner config; configure HOSTED_ASSISTANT_PROVIDER=${HOSTED_RUNNER_DEFAULT_ASSISTANT_PROVIDER} with ${HOSTED_RUNNER_OPENAI_API_KEY_ENV} instead.`,
   );
 }
 
-export function isHostedRunnerVercelAiGatewayProvider(
+export function isHostedRunnerSupportedAssistantProvider(
   value: unknown,
 ): boolean {
   return normalizeStringEnvValue(value) === HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER;
 }
 
-export function hasHostedRunnerVercelAiGatewayCredential(input: {
+export function isHostedRunnerOpenAiProvider(value: unknown): boolean {
+  return isHostedRunnerSupportedAssistantProvider(value);
+}
+
+export function hasHostedRunnerModelCredential(input: {
   forwardedEnv?: Readonly<Record<string, string>> | null;
   userEnv?: Readonly<Record<string, string>> | null;
 }): boolean {
-  return normalizeStringEnvValue(input.forwardedEnv?.VERCEL_AI_API_KEY) !== null
-    || normalizeStringEnvValue(input.userEnv?.VERCEL_AI_API_KEY) !== null;
+  return HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES.some((envName) =>
+    normalizeStringEnvValue(input.forwardedEnv?.[envName]) !== null
+    || normalizeStringEnvValue(input.userEnv?.[envName]) !== null
+  );
 }
 
 function assertHostedRunnerAssistantProvider(
   source: Readonly<Record<string, unknown>>,
 ): void {
-  const provider = normalizeStringEnvValue(source.HOSTED_ASSISTANT_PROVIDER);
-  if (!provider || provider === HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER) {
+  if (isHostedRunnerSupportedAssistantProvider(source.HOSTED_ASSISTANT_PROVIDER)) {
     return;
   }
 

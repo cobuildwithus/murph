@@ -136,9 +136,11 @@ test("hosted runtime usage parser rejects recorded counts that do not match usag
   );
 });
 
-test("hosted runtime delegated billing resolves the Stripe customer id only for Vercel AI Gateway requests", async () => {
+test("hosted runtime delegated billing skips lookup for direct OpenAI requests", async () => {
+  let called = false;
   const billingPort = {
     async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
       return {
         stripeCustomerId: "cus_123",
       };
@@ -150,17 +152,18 @@ test("hosted runtime delegated billing resolves the Stripe customer id only for 
       billingPort,
       forwardedEnv: {
         ...HOSTED_STRIPE_METER_BILLING_ENV,
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-        VERCEL_AI_API_KEY: "platform-key",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "platform-key",
       },
       userEnv: {},
       wake: createHostedRuntimeTestWake(),
     }),
-    "cus_123",
+    null,
   );
+  assert.equal(called, false);
 });
 
-test("hosted runtime delegated billing skips lookup when the request is not using Vercel AI Gateway", async () => {
+test("hosted runtime delegated billing skips lookup when the request is not using OpenAI", async () => {
   let called = false;
   const billingPort = {
     async resolveVercelAiGatewayStripeCustomerId() {
@@ -204,7 +207,7 @@ test("hosted runtime delegated billing skips lookup when the billing flag is dis
       forwardedEnv: {
         [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
         HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
         [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "false",
       },
@@ -234,7 +237,7 @@ test("hosted runtime delegated billing skips lookup when usage billing mode is d
         ...HOSTED_STRIPE_METER_BILLING_ENV,
         [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "disabled",
         HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
       },
       userEnv: {},
       wake: createHostedRuntimeTestWake(),
@@ -261,7 +264,7 @@ test("hosted runtime delegated billing skips lookup for unsupported truthy flag 
       forwardedEnv: {
         [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
         HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
         [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "yes",
       },
@@ -290,7 +293,7 @@ test("hosted runtime delegated billing skips lookup when the restricted access k
       forwardedEnv: {
         [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
         HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
         [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
       },
       userEnv: {},
@@ -317,13 +320,13 @@ test("hosted runtime delegated billing skips lookup when the configured provider
       billingPort,
       forwardedEnv: {
         ...HOSTED_STRIPE_METER_BILLING_ENV,
-        HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+        HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
         HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-        VERCEL_AI_API_KEY: "platform-key",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "platform-key",
       },
       userEnv: {
-        VERCEL_AI_API_KEY: "member-key",
+        OPENAI_API_KEY: "member-key",
       },
       wake: createHostedRuntimeTestWake(),
     }),
@@ -332,7 +335,7 @@ test("hosted runtime delegated billing skips lookup when the configured provider
   assert.equal(called, false);
 });
 
-test("hosted runtime delegated billing skips lookup for lookalike Vercel AI Gateway hosts", async () => {
+test("hosted runtime delegated billing skips lookup for lookalike OpenAI hosts", async () => {
   let called = false;
   const billingPort = {
     async resolveVercelAiGatewayStripeCustomerId() {
@@ -358,7 +361,7 @@ test("hosted runtime delegated billing skips lookup for lookalike Vercel AI Gate
   assert.equal(called, false);
 });
 
-test("hosted runtime delegated billing skips lookup for userinfo-bearing Vercel AI Gateway urls", async () => {
+test("hosted runtime delegated billing skips lookup for userinfo-bearing OpenAI urls", async () => {
   let called = false;
   const billingPort = {
     async resolveVercelAiGatewayStripeCustomerId() {
@@ -384,7 +387,7 @@ test("hosted runtime delegated billing skips lookup for userinfo-bearing Vercel 
   assert.equal(called, false);
 });
 
-test("hosted runtime delegated billing skips lookup for Vercel AI Gateway urls with non-default explicit ports", async () => {
+test("hosted runtime delegated billing skips lookup for OpenAI urls with non-default explicit ports", async () => {
   let called = false;
   const billingPort = {
     async resolveVercelAiGatewayStripeCustomerId() {
@@ -430,8 +433,8 @@ test("hosted runtime delegated billing skips lookup when a custom base url confl
       forwardedEnv: {
         ...HOSTED_STRIPE_METER_BILLING_ENV,
         HOSTED_ASSISTANT_BASE_URL: "https://router.example.test/v1",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-        HOSTED_ASSISTANT_PROVIDER_NAME: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_ASSISTANT_PROVIDER_NAME: "openai",
       },
       userEnv: {},
       wake: createHostedRuntimeTestWake(),
@@ -457,8 +460,8 @@ test("hosted runtime delegated billing skips lookup when gateway metadata is pre
       billingPort,
       forwardedEnv: {
         ...HOSTED_STRIPE_METER_BILLING_ENV,
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-        HOSTED_ASSISTANT_PROVIDER_NAME: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_ASSISTANT_PROVIDER_NAME: "openai",
       },
       userEnv: {},
       wake: createHostedRuntimeTestWake(),
@@ -488,10 +491,10 @@ test("hosted runtime treats blank configured user API key overrides as platform-
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
-        HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+        HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       },
       userEnv: {
-        VERCEL_AI_API_KEY: "   ",
+        OPENAI_API_KEY: "   ",
       },
     },
     platform,
@@ -509,7 +512,7 @@ test("hosted runtime treats blank configured user API key overrides as platform-
   assert.deepEqual(normalized.userEnv, {});
   assert.equal(
     resolveAssistantUsageCredentialSource({
-      apiKeyEnv: "VERCEL_AI_API_KEY",
+      apiKeyEnv: "OPENAI_API_KEY",
       provider: "codex-cli",
       userEnvKeys: Object.keys(normalized.userEnv),
     }),
@@ -520,17 +523,17 @@ test("hosted runtime treats blank configured user API key overrides as platform-
       billingPort,
       forwardedEnv: {
         ...HOSTED_STRIPE_METER_BILLING_ENV,
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-        VERCEL_AI_API_KEY: "platform-key",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "platform-key",
       },
       userEnv: {
-        VERCEL_AI_API_KEY: "   ",
+        OPENAI_API_KEY: "   ",
       },
       wake: createHostedRuntimeTestWake(),
     }),
-    "cus_123",
+    null,
   );
-  assert.equal(called, true);
+  assert.equal(called, false);
 });
 
 test("hosted runtime delegated billing fails closed when the Stripe customer lookup throws", async () => {
@@ -546,7 +549,7 @@ test("hosted runtime delegated billing fails closed when the Stripe customer loo
       forwardedEnv: {
         ...HOSTED_STRIPE_METER_BILLING_ENV,
         HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
-        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
       },
       userEnv: {},
       wake: createHostedRuntimeTestWake(),
@@ -601,7 +604,7 @@ test("hosted usage export stays non-fatal and leaves records pending when no usa
         occurredAt: "2026-04-07T00:00:00.000Z",
         outputTokens: 5,
         provider: "codex-cli",
-        providerName: "Vercel AI Gateway",
+        providerName: "OpenAI",
         providerRequestId: null,
         rawUsageJson: null,
         rawUsageJsonHash: null,
@@ -680,7 +683,7 @@ test("hosted usage export deletes only the usage ids acknowledged by the injecte
           occurredAt: "2026-04-07T00:00:00.000Z",
           outputTokens: 5,
           provider: "codex-cli",
-          providerName: "Vercel AI Gateway",
+          providerName: "OpenAI",
           providerRequestId: null,
           rawUsageJson: null,
           rawUsageJsonHash: null,

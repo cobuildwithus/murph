@@ -21,5 +21,5 @@ export const HOSTED_ASSISTANT_CONFIG_ENV_NAMES = [
 ] as const
 
 export const HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES = [
-  'VERCEL_AI_API_KEY',
+  'OPENAI_API_KEY',
 ] as const

@@ -13,7 +13,8 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
   type AssistantCodexModelProviderConfig,
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -69,6 +70,8 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
 ] as const;
+const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
 
 export interface HostedCodexRuntimeEnvironmentInput {
   operatorHomeRoot: string;
@@ -86,16 +89,8 @@ export async function prepareHostedCodexRuntimeEnvironment(
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
   rejectDeprecatedHostedCodexAppServerProxyEnv(input.runtimeEnv);
 
-  const provider = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER);
-
-  if (provider !== VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id) {
-    throw new HostedAssistantConfigurationError(
-      "HOSTED_ASSISTANT_CONFIG_INVALID",
-      `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id}.`,
-    );
-  }
-
   const providerConfig = resolveHostedCodexModelProviderConfig({
+    provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
     runtimeEnv: input.runtimeEnv,
   });
   const usesTestProviderBaseUrlOverride =
@@ -187,19 +182,30 @@ function rejectDeprecatedHostedCodexAppServerProxyEnv(
 
   throw new HostedAssistantConfigurationError(
     "HOSTED_ASSISTANT_CONFIG_INVALID",
-    `${configuredProxyEnvKeys.join(", ")} are no longer supported by hosted Codex runtime; configure HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id} with ${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey}.`,
+    `${configuredProxyEnvKeys.join(", ")} are no longer supported by hosted Codex runtime; configure HOSTED_ASSISTANT_PROVIDER=openai with OPENAI_API_KEY instead.`,
   );
 }
 
 function resolveHostedCodexModelProviderConfig(input: {
+  provider: string | null;
   runtimeEnv: Readonly<Record<string, string>>;
 }): AssistantCodexModelProviderConfig {
+  const providerConfig = input.provider === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+    ? resolveAssistantCodexModelProviderConfig(input.provider)
+    : null;
+  if (!providerConfig) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL}.`,
+    );
+  }
+
   const override = normalizeHostedCodexEnvString(
     input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
   );
 
   if (!override) {
-    return VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
+    return providerConfig;
   }
 
   if (normalizeHostedCodexEnvString(input.runtimeEnv.NODE_ENV) !== "test") {
@@ -234,7 +240,7 @@ function resolveHostedCodexModelProviderConfig(input: {
   }
 
   return {
-    ...VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+    ...providerConfig,
     baseUrl: url.toString(),
   };
 }

@@ -11,22 +11,26 @@ describe("hosted runner secrets payload decoding", () => {
     expect(decodeHostedRunnerSecretsPayload(null)).toEqual({});
   });
 
-  it("decodes the canonical hosted Codex model credential from the stored payload", () => {
+  it("decodes explicitly allowlisted custom secrets from the stored payload", () => {
     const payload = encodeRunnerSecretsPayload({
-      VERCEL_AI_API_KEY: "sk-user",
+      CUSTOM_API_KEY: "custom-secret",
     });
 
-    expect(decodeHostedRunnerSecretsPayload(payload)).toEqual({
-      VERCEL_AI_API_KEY: "sk-user",
+    expect(decodeHostedRunnerSecretsPayload(payload, {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+    })).toEqual({
+      CUSTOM_API_KEY: "custom-secret",
     });
   });
 
   it("drops blank values during normalization", () => {
     const payload = encodeRunnerSecretsPayload({
-      VERCEL_AI_API_KEY: "  ",
+      CUSTOM_API_KEY: "  ",
     });
 
-    expect(decodeHostedRunnerSecretsPayload(payload)).toEqual({});
+    expect(decodeHostedRunnerSecretsPayload(payload, {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+    })).toEqual({});
   });
 
   it("accepts extension-only keys only when the same allowlist source is provided on read", () => {
@@ -42,6 +46,12 @@ describe("hosted runner secrets payload decoding", () => {
   });
 
   it("rejects removed or disallowed keys even if they are present in stored payloads", () => {
+    expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
+      OPENAI_API_KEY: "openai-user-secret",
+    }), {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
+    })).toThrow(/not allowed/u);
+
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
       AGENTMAIL_API_KEY: "agentmail-secret",
     }))).toThrow(/not allowed/u);
@@ -91,14 +101,14 @@ describe("hosted runner secrets payload decoding", () => {
   it("rejects invalid secret value types", () => {
     const payload = new TextEncoder().encode(JSON.stringify({
       env: {
-        VERCEL_AI_API_KEY: 123,
+        OPENAI_API_KEY: 123,
       },
       schema: HOSTED_RUNNER_SECRETS_SCHEMA,
       updatedAt: "2026-03-26T12:00:00.000Z",
     }));
 
     expect(() => decodeHostedRunnerSecretsPayload(payload)).toThrow(
-      "Hosted runner secret value for VERCEL_AI_API_KEY must be a string.",
+      "Hosted runner secret value for OPENAI_API_KEY must be a string.",
     );
   });
 });
