@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
 
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
@@ -858,6 +858,78 @@ test("withHostedProcessEnvironment restores overwritten and newly introduced env
     assert.equal(process.env.VAULT, "/tmp/original-vault");
     assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);
   } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalVault === undefined) {
+      delete process.env.VAULT;
+    } else {
+      process.env.VAULT = originalVault;
+    }
+
+    if (originalCustom === undefined) {
+      delete process.env.CUSTOM_HOSTED_ENV;
+    } else {
+      process.env.CUSTOM_HOSTED_ENV = originalCustom;
+    }
+    await removeHostedProcessEnvironmentTestRoots(roots);
+  }
+});
+
+test("withHostedProcessEnvironment restores env if cwd restoration fails", async () => {
+  const roots = await createHostedProcessEnvironmentTestRoots("hosted-env-restore-cwd-fail-");
+  const originalHome = process.env.HOME;
+  const originalVault = process.env.VAULT;
+  const originalCustom = process.env.CUSTOM_HOSTED_ENV;
+  const originalWorkingDirectory = process.cwd();
+  const restoreError = new Error("restore cwd failed");
+  let hostedCwdRequested = false;
+  const chdirSpy = vi.spyOn(process, "chdir").mockImplementation((directory) => {
+    if (directory === roots.vaultRoot) {
+      hostedCwdRequested = true;
+      return;
+    }
+
+    if (hostedCwdRequested && directory === originalWorkingDirectory) {
+      throw restoreError;
+    }
+  });
+
+  process.env.HOME = "/tmp/original-home";
+  process.env.VAULT = "/tmp/original-vault";
+  delete process.env.CUSTOM_HOSTED_ENV;
+
+  try {
+    await assert.rejects(
+      withHostedProcessEnvironment(
+        {
+          envOverrides: {
+            CUSTOM_HOSTED_ENV: "present",
+          },
+          operatorHomeRoot: roots.operatorHomeRoot,
+          vaultRoot: roots.vaultRoot,
+        },
+        async () => {
+          assert.equal(process.env.HOME, roots.operatorHomeRoot);
+          assert.equal(process.env.VAULT, roots.vaultRoot);
+          assert.equal(process.env.CUSTOM_HOSTED_ENV, "present");
+        },
+      ),
+      {
+        message: restoreError.message,
+      },
+    );
+
+    assert.equal(hostedCwdRequested, true);
+    assert.equal(process.env.HOME, "/tmp/original-home");
+    assert.equal(process.env.VAULT, "/tmp/original-vault");
+    assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);
+  } finally {
+    chdirSpy.mockRestore();
+
     if (originalHome === undefined) {
       delete process.env.HOME;
     } else {
