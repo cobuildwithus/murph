@@ -67,6 +67,7 @@ describe("hosted signup welcome email", () => {
       const payload = JSON.parse(String(init?.body));
       expect(payload).toEqual({
         from: "Murph founder <founder@example.com>",
+        html: expect.stringContaining("<h1"),
         subject: "Welcome to Murph",
         text: expect.stringContaining("I'm Murph founder, the founder of Murph."),
         to: ["member@example.com"],
@@ -105,6 +106,8 @@ describe("hosted signup welcome email", () => {
       expect(payload.text).not.toContain(
         "connect your wearable and start your first experiment",
       );
+      expect(payload.html).toContain('href="sms:+15550100099"');
+      expect(payload.html).toContain(">(+1) 555-010-0099</a>");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -157,6 +160,8 @@ describe("hosted signup welcome email", () => {
       expect(payload.text).toContain(
         "Shoot Murph a message on Telegram at @murph_test_bot to start your first experiment.",
       );
+      expect(payload.html).toContain('href="https://t.me/murph_test_bot"');
+      expect(payload.html).toContain(">@murph_test_bot</a>");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -203,6 +208,8 @@ describe("hosted signup welcome email", () => {
       expect(payload.text).toContain(
         "Shoot Murph an email at murph@mail.withmurph.ai to start your first experiment.",
       );
+      expect(payload.html).toContain('href="mailto:murph@mail.withmurph.ai"');
+      expect(payload.html).toContain(">murph@mail.withmurph.ai</a>");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
