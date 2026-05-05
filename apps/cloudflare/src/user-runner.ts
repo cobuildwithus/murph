@@ -45,6 +45,7 @@ import {
 import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
+  resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
 import { withSerializedLock } from "./serialized-lock.js";
@@ -290,6 +291,10 @@ export class HostedUserRunner {
         await deleteAlarm.call(this.state.storage);
       }
       await destroyHostedExecutionContainer({
+        runnerContainerName: resolveHostedExecutionRunnerContainerName({
+          source: this.runnerRuntimeEnvSource,
+          userId,
+        }),
         runnerContainerNamespace: this.runnerContainerNamespace,
         userId,
       });
@@ -891,6 +896,10 @@ export class HostedUserRunner {
       runnerSecrets,
     });
     const userEnv = runtimeConfig.userEnv ?? {};
+    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+      source: this.runnerRuntimeEnvSource,
+      userId: input.userId,
+    });
     const job: HostedExecutionWorkspaceInvocationJobInput = {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
@@ -920,6 +929,7 @@ export class HostedUserRunner {
         nodeEnvConfigured:
           typeof forwardedEnv.NODE_ENV === "string"
           && forwardedEnv.NODE_ENV.length > 0,
+        runnerContainerName,
         workspaceAttemptId: input.lease.attemptId,
         workspaceLeaseGeneration: input.lease.leaseGeneration,
         workspaceReason: input.reason,
@@ -932,6 +942,7 @@ export class HostedUserRunner {
 
     return await invokeHostedExecutionContainerRunner({
       job,
+      runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
       timeoutMs: this.env.runnerTimeoutMs,
       userId: input.userId,

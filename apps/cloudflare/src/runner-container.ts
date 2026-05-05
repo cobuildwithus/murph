@@ -71,6 +71,7 @@ type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest
 
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
+  runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   timeoutMs: number;
   userId: string;
@@ -98,6 +99,7 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
 } | undefined>;
 
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
+type RunnerContainerNameSource = Readonly<{ CF_VERSION_METADATA?: unknown }>;
 
 interface RunnerContainerLogContext {
   userId: string;
@@ -774,7 +776,7 @@ export async function invokeHostedExecutionContainerRunner(
     throw new TypeError("Hosted runner container route userId must match workspace job userId.");
   }
 
-  return input.runnerContainerNamespace.getByName(jobUserId).invoke({
+  return input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId).invoke({
     job: input.job,
     timeoutMs: input.timeoutMs,
     userId: jobUserId,
@@ -1045,6 +1047,7 @@ function createChildLocalInternalProxyBaseUrl(input: {
 }
 
 export async function destroyHostedExecutionContainer(input: {
+  runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   userId: string;
 }): Promise<void> {
@@ -1053,10 +1056,42 @@ export async function destroyHostedExecutionContainer(input: {
   }
 
   try {
-    await input.runnerContainerNamespace.getByName(input.userId).destroyInstance();
+    await input.runnerContainerNamespace.getByName(input.runnerContainerName ?? input.userId).destroyInstance();
   } catch {
     // best-effort cleanup only
   }
+}
+
+export function resolveHostedExecutionRunnerContainerName(input: {
+  source: RunnerContainerNameSource;
+  userId: string;
+}): string {
+  const workerVersionSegment = readRunnerContainerWorkerVersionSegment(input.source);
+  return workerVersionSegment
+    ? `${input.userId}--v-${workerVersionSegment}`
+    : input.userId;
+}
+
+function readRunnerContainerWorkerVersionSegment(source: RunnerContainerNameSource): string | null {
+  const metadata = source.CF_VERSION_METADATA;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const versionId = (metadata as { id?: unknown }).id;
+  return typeof versionId === "string"
+    ? sanitizeRunnerContainerNameSegment(versionId)
+    : null;
+}
+
+function sanitizeRunnerContainerNameSegment(value: string): string | null {
+  const sanitized = value
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+
+  return sanitized.length > 0 ? sanitized : null;
 }
 
 function parseHostedExecutionContainerInvokeInput(
