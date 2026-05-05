@@ -120,11 +120,22 @@ export default async function DeviceSyncConnectCompletePage({
         {state.contactAction ? <AutoOpenLink href={state.contactAction.href} /> : null}
 
         <div className="mt-9 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
+          <Link
+            className={buttonVariants({
+              className: "w-full sm:w-auto",
+              size: "lg",
+            })}
+            href={secondaryAction.href}
+          >
+            <SecondaryActionIcon aria-hidden="true" className="size-4" />
+            {secondaryAction.label}
+          </Link>
           {state.contactAction ? (
             <a
               className={buttonVariants({
                 className: "w-full sm:w-auto",
                 size: "lg",
+                variant: "outline",
               })}
               aria-label={state.contactAction.ariaLabel}
               href={state.contactAction.href}
@@ -139,17 +150,6 @@ export default async function DeviceSyncConnectCompletePage({
               {state.contactAction.label}
             </a>
           ) : null}
-          <Link
-            className={buttonVariants({
-              className: "w-full sm:w-auto",
-              size: "lg",
-              variant: state.contactAction ? "outline" : "default",
-            })}
-            href={secondaryAction.href}
-          >
-            <SecondaryActionIcon aria-hidden="true" className="size-4" />
-            {secondaryAction.label}
-          </Link>
         </div>
       </section>
     </main>
