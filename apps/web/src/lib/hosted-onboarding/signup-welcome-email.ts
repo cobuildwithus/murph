@@ -192,7 +192,9 @@ function buildHostedSignupWelcomeEmailMurphStartLine(input: {
     ?? normalizeNullableString(input.routing?.pendingLinqRecipientPhone);
 
   if (linqRecipientPhone) {
-    return `Shoot Murph a text at ${linqRecipientPhone} to start your first experiment.`;
+    const formattedPhone = formatHostedSignupWelcomeEmailPhoneNumber(linqRecipientPhone);
+
+    return `Shoot Murph a text at ${formattedPhone} to start your first experiment.`;
   }
 
   if (
@@ -215,6 +217,17 @@ function readHostedSignupWelcomeEmailTelegramUsername(
     ?? MURPH_TELEGRAM_BOT_USERNAME;
 
   return username.startsWith("@") ? username : `@${username}`;
+}
+
+function formatHostedSignupWelcomeEmailPhoneNumber(phoneNumber: string): string {
+  const normalized = phoneNumber.trim();
+  const digits = normalized.replace(/\D/g, "");
+
+  if (normalized.startsWith("+") && digits.length === 11 && digits.startsWith("1")) {
+    return `(+1) ${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+
+  return normalized;
 }
 
 function buildHostedSignupWelcomeEmailIdempotencyKey(memberId: string): string {
