@@ -69,7 +69,7 @@ Always read these before repo code/docs/test/config work:
 - Use `agent-docs/operations/completion-workflow.md` for mandatory completion audits. Required local Codex audit subagents are repo-policy pre-authorized; run them when the routed task class requires them.
 - Always run the verification required by `agent-docs/operations/verification-and-runtime.md` unless the user explicitly asks not to. If a required check is blocked by a credibly unrelated pre-existing failure, report the command, failing target, and why the current diff did not cause it.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
-- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` for active-plan work and `scripts/committer` when no active plan is involved.
+- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` for the final commit of active-plan work so the matching ledger row is removed and the plan is archived; use `scripts/committer` only when no active plan is involved.
 - If a plan-bearing task is done or abandoned but a safe scoped commit is blocked by overlapping dirty work, clear the exact ledger row and archive the plan with `scripts/close-exec-plan.sh`.
 - Document architecture-significant changes in the matching durable docs, and update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
 
