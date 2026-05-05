@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vercel env run -- pnpm dev:local-env",
     "dev:local-env": "bash -c 'pnpm legal:pdf && pnpm health-commons:generate && { trap \"rm -rf .next-dev/.dev-server.lock\" INT TERM EXIT; pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"; }' --",
-    "build": "pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && next build && pnpm health-commons:trace-check",
+    "build": "pnpm legal:pdf && pnpm health-commons:generate && pnpm prisma:generate && pnpm migrate:production:prebuild && next build && pnpm health-commons:trace-check",
     "health-commons:generate": "pnpm --dir ../.. health-commons:generate",
     "health-commons:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-health-commons-traces.ts",
     "lint": "eslint .",
