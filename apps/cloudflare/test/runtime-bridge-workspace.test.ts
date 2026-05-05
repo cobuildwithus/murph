@@ -535,6 +535,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const putArtifact = vi.fn(async () => {});
     const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
       createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
     const baseSnapshotRef = createBundleRef("e");
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
@@ -555,6 +558,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           },
         }),
         writeBrowserVaultReplica,
+        writeLog,
       }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
@@ -581,6 +585,110 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
       sourceBundleHash: snapshotRef.hash,
     }));
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          component: "workspace",
+          eventCode: "checkpoint.hot_state_fallback",
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson: expect.objectContaining({
+            fallbackReason: "budget_exceeded",
+          }),
+        }),
+      ],
+    });
+  });
+
+  it("logs when hot-state continuity fallback still fails full snapshot creation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: "thread-ready",
+          resumeRouteId: "route-ready",
+        },
+      }),
+      "utf8",
+    );
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const baseSnapshotRef = createBundleRef("f");
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            browserVaultReplicaRef: createBrowserVaultReplicaRef(baseSnapshotRef.hash),
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: baseSnapshotRef,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "8",
+          },
+        }),
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "8",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "8",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("outbox_sending")))
+      .rejects.toThrow("missing required provider continuity state");
+
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          component: "workspace",
+          eventCode: "checkpoint.hot_state_fallback",
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson: expect.objectContaining({
+            continuityReason: "codex_home_missing",
+            fallbackReason: "continuity_incomplete",
+          }),
+        }),
+      ],
+    });
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          component: "workspace",
+          eventCode: "checkpoint.codex_continuity_missing_after_full_fallback",
+          level: "error",
+          phase: "checkpoint",
+          redactedJson: expect.objectContaining({
+            continuityReason: "codex_home_missing",
+          }),
+        }),
+      ],
+    });
+    expect(putArtifact).not.toHaveBeenCalled();
   });
 
   it("writes full snapshots for system mailbox receipt checkpoints", async () => {

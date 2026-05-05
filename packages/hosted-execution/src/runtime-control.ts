@@ -376,6 +376,7 @@ export const HOSTED_RUNTIME_LOG_PHASES = [
   "import",
   "outbox",
   "invoke",
+  "restore",
 ] as const;
 
 export type HostedRuntimeLogPhase = (typeof HOSTED_RUNTIME_LOG_PHASES)[number];
@@ -383,6 +384,8 @@ export type HostedRuntimeLogPhase = (typeof HOSTED_RUNTIME_LOG_PHASES)[number];
 export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.cas_conflict",
   "checkpoint.committed",
+  "checkpoint.codex_continuity_missing_after_full_fallback",
+  "checkpoint.hot_state_fallback",
   "checkpoint.optional_sidecar_degraded",
   "checkpoint.snapshot_finished",
   "assistant.device_connect",
@@ -409,6 +412,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.started",
   "runtime.usage_export_finished",
   "workspace.codex_home_snapshot",
+  "workspace.legacy_codex_resume_repaired",
 ] as const;
 
 export type HostedRuntimeLogEventCode =
