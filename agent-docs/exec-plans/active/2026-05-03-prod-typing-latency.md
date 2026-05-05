@@ -75,6 +75,7 @@ Updated: 2026-05-06
 - 2026-05-06 automation timing decision: emit metadata-only assistant automation pass timing stages around diagnostics, maintenance, recovery, scan, cron, status refresh, and outbox summary so the remaining warm-path gap can be isolated without storing prompts, messages, identifiers, paths, or provider payloads.
 - 2026-05-06 status refresh latency decision: hosted queue-only auto-replies should not await status snapshot refresh before fast outbox dispatch; the status snapshot is operator metadata and can be refreshed by non-critical lanes after the user-visible send path is unblocked.
 - 2026-05-06 active-turn admission latency decision: hosted queue-only auto-replies should not install active-turn mailbox admission hooks because the request/commit boundary refreshes re-import and checkpoint mailbox state on the user-visible reply path; late same-conversation input can arrive through the next webhook/wake instead.
+- 2026-05-06 deploy unblock decision: write Health Commons generated artifacts through temp-file rename so concurrent deploy builds do not observe partially written generated files.
 
 ## Current evidence
 
@@ -92,6 +93,7 @@ Updated: 2026-05-06
 - After the warm-retention deploy, live probes restored in roughly 0.3s with base/hot cache hits, but the second warm probe still took roughly 13.8s append-to-send. The Codex app-server trace was roughly 2.1s, while the assistant automation pass was roughly 8.5s, so the remaining bottleneck is inside the automation/send envelope rather than snapshot restore.
 - Code inspection after that probe found two awaited status snapshot refreshes on the hosted queue-only auto-reply path: one in the message turn cleanup and one in the automation pass after scanning. Both occur before the hosted runtime can fast-dispatch queued delivery effects, so they are now skipped only for hosted queue-only automation passes.
 - The post-status-skip live probe confirmed status refresh was skipped, but the first run cold-restored the base snapshot after deploy and the warm follow-up still spent roughly 8.3s inside scan while Codex itself took roughly 1.7s. Code inspection mapped that gap to hosted active-turn mailbox refresh/admission hooks that re-import/checkpoint during provider request boundaries.
+- The first active-turn admission deploy failed before Cloudflare rollout because the runner bundle build observed an unterminated generated declaration file. The local deploy build passes with atomic generated-artifact writes, which matches the failure mode.
 
 ## Verification
 
@@ -131,3 +133,4 @@ Updated: 2026-05-06
   - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-automation-runtime.test.ts --testNamePattern "active-turn mailbox admission|status refresh on hosted"`
   - `pnpm --dir packages/assistant-engine typecheck`
   - `git diff --check`
+  - `pnpm --workspace-concurrency=4 --filter @murphai/contracts --filter @murphai/runtime-state --filter @murphai/core --filter @murphai/gateway-core --filter @murphai/health-metrics --filter @murphai/health-commons --filter @murphai/importers --filter @murphai/device-syncd --filter @murphai/hosted-execution --filter @murphai/messaging-ingress --filter @murphai/parsers --filter @murphai/inboxd --filter @murphai/query --filter @murphai/operator-config --filter @murphai/vault-usecases --filter @murphai/inbox-services --filter @murphai/assistant-engine --filter @murphai/gateway-local --filter @murphai/assistantd --filter @murphai/assistant-cli --filter @murphai/assistant-runtime --filter @murphai/cloudflare-hosted-control --filter @murphai/setup-cli --filter @murphai/murph --filter @murphai/cloudflare-runner run build`
