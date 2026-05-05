@@ -213,7 +213,7 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
     /Hosted bundle archive is invalid\./u,
   );
   assert.throws(
-    () => hostedBundle.parseHostedBundleArchive(new Uint8Array(64 * 1024 * 1024 + 1)),
+    () => hostedBundle.parseHostedBundleArchive(new Uint8Array(128 * 1024 * 1024 + 1)),
     /Hosted bundle archive exceeds the .* compressed size limit/u,
   );
   assert.throws(
