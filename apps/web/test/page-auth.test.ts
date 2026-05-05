@@ -65,7 +65,7 @@ describe("hosted page auth", () => {
 
   it("returns an anonymous snapshot when the session store is not configured", async () => {
     mocks.getHostedAppSession.mockRejectedValue(new TypeError(
-      "DATABASE_URL is required for the hosted device-sync control plane.",
+      "DATABASE_URL is required for the hosted web control plane.",
     ));
     const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
 

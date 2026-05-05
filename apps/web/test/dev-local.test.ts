@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "vitest";
 
 import {
+  assertHostedWebDevRequiredEnv,
   buildHostedWebDevArgv,
   clearConflictingNextDevLock,
   resolveHostedWebDevCacheLimitBytes,
@@ -27,6 +28,13 @@ test("hosted web dev disables source maps by default", () => {
     "--turbopack",
     "--disable-source-maps",
   ]);
+});
+
+test("hosted web dev fails before boot when DATABASE_URL is missing", () => {
+  assert.throws(
+    () => assertHostedWebDevRequiredEnv(createEnv({ DATABASE_URL: "" })),
+    /DATABASE_URL is required for the hosted web control plane/u,
+  );
 });
 
 test("hosted web dev respects an explicit webpack flag", () => {

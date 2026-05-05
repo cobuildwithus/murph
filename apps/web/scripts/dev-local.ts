@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
 import { resolveHostedWebDistDir } from "../next-artifacts";
+import { assertHostedWebDatabaseUrlConfigured } from "../src/lib/hosted-web/database-env";
 
 const DEFAULT_DEV_CACHE_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
 const hostedWebDevBundlerEnvVarName = "MURPH_NEXT_DEV_BUNDLER";
@@ -94,6 +95,12 @@ export function resolveHostedWebDevOwnerPid(
   return Number.isInteger(ownerPid) && ownerPid > 0 ? ownerPid : null;
 }
 
+export function assertHostedWebDevRequiredEnv(
+  environment: NodeJS.ProcessEnv = process.env,
+): void {
+  assertHostedWebDatabaseUrlConfigured(environment);
+}
+
 export function resolveHostedWebDevRuntimePaths(
   packageDir: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -117,6 +124,7 @@ async function main(): Promise<void> {
   const nextBinPath = path.join(packageDir, "node_modules/next/dist/bin/next");
   const runtimePaths = resolveHostedWebDevRuntimePaths(packageDir, process.env);
 
+  assertHostedWebDevRequiredEnv(process.env);
   process.chdir(packageDir);
   const releaseLock = await acquireHostedWebDevServerLock(
     runtimePaths,

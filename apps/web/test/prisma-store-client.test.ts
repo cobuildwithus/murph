@@ -75,7 +75,7 @@ describe("prisma module", () => {
     delete process.env.DATABASE_URL;
 
     await expect(import("@/src/lib/prisma")).rejects.toThrow(
-      "DATABASE_URL is required for the hosted device-sync control plane.",
+      "DATABASE_URL is required for the hosted web control plane.",
     );
   });
 
