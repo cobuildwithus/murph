@@ -533,6 +533,52 @@ jobs:
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}
         run: pnpm --dir apps/cloudflare deploy:worker:apply -- --config ./.deploy/wrangler.generated.jsonc
 
+      - name: Print Wrangler failure log
+        if: ${{ failure() && inputs.deploy_worker }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          log_dir="${HOME}/.config/.wrangler/logs"
+          if [[ ! -d "${log_dir}" ]]; then
+            echo "No Wrangler log directory found."
+            exit 0
+          fi
+
+          latest_log="$(
+            find "${log_dir}" -maxdepth 1 -type f -name 'wrangler-*.log' -print 2>/dev/null \
+              | sort \
+              | tail -n 1
+          )
+          if [[ -z "${latest_log}" ]]; then
+            echo "No Wrangler log files found."
+            exit 0
+          fi
+
+          echo "::group::Latest Wrangler log ($(basename "${latest_log}"))"
+          stop_marker="wrangler-log-${RANDOM}-${RANDOM}"
+          echo "::stop-commands::${stop_marker}"
+          LOG_PATH="${latest_log}" node <<'NODE' || true
+          const fs = require("node:fs");
+
+          const logPath = process.env.LOG_PATH;
+          const text = fs.readFileSync(logPath, "utf8");
+          const tail = text.split(/\r?\n/).slice(-400).join("\n");
+          const redacted = tail
+            .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s"']+/gi, "$1<REDACTED>")
+            .replace(
+              /((?:api|auth|access|refresh|id)?[_-]?(?:token|secret|password|private[_-]?jwk|key)\s*[:=]\s*["']?)[^"',\s}]+/gi,
+              "$1<REDACTED>",
+            );
+
+          process.stdout.write(redacted);
+          if (!redacted.endsWith("\n")) {
+            process.stdout.write("\n");
+          }
+          NODE
+          echo "::${stop_marker}::"
+          echo "::endgroup::"
+
       - name: Smoke test deployed endpoints
         if: ${{ inputs.deploy_worker }}
         env:
