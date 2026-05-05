@@ -257,6 +257,8 @@ export async function checkpointHostedWorkspaceTx(input: {
 
   if (browserVaultReplicaRefPresent) {
     updateData.browserVaultReplicaRef = toNullablePrismaJson(browserVaultReplicaRef ?? null);
+  } else {
+    updateData.browserVaultReplicaRef = Prisma.DbNull;
   }
 
   const updated = await input.tx.hostedWorkspace.updateMany({
