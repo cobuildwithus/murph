@@ -197,7 +197,20 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(in
   browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
-  const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
+  let currentRefs: Awaited<ReturnType<typeof readHostedWorkspaceCurrentCheckpointRefs>>;
+  try {
+    currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
+  } catch (error) {
+    await writeHostedCheckpointOptionalSidecarDegradedLog({
+      degradedBy: "current-ref-read",
+      error,
+      platform: input.platform,
+      request: input.request,
+      sidecar: "hot-checkpoint-base",
+    });
+    return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
+  }
+
   if (
     !currentRefs.baseSnapshotRef
     || !currentRefs.browserVaultReplicaRef
@@ -282,12 +295,6 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     },
   });
 
-  const replica = await createHostedBrowserVaultReplicaForSnapshot({
-    generatedAt: snapshotRef.updatedAt,
-    snapshotRef,
-    vaultRoot: input.vaultRoot,
-  });
-
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
     bundlePutCount: 1,
@@ -303,6 +310,27 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     snapshotElapsedMs: Date.now() - startedAt,
   });
 
+  let replica: Awaited<ReturnType<typeof createHostedBrowserVaultReplicaForSnapshot>>;
+  try {
+    replica = await createHostedBrowserVaultReplicaForSnapshot({
+      generatedAt: snapshotRef.updatedAt,
+      snapshotRef,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    await writeHostedCheckpointOptionalSidecarDegradedLog({
+      degradedBy: "replica-create",
+      error,
+      platform: input.platform,
+      request: input.request,
+      sidecar: "browser-vault-replica",
+    });
+    return {
+      browserVaultReplicaRef: null,
+      snapshotRef,
+    };
+  }
+
   if (!replica) {
     return {
       browserVaultReplicaRef: null,
@@ -312,12 +340,35 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
 
   const browserVaultReplicaPort = input.platform.browserVaultReplicaPort;
   if (!browserVaultReplicaPort) {
-    throw new TypeError(
-      "Hosted workspace runtime bridge requires a browser-vault replica port.",
-    );
+    await writeHostedCheckpointOptionalSidecarDegradedLog({
+      degradedBy: "replica-port-missing",
+      platform: input.platform,
+      request: input.request,
+      sidecar: "browser-vault-replica",
+    });
+    return {
+      browserVaultReplicaRef: null,
+      snapshotRef,
+    };
   }
 
-  const browserVaultReplicaRef = await browserVaultReplicaPort.write({ replica });
+  let browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  try {
+    browserVaultReplicaRef = await browserVaultReplicaPort.write({ replica });
+  } catch (error) {
+    await writeHostedCheckpointOptionalSidecarDegradedLog({
+      degradedBy: "replica-write",
+      error,
+      platform: input.platform,
+      request: input.request,
+      sidecar: "browser-vault-replica",
+    });
+    return {
+      browserVaultReplicaRef: null,
+      snapshotRef,
+    };
+  }
+
   if (browserVaultReplicaRef.sourceBundleHash !== snapshotRef.hash) {
     throw new TypeError(
       "Hosted workspace runtime bridge published a browser-vault replica for a different snapshot.",
@@ -422,6 +473,58 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
     baseSnapshotRef: readHostedExecutionSnapshotBaseRef(currentWorkspace.workspace?.snapshotRef ?? null),
     browserVaultReplicaRef: currentWorkspace.workspace?.browserVaultReplicaRef ?? null,
   };
+}
+
+async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
+  degradedBy: "current-ref-read" | "replica-create" | "replica-port-missing" | "replica-write";
+  error?: unknown;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+  sidecar: "browser-vault-replica" | "hot-checkpoint-base";
+}): Promise<void> {
+  const errorName = params.error instanceof Error
+    ? params.error.name
+    : params.error === undefined
+      ? null
+      : typeof params.error;
+  console.warn("Hosted checkpoint optional sidecar degraded.", {
+    degradedBy: params.degradedBy,
+    errorName,
+    sidecar: params.sidecar,
+  });
+
+  if (!params.platform.logPort) {
+    return;
+  }
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointReason: params.request.reason,
+    degradedBy: params.degradedBy,
+    errorName,
+    sidecar: params.sidecar,
+  };
+
+  try {
+    await params.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: params.request.attemptId,
+          component: "workspace",
+          eventCode: "checkpoint.optional_sidecar_degraded",
+          leaseGeneration: params.request.leaseGeneration,
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: params.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (logError) {
+    console.warn("Hosted checkpoint optional sidecar degradation log write failed.", {
+      errorName: logError instanceof Error ? logError.name : typeof logError,
+    });
+  }
 }
 
 type HostedWorkspaceCheckpointSnapshotMode = "full" | "hot";
