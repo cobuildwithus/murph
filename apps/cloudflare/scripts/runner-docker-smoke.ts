@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   encodeHostedBundleBase64,
-  snapshotHostedExecutionContext,
+  snapshotHostedExecutionContextUnsafeForFixture,
 } from "@murphai/runtime-state/node";
 
 import {
@@ -25,8 +25,7 @@ const SMOKE_BUNDLE_DIR = path.join(appDir, ".deploy", "runner-smoke-bundle");
 
 async function main(): Promise<void> {
   try {
-    const snapshot = await snapshotHostedExecutionContext({
-      providerContinuityPolicy: "ignore-for-fixture",
+    const snapshot = await snapshotHostedExecutionContextUnsafeForFixture({
       vaultRoot: FIXTURE_VAULT_ROOT,
     });
     const bundle = encodeHostedBundleBase64(snapshot.bundle);

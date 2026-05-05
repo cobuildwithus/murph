@@ -25,7 +25,7 @@ import {
   clearHostedAssistantRuntimeHotState,
   materializeHostedExecutionArtifacts,
   readHostedBundleTextFile,
-  repairHostedWorkspaceSnapshotProviderContinuity,
+  repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   resolveAssistantStatePaths,
@@ -35,6 +35,7 @@ import {
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
+  snapshotHostedExecutionContextUnsafeForFixture,
   writeHostedBundleTextFile,
 } from "../src/node/index.ts";
 
@@ -1853,7 +1854,7 @@ test("hosted workspace snapshot repair strips legacy Codex resume handles only",
     });
     assert.ok(bundle);
 
-    const repair = repairHostedWorkspaceSnapshotProviderContinuity({
+    const repair = repairLegacyHostedWorkspaceSnapshotProviderContinuity({
       bundle,
     });
 
@@ -1991,8 +1992,7 @@ test("hosted full snapshots require explicit fixture policy to ignore dangling C
       HostedWorkspaceSnapshotContinuityIncompleteError,
     );
 
-    const snapshot = await snapshotHostedExecutionContext({
-      providerContinuityPolicy: "ignore-for-fixture",
+    const snapshot = await snapshotHostedExecutionContextUnsafeForFixture({
       vaultRoot,
     });
 
