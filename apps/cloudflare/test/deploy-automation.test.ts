@@ -385,6 +385,7 @@ describe("hosted deploy automation helpers", () => {
       "Container rollout: \\`${{ inputs.container_rollout }}\\`",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
+      'MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"',
       "runs-on: blacksmith-4vcpu-ubuntu-2404",
       "name: Codex cache-prefix E2E gate",
       "skip_predeploy_e2e:",
