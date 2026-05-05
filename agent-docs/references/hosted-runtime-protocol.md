@@ -38,6 +38,13 @@ The live ownership split is:
   signature, and unwraps only its `cloudflare-automation-secret` recipient. The
   signed full envelopes are disclosed to preserve signature verification over
   the web-authored body; Cloudflare still has no GCP KMS decrypt authority.
+  During active mailbox import, the runner container calls a Worker-owned
+  mailbox-payload decode route over the invocation outbound proxy. That route
+  requires the active invocation lease, decrypts the mailbox payload with the
+  Worker-owned ingress crypto context, and returns only a parsed hosted wake or
+  a semantic blocked result. The container must not receive ingress root keys,
+  callback-signing private material, private JWKs, or a root-fetch capability
+  for mailbox import.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
   rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.

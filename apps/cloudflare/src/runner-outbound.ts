@@ -11,14 +11,16 @@ import {
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
+import {
+  requireRunnerActiveInvocationLease,
+  RunnerActiveInvocationLeaseError,
+} from "./runner-outbound/active-lease.ts";
 import { handleRunnerHeartbeatRequest } from "./runner-outbound/heartbeat.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
   requireRunnerInternalProxyAuthorization,
-  requireRunnerOutboundUserStubMethod,
   resolveRunnerOutboundUserCryptoContext,
-  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 
@@ -255,24 +257,16 @@ async function writeRequestOwnsActiveInvocationLease(input: {
   request: Request;
   userId: string;
 }): Promise<boolean> {
-  const attemptId = input.request.headers.get("x-hosted-runtime-attempt-id");
-  const leaseGeneration = input.request.headers.get("x-hosted-runtime-lease-generation");
-  const workspaceVersion = input.request.headers.get("x-hosted-runtime-workspace-version");
-  if (!attemptId || !leaseGeneration || !workspaceVersion) {
-    return false;
-  }
+  try {
+    await requireRunnerActiveInvocationLease(input);
+    return true;
+  } catch (error) {
+    if (error instanceof RunnerActiveInvocationLeaseError) {
+      return false;
+    }
 
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
-    stub,
-    "ownsActiveInvocationLease",
-  );
-  return await ownsActiveInvocationLease({
-    attemptId,
-    leaseGeneration,
-    userId: input.userId,
-    workspaceVersion,
-  });
+    throw error;
+  }
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

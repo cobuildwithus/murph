@@ -21,6 +21,7 @@ import {
   type HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
@@ -1010,6 +1011,153 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(readEncryptionUsers).toEqual([item.userId]);
   });
 
+  it("prefers mailbox payload decoders over encryption readers for system mailbox imports", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    const item = createSystemMailboxItem("member_bridge_decoder_system");
+    const wake = {
+      eventId: item.dedupeKey,
+      kind: item.kind,
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      occurredAt: item.occurredAt,
+      userId: item.userId,
+    };
+    const decodeMailboxPayload = {
+      decode: vi.fn(async () => ({
+        status: "decoded" as const,
+        wake,
+      })),
+    };
+    const readEncryptionEnvironment = vi.fn(() => {
+      throw new Error("legacy decrypt should not run");
+    });
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      decodeMailboxPayload,
+      platform: createPlatform({ putArtifact: async () => {} }),
+      readEncryptionEnvironment,
+      request: createBridgeRequest(item.userId),
+      runtime: {
+        platformEnv: {},
+      },
+      vaultRoot,
+    });
+
+    await expect(options.importItem(createSystemMailboxImportItem({
+      item,
+      payloadCiphertext: "opaque-ciphertext",
+      payloadSource: "sidecar",
+    }))).resolves.toEqual({
+      reasonCode: "system_mailbox.queued",
+      status: "imported",
+    });
+
+    expect(decodeMailboxPayload.decode).toHaveBeenCalledWith({
+      itemRef: {
+        dedupeKey: item.dedupeKey,
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+        occurredAt: item.occurredAt,
+        userId: item.userId,
+      },
+      payloadCiphertext: "opaque-ciphertext",
+      payloadRequestId: "request_bridge_decoder",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      payloadSource: "sidecar",
+    });
+    expect(readEncryptionEnvironment).not.toHaveBeenCalled();
+  });
+
+  it("imports conversation mailbox items with empty platform env when a decoder is provided", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_bridge_decoder_conversation",
+      linqMessage: {
+        chatId: "chat_bridge_decoder",
+        from: "+15550100000",
+        isFromMe: false,
+        messageId: "msg_bridge_decoder",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      occurredAt: "2026-05-01T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_bridge_decoder",
+      userId: "member_bridge_decoder_conversation",
+    });
+    const item = createConversationMailboxItem(wake);
+    const decodeMailboxPayload = {
+      decode: vi.fn(async () => ({
+        status: "decoded" as const,
+        wake,
+      })),
+    };
+    const readEncryptionEnvironment = vi.fn(() => {
+      throw new Error("legacy decrypt should not run");
+    });
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      decodeMailboxPayload,
+      platform: createPlatform({ putArtifact: async () => {} }),
+      readEncryptionEnvironment,
+      request: createBridgeRequest(item.userId),
+      runtime: {
+        platformEnv: {},
+      },
+      vaultRoot,
+    });
+
+    await expect(options.importItem({
+      item,
+      payload: {
+        payloadCiphertext: "opaque-conversation-ciphertext",
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        requestId: "request_bridge_decoder_conversation",
+        source: "inline",
+        status: "resolved",
+      },
+      route: {
+        action: "import-conversation-message",
+        advanceProgress: true,
+        itemRef: {
+          id: item.id,
+          kind: item.kind,
+          lane: item.lane,
+          laneSeq: item.laneSeq,
+        },
+        state: "route",
+      },
+    })).resolves.toMatchObject({
+      status: "imported",
+    });
+
+    expect(decodeMailboxPayload.decode).toHaveBeenCalledWith({
+      itemRef: {
+        dedupeKey: item.dedupeKey,
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+        occurredAt: item.occurredAt,
+        userId: item.userId,
+      },
+      payloadCiphertext: "opaque-conversation-ciphertext",
+      payloadRequestId: "request_bridge_decoder_conversation",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      payloadSource: "inline",
+    });
+    expect(readEncryptionEnvironment).not.toHaveBeenCalled();
+  });
+
   it("captures server-owned return targets from decoded conversation wakes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
@@ -1117,6 +1265,84 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   });
 
 });
+
+function createBridgeRequest(userId: string) {
+  return {
+    attemptId: "attempt_1",
+    leaseGeneration: "4",
+    reason: "nudge" as const,
+    userId,
+    workspaceVersion: "7",
+  };
+}
+
+function createSystemMailboxItem(userId: string) {
+  return {
+    createdAt: "2026-05-01T00:00:00.000Z",
+    dedupeKey: "event:member-channels-decoder",
+    expiresAt: null,
+    id: "mailbox_item_bridge_decoder",
+    kind: "member.channels.updated" as const,
+    lane: "system" as const,
+    laneSeq: "1",
+    occurredAt: "2026-05-01T00:00:00.000Z",
+    payloadBytes: 128,
+    payloadInlineCiphertext: null,
+    payloadRef: "hosted-mailbox-payload:mailbox_item_bridge_decoder",
+    payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    userId,
+  };
+}
+
+function createConversationMailboxItem(
+  wake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>,
+) {
+  return {
+    createdAt: wake.occurredAt,
+    dedupeKey: wake.eventId,
+    expiresAt: null,
+    id: "mailbox_item_bridge_decoder_conversation",
+    kind: "conversation.message" as const,
+    lane: "conversation" as const,
+    laneSeq: "1",
+    occurredAt: wake.occurredAt,
+    payloadBytes: 128,
+    payloadInlineCiphertext: "inline",
+    payloadRef: null,
+    payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    updatedAt: wake.occurredAt,
+    userId: wake.userId,
+  };
+}
+
+function createSystemMailboxImportItem(input: {
+  item: ReturnType<typeof createSystemMailboxItem>;
+  payloadCiphertext: string;
+  payloadSource: "inline" | "sidecar";
+}) {
+  return {
+    item: input.item,
+    payload: {
+      payloadCiphertext: input.payloadCiphertext,
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      requestId: "request_bridge_decoder",
+      source: input.payloadSource,
+      status: "resolved" as const,
+    },
+    route: {
+      action: "apply-member-channels-update" as const,
+      advanceProgress: true as const,
+      itemRef: {
+        id: input.item.id,
+        kind: input.item.kind,
+        lane: input.item.lane,
+        laneSeq: input.item.laneSeq,
+      },
+      state: "route" as const,
+    },
+  };
+}
 
 function createCheckpointInput(
   reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "idle",

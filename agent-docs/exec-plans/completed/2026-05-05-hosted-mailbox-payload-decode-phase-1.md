@@ -23,6 +23,12 @@ Success criteria:
 - Legacy direct decrypt remains only as fallback for local/test paths.
 - No hosted Cloudflare path silently falls back to direct `platformEnv` decrypt when proxy decode is expected.
 
+Implementation refinements from code review:
+
+- Wire the decoder whenever the invocation proxy token is present, even when no local loopback proxy base URL is configured. Direct internal-host mode must not silently fall back to legacy `platformEnv` decrypt.
+- Reuse the existing runner outbound ingress crypto context resolver for Worker-side decrypt and adapt it to the mailbox decrypt interface, instead of adding a second root-fetching/cache abstraction.
+- Keep request and response validation in the app-local decode contract module so the route and client share one small parser surface.
+
 ## Why This Seam
 
 Main branch already has the right seam in `apps/cloudflare/src/runtime-bridge-workspace.ts`.
@@ -625,3 +631,6 @@ Phase 1 is done when all of this is true:
 - Decode route never returns root keys, private JWKs, callback-signing material, or decrypted arbitrary raw JSON.
 - Legacy direct decrypt remains only as fallback for local/test paths.
 - No hosted Cloudflare path silently falls back to direct `platformEnv` decrypt when proxy decode is expected.
+Status: completed
+Updated: 2026-05-05
+Completed: 2026-05-05
