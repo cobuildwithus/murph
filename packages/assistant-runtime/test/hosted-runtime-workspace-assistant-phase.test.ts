@@ -205,6 +205,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("skips timer device-sync work when the mailbox import brought in active input", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: true,
+      }),
+    );
+  });
+
   it("exposes hosted device connect providers and link helper from the platform port", async () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -1185,6 +1197,7 @@ describe("hosted runtime log helpers", () => {
 });
 
 function createPhaseInput(input: {
+  importedCount?: number;
   logRequests?: HostedRuntimeLogRequest[];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
@@ -1198,8 +1211,8 @@ function createPhaseInput(input: {
       checkpoint: null,
       importResult: {
         blocked: [],
-        fetchedCount: 0,
-        importedCount: 0,
+        fetchedCount: input.importedCount ?? 0,
+        importedCount: input.importedCount ?? 0,
         state: {
           recentStatuses: [],
           watermarks: {
