@@ -123,7 +123,7 @@ describe("hosted workspace store", () => {
     const result = await checkpointHostedWorkspaceTx({
       browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_stale_hash"),
       expectedVersion: 4n,
-      reason: "idle",
+      reason: "maintenance",
       snapshotRef: createBundleRef("snapshot_stale"),
       tx,
       userId: "member_workspace_1",

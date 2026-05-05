@@ -328,15 +328,10 @@ export const HOSTED_WORKSPACE_CHECKPOINT_REASONS = [
   "import",
   "active_turn_input",
   "active_turn_acceptance",
-  "outbox_intent",
   "outbox_sending",
   "outbox_receipt",
-  "system_mailbox_sending",
   "system_mailbox_receipt",
   "maintenance",
-  "idle",
-  "budget_exhausted",
-  "error",
 ] as const;
 
 export type HostedWorkspaceCheckpointReason =
@@ -419,7 +414,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.retryable_payload_missing",
   "outbox.ambiguous",
   "outbox.delivery_finished",
-  "outbox.intent_checkpointed",
   "outbox.receipt_checkpointed",
   "runner.error",
   "runner.idle",

@@ -444,7 +444,7 @@ describe("hosted workspace runtime entrypoint", () => {
           );
           events.push("assistant");
           return {
-            checkpointReason: "outbox_intent",
+            checkpointReason: "outbox_sending",
             progressed: true,
             redactedStatus: {
               hostedAssistantProgressed: true,
@@ -461,12 +461,12 @@ describe("hosted workspace runtime entrypoint", () => {
         "snapshot:import:1",
         "workspace.checkpoint",
         "assistant",
-        "snapshot:outbox_intent:1",
+        "snapshot:outbox_sending:1",
         "workspace.checkpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "outbox_intent",
+        "outbox_sending",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
