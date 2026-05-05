@@ -784,6 +784,128 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("checkpoints reply intent even when optional runner lanes are degraded", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_liveness_optional_degraded",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_liveness_optional_degraded",
+          browserVaultReplicaRef: null,
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return {
+            afterCheckpoint: async () => {
+              events.push("optional:projection");
+              throw Object.assign(new Error("optional projection unavailable"), {
+                code: "PROJECTION_UNAVAILABLE",
+              });
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: {
+          ...createPlatform({
+            mailboxPort,
+            usageExportPort: {
+              async recordUsage() {
+                events.push("optional:usage-export");
+                throw new Error("usage export unavailable");
+              },
+            },
+            workspacePort: createWorkspacePort({ checkpointRequests }),
+          }),
+          logPort: {
+            async write() {
+              events.push("optional:log");
+              throw new Error("log export unavailable");
+            },
+          },
+        },
+        requestId: "request_synthetic_runner_liveness_optional_degraded",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_liveness_optional_degraded",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase() {
+          events.push("assistant");
+          await writePendingHostedUsageRecord(vaultRoot, "turn_runner_liveness_optional_degraded");
+          return {
+            checkpointReason: "outbox_intent",
+            progressed: true,
+            redactedStatus: {
+              hostedOutboxIntentCheckpointed: true,
+            },
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.progressed, true);
+      assert.equal(result.latestWorkspace?.version, "2");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "outbox_intent",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.equal(checkpointRequests[0]?.browserVaultReplicaRef, null);
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+        hostedOutboxIntentCheckpointed: true,
+      });
+      assert.deepEqual(events, [
+        "import:1",
+        "optional:log",
+        "optional:projection",
+        "optional:log",
+        "assistant",
+        "optional:usage-export",
+        "optional:log",
+      ]);
+      assert.deepEqual(
+        (await listPendingAssistantUsageRecords({ vault: vaultRoot }))
+          .map((record) => record.usageId),
+        ["turn_runner_liveness_optional_degraded.attempt-1"],
+      );
+    } finally {
+      warn.mockRestore();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("runs mailbox post-checkpoint effects before assistant failure without an extra checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
