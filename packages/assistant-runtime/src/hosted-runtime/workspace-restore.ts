@@ -14,7 +14,7 @@ import {
 import {
   clearHostedAssistantRuntimeHotState,
   hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
-  repairHostedWorkspaceSnapshotProviderContinuity,
+  repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
@@ -129,7 +129,7 @@ async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
   removedMalformedSessionCount: number;
   scrubbedSessionCount: number;
 }> {
-  const repair = repairHostedWorkspaceSnapshotProviderContinuity({
+  const repair = repairLegacyHostedWorkspaceSnapshotProviderContinuity({
     bundle: input.bundle,
   });
   if (repair.removedMalformedSessionCount === 0 && repair.scrubbedSessionCount === 0) {

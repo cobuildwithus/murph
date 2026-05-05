@@ -16,7 +16,6 @@ import {
 import {
   isHostedBundleArtifactEntry,
   parseHostedBundleArchive,
-  serializeHostedBundleArchive,
   type HostedBundleArtifactRef,
 } from "./hosted-bundle.ts";
 import {
@@ -93,12 +92,6 @@ export interface HostedWorkspaceSnapshotProviderContinuityAnalysis {
   hasProviderResumeState: boolean;
 }
 
-export interface HostedWorkspaceSnapshotProviderContinuityRepair {
-  bundle: Uint8Array | ArrayBuffer;
-  removedMalformedSessionCount: number;
-  scrubbedSessionCount: number;
-}
-
 interface HostedAssistantRuntimeHotStateBudgetMetrics {
   fileCount: number;
   inlineBytes: number;
@@ -135,19 +128,44 @@ export type HostedWorkspaceArtifactResolver = (
   input: HostedBundleArtifactRestoreInput,
 ) => Promise<Uint8Array | ArrayBuffer>;
 
-export type HostedWorkspaceSnapshotProviderContinuityPolicy =
-  | "enforce"
-  | "ignore-for-fixture";
-
-export async function snapshotHostedExecutionContext(input: {
+interface HostedExecutionContextSnapshotInput {
   artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
   codexHomeSnapshotHashSecret?: string | null;
   materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot?: string | null;
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
-  providerContinuityPolicy?: HostedWorkspaceSnapshotProviderContinuityPolicy;
   vaultRoot: string;
-}): Promise<{
+}
+
+export async function snapshotHostedExecutionContext(
+  input: HostedExecutionContextSnapshotInput,
+): Promise<{
+  bundle: Uint8Array;
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+}> {
+  return await snapshotHostedExecutionContextWithProviderContinuityPolicy({
+    ...input,
+    enforceProviderContinuity: true,
+  });
+}
+
+export async function snapshotHostedExecutionContextUnsafeForFixture(
+  input: HostedExecutionContextSnapshotInput,
+): Promise<{
+  bundle: Uint8Array;
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+}> {
+  return await snapshotHostedExecutionContextWithProviderContinuityPolicy({
+    ...input,
+    enforceProviderContinuity: false,
+  });
+}
+
+async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
+  input: HostedExecutionContextSnapshotInput & {
+    enforceProviderContinuity: boolean;
+  },
+): Promise<{
   bundle: Uint8Array;
   codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
 }> {
@@ -215,7 +233,7 @@ export async function snapshotHostedExecutionContext(input: {
   if (vaultBundle === null) {
     throw new Error(`Hosted vault bundle could not be created for ${vaultRoot}.`);
   }
-  if ((input.providerContinuityPolicy ?? "enforce") === "enforce") {
+  if (input.enforceProviderContinuity) {
     assertHostedWorkspaceSnapshotProviderContinuityComplete({
       bundle: vaultBundle,
     });
@@ -389,63 +407,6 @@ export function analyzeHostedWorkspaceSnapshotProviderContinuity(input: {
   return {
     hasCodexProviderContinuity,
     hasProviderResumeState,
-  };
-}
-
-export function repairHostedWorkspaceSnapshotProviderContinuity(input: {
-  bundle: Uint8Array | ArrayBuffer;
-}): HostedWorkspaceSnapshotProviderContinuityRepair {
-  const analysis = analyzeHostedWorkspaceSnapshotProviderContinuity(input);
-  if (!analysis.hasProviderResumeState || analysis.hasCodexProviderContinuity) {
-    return {
-      bundle: input.bundle,
-      removedMalformedSessionCount: 0,
-      scrubbedSessionCount: 0,
-    };
-  }
-
-  const archive = parseHostedBundleArchive(input.bundle);
-  let removedMalformedSessionCount = 0;
-  let scrubbedSessionCount = 0;
-  const files = archive.files.flatMap((file) => {
-    if (
-      file.root !== "vault"
-      || isHostedBundleArtifactEntry(file)
-      || !hasWorkspaceSnapshotPathPrefix(
-        normalizeWorkspaceSnapshotRelativePath(file.path),
-        `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
-      )
-    ) {
-      return [file];
-    }
-
-    const text = Buffer.from(file.contentsBase64, "base64").toString("utf8");
-    const scrubbed = scrubAssistantSessionProviderResumeState(text);
-    if (!scrubbed.changed) {
-      return [file];
-    }
-
-    if (scrubbed.text === null) {
-      removedMalformedSessionCount += 1;
-      return [];
-    }
-
-    scrubbedSessionCount += 1;
-    return [
-      {
-        ...file,
-        contentsBase64: Buffer.from(scrubbed.text, "utf8").toString("base64"),
-      },
-    ];
-  });
-
-  return {
-    bundle: serializeHostedBundleArchive({
-      ...archive,
-      files,
-    }),
-    removedMalformedSessionCount,
-    scrubbedSessionCount,
   };
 }
 
@@ -784,45 +745,6 @@ function assistantSessionTextContainsProviderResumeState(text: string): boolean 
     recordStringProperty(parsed, "providerSessionId") !== null
     || recordStringProperty(recordProperty(parsed, "resumeState"), "providerSessionId") !== null
   );
-}
-
-function scrubAssistantSessionProviderResumeState(text: string): {
-  changed: boolean;
-  text: string | null;
-} {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return {
-      changed: true,
-      text: null,
-    };
-  }
-
-  if (!isRecord(parsed)) {
-    return {
-      changed: false,
-      text,
-    };
-  }
-
-  let changed = false;
-  const next: Record<string, unknown> = { ...parsed };
-  if (recordStringProperty(next, "providerSessionId") !== null) {
-    delete next.providerSessionId;
-    changed = true;
-  }
-
-  if (recordStringProperty(recordProperty(next, "resumeState"), "providerSessionId") !== null) {
-    next.resumeState = null;
-    changed = true;
-  }
-
-  return {
-    changed,
-    text: changed ? `${JSON.stringify(next)}\n` : text,
-  };
 }
 
 function isHostedCodexProviderContinuityRelativePath(relativePath: string): boolean {
