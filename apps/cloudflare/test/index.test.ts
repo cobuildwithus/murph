@@ -289,6 +289,30 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("rejects deploy container smoke requests with a short signed nonce", async () => {
+    const env = createWorkerEnv();
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        nonce: "short",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
   it("rejects deploy container smoke requests outside the signature timestamp window", async () => {
     const env = createWorkerEnv();
     const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
