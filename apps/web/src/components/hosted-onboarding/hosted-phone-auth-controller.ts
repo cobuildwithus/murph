@@ -27,6 +27,7 @@ import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phon
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type {
   HostedAuthCompletionResult,
+  HostedAuthCompletionUser,
   HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
 
@@ -84,7 +85,12 @@ export function useHostedPhoneAuthController({
 }: HostedPhoneAuthControllerInput) {
   const { authenticated, logout, ready } = usePrivy();
   const { createWallet } = useCreateWallet();
-  const { loginWithCode, sendCode } = useLoginWithSms();
+  const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
+  const { loginWithCode, sendCode } = useLoginWithSms({
+    onComplete: (params) => {
+      completedUserRef.current = params.user;
+    },
+  });
   const { refreshUser, user } = useUser();
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -493,6 +499,7 @@ export function useHostedPhoneAuthController({
         }
 
         await finalizeHostedPrivyVerification({
+          completedUser: completedUserRef.current,
           inviteCode,
           onAuthCompleted,
           onCompleted,

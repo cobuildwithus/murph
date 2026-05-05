@@ -3,10 +3,15 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
+type LoginCallbacks = {
+  onComplete?: (params: { user: { linkedAccounts?: unknown } }) => void;
+};
+
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   createWallet: vi.fn(),
   login: vi.fn(),
+  loginCallbacks: null as LoginCallbacks | null,
   usePrivy: vi.fn(),
   useUser: vi.fn(),
 }));
@@ -17,7 +22,9 @@ vi.mock("@privy-io/react-auth", () => ({
       createWallet: mocks.createWallet,
     };
   },
-  useLoginWithTelegram() {
+  useLoginWithTelegram(callbacks?: LoginCallbacks) {
+    mocks.loginCallbacks = callbacks ?? null;
+
     return {
       login: mocks.login,
       state: { status: "initial" },
@@ -37,6 +44,7 @@ let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.loginCallbacks = null;
   mocks.usePrivy.mockReturnValue({
     ready: true,
   });
@@ -91,6 +99,39 @@ test("HomepageTelegramAuthButton logs in with Telegram and redirects through the
     user: null,
   });
   expect(assign).toHaveBeenCalledWith("/home");
+});
+
+test("HomepageTelegramAuthButton passes Privy's completed user into shared completion", async () => {
+  const completedUser = {
+    linkedAccounts: [
+      {
+        id: 67890,
+        type: "telegram",
+        username: "new_user",
+      },
+    ],
+  };
+  mocks.login.mockImplementationOnce(async () => {
+    mocks.loginCallbacks?.onComplete?.({
+      user: completedUser,
+    });
+  });
+
+  const { button, cleanup } = await renderClientComponent(
+    createElement(HomepageTelegramAuthButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
+    completedUser,
+    createWallet: mocks.createWallet,
+    refreshUser: expect.any(Function),
+    user: null,
+  }));
 });
 
 test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", async () => {

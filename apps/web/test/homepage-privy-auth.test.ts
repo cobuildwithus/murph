@@ -154,6 +154,101 @@ test("completeHostedPrivyAuth falls back to the current user when refreshUser fa
   });
 });
 
+test("completeHostedPrivyAuth prefers the completed user when refresh is stale for phone readiness", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+  const completedUser = {
+    linkedAccounts: [
+      {
+        latest_verified_at: 1771977600,
+        number: "+15555551212",
+        type: "phone",
+      },
+    ],
+  };
+
+  await completeHostedPrivyAuth({
+    completedUser,
+    createWallet: vi.fn(),
+    refreshUser: vi.fn().mockResolvedValue({
+      linkedAccounts: [],
+    }),
+    requirePhone: true,
+    user: null,
+  });
+
+  expect(mocks.ensureHostedPrivyPhoneReady).toHaveBeenCalledWith({
+    createWallet: expect.any(Function),
+    user: completedUser,
+  });
+});
+
+test("completeHostedPrivyAuth prefers the completed user when non-phone refresh is stale", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+  const completedUser = {
+    linkedAccounts: [
+      {
+        address: "fresh@example.com",
+        latest_verified_at: 1771977600,
+        type: "email",
+      },
+    ],
+  };
+
+  await completeHostedPrivyAuth({
+    completedUser,
+    createWallet: vi.fn(),
+    refreshUser: vi.fn().mockResolvedValue({
+      linkedAccounts: [
+        {
+          id: 12345,
+          type: "telegram",
+          username: "old_user",
+        },
+      ],
+    }),
+    user: null,
+  });
+
+  expect(mocks.ensureHostedPrivyWalletReady).toHaveBeenCalledWith({
+    createWallet: expect.any(Function),
+    user: completedUser,
+  });
+});
+
+test("completeHostedPrivyAuth falls back to the current user when completed user is sparse", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+  const currentUser = {
+    linkedAccounts: [
+      {
+        latest_verified_at: 1771977600,
+        number: "+15555551212",
+        type: "phone",
+      },
+    ],
+  };
+
+  await completeHostedPrivyAuth({
+    completedUser: {
+      linkedAccounts: [],
+    },
+    createWallet: vi.fn(),
+    refreshUser: vi.fn().mockResolvedValue(null),
+    requirePhone: true,
+    user: currentUser,
+  });
+
+  expect(mocks.ensureHostedPrivyPhoneReady).toHaveBeenCalledWith({
+    createWallet: expect.any(Function),
+    user: currentUser,
+  });
+});
+
 test("completeHostedPrivyAuth does not prefetch checkout sessions for checkout-stage users", async () => {
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,

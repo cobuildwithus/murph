@@ -17,6 +17,7 @@ import { EmailIcon } from "@/src/components/homepage/email-icon";
 import {
   completeHostedPrivyAuth,
   type HostedAuthCompletionResult,
+  type HostedAuthCompletionUser,
   type HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
 import {
@@ -43,7 +44,12 @@ export function HostedEmailAuthButton({
   onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
 }) {
   const { createWallet } = useCreateWallet();
-  const { loginWithCode, sendCode, state } = useLoginWithEmail();
+  const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
+  const { loginWithCode, sendCode, state } = useLoginWithEmail({
+    onComplete: (params) => {
+      completedUserRef.current = params.user;
+    },
+  });
   const { ready } = usePrivy();
   const { refreshUser, user } = useUser();
   const [code, setCode] = useState("");
@@ -159,8 +165,10 @@ export function HostedEmailAuthButton({
 
     try {
       await loginWithCode({ code: submittedCode });
+      const completedUser = completedUserRef.current;
       const result = await completeHostedPrivyAuth({
         ...authSession,
+        ...(completedUser ? { completedUser } : {}),
         inviteCode,
       });
       if (onCompleted) {

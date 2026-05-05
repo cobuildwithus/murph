@@ -6,7 +6,7 @@ import {
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
@@ -14,6 +14,7 @@ import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 import {
   completeHostedPrivyAuth,
   type HostedAuthCompletionResult,
+  type HostedAuthCompletionUser,
   type HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
 import { toErrorMessage } from "./hosted-auth-shared";
@@ -31,7 +32,12 @@ export function HostedTelegramAuthButton({
   onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
 }) {
   const { createWallet } = useCreateWallet();
-  const { login, state } = useLoginWithTelegram();
+  const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
+  const { login, state } = useLoginWithTelegram({
+    onComplete: (params) => {
+      completedUserRef.current = params.user;
+    },
+  });
   const { ready } = usePrivy();
   const { refreshUser, user } = useUser();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -51,8 +57,10 @@ export function HostedTelegramAuthButton({
 
     try {
       await login(disableSignup ? { disableSignup: true } : undefined);
+      const completedUser = completedUserRef.current;
       const result = await completeHostedPrivyAuth({
         ...authSession,
+        ...(completedUser ? { completedUser } : {}),
       });
       if (onCompleted) {
         await onCompleted(result);

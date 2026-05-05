@@ -7,8 +7,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
+type SmsLoginCallbacks = {
+  onComplete?: (params: { user: { linkedAccounts?: unknown } }) => void;
+};
+
 const mocks = vi.hoisted(() => ({
   createWallet: vi.fn(),
+  loginCallbacks: null as SmsLoginCallbacks | null,
   loginWithCode: vi.fn(),
   logout: vi.fn(),
   refreshUser: vi.fn(),
@@ -16,6 +21,31 @@ const mocks = vi.hoisted(() => ({
   usePrivy: vi.fn(),
   useUser: vi.fn(),
 }));
+
+type TestLinkedAccount = Record<string, unknown> & { type?: unknown };
+
+function readHostedPrivyClientSessionStateForTest(input: {
+  user: { linkedAccounts?: unknown } | null;
+}) {
+  const linkedAccounts = Array.isArray(input.user?.linkedAccounts)
+    ? input.user.linkedAccounts.filter(isTestLinkedAccount)
+    : [];
+
+  return {
+    linkedAccounts,
+    phone: linkedAccounts.some((account) => account.type === "phone")
+      ? {
+          number: "+15555551212",
+          verifiedAt: 1771977600,
+        }
+      : null,
+    wallet: null,
+  };
+}
+
+function isTestLinkedAccount(value: unknown): value is TestLinkedAccount {
+  return typeof value === "object" && value !== null;
+}
 
 vi.mock("@privy-io/react-auth", () => ({
   Captcha() {
@@ -26,7 +56,9 @@ vi.mock("@privy-io/react-auth", () => ({
       createWallet: mocks.createWallet,
     };
   },
-  useLoginWithSms() {
+  useLoginWithSms(callbacks?: SmsLoginCallbacks) {
+    mocks.loginCallbacks = callbacks ?? null;
+
     return {
       loginWithCode: mocks.loginWithCode,
       sendCode: mocks.sendCode,
@@ -39,6 +71,7 @@ vi.mock("@privy-io/react-auth", () => ({
 describe("HostedPhoneAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.loginCallbacks = null;
     mocks.usePrivy.mockReturnValue({
       authenticated: false,
       logout: mocks.logout,
@@ -2072,6 +2105,174 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
+  it("passes Privy's completed SMS user into hosted phone finalization", async () => {
+    vi.resetModules();
+    const completedUser = {
+      linkedAccounts: [
+        {
+          latest_verified_at: 1771977600,
+          number: "+14155552671",
+          type: "phone",
+        },
+      ],
+    };
+    const finalizeHostedPrivyVerification = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-support", async () => {
+      const actual = await vi.importActual<
+        typeof import("@/src/components/hosted-onboarding/hosted-phone-auth-support")
+      >("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      return {
+        ...actual,
+        finalizeHostedPrivyVerification,
+      };
+    });
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: {
+        activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
+        onCodeChange: (code: string) => void;
+        onPhoneNumberChange: (phoneNumber: string) => void;
+        onSubmitPhoneEntry: () => void;
+        onVerifyCode: () => void;
+      }) {
+        if (props.activeAttempt) {
+          return React.createElement(
+            "div",
+            null,
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                onClick: () => props.onCodeChange("123456"),
+              },
+              "Enter code",
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                onClick: props.onVerifyCode,
+              },
+              "Verify code",
+            ),
+          );
+        }
+
+        return React.createElement(
+          "div",
+          null,
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => props.onPhoneNumberChange("4155552671"),
+            },
+            "Enter phone",
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => props.onSubmitPhoneEntry(),
+            },
+            "Send verification code",
+          ),
+        );
+      },
+      HostedPhoneAuthScaffold({ children }: { children: React.ReactNode }) {
+        return React.createElement(React.Fragment, null, children);
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return React.createElement("div", { "data-privy-captcha": "mounted" });
+      },
+    }));
+
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: null,
+    });
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [],
+    });
+    mocks.sendCode.mockResolvedValue(undefined);
+    mocks.loginWithCode.mockImplementationOnce(async () => {
+      mocks.loginCallbacks?.onComplete?.({
+        user: completedUser,
+      });
+    });
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        intent: "auth",
+      }),
+    );
+
+    try {
+      const enterPhoneButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Enter phone") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(enterPhoneButton);
+
+      await act(async () => {
+        enterPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      const sendCodeButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Send verification code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(sendCodeButton);
+
+      await act(async () => {
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      const enterCodeButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Enter code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(enterCodeButton);
+
+      await act(async () => {
+        enterCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      const verifyCodeButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Verify code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(verifyCodeButton);
+
+      await act(async () => {
+        verifyCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(finalizeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+        completedUser,
+        refreshUser: mocks.refreshUser,
+        user: null,
+      }));
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
   it("uses full-size code entry controls for the public homepage code step", async () => {
     const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
@@ -2482,6 +2683,7 @@ describe("HostedPhoneAuth", () => {
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
       HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0],
       ensureHostedPrivyPhoneReady,
+      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
@@ -2534,6 +2736,7 @@ describe("HostedPhoneAuth", () => {
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
       HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0],
       ensureHostedPrivyPhoneReady,
+      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
@@ -2603,6 +2806,7 @@ describe("HostedPhoneAuth", () => {
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
       HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
       ensureHostedPrivyPhoneReady,
+      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: TestHostedOnboardingApiError,
@@ -2674,6 +2878,7 @@ describe("HostedPhoneAuth", () => {
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
       HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
       ensureHostedPrivyPhoneReady,
+      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: TestHostedOnboardingApiError,
