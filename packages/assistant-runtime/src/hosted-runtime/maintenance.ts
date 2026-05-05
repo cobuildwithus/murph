@@ -1,4 +1,7 @@
-import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
+import {
+  createConfiguredDeviceSyncProvidersFromConfigs,
+  readConfiguredJunctionDeviceSyncProviderConfig,
+} from "@murphai/device-syncd/config";
 import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
@@ -50,6 +53,12 @@ import {
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
 const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
+const HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS = [
+  "JUNCTION_API_KEY",
+  "JUNCTION_CLIENT_USER_ID_SECRET",
+  "JUNCTION_ENV",
+  "JUNCTION_REGION",
+] as const;
 
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
@@ -141,6 +150,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     input.runtime.platform.deviceSyncPort,
     input.runtime.commitTimeoutMs,
     {
+      platformEnv: input.runtime.platformEnv,
       runtimeLogPlatform: input.runtime.platform,
     },
   );
@@ -442,6 +452,7 @@ export async function runHostedDeviceSyncPass(
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
   options: {
+    platformEnv?: Readonly<Record<string, string>>;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   } = {},
 ): Promise<{
@@ -452,10 +463,15 @@ export async function runHostedDeviceSyncPass(
 }> {
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
+    platformEnv: options.platformEnv ?? {},
     vaultRoot,
   });
 
   if (!service) {
+    if (deviceSyncConfig) {
+      reportHostedDeviceSyncConfigMissing(wake);
+    }
+
     return {
       nextWakeAt: null,
       postCheckpointRecord: null,
@@ -539,6 +555,7 @@ export async function runHostedDeviceSyncPass(
 
 export async function runHostedDeviceSyncWakeLane(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  platformEnv?: Readonly<Record<string, string>>;
   runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   wake: HostedRuntimeEvent;
   resolvedConfig: {
@@ -554,6 +571,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
     input.deviceSyncPort,
     input.timeoutMs,
     {
+      platformEnv: input.platformEnv ?? {},
       runtimeLogPlatform: input.runtimeLogPlatform ?? null,
     },
   );
@@ -619,6 +637,20 @@ function reportHostedDeviceSyncControlPlaneFailure(
     level: "warn",
     message: `Hosted device-sync control-plane ${phase} failed; continuing hosted job.`,
     phase: "wake.running",
+  });
+}
+
+function reportHostedDeviceSyncConfigMissing(wake: HostedRuntimeEvent): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      eventCode: "dirty_state.device_sync_config_missing",
+      reason: "device_sync_config_missing",
+    },
+    level: "warn",
+    message: "Hosted device-sync dirty state skipped: dirty_state.device_sync_config_missing.",
+    phase: "wake.running",
+    wake,
   });
 }
 
@@ -749,6 +781,7 @@ function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
 
 function createHostedDeviceSyncRuntime(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
+  platformEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }) {
   if (!input.deviceSyncConfig) {
@@ -757,7 +790,10 @@ function createHostedDeviceSyncRuntime(input: {
 
   const registry = createDeviceSyncRegistry(
     createConfiguredDeviceSyncProvidersFromConfigs(
-      resolveHostedRuntimeDeviceSyncProviderConfigs(input.deviceSyncConfig.providerConfigs),
+      resolveHostedRuntimeDeviceSyncProviderConfigs(
+        input.deviceSyncConfig.providerConfigs,
+        input.platformEnv,
+      ),
     ),
   );
 
@@ -777,13 +813,17 @@ function createHostedDeviceSyncRuntime(input: {
 
 function resolveHostedRuntimeDeviceSyncProviderConfigs(
   providerConfigs: HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"],
+  platformEnv: Readonly<Record<string, string>>,
 ): ConfiguredDeviceSyncProviderConfigs {
   const runtimeProviderConfigs: ConfiguredDeviceSyncProviderConfigs = {};
 
-  // Junction provider-config credentials require provider-owned API/HMAC
-  // secrets. The resolved hosted config is serializable, so Junction must be
-  // hydrated through an explicit runtime secret channel before provider
-  // instantiation instead of being reconstructed from this envelope.
+  if (providerConfigs.junction && hasHostedRuntimeJunctionPlatformEnv(platformEnv)) {
+    const junction = readConfiguredJunctionDeviceSyncProviderConfig(platformEnv);
+
+    if (junction) {
+      runtimeProviderConfigs.junction = junction;
+    }
+  }
 
   if (providerConfigs.oura) {
     runtimeProviderConfigs.oura = providerConfigs.oura;
@@ -798,4 +838,10 @@ function resolveHostedRuntimeDeviceSyncProviderConfigs(
   }
 
   return runtimeProviderConfigs;
+}
+
+function hasHostedRuntimeJunctionPlatformEnv(
+  platformEnv: Readonly<Record<string, string>>,
+): boolean {
+  return HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS.some((key) => Boolean(platformEnv[key]));
 }

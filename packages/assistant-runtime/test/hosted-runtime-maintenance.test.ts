@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   initInboxRuntime: vi.fn(),
   readAssistantAutomationState: vi.fn(),
+  readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
@@ -23,6 +24,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@murphai/device-syncd/config", () => ({
   createConfiguredDeviceSyncProvidersFromConfigs:
     mocks.createConfiguredDeviceSyncProvidersFromConfigs,
+  readConfiguredJunctionDeviceSyncProviderConfig:
+    mocks.readConfiguredJunctionDeviceSyncProviderConfig,
 }));
 
 vi.mock("@murphai/device-syncd/registry", () => ({
@@ -191,6 +194,7 @@ beforeEach(() => {
     progressed: false,
   });
   mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["oura"]);
+  mocks.readConfiguredJunctionDeviceSyncProviderConfig.mockReturnValue(null);
   mocks.createDeviceSyncRegistry.mockReturnValue({
     list: () => ["oura"],
   });
@@ -784,7 +788,82 @@ describe("runHostedDeviceSyncPass", () => {
       skipped: true,
     });
     expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
+    expect(mocks.readConfiguredJunctionDeviceSyncProviderConfig).not.toHaveBeenCalled();
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
+  });
+
+  it("hydrates Junction provider config from hosted runtime platform env", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+    const platformEnv = {
+      JUNCTION_API_KEY: "junction-api-key",
+      JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    };
+    const junctionConfig = {
+      apiKey: "junction-api-key",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+    };
+
+    mocks.readConfiguredJunctionDeviceSyncProviderConfig.mockReturnValue(junctionConfig);
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["junction"]);
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => ["junction"],
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => null,
+      runSchedulerOnce,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_junction_platform_env",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["garmin"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        platformEnv,
+      },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: false,
+    });
+    expect(mocks.readConfiguredJunctionDeviceSyncProviderConfig).toHaveBeenCalledWith(platformEnv);
+    expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({
+      junction: junctionConfig,
+    });
+    expect(mocks.createHostedRuntimeDeviceSyncService).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registry: expect.anything(),
+      }),
+    );
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it("skips device sync when the hosted runtime resolved config disables device sync", async () => {

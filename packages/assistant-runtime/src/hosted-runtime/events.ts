@@ -124,7 +124,7 @@ async function executeHostedSystemWake(input: {
   forceQueueOnlyAssistantNotification: boolean;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig"
+    "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -149,6 +149,7 @@ async function executeHostedSystemWake(input: {
     case "device-sync.wake":
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+        platformEnv: input.runtime.platformEnv,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         timeoutMs: input.runtime.commitTimeoutMs,
