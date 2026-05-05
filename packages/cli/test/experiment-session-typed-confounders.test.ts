@@ -108,7 +108,7 @@ test.sequential(
         slug: string
       }>([
         'experiment',
-        'create',
+        'start',
         'typed-confounders',
         '--title',
         'Typed Confounders',
@@ -116,6 +116,12 @@ test.sequential(
         '2026-04-01',
         '--status',
         'active',
+        '--intervention-start',
+        '2026-04-08',
+        '--intervention-days',
+        '14',
+        '--primary-biomarker-key',
+        'biomarker:resting-heart-rate',
         '--vault',
         vaultRoot,
       ])

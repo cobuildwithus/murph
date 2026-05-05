@@ -20,7 +20,7 @@ describe('assistant transcript audit replay', () => {
           mode: 'apply',
           tool: 'vault.cli.run',
           input: {
-            command: 'vault-cli experiment update',
+            command: 'vault-cli experiment edit',
           },
         },
         {

@@ -274,12 +274,14 @@ function createIntegratedCoreServices(): CoreWriteServices {
       return createExperimentRecord(input)
     },
     async planExperiment(input: CommandContext & {
-      inputFile: string
+      inputFile?: string
+      payload?: JsonObject
     }) {
       return planExperimentRecord(input)
     },
     async startExperiment(input: CommandContext & {
-      inputFile: string
+      inputFile?: string
+      payload?: JsonObject
     }) {
       return startExperimentFromPlanRecord(input)
     },

@@ -362,8 +362,8 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
     asOf: "2026-04-20",
   });
 
-  assert.equal(progress.schema, "murph.experiment-progress.v1");
-  assert.equal(progress.schemaVersion, "murph.experiment-progress.v1");
+  assert.equal(progress.schema, "murph.experiment-progress.v2");
+  assert.equal(progress.schemaVersion, "murph.experiment-progress.v2");
   assert.equal(progress.phase, "intervention");
   assert.equal(progress.dayInRun, 20);
   assert.equal(progress.experiment.id, "exp_01JNV4458HYPP53JDQCBP1QJFM");
@@ -446,6 +446,44 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
     reason: "Logged sessions are behind the current target pace.",
     shouldNotifyUser: true,
   });
+});
+
+test("experiment progress treats incomplete setup as setup-missing rather than missing wearable data", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFS",
+    slug: "partial-setup",
+    runPlan: {
+      baselineStart: "2026-04-01",
+      baselineEnd: "2026-04-07",
+      interventionStart: "2026-04-08",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      desiredDirection: "decrease",
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-partial-setup",
+    metadata: null,
+    entities: [experiment],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "partial-setup", {
+    asOf: "2026-04-10",
+  });
+
+  assert.equal(progress.phase, "planned");
+  assert.equal(progress.dayInRun, null);
+  assert.equal(progress.dataCoverage.status, "insufficient");
+  assert.deepEqual(progress.setupReadiness, {
+    status: "incomplete",
+    blockingReasons: ["missing_intervention_window"],
+  });
+  assert.deepEqual(progress.analysisReadiness, {
+    status: "incomplete",
+    blockingReasons: ["missing_metric_window"],
+  });
+  assert.equal(progress.recommendation.reason, "Too early; no action is needed.");
 });
 
 test("experiment progress and outcome preserve private protocol refs and effective snapshots", () => {

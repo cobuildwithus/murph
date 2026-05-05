@@ -165,45 +165,55 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
     assert.equal(requireData(samplesAdd).lookupIds.length, 1)
 
     const createdExperiment = await runCli<{
-      experimentId: string
-      experimentPath: string
+      experiment: {
+        experimentId: string
+        experimentPath: string
+      } | null
     }>([
       'experiment',
-      'create',
+      'start',
       'sleep-reset',
       '--title',
       'Sleep Reset Sprint',
       '--hypothesis',
       'Earlier light exposure will improve sleep onset.',
+      '--intervention-start',
+      '2026-03-12',
+      '--intervention-days',
+      '7',
+      '--primary-biomarker-key',
+      'biomarker:sleep-efficiency',
       '--vault',
       vaultRoot,
     ])
 
     assert.equal(createdExperiment.ok, true)
 
-    const experimentId = requireData(createdExperiment).experimentId
-    const experimentPath = requireData(createdExperiment).experimentPath
+    const experiment = requireData(createdExperiment).experiment
+    assert.ok(experiment)
 
     const experimentCheckpoint = await runCli<{
       eventId: string
       experimentId: string
-    }>(
-      ['experiment', 'checkpoint-json', '--input', '-', '--vault', vaultRoot],
-      {
-        stdin: JSON.stringify({
-          lookup: experimentId,
-          occurredAt: '2026-03-12T22:15:00.000Z',
-          title: 'Evening checkpoint',
-          note: 'Screens off by 9:30 pm.',
-        }),
-      },
-    )
+    }>([
+      'experiment',
+      'checkpoint',
+      experiment.experimentId,
+      '--occurred-at',
+      '2026-03-12T22:15:00.000Z',
+      '--title',
+      'Evening checkpoint',
+      '--note',
+      'Screens off by 9:30 pm.',
+      '--vault',
+      vaultRoot,
+    ])
 
     assert.equal(experimentCheckpoint.ok, true)
     assert.match(requireData(experimentCheckpoint).eventId, /^evt_/u)
 
     const experimentMarkdown = await readFile(
-      path.join(vaultRoot, experimentPath),
+      path.join(vaultRoot, experiment.experimentPath),
       'utf8',
     )
 

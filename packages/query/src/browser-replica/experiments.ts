@@ -202,6 +202,14 @@ export interface BrowserVaultExperimentProgressResult {
     primaryMetricDaysAvailable: number;
     status: BrowserVaultExperimentCoverageStatus;
   };
+  setupReadiness: {
+    status: "ready" | "incomplete";
+    blockingReasons: string[];
+  };
+  analysisReadiness: {
+    status: "ready" | "incomplete";
+    blockingReasons: string[];
+  };
   dayInRun: number | null;
   phase: BrowserVaultExperimentProgressPhase;
   windows: BrowserVaultExperimentRunWindows;
@@ -365,10 +373,17 @@ function buildRunContext(
   const asOfDate = schedule ? toZonedIsoDate(asOf, schedule.timeZone) : toIsoDate(asOf);
   const startedOn = readString(attributes.startedOn) ?? entity.date ?? extractDate(entity.occurredAt);
   const completedAt = readString(attributes.completedAt) ?? readString(attributes.endedOn);
+  const hasCompleteWindows =
+    windows.baselineStart !== null &&
+    windows.baselineEnd !== null &&
+    windows.interventionStart !== null &&
+    windows.interventionEnd !== null;
   const run = {
     commonsProtocolRef: cloneRecordOrNull(attributes.commonsProtocolRef),
     completedAt,
-    dayInRun: computeDayInRun(windows.baselineStart ?? startedOn, asOfDate),
+    dayInRun: hasCompleteWindows
+      ? computeDayInRun(windows.baselineStart, asOfDate)
+      : null,
     effectiveProtocolSnapshot: cloneRecordOrNull(attributes.effectiveProtocolSnapshot),
     id: readString(attributes.experimentId) ?? entity.id,
     phase: resolveExperimentPhase(readString(attributes.status) ?? entity.status, windows, asOfDate),
@@ -904,12 +919,63 @@ function buildProgressResult(
       interventionDaysAvailable: primaryInterventionDays,
       primaryBiomarkerKey: primary?.biomarkerKey ?? null,
       primaryMetricDaysAvailable: primaryBaselineDays + primaryInterventionDays,
-      status: classifyCoverageStatus(context.run.phase, primary),
+      status: classifyCoverageStatus(context.run.phase, primary, context.run.windows),
     },
+    setupReadiness: buildBrowserSetupReadiness(context),
+    analysisReadiness: buildBrowserAnalysisReadiness(context),
     dayInRun: context.run.dayInRun,
     phase: context.run.phase,
     windows: context.run.windows,
   };
+}
+
+function readinessResult(blockingReasons: string[]) {
+  return {
+    status: blockingReasons.length === 0 ? "ready" : "incomplete",
+    blockingReasons,
+  } as const;
+}
+
+function buildBrowserSetupReadiness(
+  context: BrowserVaultExperimentRunContext,
+): BrowserVaultExperimentProgressResult["setupReadiness"] {
+  const blockingReasons: string[] = [];
+
+  if (!readRecord(context.entity.attributes.runPlan)) {
+    blockingReasons.push("missing_run_plan");
+  }
+  if (!context.run.windows.baselineStart || !context.run.windows.baselineEnd) {
+    blockingReasons.push("missing_baseline_window");
+  }
+  if (!context.run.windows.interventionStart || !context.run.windows.interventionEnd) {
+    blockingReasons.push("missing_intervention_window");
+  }
+
+  return readinessResult(blockingReasons);
+}
+
+function buildBrowserAnalysisReadiness(
+  context: BrowserVaultExperimentRunContext,
+): BrowserVaultExperimentProgressResult["analysisReadiness"] {
+  const blockingReasons: string[] = [];
+  const analysisPlan = readRecord(context.entity.attributes.analysisPlan);
+
+  if (!analysisPlan) {
+    blockingReasons.push("missing_analysis_plan");
+  }
+  if (!readString(analysisPlan?.primaryBiomarkerKey)) {
+    blockingReasons.push("missing_primary_biomarker");
+  }
+  if (
+    !context.run.windows.baselineStart ||
+    !context.run.windows.baselineEnd ||
+    !context.run.windows.interventionStart ||
+    !context.run.windows.interventionEnd
+  ) {
+    blockingReasons.push("missing_metric_window");
+  }
+
+  return readinessResult(blockingReasons);
 }
 
 function buildOutcomeResult(
@@ -1234,13 +1300,19 @@ function classifyAdherenceStatus(input: {
 function classifyCoverageStatus(
   phase: BrowserVaultExperimentProgressPhase,
   primary: BrowserVaultExperimentBiomarkerResult | null,
+  windows: BrowserVaultExperimentRunWindows,
 ): BrowserVaultExperimentCoverageStatus {
   const baselineDays = primary?.baseline.daysWithData ?? 0;
   const interventionDays = primary?.intervention.daysWithData ?? 0;
   const totalDays = baselineDays + interventionDays;
+  const hasCompleteWindows =
+    windows.baselineStart !== null &&
+    windows.baselineEnd !== null &&
+    windows.interventionStart !== null &&
+    windows.interventionEnd !== null;
 
   if (totalDays === 0) {
-    return "no_data";
+    return hasCompleteWindows && primary !== null ? "no_data" : "insufficient";
   }
 
   if (
@@ -1280,6 +1352,15 @@ function resolveExperimentPhase(
   }
 
   if (status === "planned") {
+    return "planned";
+  }
+
+  if (
+    windows.baselineStart === null ||
+    windows.baselineEnd === null ||
+    windows.interventionStart === null ||
+    windows.interventionEnd === null
+  ) {
     return "planned";
   }
 
