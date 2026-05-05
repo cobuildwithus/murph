@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
     createDeviceSyncPublicIngress: vi.fn(),
     createSignal: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
-    enqueueHostedExecutionOutbox: vi.fn(),
+    appendHostedMailboxEnvelope: vi.fn(),
     getConnectionForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     getDirtyConnection: vi.fn(),
     upsertDirtyConnection: vi.fn(),
     upsertConnectionSource: vi.fn(),
+    withConnectionMutationLock: vi.fn(),
     prismaTx: {
       __tx: true,
       deviceSyncSignal: {
@@ -36,7 +37,7 @@ const mocks = vi.hoisted(() => {
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       envelope: { eventId: string; userId: string };
     }) => {
-      await state.enqueueHostedExecutionOutbox(input);
+      await state.appendHostedMailboxEnvelope(input);
       return {
         dedupeConflict: false,
         duplicate: false,
@@ -186,6 +187,24 @@ function buildStoredConnection(
   };
 }
 
+function buildProviderConfigStoredConnection(
+  overrides: Parameters<typeof buildHostedConnection>[0] = {},
+) {
+  const connection = buildHostedConnection(overrides);
+
+  return {
+    ...connection,
+    credential: {
+      kind: "provider_config",
+      credentialMetadata: {},
+      providerConfigKey: "hosted-provider-config",
+    },
+    disconnectGeneration: 0,
+    keyVersion: null,
+    tokenVersion: null,
+  };
+}
+
 function buildDirtyConnectionRecord(overrides: Partial<{
   connectionId: string;
   dirtyRevision: bigint;
@@ -242,6 +261,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     syncDurableConnectionState = mocks.syncDurableConnectionState;
     upsertDirtyConnection = mocks.upsertDirtyConnection;
     upsertConnectionSource = mocks.upsertConnectionSource;
+    withConnectionMutationLock = mocks.withConnectionMutationLock;
     prisma = mocks.prisma;
   },
   generateHostedAgentBearerToken: vi.fn(),
@@ -383,7 +403,7 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
       runId: "workflow_run_123",
     });
-    mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
+    mocks.appendHostedMailboxEnvelope.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.upsertDirtyConnection.mockResolvedValue({
@@ -398,6 +418,10 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.persistStoredConnectionTokenBundle.mockResolvedValue(undefined);
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
+    mocks.withConnectionMutationLock.mockImplementation(async (
+      _connectionId: string,
+      callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
+    ) => callback(mocks.prismaTx));
   });
 
   it("requires an explicit hosted public base URL in production instead of trusting the request host", () => {
@@ -466,7 +490,7 @@ describe("appendHostedDeviceSyncWake", () => {
       tx: mocks.prismaTx,
       userId: "user-123",
     });
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
           connectionId: "dsc_123",
@@ -549,7 +573,7 @@ describe("appendHostedDeviceSyncWake", () => {
       tx: mocks.prismaTx,
       userId: "user-123",
     });
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
           connectionId: "dsc_123",
@@ -627,15 +651,15 @@ describe("appendHostedDeviceSyncWake", () => {
       tx: mocks.prismaTx,
     });
     expect(mocks.syncDurableConnectionState.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+      mocks.appendHostedMailboxEnvelope.mock.invocationCallOrder[0],
     );
     expect(mocks.persistStoredConnectionTokenBundle.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+      mocks.appendHostedMailboxEnvelope.mock.invocationCallOrder[0],
     );
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+      mocks.appendHostedMailboxEnvelope.mock.invocationCallOrder[0],
     );
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
           eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
@@ -643,6 +667,96 @@ describe("appendHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
+  });
+
+  it("re-reads inside the connection mutation lock before clearing refreshed tokens", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const beforeRefresh = buildHostedConnection({
+      accessTokenExpiresAt: "2026-03-26T12:05:00.000Z",
+      lastSyncCompletedAt: null,
+      nextReconcileAt: "2026-03-26T12:10:00.000Z",
+    });
+    const afterRefresh = buildHostedConnection({
+      accessTokenExpiresAt: "2026-03-26T13:00:00.000Z",
+      lastSyncCompletedAt: "2026-03-26T12:01:00.000Z",
+      nextReconcileAt: "2026-03-26T13:10:00.000Z",
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    const beforeRefreshStored = buildStoredConnection({
+      accessTokenExpiresAt: "2026-03-26T12:05:00.000Z",
+    });
+    const afterRefreshStored = buildStoredConnection({
+      accessTokenExpiresAt: "2026-03-26T13:00:00.000Z",
+      updatedAt: "2026-03-26T12:01:00.000Z",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([beforeRefresh]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(beforeRefresh)
+      .mockResolvedValueOnce(afterRefresh);
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(beforeRefreshStored)
+      .mockResolvedValueOnce(afterRefreshStored);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
+      connection: {
+        id: publicConnectionId,
+        status: "disconnected",
+      },
+    });
+
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.getConnectionForUser).toHaveBeenNthCalledWith(2, "user-123", "dsc_123", mocks.prismaTx);
+    expect(mocks.getStoredConnectionAccountForUser).toHaveBeenNthCalledWith(2, "user-123", "dsc_123", mocks.prismaTx);
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessTokenExpiresAt: null,
+        id: "dsc_123",
+        lastSyncCompletedAt: "2026-03-26T12:01:00.000Z",
+        nextReconcileAt: null,
+        status: "disconnected",
+      }),
+      mocks.prismaTx,
+    );
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      externalAccountId: afterRefreshStored.externalAccountId,
+      provider: "oura",
+      tokenBundle: null,
+      tx: mocks.prismaTx,
+    });
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not append duplicate disconnect wakes for disconnected tokenless provider-config connections", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const disconnectedConnection = buildHostedConnection({
+      status: "disconnected",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([disconnectedConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(disconnectedConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildProviderConfigStoredConnection({
+      status: "disconnected",
+    }));
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
+      connection: {
+        id: publicConnectionId,
+        status: "disconnected",
+      },
+    });
+
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("sanitizes revoke failures before they fan out to runtime state, signals, dispatches, and the browser response", async () => {
@@ -689,7 +803,7 @@ describe("appendHostedDeviceSyncWake", () => {
         },
       }),
     );
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
           hint: expect.objectContaining({
@@ -726,7 +840,7 @@ describe("appendHostedDeviceSyncWake", () => {
       },
     });
 
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
   });
 
   it("returns opaque browser connection ids and omits external account ids from browser reads", async () => {
@@ -852,7 +966,7 @@ describe("appendHostedDeviceSyncWake", () => {
         userId: "user-123",
       }),
     );
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
           connectionId: "dsc_123",
@@ -1135,7 +1249,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.upsertDirtyConnection.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.completeWebhookTrace.mock.invocationCallOrder[0],
     );
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "hosted-device-sync-dirty-webhook",
@@ -1160,7 +1274,7 @@ describe("appendHostedDeviceSyncWake", () => {
     await controlPlane.handleWebhook("oura");
 
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
   });
 
@@ -1194,7 +1308,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
       expect(mocks.createSignal).toHaveBeenCalledTimes(1);
       expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
-      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
       expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
       expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
       expect(consoleWarn).toHaveBeenCalledWith(
@@ -1282,7 +1396,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).toHaveBeenCalledTimes(2_500);
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(2_500);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2_500);
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
   });
@@ -1361,7 +1475,7 @@ describe("appendHostedDeviceSyncWake", () => {
       });
     }
 
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(2);
   });
@@ -1390,7 +1504,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(ingress.handleWebhook).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
   it("does not complete or nudge a hosted webhook trace when dirty-state persistence fails", async () => {
@@ -1412,7 +1526,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
@@ -1517,7 +1631,7 @@ describe("appendHostedDeviceSyncWake", () => {
         windowStart: "2026-03-19T00:00:00.000Z",
       },
     ]);
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "hosted-device-sync-dirty-webhook",
       timeoutMs: 5_000,
@@ -1631,7 +1745,7 @@ describe("appendHostedDeviceSyncWake", () => {
         windowStart: null,
       },
     ]);
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "hosted-device-sync-dirty-webhook",
       timeoutMs: 5_000,
@@ -1671,7 +1785,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
@@ -1756,7 +1870,7 @@ describe("appendHostedDeviceSyncWake", () => {
       },
     ]);
     expect(JSON.stringify(dirtyResources)).not.toContain("oura-user-1");
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "hosted-device-sync-dirty-webhook",
       timeoutMs: 5_000,

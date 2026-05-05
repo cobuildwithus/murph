@@ -113,7 +113,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
   const updates = await Promise.all(
     parsed.updates.map(async (update) =>
-      controlPlane.store.withConnectionRefreshLock(update.connectionId, async (tx) => {
+      controlPlane.store.withConnectionMutationLock(update.connectionId, async (tx) => {
         const record = await tx.deviceConnection.findFirst({
           where: {
             id: update.connectionId,
@@ -139,7 +139,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         );
         const durableConnection = storedAccount
           ? null
-          : await controlPlane.store.getConnectionForUser(input.trustedUserId, update.connectionId);
+          : await controlPlane.store.getConnectionForUser(input.trustedUserId, update.connectionId, tx);
         const durableExternalAccountId =
           storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null;
         const baseline = buildHostedRuntimeConnectionSnapshot(
