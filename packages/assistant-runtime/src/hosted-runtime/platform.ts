@@ -22,8 +22,6 @@ import type {
   HostedExecutionDeviceSyncDirtyAckResponse,
   HostedExecutionDeviceSyncDirtyPendingRequest,
   HostedExecutionDeviceSyncDirtyPendingResponse,
-  HostedExecutionDeviceSyncDirtyStateRequest,
-  HostedExecutionDeviceSyncDirtyStateResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
@@ -84,13 +82,10 @@ export interface HostedRuntimeDeviceSyncPort {
     connectionId?: string | null;
     provider?: string | null;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  fetchDirtyState?(input: Omit<HostedExecutionDeviceSyncDirtyStateRequest, "userId">): Promise<
-    HostedExecutionDeviceSyncDirtyStateResponse | null
-  >;
-  fetchDirtyStates?(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId">): Promise<
+  fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId">): Promise<
     HostedExecutionDeviceSyncDirtyPendingResponse
   >;
-  ackDirtyStateProcessed?(input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId">): Promise<
+  ackDirtyStateProcessed(input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId">): Promise<
     HostedExecutionDeviceSyncDirtyAckResponse
   >;
 }

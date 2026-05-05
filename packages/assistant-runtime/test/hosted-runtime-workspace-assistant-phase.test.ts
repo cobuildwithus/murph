@@ -90,6 +90,25 @@ type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
 
+function createNoDirtyRuntimeDeviceSyncPortMethods(): Pick<
+  RuntimeDeviceSyncPort,
+  "ackDirtyStateProcessed" | "fetchDirtyStates"
+> {
+  return {
+    async ackDirtyStateProcessed() {
+      throw new Error("ackDirtyStateProcessed should not be called.");
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: "member_synthetic_phase",
+      };
+    },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
@@ -215,6 +234,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
         return {
           appliedAt: "2026-04-29T00:00:00.000Z",
@@ -318,6 +338,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("logs hosted device connect helper failures without leaking response details", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
         return {
           appliedAt: "2026-04-29T00:00:00.000Z",

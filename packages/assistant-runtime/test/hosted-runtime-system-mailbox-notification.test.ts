@@ -185,6 +185,14 @@ describe("hosted system mailbox notification execution context", () => {
           async createConnectLink() {
             throw new Error("createConnectLink should not be called");
           },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
           async fetchSnapshot() {
             throw new Error("fetchSnapshot should not be called");
           },

@@ -156,8 +156,6 @@ function buildDeviceSyncWake(input: {
   connectionId: string;
   eventId?: string;
   hint?: {
-    dirtyConnectionId?: string | null;
-    dirtyRevision?: string | null;
     jobs?: Array<{
       availableAt?: string;
       dedupeKey?: string;
@@ -282,10 +280,30 @@ function buildEmptyRuntimeSnapshot(): HostedExecutionDeviceSyncRuntimeSnapshotRe
   };
 }
 
+function createNoDirtyStateDeviceSyncPortMethods(): Pick<
+  HostedRuntimeDeviceSyncPort,
+  "ackDirtyStateProcessed" | "fetchDirtyStates"
+> {
+  return {
+    async ackDirtyStateProcessed() {
+      throw new Error("ackDirtyStateProcessed should not be called during sync");
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: "member_123",
+      };
+    },
+  };
+}
+
 function createSnapshotOnlyDeviceSyncPort(
   snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 ): HostedRuntimeDeviceSyncPort {
   return {
+    ...createNoDirtyStateDeviceSyncPortMethods(),
     async applyUpdates() {
       throw new Error("applyUpdates should not be called during sync");
     },
@@ -425,6 +443,7 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
     let fetchSnapshotCalls = 0;
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
       async applyUpdates() {
         throw new Error("applyUpdates should not be called during sync");
       },
@@ -504,6 +523,7 @@ describe("hosted device-sync runtime", () => {
       });
       let fetchSnapshotCalls = 0;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates() {
           throw new Error("applyUpdates should not be called during sync");
         },
@@ -609,6 +629,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -783,6 +804,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -982,14 +1004,14 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("dirty device-sync wakes fetch dirty state and enqueue semantic resource jobs", async () => {
+  test("device-sync wakes pull pending dirty state and enqueue semantic resource jobs", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
     await mkdir(vaultRoot, { recursive: true });
 
     const service = createDeviceSyncServiceForVault(vaultRoot);
-    const dirtyStateRequests: Array<{ connectionId: string; dirtyRevision: string }> = [];
+    const pendingRequests: Array<{ limit?: number | null }> = [];
 
     try {
       const begin = await service.startConnection({
@@ -1035,15 +1057,21 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
           async createConnectLink() {
             throw new Error("createConnectLink should not be called during sync");
           },
-          async fetchDirtyState(input) {
-            dirtyStateRequests.push(input);
-            return dirtyState;
+          async fetchDirtyStates(input = {}) {
+            pendingRequests.push(input);
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
           },
           async fetchSnapshot() {
             return snapshot;
@@ -1053,8 +1081,6 @@ describe("hosted device-sync runtime", () => {
           connectionId: "hosted_conn_dirty_wake",
           eventId: "evt_device_sync_dirty_wake",
           hint: {
-            dirtyConnectionId: "hosted_conn_dirty_wake",
-            dirtyRevision: "42",
             reason: "dirty",
           },
           occurredAt: "2026-04-04T10:00:00.000Z",
@@ -1064,10 +1090,9 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      assert.deepEqual(dirtyStateRequests, [
+      assert.deepEqual(pendingRequests, [
         {
-          connectionId: "hosted_conn_dirty_wake",
-          dirtyRevision: "42",
+          limit: 1,
         },
       ]);
       assert.deepEqual(state.pendingDirtyAck, {
@@ -1166,6 +1191,7 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -1304,7 +1330,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("legacy device-sync wake hints do not require dirty-pending routes during staggered deploys", async () => {
+  test("legacy device-sync wake hints still drain while the runtime checks dirty state", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -1329,10 +1355,16 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           ...createSnapshotOnlyDeviceSyncPort(snapshot),
           async fetchDirtyStates() {
             dirtyPendingFetches += 1;
-            throw new Error("dirty-pending should not be fetched for legacy device-sync wakes");
+            return {
+              hasMore: false,
+              items: [],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
           },
         },
         wake: buildDeviceSyncWake({
@@ -1354,7 +1386,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      assert.equal(dirtyPendingFetches, 0);
+      assert.equal(dirtyPendingFetches, 1);
       assert.equal(state.pendingDirtyAck, null);
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
@@ -1448,6 +1480,7 @@ describe("hosted device-sync runtime", () => {
         status: "active",
       });
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates() {
           throw new Error("applyUpdates should not be called during sync");
         },
@@ -1570,6 +1603,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -1714,6 +1748,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -1780,6 +1815,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -1801,6 +1837,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -1852,6 +1889,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -1928,6 +1966,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2018,6 +2057,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2096,6 +2136,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2205,6 +2246,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -2336,6 +2378,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2364,6 +2407,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2414,6 +2458,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2442,6 +2487,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2492,6 +2538,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2520,6 +2567,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             throw new Error("applyUpdates should not be called during sync");
           },
@@ -2584,6 +2632,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -2724,6 +2773,7 @@ describe("hosted device-sync runtime", () => {
     try {
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates() {
             applyUpdatesCalls += 1;
             return {
@@ -2787,6 +2837,7 @@ describe("hosted device-sync runtime", () => {
     try {
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
           async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
             appliedRequest = input;
             return {
@@ -2842,6 +2893,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -2910,6 +2962,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -2990,6 +3043,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -3065,6 +3119,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -3161,6 +3216,7 @@ describe("hosted device-sync runtime", () => {
       };
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -3308,6 +3364,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -3372,6 +3429,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {
@@ -3441,6 +3499,7 @@ describe("hosted device-sync runtime", () => {
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
           return {

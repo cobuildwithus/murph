@@ -20,6 +20,9 @@ import type {
 
 function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
   return {
+    async ackDirtyStateProcessed() {
+      throw new Error("ackDirtyStateProcessed should not be called.");
+    },
     async applyUpdates() {
       throw new Error("applyUpdates should not be called.");
     },
@@ -31,6 +34,14 @@ function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
     })),
     async fetchSnapshot() {
       throw new Error("fetchSnapshot should not be called.");
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: "member_test",
+      };
     },
   };
 }
@@ -66,6 +77,9 @@ test("hosted CLI runtime bridge creates device connect links through the runtime
 
 test("hosted CLI runtime bridge lists device accounts from runtime snapshots", async () => {
   const deviceSyncPort = {
+    async ackDirtyStateProcessed() {
+      throw new Error("ackDirtyStateProcessed should not be called.");
+    },
     async applyUpdates() {
       throw new Error("applyUpdates should not be called.");
     },
@@ -117,6 +131,14 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
       generatedAt: "2026-05-03T21:00:00.000Z",
       userId: "member_test",
     })),
+    async fetchDirtyStates() {
+      return {
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: "member_test",
+      };
+    },
   } satisfies HostedRuntimeDeviceSyncPort;
   const bridge = await startHostedCliRuntimeBridge({ deviceSyncPort });
   assert.ok(bridge);
@@ -296,6 +318,9 @@ test("hosted CLI runtime bridge stop destroys partial authenticated requests", a
 test("hosted CLI runtime bridge redacts downstream connect failures", async () => {
   const bridge = await startHostedCliRuntimeBridge({
     deviceSyncPort: {
+      async ackDirtyStateProcessed() {
+        throw new Error("ackDirtyStateProcessed should not be called.");
+      },
       async applyUpdates() {
         throw new Error("applyUpdates should not be called.");
       },
@@ -304,6 +329,14 @@ test("hosted CLI runtime bridge redacts downstream connect failures", async () =
       },
       async fetchSnapshot() {
         throw new Error("fetchSnapshot should not be called.");
+      },
+      async fetchDirtyStates() {
+        return {
+          hasMore: false,
+          items: [],
+          nextWakeAt: null,
+          userId: "member_test",
+        };
       },
     },
   });
