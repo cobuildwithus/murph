@@ -384,7 +384,7 @@ describe("hosted deploy automation helpers", () => {
     const workflowEnvBindings = new Map(
       [
         ...workflow.matchAll(
-          /^\s{6}([A-Z0-9_]+):\s+\$\{\{\s*(vars|secrets)\.[^\n]+$/gmu,
+          /^\s{6}([A-Z0-9_]+):\s+\$\{\{\s*(?:inputs\.[^|}\n]+\|\|\s*)?(vars|secrets)\.[^\n]+$/gmu,
         ),
       ].map((match) => [match[1] ?? "", match[2] ?? ""] as const),
     );
@@ -396,6 +396,7 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
+      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}",
@@ -409,6 +410,8 @@ describe("hosted deploy automation helpers", () => {
       "name: Codex cache-prefix E2E gate",
       "skip_predeploy_e2e:",
       "description: Skip predeploy hosted-local E2E gates",
+      "runner_idle_ttl_ms:",
+      "description: Optional runner container idle TTL override in milliseconds",
       "if: ${{ !inputs.skip_predeploy_e2e }}",
       "if: ${{ !cancelled() && (inputs.skip_predeploy_e2e || (needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success')) }}",
       "name: Linq delivery E2E gate",
