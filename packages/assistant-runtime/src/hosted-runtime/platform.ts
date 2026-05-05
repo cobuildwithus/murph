@@ -122,7 +122,7 @@ export interface HostedRuntimeLinqSendResponse {
 }
 
 export interface HostedRuntimeLinqChatActionRequest {
-  action: "typing";
+  action: "typing" | "typing_stop";
   target: string;
 }
 

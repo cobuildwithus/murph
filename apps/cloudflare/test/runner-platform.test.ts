@@ -1667,6 +1667,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       action: "typing",
       target: "linq_chat_123",
     });
+    await platform.effectsPort.sendLinqChatAction!({
+      action: "typing_stop",
+      target: "linq_chat_123",
+    });
     await expect(platform.effectsPort.sendLinq!({
       directRecipientPhoneNumber: "+15550001",
       message: "hello",
@@ -1680,12 +1684,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: null,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const telegramRequest = requireFetchRequest(fetchMock.mock.calls[0], "telegram send");
-    const linqRequest = requireFetchRequest(fetchMock.mock.calls[1], "linq action");
-    const linqSendRequest = requireFetchRequest(fetchMock.mock.calls[2], "linq send");
+    const linqStartRequest = requireFetchRequest(fetchMock.mock.calls[1], "linq action start");
+    const linqStopRequest = requireFetchRequest(fetchMock.mock.calls[2], "linq action stop");
+    const linqSendRequest = requireFetchRequest(fetchMock.mock.calls[3], "linq send");
     expect(telegramRequest.url).toBe("http://results.worker/telegram/send");
-    expect(linqRequest.url).toBe("http://results.worker/linq/chat-action");
+    expect(linqStartRequest.url).toBe("http://results.worker/linq/chat-action");
+    expect(linqStopRequest.url).toBe("http://results.worker/linq/chat-action");
     expect(linqSendRequest.url).toBe("http://results.worker/linq/send");
     expect(telegramRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
@@ -1696,6 +1702,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(telegramRequest.json()).resolves.toEqual({
       message: "hello",
       target: "telegram_chat_123",
+    });
+    await expect(linqStartRequest.json()).resolves.toEqual({
+      action: "typing",
+      target: "linq_chat_123",
+    });
+    await expect(linqStopRequest.json()).resolves.toEqual({
+      action: "typing_stop",
+      target: "linq_chat_123",
     });
     await expect(linqSendRequest.json()).resolves.toEqual({
       directRecipientPhoneNumber: "+15550001",
