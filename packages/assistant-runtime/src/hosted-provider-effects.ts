@@ -2,7 +2,7 @@ import {
   sendLinqMessage,
   sendTelegramMessage,
   startTelegramTypingIndicator,
-} from "@murphai/assistant-engine";
+} from "@murphai/assistant-engine/assistant-channel-runtime";
 import {
   markLinqChatRead,
   probeLinqApi,

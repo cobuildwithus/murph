@@ -2,13 +2,13 @@ import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeParserToolchainConfig,
   HostedAssistantRuntimeResolvedConfig,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   buildHostedRuntimeChildEnv,
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   readHostedRuntimeCommitTimeoutConfigValue,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 
 import {
   buildHostedRunnerAmbientEnv,

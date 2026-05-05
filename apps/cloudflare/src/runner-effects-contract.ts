@@ -13,7 +13,7 @@ import type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 
 export const HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH =
   "/telegram/send";

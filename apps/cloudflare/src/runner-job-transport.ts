@@ -1,10 +1,10 @@
 import type {
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedAssistantWorkspaceRuntimeJobResult,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   parseHostedAssistantWorkspaceRuntimeJobInput,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   parseHostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/parsers";

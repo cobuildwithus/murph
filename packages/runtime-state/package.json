@@ -31,6 +31,10 @@
       "types": "./dist/node/assistant-usage.d.ts",
       "default": "./dist/node/assistant-usage.js"
     },
+    "./node/assistant-runtime-issues": {
+      "types": "./dist/node/assistant-runtime-issues.d.ts",
+      "default": "./dist/node/assistant-runtime-issues.js"
+    },
     "./node/assistant-state-fs": {
       "types": "./dist/node/assistant-state-fs.d.ts",
       "default": "./dist/node/assistant-state-fs.js"

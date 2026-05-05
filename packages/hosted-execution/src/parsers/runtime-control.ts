@@ -4,9 +4,11 @@ import {
   parseHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
-  parseAssistantRuntimeIssueRecord,
   parseAssistantUsageRecord,
-} from "@murphai/runtime-state/node";
+} from "@murphai/runtime-state/node/assistant-usage";
+import {
+  parseAssistantRuntimeIssueRecord,
+} from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,

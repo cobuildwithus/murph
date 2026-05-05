@@ -11,7 +11,7 @@ import {
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILES_ENV,
   HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   HOSTED_AI_USAGE_BILLING_MODE_ENV,
 } from "@murphai/hosted-execution";
