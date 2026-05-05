@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -32,7 +33,19 @@ export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions):
   for (const [fileName, nextContent] of files.entries()) {
     const outputPath = path.join(options.generatedRoot, fileName);
     await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, nextContent, "utf8");
+    await writeFileAtomically(outputPath, nextContent);
+  }
+}
+
+async function writeFileAtomically(outputPath: string, content: string): Promise<void> {
+  const temporaryPath = `${outputPath}.${process.pid}.${randomUUID()}.tmp`;
+
+  try {
+    await writeFile(temporaryPath, content, "utf8");
+    await rename(temporaryPath, outputPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
   }
 }
 
