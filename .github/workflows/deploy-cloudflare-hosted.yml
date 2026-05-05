@@ -433,6 +433,28 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run hosted Codex auth deploy guard
+        shell: bash
+        env:
+          MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"
+        run: |
+          set -euo pipefail
+
+          codex_cli_version="$(
+            sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
+          )"
+          if [[ -z "${codex_cli_version}" ]]; then
+            echo "Missing CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base" >&2
+            exit 1
+          fi
+
+          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"
+          mkdir -p "${npm_prefix}"
+          npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"
+          export PATH="${npm_prefix}/bin:${PATH}"
+          codex --version
+          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts
+
       - name: Validate required deploy environment
         env:
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
