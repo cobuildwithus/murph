@@ -3,9 +3,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
+type LoginCallbacks = {
+  onComplete?: (params: { user: { linkedAccounts?: unknown } }) => void;
+};
+
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   createWallet: vi.fn(),
+  loginCallbacks: null as LoginCallbacks | null,
   loginWithCode: vi.fn(),
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
@@ -18,7 +23,9 @@ vi.mock("@privy-io/react-auth", () => ({
       createWallet: mocks.createWallet,
     };
   },
-  useLoginWithEmail() {
+  useLoginWithEmail(callbacks?: LoginCallbacks) {
+    mocks.loginCallbacks = callbacks ?? null;
+
     return {
       loginWithCode: mocks.loginWithCode,
       sendCode: mocks.sendCode,
@@ -40,6 +47,7 @@ let cleanupRender: (() => Promise<void>) | null = null;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  mocks.loginCallbacks = null;
   mocks.usePrivy.mockReturnValue({
     ready: true,
   });
@@ -151,6 +159,65 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
     user: null,
   });
   expect(assign).toHaveBeenCalledWith("/home");
+});
+
+test("HomepageEmailAuthButton passes Privy's completed user into shared completion", async () => {
+  const completedUser = {
+    linkedAccounts: [
+      {
+        address: "user@example.com",
+        latest_verified_at: 1771977600,
+        type: "email",
+      },
+    ],
+  };
+  mocks.loginWithCode.mockImplementationOnce(async () => {
+    mocks.loginCallbacks?.onComplete?.({
+      user: completedUser,
+    });
+  });
+
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(HomepageEmailAuthButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = container.querySelector("form");
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, "user@example.com");
+    }
+    emailForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  const codeInput = container.querySelector(
+    "input[data-input-otp]",
+  ) as HTMLInputElement | null;
+  const verifyButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Verify email"),
+  );
+
+  await act(async () => {
+    if (codeInput) {
+      setInputValue(window, codeInput, "654321");
+    }
+    verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
+    completedUser,
+    createWallet: mocks.createWallet,
+    refreshUser: expect.any(Function),
+    user: null,
+  }));
 });
 
 test("HomepageEmailAuthButton uses no-signup mode for login code sends and resends", async () => {

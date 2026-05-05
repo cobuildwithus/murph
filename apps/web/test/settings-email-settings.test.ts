@@ -287,6 +287,80 @@ describe("HostedEmailSettings", () => {
     });
   });
 
+  it("prefers Privy's email link payload over a stale refreshed email", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const linkedUser = {
+      linkedAccounts: [
+        {
+          address: "linked@example.com",
+          latest_verified_at: 1771977600,
+          type: "email",
+        },
+      ],
+    };
+    mocks.refreshUser.mockResolvedValueOnce({
+      linkedAccounts: [
+        {
+          address: "old@example.com",
+          latest_verified_at: 1771891200,
+          type: "email",
+        },
+      ],
+    });
+    const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      emailAddress: "linked@example.com",
+      ok: true,
+      runTriggered: true,
+      verifiedAt: "2026-04-25T00:00:00.000Z",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", syncFetch);
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link email"),
+    );
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: {
+          address: "linked@example.com",
+          latest_verified_at: 1771977600,
+          type: "email",
+        },
+        linkMethod: "email",
+        user: linkedUser,
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(syncFetch).toHaveBeenCalledWith(
+        "/api/settings/email/sync",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+    expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({
+      expectedEmailAddress: "linked@example.com",
+    });
+  });
+
   it("sends and verifies update-email codes from the live settings inputs", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({

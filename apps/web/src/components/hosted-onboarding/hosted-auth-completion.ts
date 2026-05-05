@@ -1,6 +1,7 @@
 import {
   ensureHostedPrivyPhoneReady,
   ensureHostedPrivyWalletReady,
+  readHostedPrivyClientSessionState,
 } from "@/src/lib/hosted-onboarding/privy-client";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
@@ -12,6 +13,7 @@ export interface HostedAuthCompletionUser {
 }
 
 export interface HostedPrivyClientSessionInput {
+  completedUser?: HostedAuthCompletionUser | null;
   createWallet: () => Promise<unknown>;
   refreshUser?: () => Promise<HostedAuthCompletionUser | null>;
   requirePhone?: boolean;
@@ -33,7 +35,12 @@ export async function completeHostedPrivyAuth(
   const refreshedUser = input.refreshUser
     ? await input.refreshUser().catch(() => null)
     : null;
-  const currentUser = refreshedUser ?? input.user;
+  const currentUser = selectHostedAuthCompletionUser({
+    completedUser: input.completedUser ?? null,
+    refreshedUser,
+    requirePhone: input.requirePhone === true,
+    user: input.user,
+  });
 
   if (input.requirePhone) {
     await ensureHostedPrivyPhoneReady({
@@ -59,6 +66,42 @@ export async function completeHostedPrivyAuth(
     payload,
     redirectUrl,
   };
+}
+
+export function selectHostedAuthCompletionUser(input: {
+  completedUser: HostedAuthCompletionUser | null;
+  refreshedUser: HostedAuthCompletionUser | null;
+  requirePhone: boolean;
+  user: HostedAuthCompletionUser | null;
+}): HostedAuthCompletionUser | null {
+  if (
+    input.completedUser
+    && hasRequiredHostedAuthCompletionState(input.completedUser, input.requirePhone)
+  ) {
+    return input.completedUser;
+  }
+
+  if (
+    input.refreshedUser
+    && hasRequiredHostedAuthCompletionState(input.refreshedUser, input.requirePhone)
+  ) {
+    return input.refreshedUser;
+  }
+
+  return input.refreshedUser ?? input.user ?? input.completedUser;
+}
+
+function hasRequiredHostedAuthCompletionState(
+  user: HostedAuthCompletionUser,
+  requirePhone: boolean,
+): boolean {
+  const state = readHostedPrivyClientSessionState({ user });
+
+  if (!state) {
+    return false;
+  }
+
+  return requirePhone ? Boolean(state.phone) : state.linkedAccounts.length > 0;
 }
 
 export async function resolveHostedAuthRedirectUrl(input: {

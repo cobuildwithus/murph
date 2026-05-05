@@ -135,6 +135,7 @@ export async function finalizeHostedPrivyVerification(input: HostedPrivyClientSe
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
 }) {
   const result = await completeHostedPrivyAuth({
+    completedUser: input.completedUser,
     createWallet: input.createWallet,
     inviteCode: input.inviteCode,
     refreshUser: input.refreshUser,

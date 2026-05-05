@@ -14,6 +14,7 @@ import {
   normalizeComparableEmail,
   normalizeEmailAddress,
   resolveHostedEmailSettingsDisplayState,
+  type HostedEmailSettingsDisplayState,
   syncHostedVerifiedEmailAddress,
   type HostedEmailSyncResult,
 } from "./hosted-email-settings-helpers";
@@ -54,7 +55,10 @@ export function useHostedEmailSettingsController(input: {
     },
     onSuccess: (params) => {
       if (params.linkMethod === "email") {
-        void handleLinkedEmailAccount(params.user);
+        void handleLinkedEmailAccount({
+          linkedUser: params.user,
+          preferredEmailAddress: readLinkedEmailAddress(params.linkedAccount),
+        });
       }
     },
   });
@@ -184,10 +188,14 @@ export function useHostedEmailSettingsController(input: {
         throw new Error("We could not verify that code.");
       }
 
-      const refreshedUser = await refreshUser().catch(() => updateResult?.user ?? null);
-      const nextEmail = resolveHostedEmailSettingsDisplayState({
-        linkedAccounts: readPrivyLinkedAccounts(refreshedUser) ?? linkedAccounts,
-      }).currentVerifiedEmail;
+      const refreshedUser = await refreshUser().catch(() => updateResult.user);
+      const displayState = resolveHostedEmailSettingsDisplayStateFromUsers({
+        fallbackUser: updateResult.user,
+        initialLinkedAccounts: linkedAccounts,
+        preferredEmailAddress: pendingEmailAddress ?? emailAddress,
+        refreshedUser,
+      });
+      const nextEmail = displayState.currentVerifiedEmail;
 
       verifiedEmailAddress = nextEmail?.address ?? pendingEmailAddress ?? normalizeEmailAddress(emailAddress);
 
@@ -230,10 +238,17 @@ export function useHostedEmailSettingsController(input: {
     linkEmail();
   }
 
-  async function handleLinkedEmailAccount(linkedUser: { linkedAccounts?: unknown }) {
+  async function handleLinkedEmailAccount(input: {
+    linkedUser: HostedEmailPrivyUser;
+    preferredEmailAddress: string | null;
+  }) {
+    const { linkedUser } = input;
     const refreshedUser = await refreshUser().catch(() => linkedUser);
-    const displayState = resolveHostedEmailSettingsDisplayState({
-      linkedAccounts: readPrivyLinkedAccounts(refreshedUser) ?? linkedAccounts,
+    const displayState = resolveHostedEmailSettingsDisplayStateFromUsers({
+      fallbackUser: linkedUser,
+      initialLinkedAccounts: linkedAccounts,
+      preferredEmailAddress: input.preferredEmailAddress,
+      refreshedUser,
     });
     const linkedEmail = displayState.currentVerifiedEmail ?? displayState.currentEmail;
 
@@ -314,12 +329,74 @@ export function useHostedEmailSettingsController(input: {
   };
 }
 
-function readPrivyLinkedAccounts(input: { linkedAccounts?: unknown } | null | undefined): readonly PrivyLinkedAccountLike[] | null {
+type HostedEmailPrivyUser = { linkedAccounts?: unknown } | null | undefined;
+
+function resolveHostedEmailSettingsDisplayStateFromUsers(input: {
+  fallbackUser: HostedEmailPrivyUser;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  preferredEmailAddress?: string | null;
+  refreshedUser: HostedEmailPrivyUser;
+}): HostedEmailSettingsDisplayState {
+  const preferredEmailAddress = normalizeComparableEmail(input.preferredEmailAddress);
+  const refreshedState = resolveHostedEmailSettingsDisplayState({
+    linkedAccounts: readPrivyLinkedAccounts(input.refreshedUser) ?? [],
+  });
+  const fallbackState = resolveHostedEmailSettingsDisplayState({
+    linkedAccounts: readPrivyLinkedAccounts(input.fallbackUser) ?? [],
+  });
+
+  if (doesEmailDisplayStateMatch(refreshedState, preferredEmailAddress)) {
+    return refreshedState;
+  }
+
+  if (doesEmailDisplayStateMatch(fallbackState, preferredEmailAddress)) {
+    return fallbackState;
+  }
+
+  if (hasEmailDisplayState(refreshedState)) {
+    return refreshedState;
+  }
+
+  if (hasEmailDisplayState(fallbackState)) {
+    return fallbackState;
+  }
+
+  return resolveHostedEmailSettingsDisplayState({
+    linkedAccounts: input.initialLinkedAccounts,
+  });
+}
+
+function doesEmailDisplayStateMatch(
+  state: HostedEmailSettingsDisplayState,
+  preferredEmailAddress: string | null,
+): boolean {
+  if (!preferredEmailAddress) {
+    return hasEmailDisplayState(state);
+  }
+
+  const email = state.currentVerifiedEmail ?? state.currentEmail;
+
+  return normalizeComparableEmail(email?.address) === preferredEmailAddress;
+}
+
+function hasEmailDisplayState(state: HostedEmailSettingsDisplayState): boolean {
+  return Boolean(state.currentVerifiedEmail ?? state.currentEmail);
+}
+
+function readPrivyLinkedAccounts(input: HostedEmailPrivyUser): readonly PrivyLinkedAccountLike[] | null {
   if (!Array.isArray(input?.linkedAccounts)) {
     return null;
   }
 
   return input.linkedAccounts.filter(isPrivyLinkedAccountLike);
+}
+
+function readLinkedEmailAddress(input: unknown): string | null {
+  if (!isPrivyLinkedAccountLike(input)) {
+    return null;
+  }
+
+  return typeof input.address === "string" ? input.address : null;
 }
 
 function isPrivyLinkedAccountLike(value: unknown): value is PrivyLinkedAccountLike {
