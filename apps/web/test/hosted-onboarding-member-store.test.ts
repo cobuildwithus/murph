@@ -1606,6 +1606,9 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
+        currentBillingPlanCode: null,
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
         memberId: "member_123",
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
@@ -1744,6 +1747,9 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
+        currentBillingPlanCode: null,
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
         lastStripeEventCreatedAt: freshnessAt,
         memberId: "member_123",
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -1778,6 +1784,74 @@ describe("hosted-member-store", () => {
       select: {
         memberId: true,
       },
+    });
+  });
+
+  it("persists Stripe billing plan and period markers from reconciliation", async () => {
+    const currentBillingPlanCode = "launch_edge_monthly";
+    const currentPeriodStart = new Date("2026-04-01T00:00:00.000Z");
+    const currentPeriodEnd = new Date("2026-05-01T00:00:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([]);
+    const upsert = vi.fn().mockResolvedValue({
+      currentBillingPlanCode,
+      currentPeriodEnd,
+      currentPeriodStart,
+      memberId: "member_123",
+      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-billing-ref.stripe-customer-id",
+        memberId: "member_123",
+        value: "cus_123",
+      }),
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
+      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-billing-ref.stripe-subscription-id",
+        memberId: "member_123",
+        value: "sub_123",
+      }),
+      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
+    });
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedMemberBillingRef: {
+        findMany,
+        upsert,
+      },
+    } as never;
+
+    await expect(
+      writeHostedMemberStripeBillingRefTx({
+        currentBillingPlanCode,
+        currentPeriodEnd,
+        currentPeriodStart,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+        tx: prisma,
+      }),
+    ).resolves.toMatchObject({
+      currentBillingPlanCode,
+      currentPeriodEnd,
+      currentPeriodStart,
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      create: expect.objectContaining({
+        currentBillingPlanCode,
+        currentPeriodEnd,
+        currentPeriodStart,
+        memberId: "member_123",
+      }),
+      update: expect.objectContaining({
+        currentBillingPlanCode,
+        currentPeriodEnd,
+        currentPeriodStart,
+      }),
     });
   });
 

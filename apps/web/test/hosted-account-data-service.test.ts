@@ -49,6 +49,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",
   "prisma.hosted_ai_usage",
+  "prisma.hosted_ai_usage_period",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",
@@ -264,6 +265,11 @@ describe("buildHostedDataExport", () => {
             maxRows: 250,
             truncated: false,
           },
+          aiUsagePeriods: {
+            exportedRows: 1,
+            maxRows: 250,
+            truncated: false,
+          },
           mailboxItems: {
             exportedRows: 3,
             maxRows: 250,
@@ -273,6 +279,13 @@ describe("buildHostedDataExport", () => {
       },
       schema: "murph.hosted-data-export.v1",
       usage: {
+        aiUsagePeriods: [
+          {
+            billingPlanCode: "launch_monthly",
+            limitUsdMicros: "10000000",
+            spentUsdMicros: "2500000",
+          },
+        ],
         aiUsage: [
           {
             apiKeyEnvConfigured: true,
@@ -624,6 +637,23 @@ function makeHostedAiUsageRowForTest(input: {
   };
 }
 
+function makeHostedAiUsagePeriodRowForTest(input: {
+  memberId: string;
+}) {
+  return {
+    billingPlanCode: "launch_monthly",
+    blockedAt: null,
+    createdAt: new Date("2026-04-01T00:00:00.000Z"),
+    lastUsageAt: new Date("2026-04-27T00:23:00.000Z"),
+    limitUsdMicros: 10_000_000n,
+    memberId: input.memberId,
+    periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+    periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    spentUsdMicros: 2_500_000n,
+    updatedAt: new Date("2026-04-27T00:24:00.000Z"),
+  };
+}
+
 async function encryptHostedMailboxPayloadForFixture(input: {
   dedupeKey: string;
   itemId: string;
@@ -650,6 +680,7 @@ async function encryptHostedMailboxPayloadForFixture(input: {
 
 async function createHostedAccountDataExportPrisma(input: {
   aiUsageRows?: ReturnType<typeof makeHostedAiUsageRowForTest>[];
+  aiUsagePeriodRows?: ReturnType<typeof makeHostedAiUsagePeriodRowForTest>[];
 } = {}) {
   const count = async () => 1;
   const memberId = "member_123";
@@ -874,6 +905,11 @@ async function createHostedAccountDataExportPrisma(input: {
     hostedAiUsage: {
       count,
       findMany: async () => input.aiUsageRows ?? [makeHostedAiUsageRowForTest({ memberId })],
+    },
+    hostedAiUsagePeriod: {
+      count,
+      findMany: async () =>
+        input.aiUsagePeriodRows ?? [makeHostedAiUsagePeriodRowForTest({ memberId })],
     },
     hostedConsentEvent: {
       count,

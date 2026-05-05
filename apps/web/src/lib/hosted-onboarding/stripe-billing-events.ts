@@ -10,6 +10,11 @@ import {
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
+import {
+  getHostedBillingPlanDefinition,
+  HOSTED_BILLING_PLAN_CODES,
+  parseHostedBillingPlanCode,
+} from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import {
   activateHostedMemberForPositiveSourceTx,
@@ -124,6 +129,7 @@ export async function applyStripeSubscriptionUpdated(
   await writeHostedMemberStripeBillingTx({
     billingStatus: member.core.billingStatus,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
+    ...buildHostedStripeSubscriptionBillingPeriodSnapshot(subscription),
     dispatchContext,
     member: preparedMember,
     stripeCustomerId: coerceStripeObjectId(subscription.customer) ?? member.billingRef?.stripeCustomerId ?? null,
@@ -166,6 +172,9 @@ export async function applyStripeInvoicePaid(
   const updatedMember = await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.active,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
+    ...(canonicalSubscription
+      ? buildHostedStripeSubscriptionBillingPeriodSnapshot(canonicalSubscription)
+      : {}),
     dispatchContext,
     freshnessPolicy: "positive-invoice-entitlement",
     member: preparedMember,
@@ -242,6 +251,9 @@ export async function applyStripeInvoicePaymentFailed(
   await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.past_due,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
+    ...(canonicalSubscription
+      ? buildHostedStripeSubscriptionBillingPeriodSnapshot(canonicalSubscription)
+      : {}),
     dispatchContext,
     member: preparedMember,
     stripeCustomerId:
@@ -319,6 +331,87 @@ function readHostedStripeCheckoutSessionEmailAddress(
 
 function readHostedStripeInvoiceEmailAddress(invoice: Stripe.Invoice): string | null {
   return normalizeHostedStripeEmailAddress(invoice.customer_email ?? null);
+}
+
+function buildHostedStripeSubscriptionBillingPeriodSnapshot(
+  subscription: Stripe.Subscription,
+): {
+  currentBillingPlanCode?: string | null;
+  currentPeriodEnd?: Date | null;
+  currentPeriodStart?: Date | null;
+} {
+  const currentBillingPlanCode = resolveHostedStripeSubscriptionBillingPlanCode(subscription);
+  const currentPeriodStart = readHostedStripeSubscriptionPeriodDate(
+    subscription,
+    "current_period_start",
+  );
+  const currentPeriodEnd = readHostedStripeSubscriptionPeriodDate(
+    subscription,
+    "current_period_end",
+  );
+  const hasPeriod =
+    currentPeriodStart !== null
+    && currentPeriodEnd !== null
+    && currentPeriodStart.getTime() < currentPeriodEnd.getTime();
+
+  return {
+    ...(currentBillingPlanCode ? { currentBillingPlanCode } : {}),
+    ...(hasPeriod
+      ? {
+          currentPeriodEnd,
+          currentPeriodStart,
+        }
+      : {}),
+  };
+}
+
+function resolveHostedStripeSubscriptionBillingPlanCode(
+  subscription: Stripe.Subscription,
+): ReturnType<typeof parseHostedBillingPlanCode> {
+  const metadataPlanCode = parseHostedBillingPlanCode(subscription.metadata?.billingPlanCode);
+  if (metadataPlanCode) {
+    return metadataPlanCode;
+  }
+
+  const priceId = readHostedStripeSubscriptionPriceId(subscription);
+  if (!priceId) {
+    return null;
+  }
+
+  for (const code of HOSTED_BILLING_PLAN_CODES) {
+    const expectedPriceId = process.env[getHostedBillingPlanDefinition(code).priceIdEnvKey];
+    if (expectedPriceId && expectedPriceId === priceId) {
+      return code;
+    }
+  }
+
+  return null;
+}
+
+function readHostedStripeSubscriptionPriceId(
+  subscription: Stripe.Subscription,
+): string | null {
+  const items = subscription.items?.data ?? [];
+  for (const item of items) {
+    const priceId = typeof item.price?.id === "string" ? item.price.id : null;
+    if (priceId) {
+      return priceId;
+    }
+  }
+
+  return null;
+}
+
+function readHostedStripeSubscriptionPeriodDate(
+  subscription: Stripe.Subscription,
+  field: "current_period_end" | "current_period_start",
+): Date | null {
+  const raw = Reflect.get(subscription, field);
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    return null;
+  }
+
+  return new Date(raw * 1000);
 }
 
 function normalizeHostedStripeEmailAddress(value: string | null | undefined): string | null {

@@ -27,6 +27,8 @@ import { createTestHostedRuntimeCryptoContext } from "./hosted-runtime-crypto-fi
 import { createTestSqlStorage } from "./sql-storage.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
+const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
+
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
@@ -1133,6 +1135,57 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("does not begin a container invocation when the web AI usage gate denies the start", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const { alarms, invoke, runner } = createRunnerCryptoContextHarness(null, {
+      usageGateResponse: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toEqual({
+      nextWakeAt: "2026-05-01T00:00:00.000Z",
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateReason: "ai_usage_limit_exceeded",
+        aiUsageGateRetryAfter: "2026-05-01T00:00:00.000Z",
+      },
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toContain("2026-05-01T00:00:00.000Z");
+  });
+
+  it("fails closed with a retry alarm when the web AI usage gate is unavailable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const { alarms, invoke, runner } = createRunnerCryptoContextHarness(null, {
+      usageGateResponse: {
+        error: "Unavailable",
+      },
+      usageGateStatus: 503,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateReason: "ai_usage_gate_unavailable",
+        aiUsageGateRetryAfter: "2026-04-27T00:00:30.000Z",
+      },
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toContain("2026-04-27T00:00:30.000Z");
+  });
+
   it("refreshes the cached runtime crypto context after the web TTL expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1444,6 +1497,8 @@ function createRunnerCryptoContextHarness(
     cryptoContextStatus?: number;
     invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
     maxEventAttempts?: number;
+    usageGateResponse?: Record<string, unknown>;
+    usageGateStatus?: number;
   } = {},
 ) {
   const sql = createTestSqlStorage();
@@ -1493,6 +1548,14 @@ function createRunnerCryptoContextHarness(
         ...(options.cryptoContextCacheMaxAgeMs === undefined
           ? {}
           : { cacheMaxAgeMs: options.cryptoContextCacheMaxAgeMs }),
+      });
+    }
+
+    if (input.path === HOSTED_WEB_USAGE_GATE_PATH) {
+      return Response.json(options.usageGateResponse ?? {
+        allowed: true,
+      }, {
+        status: options.usageGateStatus ?? 200,
       });
     }
 

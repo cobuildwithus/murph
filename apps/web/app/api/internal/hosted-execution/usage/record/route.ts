@@ -14,6 +14,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const usage = body.usage;
   const result = await importHostedAiUsageRecords({
+    accountAllowance: true,
     trustedUserId: userId,
     usage,
   });

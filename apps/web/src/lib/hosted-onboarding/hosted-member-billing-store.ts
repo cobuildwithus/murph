@@ -27,6 +27,9 @@ import {
 } from "./shared";
 
 export interface HostedMemberStripeBillingRefSnapshot {
+  currentBillingPlanCode?: string | null;
+  currentPeriodEnd?: Date | null;
+  currentPeriodStart?: Date | null;
   lastStripeEventCreatedAt?: Date | null;
   memberId: string;
   stripeCustomerId: string | null;
@@ -44,6 +47,9 @@ export interface HostedMemberStripeBillingLookup {
 }
 
 export interface HostedMemberStripeBillingRefWriteInput {
+  currentBillingPlanCode?: string | null;
+  currentPeriodEnd?: Date | null;
+  currentPeriodStart?: Date | null;
   memberId: string;
   stripeEventCreatedAt?: Date | null;
   stripeCustomerId?: string | null;
@@ -250,6 +256,9 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
           lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
         }
       : {}),
+    currentBillingPlanCode: billingRef.currentBillingPlanCode,
+    currentPeriodEnd: billingRef.currentPeriodEnd,
+    currentPeriodStart: billingRef.currentPeriodStart,
     memberId: billingRef.memberId,
     stripeCustomerId: privateState.stripeCustomerId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,
@@ -314,6 +323,9 @@ async function buildHostedMemberBillingRefCreateData(
       stripeCustomerId: input.stripeCustomerId ?? null,
       stripeSubscriptionId: input.stripeSubscriptionId ?? null,
     })),
+    currentBillingPlanCode: input.currentBillingPlanCode ?? null,
+    currentPeriodEnd: input.currentPeriodEnd ?? null,
+    currentPeriodStart: input.currentPeriodStart ?? null,
     stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(input.stripeCustomerId ?? null),
     stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(
       input.stripeSubscriptionId ?? null,
@@ -328,6 +340,15 @@ async function buildHostedMemberBillingRefUpdateData(
 
   if (input.stripeEventCreatedAt !== undefined) {
     data.lastStripeEventCreatedAt = input.stripeEventCreatedAt;
+  }
+  if (input.currentBillingPlanCode !== undefined) {
+    data.currentBillingPlanCode = input.currentBillingPlanCode;
+  }
+  if (input.currentPeriodStart !== undefined) {
+    data.currentPeriodStart = input.currentPeriodStart;
+  }
+  if (input.currentPeriodEnd !== undefined) {
+    data.currentPeriodEnd = input.currentPeriodEnd;
   }
   if (input.stripeCustomerId !== undefined) {
     data.stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
