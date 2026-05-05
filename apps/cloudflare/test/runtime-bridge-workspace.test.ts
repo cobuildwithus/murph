@@ -10,6 +10,9 @@ import {
   serializeHostedSecureBoxEnvelope,
 } from "@murphai/runtime-state";
 import {
+  readHostedBundleTextFile,
+} from "@murphai/runtime-state/node";
+import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
@@ -273,8 +276,32 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       "{\"intent\":\"ready\"}\n",
       "utf8",
     );
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      "{\"providerSessionId\":\"thread-ready\"}\n",
+      "utf8",
+    );
+    const operatorHomeRoot = path.join(
+      path.dirname(vaultRoot),
+      `${path.basename(vaultRoot)}-operator-home`,
+    );
+    cleanupPaths.push(operatorHomeRoot);
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread.jsonl"),
+      "{\"thread\":\"ready\"}\n",
+      "utf8",
+    );
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
-    const putArtifact = vi.fn(async () => {});
+    const putArtifacts: Array<{ bytes: Uint8Array; sha256: string }> = [];
+    const putArtifact = vi.fn(async (payload: { bytes: Uint8Array; sha256: string }) => {
+      putArtifacts.push(payload);
+    });
     const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
       createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
     const writeLog = vi.fn(async (request) => ({
@@ -333,6 +360,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
       sha256: snapshotRef.hot?.hash,
     }));
+    const hotBundle = putArtifacts[0]?.bytes ?? null;
+    expect(readHostedBundleTextFile({
+      bytes: hotBundle,
+      expectedKind: "vault",
+      path: ".codex-hosted/sessions/thread.jsonl",
+      root: "operator-home",
+    })).toBe("{\"thread\":\"ready\"}\n");
     expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
     expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
     expect(writeLog).toHaveBeenCalledWith({

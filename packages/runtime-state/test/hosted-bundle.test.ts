@@ -17,6 +17,9 @@ import {
   encodeHostedBundleBase64,
   hasHostedBundleArtifactPath,
   HOSTED_BUNDLE_SCHEMA,
+  hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
+  HostedAssistantRuntimeHotStateIncompleteError,
+  HostedWorkspaceSnapshotContinuityIncompleteError,
   listHostedBundleArtifacts,
   clearHostedAssistantRuntimeHotState,
   materializeHostedExecutionArtifacts,
@@ -1614,6 +1617,212 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted assistant hot-state snapshots include filtered Codex home state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05"), {
+      recursive: true,
+    });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "logs"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      "{\"providerSessionId\":\"thread-test\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05", "rollout.jsonl"),
+      "{\"type\":\"provider-owned\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "logs", "debug.log"),
+      "must not snapshot\n",
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedAssistantRuntimeHotState({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: snapshot.bundle,
+    }), true);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/sessions/2026/05/05/rollout.jsonl",
+        root: "operator-home",
+      }),
+      "{\"type\":\"provider-owned\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/logs/debug.log",
+        root: "operator-home",
+      }),
+      null,
+    );
+
+    await clearHostedAssistantRuntimeHotState({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    await assert.rejects(
+      readFile(
+        path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05", "rollout.jsonl"),
+        "utf8",
+      ),
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted assistant hot-state snapshots omit Codex home without provider resume state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-unused-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "outbox"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "outbox", "intent.json"),
+      "{\"intent\":\"ready\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "sessions", "stale.jsonl"),
+      "{\"thread\":\"stale\"}\n",
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedAssistantRuntimeHotState({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: snapshot.bundle,
+    }), false);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/sessions/stale.jsonl",
+        root: "operator-home",
+      }),
+      null,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted assistant hot-state snapshots reject dangling Codex resume state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-missing-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      "{\"providerSessionId\":\"thread-test\"}\n",
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedAssistantRuntimeHotState({
+        vaultRoot,
+      }),
+      HostedAssistantRuntimeHotStateIncompleteError,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted assistant hot-state snapshots reject config-only Codex home continuity", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-config-only-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: "thread-test",
+          resumeRouteId: "route-test",
+        },
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "config.toml"),
+      "model = \"gpt-test\"\n",
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedAssistantRuntimeHotState({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      HostedAssistantRuntimeHotStateIncompleteError,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted full snapshots reject dangling Codex resume state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-full-codex-missing-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      "{\"providerSessionId\":\"thread-test\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "config.toml"),
+      "model = \"gpt-test\"\n",
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedExecutionContext({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      HostedWorkspaceSnapshotContinuityIncompleteError,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 

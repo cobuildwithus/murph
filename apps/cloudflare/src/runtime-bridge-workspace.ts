@@ -29,6 +29,7 @@ import type {
   HostedWorkspaceInvocationRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HostedAssistantRuntimeHotStateIncompleteError,
   HostedAssistantRuntimeHotStateBudgetExceededError,
   sha256HostedBundleHex,
   snapshotHostedAssistantRuntimeHotState,
@@ -226,7 +227,10 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(in
       browserVaultReplicaRef: currentRefs.browserVaultReplicaRef,
     });
   } catch (error) {
-    if (error instanceof HostedAssistantRuntimeHotStateBudgetExceededError) {
+    if (
+      error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
+      || error instanceof HostedAssistantRuntimeHotStateIncompleteError
+    ) {
       return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
     }
     throw error;
@@ -384,6 +388,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
 async function createHostedWorkspaceBridgeHotCheckpointSnapshot(input: {
   baseSnapshotRef: HostedExecutionBundleRef;
   browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  codexHomeSnapshotHashSecret: string | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
@@ -407,11 +412,18 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshot(input: {
     request: input.request,
     snapshotWorkspace: async () => {
       const snapshot = await snapshotHostedAssistantRuntimeHotState({
+        codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
+        operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
         vaultRoot: input.vaultRoot,
       });
       hotStateBundleBytes = snapshot.bundleBytes;
       hotStateFileCount = snapshot.fileCount;
       hotStateInlineBytes = snapshot.inlineBytes;
+      await writeHostedCodexHomeSnapshotDiagnosticLog({
+        diagnostics: snapshot.codexHomeSnapshotDiagnostics,
+        platform: input.platform,
+        request: input.request,
+      });
       return snapshot.bundle;
     },
     userId: input.userId,
