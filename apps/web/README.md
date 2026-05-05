@@ -420,6 +420,15 @@ pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 ```
 
+Production Vercel builds from `main` run `prisma migrate deploy` immediately
+before `next build` through `pnpm --dir apps/web build`. The build hook is
+intentionally non-mutating for local builds, CI verification, preview deploys,
+and non-main production deploys; keep that branch/environment gate in place so
+schema drift fails the deploy before new Prisma Client code can serve traffic.
+Because a successful migration cannot roll back automatically if a later build
+step fails, production migrations must stay backward compatible with the
+currently deployed app and use expand/contract sequencing for breaking changes.
+
 The hosted schema now includes the canonical member slices, hosted email
 authorization, device-sync web ownership models, the anonymized hosted
 assistant-runtime issue sink, canonical hosted mailbox rows, hosted workspace
