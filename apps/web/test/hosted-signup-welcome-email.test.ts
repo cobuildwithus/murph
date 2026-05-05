@@ -112,7 +112,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Best thing to do right now is sync your health data and text Murph.",
+        "Best thing to do right now is sync your wearable or health data and text Murph.",
       );
       expect(payload.text).toContain(
         "Shoot Murph a text at (+1) 555-010-0099 to start your first experiment.",

@@ -115,7 +115,9 @@ export async function sendHostedSignupWelcomeEmailForMember(input: {
     memberId: input.memberId,
     prisma,
   });
-  const recipientEmail = emailAuthorization?.verifiedEmail?.address ?? null;
+  const recipientEmail = emailAuthorization?.verifiedEmail?.address
+    ?? emailAuthorization?.stripeCheckoutEmail?.address
+    ?? null;
 
   if (!recipientEmail) {
     return {
@@ -248,15 +250,15 @@ function buildHostedSignupWelcomeEmailText(input: {
 }): string {
   const murphStartLine = normalizeNullableString(input.murphStartLine);
   const nextStep = murphStartLine
-    ? "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph."
-    : "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph to start your first experiment!";
+    ? "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph."
+    : "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph to start your first experiment!";
 
   return [
     "Hey, welcome to Murph!",
     "",
     `I'm ${input.founderName}, the founder of Murph. I built Murph because I had a WHOOP and kept looking at my scores every morning without really using the data.`,
     "",
-    "What I really wanted was a way to try a new health experiment, see if it worked, and move on. That's basically what Murph does. You sync your health data, pick a protocol, and it runs you through an experiment over text.",
+    "What I really wanted was a way to try a new health experiment and actually know whether it's working. That's basically what Murph does. You sync your wearable or health data, pick a protocol, and it runs you through an experiment over text.",
     "",
     nextStep,
     ...(murphStartLine ? ["", murphStartLine] : []),
@@ -276,12 +278,12 @@ function buildHostedSignupWelcomeEmailHtml(input: {
     input.murphStartAction?.line ?? input.murphStartLine,
   );
   const nextStep = murphStartLine
-    ? "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph."
-    : "At the end you see what actually improved. Best thing to do right now is sync your health data and text Murph to start your first experiment!";
+    ? "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph."
+    : "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph to start your first experiment!";
   const paragraphs = [
     "Hey, welcome to Murph!",
     `I'm ${input.founderName}, the founder of Murph. I built Murph because I had a WHOOP and kept looking at my scores every morning without really using the data.`,
-    "What I really wanted was a way to try a new health experiment, see if it worked, and move on. That's basically what Murph does. You sync your health data, pick a protocol, and it runs you through an experiment over text.",
+    "What I really wanted was a way to try a new health experiment and actually know whether it's working. That's basically what Murph does. You sync your wearable or health data, pick a protocol, and it runs you through an experiment over text.",
     nextStep,
   ];
   const body = [
