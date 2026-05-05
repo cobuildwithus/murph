@@ -12,6 +12,7 @@ import {
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   HOSTED_STANDARD_CHECKOUT_OFFER,
   getHostedDefaultBillingPlanCode,
+  isHostedPulseTrialCheckoutEnabled,
   type HostedBillingCheckoutOffer,
   type HostedBillingPlanCode,
   type HostedPublicBillingCheckoutOffer,
@@ -338,10 +339,6 @@ function resolveHostedBillingCheckoutOffer(input: {
   }
 
   return input.checkoutOffer;
-}
-
-function isHostedPulseTrialCheckoutEnabled(): boolean {
-  return process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED === "1";
 }
 
 function buildHostedBillingCheckoutMetadata(input: {

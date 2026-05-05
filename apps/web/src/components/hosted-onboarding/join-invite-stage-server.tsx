@@ -14,6 +14,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
+import { isHostedPulseTrialCheckoutEnabled } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
@@ -237,7 +238,7 @@ function JoinInviteCheckoutPanel({
 }) {
   const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly") ?? null;
   const edgePlan = billingPlans.find((p) => p.code === "launch_edge_monthly") ?? null;
-  const pulseTrialCheckoutEnabled = isPulseTrialCheckoutEnabled();
+  const pulseTrialCheckoutEnabled = isHostedPulseTrialCheckoutEnabled();
   const buttonClassName =
     "h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90";
 
@@ -337,10 +338,6 @@ function JoinInviteCheckoutPanel({
       </div>
     </div>
   );
-}
-
-function isPulseTrialCheckoutEnabled(): boolean {
-  return process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED === "1";
 }
 
 function PricingTierCard({

@@ -562,6 +562,9 @@ function buildHostedStripeSubscriptionBillingPhaseSnapshot(
     ? parseHostedBillingPhase(member.billingRef?.currentBillingPhase)
     : null;
   const checkoutOffer = metadataOffer ?? (sameSubscription ? currentOffer : null);
+  const hasRedeemedCurrentPulseTrial = sameSubscription &&
+    checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
+    Boolean(member.billingRef?.pulseTrialRedeemedAt);
 
   if (subscription.status === "trialing" && checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
     return {
@@ -572,7 +575,11 @@ function buildHostedStripeSubscriptionBillingPhaseSnapshot(
   }
 
   if (subscription.status === "active") {
-    if (currentPhase === "trial" && checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
+    if (
+      checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
+      (currentPhase === "trial" ||
+        (hasRedeemedCurrentPulseTrial && currentPhase !== "paid"))
+    ) {
       return {
         currentBillingPhase: "trial",
         currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,

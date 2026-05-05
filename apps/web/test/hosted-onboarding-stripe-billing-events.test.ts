@@ -310,6 +310,48 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
+  it("does not promote a redeemed Pulse Trial with missing phase on subscription.active before paid invoice", async () => {
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.active,
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        currentPeriodEnd: 1_745_020_800,
+        currentPeriodStart: 1_744_416_000,
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "active",
+        trialEnd: 1_745_020_800,
+        trialStart: 1_744_416_000,
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_trial_sub_active_missing_phase",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPhase: "trial",
+        currentCheckoutOffer: "pulse_trial_7d",
+      }),
+    );
+  });
+
   it("ignores the initial zero-dollar Pulse Trial invoice", async () => {
     mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
       billingRef: {
@@ -534,6 +576,7 @@ describe("hosted onboarding stripe billing events", () => {
 });
 
 function makeMemberSnapshot(input?: {
+  billingStatus?: HostedBillingStatus;
   billingRef?: HostedMemberBillingSnapshot["billingRef"];
 }): HostedMemberBillingSnapshot {
   return {
@@ -543,7 +586,7 @@ function makeMemberSnapshot(input?: {
       stripeSubscriptionId: "sub_123",
     },
     core: {
-      billingStatus: HostedBillingStatus.incomplete,
+      billingStatus: input?.billingStatus ?? HostedBillingStatus.incomplete,
       createdAt: new Date("2026-04-23T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
