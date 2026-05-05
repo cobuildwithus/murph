@@ -1,13 +1,13 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 import path from "node:path";
 
 import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
-  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import type {
@@ -40,6 +40,7 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  buildHostedLinqInboundEvent,
   buildHostedLinqSignupWelcomeWake,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
@@ -97,7 +98,7 @@ describe("hosted local snapshot stress e2e", () => {
     await startScenario();
   }, 300_000);
 
-  it("reproduces a large restored Codex workspace through import, checkpoint, and Linq delivery", async () => {
+  it("measures signed Linq webhook to reply latency with a large restored Codex workspace", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
@@ -174,59 +175,63 @@ describe("hosted local snapshot stress e2e", () => {
     const materializedChatId = requireLinqStub().requireObservedChatId(userId);
     const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const baselineReplyCount = requireLinqStub().countObservedSends(replyPath);
+    const beforeInboundStatus = await requireScenario().harness.readUserStatus(userId);
+    const beforeInboundWorkspaceVersion = beforeInboundStatus.workspace?.version ?? null;
+    expect(beforeInboundWorkspaceVersion).not.toBeNull();
     requireScenario().queueAssistantResponses([replyText]);
-    await requireScenario().runWake(
-      buildHostedExecutionLinqConversationMessageWake({
+    const inboundReplyLatencyStartedAt = performance.now();
+    const webhookResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, materializedChatId, {
         eventId: `evt_snapshot_stress_${userId}`,
-        linqMessage: {
-          chatId: materializedChatId,
-          from: memberPhone,
-          isFromMe: false,
-          messageId: `msg_snapshot_stress_${userId}`,
-          parts: [
-            {
-              type: "text",
-              value: "Can you reply after restoring this large local hosted workspace?",
-            },
-          ],
-          service: "SMS",
-        },
-        occurredAt: new Date().toISOString(),
-        phoneLookupKey: memberPhone.replace(/\D/gu, ""),
-        userId,
+        messageId: `msg_snapshot_stress_${userId}`,
+        text: "Can you reply after restoring this large local hosted workspace?",
       }),
-      userId,
     );
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
 
+    await requireScenario().waitForLatestPendingWake(userId);
+    const completionPromise = requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: 420_000,
+    });
     const sendRequest = await requireLinqStub().waitForAdditionalSend({
       baselineCount: baselineReplyCount,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
     });
+    const inboundReplyLatencyMs = performance.now() - inboundReplyLatencyStartedAt;
+    expect(inboundReplyLatencyMs).toBeGreaterThanOrEqual(0);
+    console.info(
+      `Hosted snapshot stress inbound webhook-to-reply latency: ${
+        Math.round(inboundReplyLatencyMs)
+      }ms`,
+    );
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(replyText);
 
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId, {
-      timeoutMs: 420_000,
-    });
+    const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(finalStatus.workspace?.version).not.toBe(beforeInboundWorkspaceVersion);
 
-    const outboxSnapshot = findLargestCheckpointLog(finalStatus.recentLogs, {
+    const postReplySnapshot = findLargestCheckpointLog(finalStatus.recentLogs, {
       eventCode: "checkpoint.snapshot_finished",
-      reason: "outbox_sending",
+      reason: ["outbox_sending", "maintenance"],
     });
 
     expect(readRedactedJsonString(importSnapshot, "snapshotMode")).toBe("full");
-    expect(readRedactedJsonString(outboxSnapshot, "snapshotMode")).toBe("full");
+    expect(readRedactedJsonString(postReplySnapshot, "snapshotMode")).toBe("full");
     expect(readRedactedJsonNumber(importSnapshot, "bundlePutBytes"))
       .toBeGreaterThan(16 * 1024 * 1024);
-    expect(readRedactedJsonNumber(outboxSnapshot, "bundlePutBytes"))
+    expect(readRedactedJsonNumber(postReplySnapshot, "bundlePutBytes"))
       .toBeGreaterThan(16 * 1024 * 1024);
     expect(readRedactedJsonNumber(importSnapshot, "snapshotElapsedMs"))
       .toBeGreaterThanOrEqual(0);
-    expect(readRedactedJsonNumber(outboxSnapshot, "snapshotElapsedMs"))
+    expect(readRedactedJsonNumber(postReplySnapshot, "snapshotElapsedMs"))
       .toBeGreaterThanOrEqual(0);
   }, 480_000);
 });
@@ -237,6 +242,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+        buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
@@ -292,6 +299,30 @@ async function uploadHostedSnapshotArtifact(input: {
       method: "PUT",
     },
   );
+}
+
+async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
+  const rawBody = JSON.stringify(event);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = signLinqWebhook(linqWebhookSecret, rawBody, timestamp);
+
+  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
+    body: rawBody,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-webhook-signature": signature,
+      "x-webhook-timestamp": timestamp,
+    },
+    method: "POST",
+  });
+}
+
+function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
+  const signature = createHmac("sha256", secret)
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+
+  return `sha256=${signature}`;
 }
 
 async function writeSyntheticVaultMetadata(vaultRoot: string): Promise<void> {
@@ -474,12 +505,13 @@ function findLargestCheckpointLog(
   logs: readonly HostedRuntimeLogEntry[] | undefined,
   input: {
     eventCode: string;
-    reason: string;
+    reason: string | readonly string[];
   },
 ): HostedRuntimeLogEntry {
+  const expectedReasons = Array.isArray(input.reason) ? input.reason : [input.reason];
   const matches = logs?.filter((entry) =>
     entry.eventCode === input.eventCode
-    && readRedactedJsonString(entry, "checkpointReason") === input.reason
+    && expectedReasons.includes(readRedactedJsonString(entry, "checkpointReason") ?? "")
   ) ?? [];
   const match = matches.sort((left, right) =>
     readRedactedJsonNumberOrZero(right, "bundlePutBytes")
@@ -487,10 +519,31 @@ function findLargestCheckpointLog(
   )[0] ?? null;
   if (!match) {
     throw new Error(
-      `Expected hosted runtime log ${input.eventCode} for ${input.reason}.`,
+      [
+        `Expected hosted runtime log ${input.eventCode} for ${expectedReasons.join(" or ")}.`,
+        `available checkpoint logs: ${JSON.stringify(summarizeCheckpointLogs(logs))}`,
+      ].join("\n"),
     );
   }
   return match;
+}
+
+function summarizeCheckpointLogs(
+  logs: readonly HostedRuntimeLogEntry[] | undefined,
+): Array<{
+  bundlePutBytes: number;
+  eventCode: string;
+  reason: string | null;
+  snapshotMode: string | null;
+}> {
+  return (logs ?? [])
+    .filter((entry) => entry.eventCode.startsWith("checkpoint."))
+    .map((entry) => ({
+      bundlePutBytes: readRedactedJsonNumberOrZero(entry, "bundlePutBytes"),
+      eventCode: entry.eventCode,
+      reason: readRedactedJsonString(entry, "checkpointReason"),
+      snapshotMode: readRedactedJsonString(entry, "snapshotMode"),
+    }));
 }
 
 function readRedactedJsonNumberOrZero(entry: HostedRuntimeLogEntry, key: string): number {
