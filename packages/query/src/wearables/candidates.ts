@@ -4,7 +4,11 @@ import { deviceDataOriginSchema, extractIsoDatePrefix, type DeviceDataOrigin } f
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
-import { wearableDataOriginKey } from "./origin.ts";
+import {
+  inferJunctionWearableDataOriginFromExternalRef,
+  resolveWearablePublicSourceProvider,
+  wearableDataOriginKey,
+} from "./origin.ts";
 import { formatProviderName } from "./provider-policy.ts";
 import {
   buildCandidateId,
@@ -47,6 +51,8 @@ export function collectWearableDataset(
   for (const entity of [...vault.events, ...vault.samples]) {
     const externalRef = readExternalRef(entity.attributes.externalRef);
     const provider = normalizeLowercaseString(externalRef?.system);
+    const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
+    const publicProvider = resolveWearablePublicSourceProvider({ dataOrigin, externalRef, provider });
     const missingProvenanceFields = listMissingWearableProvenanceFields(externalRef);
 
     if (provider && missingProvenanceFields.length > 0) {
@@ -55,7 +61,7 @@ export function collectWearableDataset(
         externalRef,
         kind: "included",
         missingFields: missingProvenanceFields,
-        provider,
+        provider: publicProvider,
       });
     }
 
@@ -72,7 +78,7 @@ export function collectWearableDataset(
       continue;
     }
 
-    if (providerSet && !providerSet.has(provider)) {
+    if (providerSet && !providerSet.has(publicProvider)) {
       continue;
     }
 
@@ -712,62 +718,13 @@ function readWearableDataOrigin(
   externalRef: WearableExternalRef | null,
 ): DeviceDataOrigin | null {
   const normalized = normalizeDeviceDataOrigin(value);
-  return normalized ?? inferJunctionDataOriginFromExternalRef(externalRef);
+  return normalized ?? inferJunctionWearableDataOriginFromExternalRef(externalRef);
 }
 
 function normalizeDeviceDataOrigin(value: unknown): DeviceDataOrigin | null {
   const parsed = deviceDataOriginSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
-
-function inferJunctionDataOriginFromExternalRef(
-  externalRef: WearableExternalRef | null,
-): DeviceDataOrigin | null {
-  if (normalizeLowercaseString(externalRef?.system) !== "junction") {
-    return null;
-  }
-
-  const resourceType = normalizeLowercaseString(externalRef?.resourceType);
-  if (!resourceType?.startsWith("junction-")) {
-    return null;
-  }
-
-  for (const suffix of JUNCTION_RESOURCE_TYPE_SUFFIXES) {
-    const token = `-${suffix}`;
-    if (!resourceType.endsWith(token)) {
-      continue;
-    }
-
-    const sourceProviderSlug = resourceType.slice("junction-".length, -token.length);
-    if (!sourceProviderSlug) {
-      return null;
-    }
-
-    return {
-      version: 1,
-      aggregatorProvider: "junction",
-      sourceProviderSlug,
-      originConfidence: "low",
-    };
-  }
-
-  return null;
-}
-
-const JUNCTION_RESOURCE_TYPE_SUFFIXES = [
-  "respiratory-rate",
-  "blood-oxygen",
-  "heartrate",
-  "workouts",
-  "activity",
-  "profile",
-  "glucose",
-  "weight",
-  "steps",
-  "sleep",
-  "body",
-  "hrv",
-] as const;
 
 function listMissingWearableProvenanceFields(
   externalRef: WearableExternalRef | null,

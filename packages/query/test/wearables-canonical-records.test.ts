@@ -132,6 +132,46 @@ test("collectCanonicalWearableDataset keeps canonical candidates and suppresses 
   assert.equal(sourceFamilyScore("canonical"), 4);
 });
 
+test("collectCanonicalWearableDataset filters Junction-backed canonical records by public source", () => {
+  const records: CanonicalWearableRecord[] = [
+    {
+      id: "obs_junction_garmin_steps",
+      kind: "observation",
+      schemaVersion: "wearable.canonical_record.v1",
+      dayKey: "2026-04-21",
+      observedAt: "2026-04-21T12:00:00.000Z",
+      source: {
+        provider: "junction",
+        dataSourceId: "wearable_source_junction_garmin",
+        externalRef: {
+          resourceId: "junction-garmin-steps",
+          resourceType: "junction-garmin-activity",
+          system: "junction",
+        },
+        normalizerVersion: "test-normalizer.v1",
+        origin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          version: 1,
+        },
+        providerResourceId: "junction-garmin-steps",
+        providerResourceType: "junction-garmin-activity",
+        rawArtifactRoles: ["daily-activity"],
+      },
+      metric: "steps",
+      unit: "count",
+      value: 7300,
+    },
+  ];
+
+  const garminDataset = collectCanonicalWearableDataset(records, { providers: ["garmin"] });
+  const junctionDataset = collectCanonicalWearableDataset(records, { providers: ["junction"] });
+
+  assert.equal(garminDataset.metricCandidates.length, 1);
+  assert.equal(garminDataset.metricCandidates[0]?.provider, "junction");
+  assert.equal(junctionDataset.metricCandidates.length, 0);
+});
+
 test("collectCanonicalWearableDataset surfaces WHOOP metrics from normalized canonical records", () => {
   const records = canonicalizeDeviceBatchPayload({
     provider: "whoop",

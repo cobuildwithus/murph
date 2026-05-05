@@ -119,6 +119,12 @@ describe('assistant local PDF evidence guidance', () => {
       'prefer canonical `vault-cli ... --format json` commands for Murph reads and writes',
     )
     expect(prompt).toContain(
+      'Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source',
+    )
+    expect(prompt).toContain(
+      'mention Junction only when explicitly debugging low-level connection or runtime state',
+    )
+    expect(prompt).toContain(
       'Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs',
     )
     expect(prompt).toContain(

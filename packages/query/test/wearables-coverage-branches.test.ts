@@ -1141,6 +1141,194 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
   assert.equal(summarizeWearableSleep(wearableVault, { limit: 0 }).length, sleepNights.length);
 });
 
+test("public wearable surfaces present Junction-backed Garmin as Garmin", () => {
+  const makeJunctionSleepStage = (
+    stage: string,
+    durationMinutes: number,
+    options: {
+      date?: string;
+      sourceSlug?: string | null;
+    } = {},
+  ): CanonicalEntity => {
+    const date = options.date ?? "2026-04-07";
+    const sourceSlug = options.sourceSlug === undefined ? "garmin" : options.sourceSlug;
+    const resourcePrefix = sourceSlug ? `junction-${sourceSlug}` : "junction-unknown";
+    const resourceType = sourceSlug ? `junction-${sourceSlug}-sleep` : "sleep";
+
+    return makeEntity({
+      attributes: {
+        dayKey: date,
+        durationMinutes,
+        externalRef: makeExternalRef({
+          resourceId: `${resourcePrefix}-sleep-${stage}`,
+          resourceType,
+          system: "junction",
+        }),
+        recordedAt: `${date}T07:00:00Z`,
+        stage,
+      },
+      entityId: `sample_sleep_stage_${resourcePrefix}_${date}_${stage}`,
+      family: "sample",
+      kind: "sleep_stage",
+      occurredAt: `${date}T07:00:00Z`,
+      recordClass: "ledger",
+      stream: "sleep_stage",
+      title: sourceSlug ? `Junction ${sourceSlug} ${stage} sleep` : `Junction unknown ${stage} sleep`,
+    });
+  };
+
+  const vault = makeVault([
+    makeEntity({
+      attributes: {
+        dataOrigin: {
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          version: 1,
+        },
+        dayKey: "2026-04-05",
+        externalRef: makeExternalRef({
+          resourceId: "junction-garmin-steps-explicit",
+          resourceType: "junction-garmin-activity",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-05T08:00:00Z",
+        unit: "count",
+        value: 9400,
+      },
+      entityId: "event_steps_junction_garmin_explicit",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-04-05T08:00:00Z",
+      recordClass: "ledger",
+      title: "Junction Garmin steps",
+    }),
+    makeEntity({
+      attributes: {
+        dayKey: "2026-04-05",
+        externalRef: makeExternalRef({
+          resourceId: "junction-garmin-steps-legacy",
+          resourceType: "junction-garmin-activity",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-05T08:05:00Z",
+        unit: "count",
+        value: 10000,
+      },
+      entityId: "event_steps_junction_garmin_legacy",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-04-05T08:05:00Z",
+      recordClass: "ledger",
+      title: "Legacy Junction steps",
+    }),
+    makeEntity({
+      attributes: {
+        dayKey: "2026-04-05",
+        externalRef: makeExternalRef({
+          resourceId: "garmin-steps-direct",
+          resourceType: "activity_summary",
+          system: "garmin",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-05T07:55:00Z",
+        unit: "count",
+        value: 8600,
+      },
+      entityId: "event_steps_garmin_direct",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-04-05T07:55:00Z",
+      recordClass: "ledger",
+      title: "Garmin direct steps",
+    }),
+    makeEntity({
+      attributes: {
+        dayKey: "2026-04-06",
+        externalRef: makeExternalRef({
+          resourceId: "junction-unknown-steps",
+          resourceType: "activity_summary",
+          system: "junction",
+        }),
+        metric: "daily-steps",
+        recordedAt: "2026-04-06T08:00:00Z",
+        unit: "count",
+        value: 1200,
+      },
+      entityId: "event_steps_junction_unknown",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-04-06T08:00:00Z",
+      recordClass: "ledger",
+      title: "Unknown bridge steps",
+    }),
+    makeJunctionSleepStage("deep", 80),
+    makeJunctionSleepStage("light", 240),
+    makeJunctionSleepStage("rem", 70),
+    makeJunctionSleepStage("deep", 80, { date: "2026-04-08" }),
+    makeJunctionSleepStage("light", 240, { date: "2026-04-08" }),
+    makeJunctionSleepStage("rem", 70, { date: "2026-04-08", sourceSlug: null }),
+    makeJunctionSleepStage("deep", 80, { date: "2026-04-09" }),
+    makeJunctionSleepStage("light", 240, { date: "2026-04-09" }),
+    makeJunctionSleepStage("rem", 70, { date: "2026-04-09" }),
+    makeJunctionSleepStage("deep", 90, { date: "2026-04-09", sourceSlug: "oura" }),
+    makeJunctionSleepStage("light", 250, { date: "2026-04-09", sourceSlug: "oura" }),
+    makeJunctionSleepStage("rem", 80, { date: "2026-04-09", sourceSlug: "oura" }),
+  ]);
+
+  const garminDataset = collectWearableDataset(vault, { providers: ["garmin"] });
+  const junctionDataset = collectWearableDataset(vault, { providers: ["junction"] });
+  assert.equal(garminDataset.rawMetricCandidates.length, 3);
+  assert.equal(
+    garminDataset.rawMetricCandidates.some((candidate) => candidate.provider === "junction"),
+    true,
+  );
+  assert.equal(junctionDataset.rawMetricCandidates.length, 0);
+
+  const day = summarizeWearableDay(vault, "2026-04-05", { providers: ["garmin"] });
+  assert.deepEqual(day?.providers, ["garmin"]);
+  assert.equal(day?.activity?.steps.selection.provider, "garmin");
+  assert.deepEqual(day?.activity?.steps.confidence.conflictingProviders, []);
+  assert.equal(
+    day?.activity?.steps.confidence.reasons.some((reason) => reason.includes("Garmin conflicts with Garmin")),
+    false,
+  );
+  const sourceHealth = listWearableSourceHealth(vault, { providers: ["garmin"] });
+  assert.deepEqual(sourceHealth.map((row) => row.provider), ["garmin"]);
+  assert.equal(sourceHealth[0]?.providerDisplayName, "Garmin");
+  assert.equal(sourceHealth[0]?.notes.some((note) => /\bjunction\b/iu.test(note)), false);
+
+  const unknownDay = summarizeWearableDay(vault, "2026-04-06");
+  assert.deepEqual(unknownDay?.providers, ["unknown"]);
+  assert.equal(unknownDay?.activity?.steps.selection.provider, "unknown");
+
+  const garminSleep = summarizeWearableSleep(vault, { providers: ["garmin"] })
+    .find((night) => night.date === "2026-04-07");
+  assert.equal(garminSleep?.totalSleepMinutes.selection.provider, "garmin");
+  assert.equal(garminSleep?.totalSleepMinutes.selection.value, 390);
+
+  const mixedSourceSleep = summarizeWearableSleep(vault)
+    .find((night) => night.date === "2026-04-08");
+  assert.equal(mixedSourceSleep?.totalSleepMinutes.selection.value, null);
+
+  const conflictingSleep = summarizeWearableSleep(vault)
+    .find((night) => night.date === "2026-04-09");
+  assert.equal(conflictingSleep?.totalSleepMinutes.candidates.length, 2);
+  assert.equal(
+    new Set(conflictingSleep?.totalSleepMinutes.candidates.map((candidate) => candidate.candidateId)).size,
+    2,
+  );
+  assert.deepEqual(
+    new Set([
+      conflictingSleep?.totalSleepMinutes.selection.provider,
+      ...(conflictingSleep?.totalSleepMinutes.confidence.conflictingProviders ?? []),
+    ]),
+    new Set(["garmin", "oura"]),
+  );
+});
+
 test("confidence and summary helpers describe the selected evidence plainly", () => {
   const missingSummary = summarizeMetricsConfidence([
     ["steps", makeResolvedMetric({

@@ -3,7 +3,7 @@ import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { buildActivitySessionAggregates, matchesDateFilters } from "./candidates.ts";
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
-import { wearableDataOriginKey } from "./origin.ts";
+import { resolveWearablePublicSourceProvider, wearableDataOriginKey } from "./origin.ts";
 import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "./selection.ts";
 import { buildCandidateId, latestIsoTimestamp, normalizeNullableString, uniqueStrings } from "./shared.ts";
 import type {
@@ -28,7 +28,14 @@ export function collectCanonicalWearableDataset(
 
   for (const record of records) {
     const provider = record.source.provider.toLowerCase();
-    if (providerSet && !providerSet.has(provider)) {
+    const externalRef = normalizeExternalRef(record.source.externalRef);
+    const publicProvider = resolveWearablePublicSourceProvider({
+      dataOrigin: record.source.origin ?? null,
+      externalRef,
+      provider,
+    });
+
+    if (providerSet && !providerSet.has(publicProvider)) {
       continue;
     }
 
