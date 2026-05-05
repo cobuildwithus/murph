@@ -19,6 +19,7 @@ const HOSTED_WEB_CALLBACK_SIGNING_ALGORITHM: EcdsaParams = {
   hash: "SHA-256",
 };
 const DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS = 60_000;
+const HOSTED_WEB_CALLBACK_NONCE_MIN_LENGTH = 16;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -92,6 +93,12 @@ export async function verifyHostedWebCallbackSignatureHeaders(input: {
     return false;
   }
 
+  const nonce = normalizeOptionalString(headers.nonce);
+
+  if (!nonce || nonce.length < HOSTED_WEB_CALLBACK_NONCE_MIN_LENGTH) {
+    return false;
+  }
+
   if (!isFreshCanonicalTimestamp({
     now: input.now ?? (() => new Date()),
     timestamp: headers.timestamp,
@@ -119,7 +126,7 @@ export async function verifyHostedWebCallbackSignatureHeaders(input: {
     signatureBuffer,
     encodeHostedExecutionSignedRequestPayload({
       method: input.method,
-      nonce: headers.nonce,
+      nonce,
       path: input.path,
       payload: input.payload,
       search: input.search,
