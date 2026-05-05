@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto'
 import {
   readLoopbackControlHeaderValue,
   type LoopbackControlHeaderValue,
-} from '../loopback-control-plane.ts'
+} from '../loopback-control-plane.js'
 
 export function hasMatchingLoopbackControlBearerToken(
   value: LoopbackControlHeaderValue,
