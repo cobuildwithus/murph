@@ -105,8 +105,6 @@ type AssistantProviderAttemptOutcome =
       result: ExecutedAssistantProviderTurnResult
     }
 
-const VERCEL_AI_GATEWAY_MODEL_PROVIDER_ID = 'vercel-ai-gateway' as const
-
 export type AssistantProviderTurnRecoveryOutcome =
   | {
       kind: 'failed_terminal'
@@ -202,17 +200,6 @@ function createAssistantProviderUsageAttribution(input: {
     provider: input.attemptPlan.route.provider,
     userEnvKeys: [...(input.executionPlan.executionContext?.hosted?.userEnvKeys ?? [])],
   })
-  const stripeCustomerId =
-    input.executionPlan.executionContext?.hosted?.stripeCustomerId ?? null
-  const stripeMeterSource =
-    stripeCustomerId
-    && credentialSource === 'platform'
-    && input.attemptPlan.route.provider === 'codex-cli'
-    && input.attemptPlan.route.providerOptions.modelProvider ===
-      VERCEL_AI_GATEWAY_MODEL_PROVIDER_ID
-      ? VERCEL_AI_GATEWAY_MODEL_PROVIDER_ID
-      : 'murph'
-
   return createAssistantUsageAttribution({
     credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
@@ -227,8 +214,7 @@ function createAssistantProviderUsageAttribution(input: {
       messageInput: input.executionPlan.input,
       session: input.attemptPlan.session,
     }),
-    stripeCustomerId,
-    stripeMeterSource,
+    stripeMeterSource: 'murph',
     triggerKind: resolveAssistantUsageTriggerKind(
       input.executionPlan.input.turnTrigger ?? 'manual-ask',
     ),

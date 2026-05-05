@@ -21,8 +21,6 @@ export {
 
 export const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
 export const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
-export const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
-  "/api/internal/hosted-execution/billing/stripe/customer/resolve";
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/connect-targets\/[^/]+\/connect-link$/u;
 
@@ -58,7 +56,6 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
     || path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
     || path === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     || path === HOSTED_WEB_ISSUE_RECORD_PATH
-    || path === HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH
     || path === HOSTED_WEB_USAGE_RECORD_PATH
     || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
 }

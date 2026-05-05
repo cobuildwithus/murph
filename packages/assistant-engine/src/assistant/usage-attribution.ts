@@ -23,7 +23,6 @@ export interface AssistantUsageAttribution {
   gatewayTags: readonly string[]
   reportingUserId: string | null
   surface: string
-  stripeCustomerId: string | null
   stripeMeterSource: AssistantUsageStripeMeterSource
   triggerKind: string
 }
@@ -35,7 +34,6 @@ export function createAssistantUsageAttribution(input: {
   memberId: string
   reportingSecret?: string | null
   surface: string
-  stripeCustomerId?: string | null
   stripeMeterSource?: AssistantUsageStripeMeterSource | null
   triggerKind: string
 }): AssistantUsageAttribution {
@@ -44,7 +42,6 @@ export function createAssistantUsageAttribution(input: {
   const surface = normalizeUsageAttributionPart(input.surface) ?? 'assistant'
   const triggerKind = normalizeUsageAttributionPart(input.triggerKind) ?? 'manual_ask'
   const credentialSource = input.credentialSource
-  const stripeCustomerId = normalizeOptionalString(input.stripeCustomerId)
   const reportingUserId = createAssistantUsageReportingUserId({
     memberId: input.memberId,
     reportingSecret: input.reportingSecret,
@@ -64,7 +61,6 @@ export function createAssistantUsageAttribution(input: {
     gatewayTags,
     reportingUserId,
     surface,
-    stripeCustomerId,
     stripeMeterSource: normalizeAssistantUsageStripeMeterSource(input.stripeMeterSource),
     triggerKind,
   }

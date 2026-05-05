@@ -1,5 +1,4 @@
 import {
-  parseHostedRuntimeBillingStripeCustomerResponse,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
@@ -82,7 +81,6 @@ import {
 import {
   assertAllowedHostedRunnerWebControlRequest,
   HOSTED_WEB_ISSUE_RECORD_PATH,
-  HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
   HOSTED_WEB_USAGE_RECORD_PATH,
   readHostedRunnerWebControlRoute,
 } from "./runner-outbound/shared-web-control-policy.ts";
@@ -223,12 +221,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
     },
     ...(hostedWebControlTransport
       ? {
-          billingPort: createHostedWebBillingPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport: hostedWebControlTransport,
-          }),
           logPort: createHostedWebRuntimeLogPort({
             boundUserId: input.boundUserId,
             fetchImpl,
@@ -975,36 +967,6 @@ function createHostedWebRuntimeLogPort(input: {
       });
 
       return parseHostedRuntimeLogResponse(payload);
-    },
-  };
-}
-
-function createHostedWebBillingPort(input: {
-  boundUserId: string;
-  fetchImpl: typeof fetch;
-  timeoutMs: number;
-  transport: HostedWebControlTransport;
-}) {
-  return {
-    async resolveVercelAiGatewayStripeCustomerId() {
-      const payload = await fetchHostedWebControlPlaneJson({
-        boundUserId: input.boundUserId,
-        description: "Hosted delegated billing Stripe customer lookup",
-        fetchImpl: input.fetchImpl,
-        method: "POST",
-        path: HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
-
-      try {
-        return parseHostedRuntimeBillingStripeCustomerResponse(payload);
-      } catch (error) {
-        throw new Error(
-          "Hosted delegated billing Stripe customer lookup returned invalid JSON.",
-          { cause: error },
-        );
-      }
     },
   };
 }
