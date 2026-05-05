@@ -412,6 +412,13 @@ describe("hosted deploy automation helpers", () => {
       "file: Dockerfile.cloudflare-hosted-runner-base",
       "load: true",
       "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
+      "name: Run hosted Codex auth deploy guard",
+      'MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"',
+      'npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"',
+      'npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"',
+      'export PATH="${npm_prefix}/bin:${PATH}"',
+      "codex --version",
+      "pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts",
       "name: Validate generated Worker deploy bundle",
       "--dry-run",
       "predeploy-${GITHUB_SHA::12}",
@@ -433,15 +440,24 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toContain("cache-to: type=gha,mode=max,scope=cloudflare-runner-base");
     expect(workflow).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT");
     const prepareArtifactsStepIndex = workflow.indexOf("- name: Prepare deploy artifacts");
+    const hostedCodexAuthGuardStepIndex = workflow.indexOf(
+      "- name: Run hosted Codex auth deploy guard",
+    );
+    const validateDeployEnvStepIndex = workflow.indexOf(
+      "- name: Validate required deploy environment",
+    );
     const prepareRunnerBaseImageStepIndex = workflow.indexOf("- name: Prepare runner base image");
     const parallelChecksAndSmokeStepIndex = workflow.indexOf(
       "- name: Run focused Cloudflare checks and smoke runner container image",
     );
     const deployWorkerStepIndex = workflow.indexOf("- name: Deploy Worker");
     expect(prepareArtifactsStepIndex).toBeGreaterThanOrEqual(0);
+    expect(hostedCodexAuthGuardStepIndex).toBeGreaterThanOrEqual(0);
+    expect(validateDeployEnvStepIndex).toBeGreaterThanOrEqual(0);
     expect(prepareRunnerBaseImageStepIndex).toBeGreaterThanOrEqual(0);
     expect(parallelChecksAndSmokeStepIndex).toBeGreaterThanOrEqual(0);
     expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
+    expect(hostedCodexAuthGuardStepIndex).toBeLessThan(validateDeployEnvStepIndex);
     expect(prepareArtifactsStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
     expect(prepareRunnerBaseImageStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
     expect(workflow.indexOf("- name: Validate generated Worker deploy bundle")).toBeLessThan(
