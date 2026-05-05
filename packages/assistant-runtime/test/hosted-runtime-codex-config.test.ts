@@ -582,6 +582,8 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'env_key = "VERCEL_AI_API_KEY"',
       'wire_api = "responses"',
       "",
+      "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
+      "# runner paths change on each wake and break provider prefix caching.",
       "[skills]",
       "include_instructions = false",
       "",
@@ -594,6 +596,26 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       "",
     ].join("\n"),
   );
+});
+
+test("hosted Codex config keeps skill instructions disabled for stable prompt prefixes", () => {
+  const config = buildHostedCodexConfigToml({
+    model: "gpt-5.5",
+    provider: {
+      id: "vercel-ai-gateway",
+      name: "Vercel AI Gateway",
+      baseUrl: "https://ai-gateway.vercel.sh/v1",
+      envKey: "VERCEL_AI_API_KEY",
+      wireApi: "responses",
+    },
+    reasoningEffort: "low",
+  });
+
+  assert.match(config, /\[skills\]\ninclude_instructions = false/u);
+  assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
+  assert.doesNotMatch(config, /include_instructions = true/u);
+  assert.doesNotMatch(config, /\[skills\.bundled\]\nenabled = true/u);
+  assert.match(config, /break provider prefix caching/u);
 });
 
 async function createTemporaryDirectory(): Promise<string> {

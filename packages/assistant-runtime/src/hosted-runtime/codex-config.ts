@@ -659,6 +659,8 @@ export function buildHostedCodexConfigToml(input: {
         ]
       : []),
     "",
+    "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
+    "# runner paths change on each wake and break provider prefix caching.",
     "[skills]",
     "include_instructions = false",
     "",
