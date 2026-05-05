@@ -268,7 +268,7 @@ That command:
 
 - runs deploy preflight inside the apply step before artifact validation and upload
 - renders the deploy config and worker secrets payload
-- assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`)
+- assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli` and catalog surfaces without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts
 - prepares the stable native runner base image with Docker's local cache
 - deploys the Worker directly with Wrangler, relying on the configured gradual container rollout by default, which builds only the small app image layer from the prepared runner bundle
 
