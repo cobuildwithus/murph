@@ -25,6 +25,7 @@ import {
 } from "./mailbox-checkpoint.ts";
 import type {
   HostedMailboxItemImportOutcome,
+  HostedMailboxPrefixPrefetch,
   HostedMailboxPostCheckpointEffect,
   HostedMailboxPostCheckpointEffectResult,
   HostedMailboxResolvedImportItem,
@@ -130,6 +131,7 @@ export interface HostedWorkspaceRunnerInput {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   limitPerLane: number;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
@@ -241,12 +243,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const checkpointRequestSession = createHostedWorkspaceCheckpointRequestSession(
     input.checkpointRequestBuilder,
   );
-  const initialMailboxImport = await importHostedMailboxForWorkspaceRunner({
-    checkpointRequestBuilder: checkpointRequestSession,
-    checkpointReason: "import",
-    input,
-    requestId: input.requestId,
-  });
+  const initialMailboxImport = input.initialMailboxImport
+    ?? await importHostedMailboxForWorkspaceRunner({
+      checkpointRequestBuilder: checkpointRequestSession,
+      checkpointReason: "import",
+      input,
+      requestId: input.requestId,
+    });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
   if (input.runAssistantPhase) {
     await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
@@ -581,11 +584,12 @@ function withActiveTurnInputWorkspacePorts(input: {
   };
 }
 
-async function importHostedMailboxForWorkspaceRunner(input: {
+export async function importHostedMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   checkpointReason: HostedWorkspaceCheckpointReason;
   input: HostedWorkspaceRunnerInput;
   lanes?: readonly ("conversation" | "system")[];
+  prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
 }): Promise<HostedMailboxImportCheckpointResult> {
   const result = await importHostedMailboxPrefixAndCheckpoint({
@@ -607,6 +611,7 @@ async function importHostedMailboxForWorkspaceRunner(input: {
     limitPerLane: input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,
     now: input.input.now,
+    prefetch: input.prefetch ?? null,
     requestId: input.requestId,
     vaultRoot: input.input.vaultRoot,
     workspacePort: input.input.platform.workspacePort,

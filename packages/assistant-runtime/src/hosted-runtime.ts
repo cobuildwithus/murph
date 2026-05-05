@@ -31,6 +31,13 @@ import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
+import {
+  prefetchHostedMailboxPrefix,
+} from "./hosted-runtime/mailbox-import.ts";
+import {
+  createEmptyHostedMailboxImportState,
+  type HostedMailboxImportState,
+} from "./hosted-runtime/mailbox-state.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -52,7 +59,9 @@ import {
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
+  importHostedMailboxForWorkspaceRunner,
   runHostedWorkspaceUntilIdleOrBudget,
+  type HostedWorkspaceRunnerInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
@@ -311,6 +320,58 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       expectedUserId: input.request.userId,
       workspace: workspaceRead.workspace,
     });
+    const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
+      input.request.budget?.maxMailboxItems,
+    );
+    let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
+      null;
+    const runnerPlatform = {
+      ...guardedRuntime.platform,
+      mailboxPort: guardedMailboxPort,
+      workspacePort: guardedWorkspacePort,
+    };
+    const runtimeLogContext = {
+      attemptId: input.request.attemptId,
+      leaseGeneration: input.request.leaseGeneration,
+      workspaceVersion: input.request.workspaceVersion,
+    };
+    const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: createLivenessGuardedCheckpointSnapshot,
+      metadata: {
+        attemptId: input.request.attemptId,
+        expectedWorkspaceVersion: input.request.workspaceVersion,
+        leaseGeneration: input.request.leaseGeneration,
+        nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
+        nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
+      },
+    });
+    const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
+      mailboxBudget.importItem(
+        item,
+        async (importItem, context) => {
+          assertRuntimeLiveness();
+          const outcome = await options.importItem(importItem, context);
+          assertRuntimeLiveness();
+          return outcome;
+        },
+        {
+          recordMessagingReturnTarget: (target) => {
+            hostedCliBridgeMessagingReturnTarget = target;
+          },
+          signal: livenessAbortController.signal,
+        },
+      );
+    const initialMailboxPrefetchStateHint = createHostedMailboxPrefetchStateHint(
+      workspaceRead.workspace,
+    );
+    const initialMailboxPrefetch = initialMailboxPrefetchStateHint
+      ? prefetchHostedMailboxPrefix({
+          limitPerLane: mailboxBudget.fetchLimitPerLane,
+          mailboxPort: guardedMailboxPort,
+          requestId: `${requestId}:prefetch`,
+          state: initialMailboxPrefetchStateHint,
+        })
+      : null;
     const restored = await raceHostedRuntimeLiveness(
       restoreHostedWorkspaceRuntimeJobWorkspace({
         platform: guardedRuntime.platform,
@@ -320,6 +381,28 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     activeVaultRoot = restored.vaultRoot;
+    assertRuntimeLiveness();
+    const baseRunnerInput: HostedWorkspaceRunnerInput = {
+      checkpointRequestBuilder,
+      expectedUserId: input.request.userId,
+      importItem: importMailboxItem,
+      limitPerLane: mailboxBudget.fetchLimitPerLane,
+      platform: runnerPlatform,
+      requestId,
+      runtimeLogContext,
+      vaultRoot: restored.vaultRoot,
+      workspace: workspaceRead.workspace,
+    };
+    const initialMailboxImport = await raceHostedRuntimeLiveness(
+      importHostedMailboxForWorkspaceRunner({
+        checkpointRequestBuilder,
+        checkpointReason: "import",
+        input: baseRunnerInput,
+        prefetch: initialMailboxPrefetch,
+        requestId,
+      }),
+      livenessAbortController.signal,
+    );
     assertRuntimeLiveness();
     await raceHostedRuntimeLiveness(
       ensureHostedInboxSidecarReady({
@@ -331,9 +414,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     assertRuntimeLiveness();
-    const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
-      input.request.budget?.maxMailboxItems,
-    );
     const baseRuntimeEnv = {
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
@@ -346,8 +426,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     assertRuntimeLiveness();
-    let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
-      null;
     const hostedCliBridge = await startHostedCliRuntimeBridge({
       deviceSyncPort: guardedRuntime.platform.deviceSyncPort,
       messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
@@ -368,45 +446,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
           async () =>
             runHostedWorkspaceUntilIdleOrBudget({
-              checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-                createSnapshot: createLivenessGuardedCheckpointSnapshot,
-                metadata: {
-                  attemptId: input.request.attemptId,
-                  expectedWorkspaceVersion: input.request.workspaceVersion,
-                  leaseGeneration: input.request.leaseGeneration,
-                  nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
-                  nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
-                },
-              }),
-              expectedUserId: input.request.userId,
-              importItem: (item) =>
-                mailboxBudget.importItem(
-                  item,
-                  async (importItem, context) => {
-                    assertRuntimeLiveness();
-                    const outcome = await options.importItem(importItem, context);
-                    assertRuntimeLiveness();
-                    return outcome;
-                  },
-                  {
-                    recordMessagingReturnTarget: (target) => {
-                      hostedCliBridgeMessagingReturnTarget = target;
-                    },
-                    signal: livenessAbortController.signal,
-                  },
-                ),
-              limitPerLane: mailboxBudget.fetchLimitPerLane,
-              platform: {
-                ...guardedRuntime.platform,
-                mailboxPort: guardedMailboxPort,
-                workspacePort: guardedWorkspacePort,
-              },
-              requestId,
-              runtimeLogContext: {
-                attemptId: input.request.attemptId,
-                leaseGeneration: input.request.leaseGeneration,
-                workspaceVersion: input.request.workspaceVersion,
-              },
+              ...baseRunnerInput,
+              initialMailboxImport,
               runAssistantPhase: (phaseInput) =>
                 (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
                   ...phaseInput,
@@ -416,8 +457,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   runtimeEnv,
                   signal: livenessAbortController.signal,
                 }),
-              vaultRoot: restored.vaultRoot,
-              workspace: workspaceRead.workspace,
             }),
         ),
         livenessAbortController.signal,
@@ -475,6 +514,55 @@ function raceHostedRuntimeLiveness<T>(
       },
     );
   });
+}
+
+function createHostedMailboxPrefetchStateHint(
+  workspace: HostedWorkspaceState | null,
+): HostedMailboxImportState | null {
+  const state = createEmptyHostedMailboxImportState();
+  if (!workspace) {
+    return state;
+  }
+
+  const redactedStatus = workspace?.redactedStatus ?? null;
+  if (!redactedStatus) {
+    return null;
+  }
+
+  const conversationSeq = readHostedMailboxSeqHint(
+    redactedStatus.hostedMailboxConversationImportedSeq,
+  );
+  const systemSeq = readHostedMailboxSeqHint(
+    redactedStatus.hostedMailboxSystemImportedSeq,
+  );
+  if (conversationSeq === null || systemSeq === null) {
+    return null;
+  }
+
+  return {
+    ...state,
+    watermarks: {
+      ...state.watermarks,
+      conversation: conversationSeq,
+      system: systemSeq,
+    },
+  };
+}
+
+function readHostedMailboxSeqHint(value: unknown): string | null {
+  if (typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    return value;
+  }
+
+  if (
+    typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+  ) {
+    return String(value);
+  }
+
+  return null;
 }
 
 function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {

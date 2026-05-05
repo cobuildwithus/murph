@@ -10,6 +10,7 @@ import {
   fetchAndProcessHostedMailboxPrefix,
   type HostedMailboxImportLoopResult,
   type HostedMailboxPostCheckpointEffect,
+  type HostedMailboxPrefixPrefetch,
   type HostedMailboxResolvedImportItem,
   type HostedMailboxItemImportOutcome,
 } from "./mailbox-import.ts";
@@ -34,6 +35,7 @@ export interface HostedMailboxImportCheckpointInput {
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   checkpointReason?: HostedWorkspaceCheckpointReason;
+  prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   vaultRoot: string;
   workspacePort: HostedRuntimeWorkspacePort;
@@ -110,6 +112,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
     now: input.now,
+    prefetch: input.prefetch ?? null,
     requestId: input.requestId,
     state: previousState,
   });
