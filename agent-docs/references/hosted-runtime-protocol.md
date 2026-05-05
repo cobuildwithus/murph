@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-04
+Last verified: 2026-05-05
 
 ## Decision
 
@@ -67,6 +67,21 @@ search, display, attachment enrichment, and debugging, but hosted callers must
 not stage hidden runtime-only inbox rows to make Codex admission succeed.
 
 ## Current Protocol
+
+### Deploy Compatibility Rule
+
+Any web-to-Cloudflare or Cloudflare-to-web protocol change must land in this
+order:
+
+1. Consumer tolerant first: the new consumer must handle the old producer.
+2. Producer dual path second: the new producer must still emit old-compatible
+   work.
+3. Contract later: remove the old path only after both services have been
+   deployed and production lag is clear.
+
+Do not add a deploy orchestrator or generic capability system by default. Use
+this compatibility invariant first, and only introduce heavier machinery when a
+specific protocol change cannot be made safe with the sequence above.
 
 Hosted producers append one `HostedMailboxItem` in the same transaction as the
 product/control-plane mutation that made work necessary. Large payloads use
