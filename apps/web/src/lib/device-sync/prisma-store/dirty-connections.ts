@@ -220,10 +220,14 @@ export class PrismaHostedDirtyConnectionStore {
       return null;
     }
 
-    const nextProcessedRevision =
+    const requestedProcessedRevision =
       input.processedRevision > existing.processedRevision
         ? input.processedRevision
         : existing.processedRevision;
+    const nextProcessedRevision =
+      requestedProcessedRevision > existing.dirtyRevision
+        ? existing.dirtyRevision
+        : requestedProcessedRevision;
     const fullyProcessed = nextProcessedRevision >= existing.dirtyRevision;
     const record = await prisma.deviceSyncDirtyConnection.update({
       where: {
