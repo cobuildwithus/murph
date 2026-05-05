@@ -1,175 +1,211 @@
 # Codex Continuity Architecture Plan
 
 Date: 2026-05-05
-Status: Draft for review before implementation
+Status: Final implementation plan
 
-## Problem
+## Summary
 
-Hosted Murph should behave like a thin runner over Codex App Server: restore the same Codex home, pass Codex the stored thread id, and let Codex resume its own thread.
+Hosted Murph should be a thin runner over Codex App Server. Murph stores the Codex thread id, restores the Codex home, and asks Codex to resume. Murph should not reconstruct Codex history, repair Codex rollout files, or translate Codex tool outputs.
 
-The current production failure shape was a resumed Codex turn failing before provider work with an `input.N.output: Invalid input` error. Local reproduction showed the same failure class when Codex replayed a thread containing structured tool output content. Codex itself supports structured function-call outputs in persisted rollout history, so the likely Murph-owned failure is not the content shape by itself. The likely failure is that Murph can resume Codex with an inconsistent continuity bundle or with route overrides that change the provider replay context.
+The architectural bug is best described as a live-state completeness bug:
 
-## Current Architecture
+> If the live state snapshot stores a provider resume pointer, it must also store the provider local state required to resume that pointer.
 
-- Murph stores the Codex App Server resume handle as `providerSessionId` in assistant session runtime state.
-- Murph passes that handle to Codex App Server as `threadId` in `thread/resume`.
-- The app-server runner restores `CODEX_HOME` from `.codex-hosted` under the hosted operator home.
-- Assistant runtime hot checkpoints include assistant session state, including `providerSessionId`.
-- Hosted full/base snapshots include operator-home state, including `.codex-hosted`.
-- Most hosted checkpoints are hot checkpoints, not full snapshots.
-- Route identity already fingerprints model/provider/runtime details, and native resume is gated by the stored route id matching the current route id.
+For Codex native resume, that means assistant live state cannot persist `providerSessionId` without also preserving the matching `.codex-hosted` state.
 
-## Likely Invariant Violation
+## Naming
 
-The Codex resume handle and Codex home can currently move independently:
+Use these terms in implementation discussions:
 
-- A hot checkpoint can persist a new `providerSessionId`.
-- That same hot checkpoint does not persist the matching updated `.codex-hosted`.
-- A later restore can combine newer assistant session state with an older Codex home.
-- Codex then receives a valid-looking thread id against the wrong local thread store.
+- `baseSnapshot`: an occasional full workspace backup.
+- `liveStateSnapshot`: the small correctness bundle needed for the next hosted run to continue safely.
+- `restore`: restore `baseSnapshot`, then overlay `liveStateSnapshot`.
+- `compaction`: fold the current live state back into a new base snapshot later.
 
-That violates the intended Codex contract: the resume id is only meaningful with the Codex home that minted and last advanced it.
+Avoid introducing a separate "Codex checkpoint" subsystem. Codex state is part of live assistant state when Codex native resume is enabled.
 
-There is a second deviation from the thin-runner model: ordinary `thread/resume` currently sends current model/provider context. Codex App Server has persisted thread metadata, and normal resume should prefer that metadata instead of letting Murph reinterpret the thread under current route settings.
+## Current Problem
+
+Today, the live state snapshot can include Murph assistant runtime state such as sessions, transcripts, outbox state, active-turn input, and `providerSessionId`.
+
+But `.codex-hosted` lives under the hosted operator home and is captured by full/base snapshots, not by the live assistant-state snapshot.
+
+That can produce this bad restore shape:
+
+1. Codex runs and advances its local thread state in `.codex-hosted`.
+2. Murph persists assistant session state that points at the Codex thread id.
+3. The hosted runtime writes a live state snapshot that preserves Murph's session state.
+4. The matching updated `.codex-hosted` is not included.
+5. A later restore combines newer Murph session state with older Codex local state.
+6. Codex receives a valid-looking thread id against a stale or mismatched local store.
+
+This explains the `input.N.output: Invalid input` failure class without treating Codex history as something Murph should own. Codex supports structured tool outputs in its persisted history; Murph's likely failure is resuming that history under an inconsistent local/provider context.
 
 ## Target Invariants
 
-1. Codex continuity is one atomic unit:
-   - `.codex-hosted`
-   - `providerSessionId`
-   - config fingerprint that minted the thread
+1. **Live state is complete.**
+   If live state includes assistant runtime state with `providerSessionId`, it also includes the Codex local state needed to resume that id.
 
-2. Murph does not reconstruct Codex history:
-   - no transcript-to-Codex-history conversion for native resume
-   - no repair of Codex rollout entries
-   - no schema translation for Codex tool outputs
+2. **Codex owns Codex history.**
+   Murph does not parse, rebuild, repair, or normalize Codex rollout history as part of normal operation.
 
-3. Native resume is allowed only when the stored config fingerprint matches the current route:
-   - model changes start a new Codex thread
-   - model provider changes start a new Codex thread
-   - execution driver or resume kind changes start a new Codex thread
-   - Codex home changes start a new Codex thread
+3. **Restore is replace-then-overlay for live-owned roots.**
+   If live state includes `.codex-hosted`, restore clears the corresponding restored `.codex-hosted` root before overlaying live state. Stale base files must not survive beside newer live files.
 
-4. Ordinary app-server resume does not override persisted Codex thread metadata:
-   - pass the thread id
-   - pass only required runtime context such as cwd/sandbox/instructions when intentionally refreshing instructions
-   - do not pass model/provider overrides unless this is an explicit migration path
+4. **Route identity remains the config-change gate.**
+   Reuse `resumeRouteId`; do not add a duplicate persisted config fingerprint yet. The route id already fingerprints provider, execution driver, resume kind, model, model provider, reasoning effort, sandbox, approval policy, profile, Codex home option, and Codex command.
 
-5. Recovery fallback can start a fresh thread, but the fresh thread id must not be checkpointed without the matching `.codex-hosted`.
+5. **Ordinary resume is thin.**
+   A normal `thread/resume` should pass the Codex thread id and only the runtime fields Codex actually requires. Model/provider overrides should not be sent by default. Sandbox, approval, reasoning, and instruction refresh should also be reviewed as possible resume-context override leaks.
 
-## Proposed Shape
+6. **Fallback cannot split continuity.**
+   If invalid-resume recovery starts a fresh Codex thread, the fresh `providerSessionId` cannot become durable without the matching `.codex-hosted` state in the same live state snapshot.
 
-### 1. Make Codex Continuity Atomic
+## Implementation Plan
 
-Represent Codex continuity as a named bundle, not two incidental fields in separate snapshot layers.
+### 1. Treat `.codex-hosted` as Live Assistant State
 
-Minimum implementation options:
+Update the live state snapshot contract so it includes filtered `.codex-hosted` whenever Codex native resume is enabled or assistant session state can contain a Codex `providerSessionId`.
 
-- Option A: include `.codex-hosted` in hot checkpoints whenever assistant session state can include or update `providerSessionId`.
-- Option B: force a full checkpoint after any assistant phase that persists a provider turn result with a new or updated `providerSessionId`.
-- Option C: create a small Codex continuity sidecar snapshot that stores `.codex-hosted` plus the resume state together, then layer it separately from generic hot assistant runtime state.
+This is not a new checkpoint type. It is making the existing live state snapshot complete for the assistant runtime state it already preserves.
 
-Preferred long-term shape: Option C. It keeps hot assistant runtime checkpoints small while making the Codex-specific atomicity explicit.
+### 2. Add Clear-Before-Overlay Restore
 
-Pragmatic first patch: Option A or B, whichever is smaller and safer after tests measure bundle size and checkpoint behavior.
+Before applying a live state snapshot that contains `.codex-hosted`, clear the restored `.codex-hosted` root from the base snapshot. Then overlay the live copy.
 
-### 2. Store an Explicit Resume Config Fingerprint
+This matters because Codex may scan local state. A base snapshot's old files must not remain after live state replaces the Codex home.
 
-The existing `resumeRouteId` already captures the important model/provider/runtime dimensions indirectly. Make this intent explicit by either:
+### 3. Keep Base Snapshots Off The Response Path
 
-- adding `resumeConfigFingerprint` to resume state, or
-- documenting and renaming the route binding concept so tests and logs treat route id as the resume config fingerprint.
+Do not force full/base snapshots after every assistant reply as the default long-term fix. The response-path checkpoint should remain a small live state snapshot.
 
-The fingerprint must cover:
+Full/base snapshots remain for:
 
-- provider
-- execution driver
-- resume kind
-- model
-- model provider
-- reasoning effort
-- sandbox
-- approval policy
-- profile
-- Codex home identity
-- Codex command, if configured
+- initial full backups
+- maintenance and compaction
+- fallback if live state exceeds budget or cannot be written safely
 
-Native resume should be refused on mismatch. Refusal means start a new Codex thread; it does not mean replay old Codex history.
+### 4. Keep Murph Thin Over Codex
 
-### 3. Thin App-Server Resume Request
+Do not add Murph-owned parsing of Codex local storage for normal diagnostics. Let Codex App Server `thread/resume` be the authoritative probe.
 
-Change ordinary `thread/resume` construction so it does not pass model/provider overrides when resuming an existing Codex thread under a matching fingerprint.
+Allowed diagnostics are metadata-only:
 
-The resume request should primarily identify:
+- native resume attempted
+- native resume refused
+- route fingerprint match or mismatch
+- live state included Codex state
+- resume override keys present
+- invalid-resume fallback used
+- checkpoint mode and bundle class
 
-- `threadId`
-- working directory
-- optional refreshed instructions when the thread-instruction fingerprint changed
-- sandbox/approval context only if Codex requires those outside persisted metadata
+Never log raw prompts, message bodies, raw thread ids, secrets, local paths, provider headers, or Codex home contents.
 
-If a route migration is later needed, make it an explicit migration mode with separate tests and observability.
+### 5. Thin App-Server Resume Params
 
-### 4. Observability
+Change ordinary app-server resume construction so it does not reinterpret the persisted Codex thread under current model/provider settings.
 
-Add metadata-only diagnostics for resume decisions:
+Review and test these fields:
 
-- whether native resume was attempted
-- whether native resume was refused because config fingerprint changed
-- whether Codex continuity was checkpointed atomically
-- whether restored `.codex-hosted` could resolve the stored thread id
-- whether app-server resume sent model/provider overrides
+- `model`
+- `modelProvider`
+- `sandbox`
+- `approvalPolicy`
+- `reasoningEffort`
+- refreshed instructions
+- `cwd`
+- `excludeTurns`
 
-Do not log raw prompts, raw message text, raw thread ids, secrets, home paths, or provider headers.
+Default posture:
 
-### 5. Proof Tests
+- new threads receive the configured model/provider/runtime options
+- ordinary resume passes only the thread id plus fields Codex truly requires
+- explicit migration, if ever needed, is a separate mode with separate tests and observability
 
-Add focused tests before relying on the fix:
+### 6. Keep `resumeRouteId`
 
-1. Resume gating:
-   - same model/provider keeps native resume enabled
+Do not add `resumeConfigFingerprint` now. Instead:
+
+- clarify in comments/docs that `resumeRouteId` is the resume config gate
+- strengthen tests that model/provider/runtime changes refuse native resume
+- add metadata-only logs that say "resume route fingerprint matched" or "resume route fingerprint mismatched"
+
+The hosted `.codex-hosted` consistency problem is not solved by adding another config fingerprint; it is solved by live state completeness.
+
+## Proof Tests
+
+Add deterministic tests for the core invariants:
+
+1. Live state completeness:
+   - create assistant session live state containing a Codex `providerSessionId`
+   - create matching `.codex-hosted` state
+   - snapshot live state
+   - assert the live bundle includes the filtered Codex home state
+
+2. Same thread id advances:
+   - base snapshot has `.codex-hosted` state for thread `T` at version 1
+   - a successful resumed turn advances `.codex-hosted` to version 2 while `providerSessionId` remains `T`
+   - live state snapshot and restore preserve version 2
+
+3. Clear-before-overlay:
+   - base snapshot has old `.codex-hosted` files
+   - live state has newer `.codex-hosted` files
+   - restore must not leave old base-only Codex files behind
+
+4. Route resume gate:
+   - same model/provider/runtime config keeps native resume enabled
    - model change disables native resume
    - model provider change disables native resume
-   - Codex home change disables native resume
+   - execution driver, resume kind, sandbox, approval policy, profile, Codex home option, or command changes disable native resume
 
-2. Snapshot atomicity:
-   - after a provider turn updates `providerSessionId`, the matching `.codex-hosted` state is included in the same persisted continuity layer or the checkpoint is full
-   - a layered restore cannot produce newer resume state with older Codex home
+5. Thin resume params:
+   - ordinary resume omits model/provider overrides
+   - ordinary resume omits sandbox/approval/reasoning/instruction overrides unless Codex requires them or an explicit refresh path is active
+   - new thread still receives configured runtime options
 
-3. Real Codex home round trip:
+6. Invalid-resume fallback:
+   - force `input.N.output: Invalid input` on native resume
+   - fallback creates a fresh thread
+   - the fresh id is not durably checkpointed without matching `.codex-hosted`
+   - layered restore can resume the fresh thread
+
+7. Optional real Codex round trip:
    - create a real Codex App Server thread in an isolated Codex home
-   - include a structured tool output in the persisted thread
-   - snapshot and restore the Codex continuity bundle
-   - resume by stored thread id
+   - include structured tool output in the persisted thread
+   - live snapshot and restore the Codex home plus stored thread id
+   - resume by stored id
    - verify no `input.N.output: Invalid input` failure
 
-4. App-server resume params:
-   - ordinary resume omits model/provider overrides
-   - new thread still receives intended model/provider config
-   - explicit migration, if introduced, is the only path that overrides provider metadata on resume
+Keep the real Codex round trip opt-in if it depends on local Codex binaries or provider credentials.
 
 ## Rollout Plan
 
-1. Add read-only diagnostics around current resume decisions and checkpoint mode.
-2. Add tests that demonstrate the current atomicity gap.
-3. Patch checkpointing so Codex continuity moves atomically.
-4. Patch app-server resume params to stop overriding model/provider on ordinary resume.
-5. Keep the invalid-resume fresh-thread fallback as a guarded recovery path.
-6. Deploy and watch metadata-only logs for:
-   - native resume attempts
-   - resume refusals due to fingerprint mismatch
-   - atomic Codex continuity checkpoint confirmation
-   - absence of `input.N.output` failures on resumed turns
+1. Add metadata-only diagnostics around resume decisions, resume override keys, and live-state Codex inclusion.
+2. Add failing tests for live state missing `.codex-hosted` and for stale base files surviving overlay.
+3. Include filtered `.codex-hosted` in live state when Codex native resume is enabled.
+4. Add clear-before-overlay restore semantics for `.codex-hosted`.
+5. Thin ordinary app-server resume params.
+6. Keep invalid-resume fresh-thread fallback as a guarded temporary recovery path.
+7. Deploy and watch for:
+   - live state includes Codex state when native resume is active
+   - no resume override keys on ordinary resume except allowed fields
+   - route fingerprint mismatch starts a fresh thread
+   - invalid-resume fallback drops toward zero
+   - no resumed-turn `input.N.output` failures
 
 ## Non-Goals
 
 - Do not fork or patch Codex.
-- Do not duplicate Codex history management in Murph.
+- Do not duplicate Codex history in Murph.
+- Do not add a separate Codex checkpoint taxonomy.
+- Do not move assistant runtime semantics into hosted web DB tables as part of this fix.
 - Do not store user-facing memory in assistant runtime state.
-- Do not log raw Codex ids, prompts, message bodies, secrets, or local machine paths.
+- Do not log raw Codex ids, prompts, message bodies, secrets, provider headers, local paths, or Codex home contents.
 
 ## Open Questions
 
-- Is hot-checkpoint bundle size acceptable if `.codex-hosted` is included directly?
-- Does Codex App Server require sandbox/approval fields on resume, or can those also be treated as persisted thread metadata?
-- Should the durable name be `resumeConfigFingerprint`, `codexContinuityFingerprint`, or a clarified `resumeRouteId` contract?
-- Should recovery from an invalid native resume clear resume state immediately, or only after a fresh thread succeeds and its Codex continuity has been atomically checkpointed?
+- What exact `.codex-hosted` filter is needed for safe Codex resume while avoiding logs and other sensitive or bulky files?
+- Which app-server resume params are truly required by Codex on resume?
+- Does hosted `config.toml` rewriting affect persisted Codex thread metadata on resume, even after RPC model/provider overrides are removed?
+- What is the live state size impact once filtered `.codex-hosted` is included?
+- Should live state inclusion of `.codex-hosted` be unconditional for hosted Codex, or conditional on a session containing resumable Codex state?
