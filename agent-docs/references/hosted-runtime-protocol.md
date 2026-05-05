@@ -231,7 +231,8 @@ device-sync runtime state, parser executable-selector config, quarantine
 payloads, locks, pid/socket files, global cache/tmp, and rebuildable
 projections. Hot checkpoints snapshot a much narrower explicit assistant
 runtime continuity subset under `vault/.runtime/operations/assistant/**` for
-user-visible checkpoint boundaries such as mailbox import and outbox state.
+user-visible checkpoint boundaries such as mailbox import, active-turn
+acceptance, and pre-delivery outbox sending state.
 Operator-home `.codex-hosted/**` remains full/base snapshot provider
 continuity, not hot-state continuity. Restore applies the base bundle first,
 clears the vault hot-state include paths, leaves operator-home Codex state from
@@ -243,9 +244,10 @@ forward the browser-vault replica ref for the current base snapshot explicitly;
 if that continuity is missing or stale, the runner uses a full checkpoint
 instead. `system_mailbox_receipt` remains full because activation can mutate
 canonical vault bootstrap state that must be present for later conversation
-wakes. Assistant/output checkpoints that may make new Codex native continuity
-important use full snapshots so native resume state remains owned by the base
-layer rather than by every mailbox import hot checkpoint.
+wakes. Maintenance and explicit outbox-intent checkpoints can refresh the
+full/base provider-continuity image, but pre-delivery outbox sending must stay
+hot so user-visible delivery is not gated on compacting or validating large
+native Codex continuity artifacts.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint
