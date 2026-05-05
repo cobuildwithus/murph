@@ -289,6 +289,31 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("rejects deploy container smoke requests outside the signature timestamp window", async () => {
+    const env = createWorkerEnv();
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const staleTimestamp = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+        timestamp: staleTimestamp,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
   it("returns method-not-allowed before smoke signature verification on wrong methods", async () => {
     const response = await worker.fetch(
       new Request("https://runner.example.test/internal/deploy/container-smoke", {
