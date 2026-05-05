@@ -497,6 +497,11 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
     return;
   }
 
+  const nudgeLogMetadata = {
+    connectionId: input.connectionId,
+    provider: input.provider,
+    traceIdPresent: input.traceId !== null,
+  };
   if (legacyWakeInserted && legacyWakeMailboxItemId) {
     try {
       await startHostedWebhookNudgeWorkflow({
@@ -505,10 +510,10 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       });
     } catch (error) {
       console.warn("Hosted device-sync legacy wake workflow was not started after durable acceptance.", {
-        connectionId: input.connectionId,
+        connectionId: nudgeLogMetadata.connectionId,
         errorType: error instanceof Error ? error.name : typeof error,
-        provider: input.provider,
-        traceIdPresent: input.traceId !== null,
+        provider: nudgeLogMetadata.provider,
+        traceIdPresent: nudgeLogMetadata.traceIdPresent,
       });
     }
   }
@@ -519,11 +524,11 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   });
   if (!nudge.accepted) {
     console.warn("Hosted device-sync dirty runner nudge was not accepted after durable acceptance.", {
-      connectionId: input.connectionId,
+      connectionId: nudgeLogMetadata.connectionId,
       configured: nudge.configured,
       errorCode: nudge.errorCode,
-      provider: input.provider,
-      traceIdPresent: input.traceId !== null,
+      provider: nudgeLogMetadata.provider,
+      traceIdPresent: nudgeLogMetadata.traceIdPresent,
     });
   }
 }

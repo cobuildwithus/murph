@@ -79,6 +79,7 @@ describe("resolveHostedLocalWorkerPortMode", () => {
     const port = await reserveAndReleaseLocalPort();
 
     await expect(resolveHostedLocalWorkerPortMode({
+      allowReuseExisting: true,
       host: "127.0.0.1",
       message: "worker port busy",
       port,
@@ -96,6 +97,7 @@ describe("resolveHostedLocalWorkerPortMode", () => {
     });
 
     await expect(resolveHostedLocalWorkerPortMode({
+      allowReuseExisting: true,
       host: "127.0.0.1",
       message: "worker port busy",
       port,

@@ -30,6 +30,7 @@ export async function main(): Promise<void> {
     }
 
     terminationSignal = signal;
+    stack.kill(signal);
     process.stderr.write(`\nStopping local hosted dev (${signal}).\n`);
     try {
       await stopStack(signal);
@@ -49,6 +50,10 @@ export async function main(): Promise<void> {
 
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
+  const onExit = (): void => {
+    stack.kill("SIGKILL");
+  };
+  process.once("exit", onExit);
 
   try {
     try {
@@ -103,6 +108,7 @@ export async function main(): Promise<void> {
   } finally {
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
+    process.off("exit", onExit);
   }
 }
 

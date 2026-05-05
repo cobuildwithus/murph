@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const ready = vi.fn(async () => {});
 const stop = vi.fn(async () => {});
+const kill = vi.fn(() => {});
 const waitForExit = vi.fn(async () => ({
   child: {
     exitCode: 0,
@@ -9,6 +10,7 @@ const waitForExit = vi.fn(async () => ({
   name: "cloudflare" as const,
 }));
 const startHostedLocalDevStack = vi.fn(async () => ({
+  kill,
   ready: ready(),
   stop,
   waitForExit,
@@ -89,6 +91,7 @@ describe("hosted local dev main", () => {
       await Promise.resolve();
 
       expect(stop).toHaveBeenCalledWith("SIGINT");
+      expect(kill).toHaveBeenCalledWith("SIGINT");
       expect(settled).toBe(false);
 
       resolveStop();
@@ -97,6 +100,7 @@ describe("hosted local dev main", () => {
       expect(settled).toBe(true);
       expect(offSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
       expect(offSpy).toHaveBeenCalledWith("SIGTERM", expect.any(Function));
+      expect(offSpy).toHaveBeenCalledWith("exit", expect.any(Function));
     } finally {
       onceSpy.mockRestore();
       offSpy.mockRestore();
