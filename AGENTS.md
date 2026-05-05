@@ -72,6 +72,7 @@ Always read these before repo code/docs/test/config work:
 - If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` for the final commit of active-plan work so the matching ledger row is removed and the plan is archived; use `scripts/committer` only when no active plan is involved.
 - If a plan-bearing task is done or abandoned but a safe scoped commit is blocked by overlapping dirty work, clear the exact ledger row and archive the plan with `scripts/close-exec-plan.sh`.
 - Document architecture-significant changes in the matching durable docs, and update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
+- If a completed task could break or degrade production when Vercel (`apps/web`) and Cloudflare (`apps/cloudflare`) deploy out of sync, add a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, and any post-deploy checks.
 
 ## Notes
 
