@@ -9,6 +9,7 @@ import type {
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
   HostedExecutionLinqConversationMessagePart,
+  HostedExecutionLinqConversationContactKind,
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
@@ -118,21 +119,33 @@ export function buildHostedExecutionConversationMessageWake(input: {
 }
 
 export function buildHostedExecutionLinqConversationMessageWake(input: {
+  contactKind?: HostedExecutionLinqConversationContactKind;
+  contactLookupKey?: string;
   eventId: string;
   linqMessage: HostedExecutionLinqConversationMessage;
   occurredAt: string;
-  phoneLookupKey: string;
+  phoneLookupKey?: string | null;
   userId: string;
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionLinqConversationMessagePayload;
 } {
+  const contactKind = input.contactKind ?? "phone";
+  const contactLookupKey = input.contactLookupKey ?? input.phoneLookupKey;
+  if (!contactLookupKey) {
+    throw new TypeError("Hosted Linq conversation wake requires a contact lookup key.");
+  }
+
   return {
     eventId: input.eventId,
     kind: "conversation.message",
     message: {
       channel: "linq",
+      contactKind,
+      contactLookupKey,
       linqMessage: cloneLinqMessage(input.linqMessage),
-      phoneLookupKey: input.phoneLookupKey,
+      ...(input.phoneLookupKey === undefined
+        ? {}
+        : { phoneLookupKey: input.phoneLookupKey }),
     },
     occurredAt: input.occurredAt,
     userId: input.userId,

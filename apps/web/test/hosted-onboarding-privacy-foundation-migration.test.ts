@@ -39,6 +39,10 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
     'pendingLinqChatLookupKey String? @unique @map("pending_linq_chat_lookup_key")',
     'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
+    'pendingLinqParticipantContactKind String? @map("pending_linq_participant_contact_kind")',
+    'pendingLinqParticipantContactLookupKey String? @unique @map("pending_linq_participant_contact_lookup_key")',
+    'pendingLinqParticipantContactEncrypted String? @map("pending_linq_participant_contact_encrypted")',
+    'pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")',
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
     'replyAliasLookupKey String? @unique @map("reply_alias_lookup_key")',
@@ -167,6 +171,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const linqPendingParticipantContactMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050403_linq_pending_participant_contact/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -185,6 +196,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050400_hosted_ai_usage_provider_request_outcome",
       "2026050401_hosted_ai_usage_sanitized_usage_metadata",
       "2026050402_device_oauth_session_metadata",
+      "2026050403_linq_pending_participant_contact",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -301,6 +313,24 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(deviceOauthSessionMetadataMigrationSql).toContain(
       'ADD COLUMN "metadata_json" JSONB',
+    );
+    expect(linqPendingParticipantContactMigrationSql).toContain(
+      'ALTER TABLE "hosted_member_routing"',
+    );
+    expect(linqPendingParticipantContactMigrationSql).toContain(
+      'ADD COLUMN "pending_linq_participant_contact_kind" TEXT',
+    );
+    expect(linqPendingParticipantContactMigrationSql).toContain(
+      'ADD COLUMN "pending_linq_participant_contact_lookup_key" TEXT',
+    );
+    expect(linqPendingParticipantContactMigrationSql).toContain(
+      'ADD COLUMN "pending_linq_participant_contact_encrypted" TEXT',
+    );
+    expect(linqPendingParticipantContactMigrationSql).toContain(
+      'ADD COLUMN "pending_linq_participant_contact_observed_at" TIMESTAMP(3)',
+    );
+    expect(linqPendingParticipantContactMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_member_routing_pending_linq_participant_contact_lookup_key_key"',
     );
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');

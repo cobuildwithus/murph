@@ -67,7 +67,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Linq, Telegram, reply-alias routing bindings",
     deletion: "live-delete",
     export: "decoded-redacted-data",
-    note: "Confirmed export includes decrypted user-facing Linq and Telegram routing IDs while omitting lookup keys used for inbound traffic matching.",
+    note: "Confirmed export includes decrypted user-facing Linq and Telegram routing IDs and pending Linq participant contacts while omitting lookup keys used for inbound traffic matching.",
   },
   {
     slug: "prisma.hosted_member_email_authorization",
@@ -1027,6 +1027,13 @@ function projectAccountSnapshotForExport(
           linqRecipientPhone: snapshot.routing.linqRecipientPhone,
           memberId: snapshot.routing.memberId,
           pendingLinqChatId: snapshot.routing.pendingLinqChatId,
+          pendingLinqParticipantContact: snapshot.routing.pendingLinqParticipantContact
+            ? {
+                kind: snapshot.routing.pendingLinqParticipantContact.kind,
+                observedAt: snapshot.routing.pendingLinqParticipantContact.observedAt,
+                value: snapshot.routing.pendingLinqParticipantContact.value,
+              }
+            : null,
           pendingLinqRecipientPhone: snapshot.routing.pendingLinqRecipientPhone,
           telegramThreadId: snapshot.routing.telegramThreadId,
           telegramUserId: snapshot.routing.telegramUserId,

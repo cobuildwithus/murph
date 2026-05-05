@@ -1,6 +1,7 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
   lookupHostedMemberForPrivyIdentity,
@@ -247,6 +248,52 @@ describe("hosted-onboarding member-identity-service", () => {
     }));
   });
 
+  it("requires a verified Privy email when reconciling against an expected invite email", async () => {
+    const identityUpsert = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: null,
+          memberId: "member_123",
+          phoneLookupKey: null,
+          phoneNumber: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      expectedEmailLookupKey: requireHostedEmailLookupKey("invite@example.com"),
+      identity: makeIdentity({
+        email: {
+          address: "invite@example.com",
+          verifiedAt: null,
+        },
+        phone: null,
+        wallet: null,
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "PRIVY_EMAIL_REQUIRED",
+      httpStatus: 400,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
   it("preserves every matching identity binding when Privy identity lookup hits the same member twice", async () => {
     const member = makeMember();
     const identityRecord = {
@@ -357,6 +404,14 @@ function restoreEnvValue(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function requireHostedEmailLookupKey(value: string): string {
+  const lookupKey = createHostedEmailLookupKey(value);
+  if (!lookupKey) {
+    throw new Error("Expected test email lookup key.");
+  }
+  return lookupKey;
 }
 
 function asRootPrisma<T extends object>(tx: T): T & {

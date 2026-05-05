@@ -4,9 +4,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import {
-  createHostedPhoneLookupKey,
-} from "./contact-privacy";
+import { createHostedPhoneLookupKey } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
@@ -25,6 +23,10 @@ import {
   readHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
+  lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
+  upsertHostedMemberPendingLinqParticipantContactTx,
+} from "./hosted-member-routing-store";
+import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
   readHostedMemberIdentity,
@@ -32,6 +34,7 @@ import {
   upsertHostedMemberIdentity,
 } from "./hosted-member-identity-store";
 import {
+  assertHostedPrivyIdentityMatchesExpectedEmail,
   assertHostedPrivyIdentityMatchesExpectedPhone,
   buildHostedMemberPhoneIdentityFields,
   buildHostedMemberWalletIdentityFields,
@@ -43,6 +46,7 @@ import {
   lookupHostedMemberForPrivyIdentity,
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-lookup";
+import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 
 export {
   hasHostedMemberPrivyIdentity,
@@ -130,6 +134,94 @@ export async function ensureHostedMemberForPhoneTx(input: {
   }
 }
 
+export async function ensureHostedMemberForPendingLinqParticipantContactTx(input: {
+  contact: HostedLinqParticipantContact;
+  observedAt: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMemberCoreState> {
+  if (Number.isNaN(input.observedAt.getTime())) {
+    throw new TypeError("Hosted Linq participant contact observed timestamp must be valid.");
+  }
+
+  const existingRoutingLookup =
+    await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
+      lookupKey: input.contact.lookupKey,
+      prisma: input.prisma,
+    });
+
+  if (existingRoutingLookup) {
+    assertHostedMemberNotSuspended(existingRoutingLookup.core);
+    return existingRoutingLookup.core;
+  }
+
+  const existingIdentityLookup = input.contact.kind === "phone"
+    ? await lookupHostedMemberIdentityByPhoneLookupKey({
+        phoneLookupKey: input.contact.lookupKey,
+        prisma: input.prisma,
+      })
+    : null;
+
+  if (existingIdentityLookup) {
+    assertHostedMemberNotSuspended(existingIdentityLookup.core);
+    await upsertHostedMemberPendingLinqParticipantContactTx({
+      contact: input.contact,
+      memberId: existingIdentityLookup.core.id,
+      observedAt: input.observedAt,
+      prisma: input.prisma,
+    });
+    return existingIdentityLookup.core;
+  }
+
+  const memberId = generateHostedMemberId();
+
+  try {
+    const createdMember = await createHostedMember({
+      billingStatus: HostedBillingStatus.not_started,
+      memberId,
+      prisma: input.prisma,
+    });
+    await upsertHostedMemberIdentity({
+      maskedPhoneNumberHint: null,
+      memberId,
+      phoneLookupKey: null,
+      phoneNumber: null,
+      phoneNumberVerifiedAt: null,
+      prisma: input.prisma,
+      privyUserId: null,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    await upsertHostedMemberPendingLinqParticipantContactTx({
+      contact: input.contact,
+      memberId,
+      observedAt: input.observedAt,
+      prisma: input.prisma,
+    });
+    return createdMember;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const concurrentRoutingLookup =
+        await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
+          lookupKey: input.contact.lookupKey,
+          prisma: input.prisma,
+        });
+
+      if (concurrentRoutingLookup) {
+        assertHostedMemberNotSuspended(concurrentRoutingLookup.core);
+        return concurrentRoutingLookup.core;
+      }
+    }
+
+    throw error;
+  }
+}
+
 async function refreshHostedMemberForPhoneTx(input: {
   currentIdentity: HostedMemberIdentityLookup["identity"] | null;
   member: HostedMemberCoreState;
@@ -170,6 +262,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
 }
 
 export async function reconcileHostedPrivyIdentityOnMember(input: {
+  expectedEmailLookupKey?: string;
   expectedPhoneHint?: string;
   expectedPhoneLookupKey?: string;
   identity: HostedPrivyIdentity;
@@ -182,6 +275,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   return prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
     expectedPhoneHint: input.expectedPhoneHint,
     expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+    expectedEmailLookupKey: input.expectedEmailLookupKey,
     identity: input.identity,
     member: input.member,
     now: input.now,
@@ -237,6 +331,7 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
 }
 
 export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
+  expectedEmailLookupKey?: string;
   expectedPhoneHint?: string;
   expectedPhoneLookupKey?: string;
   identity: HostedPrivyIdentity;
@@ -267,6 +362,10 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   assertHostedPrivyIdentityMatchesExpectedPhone({
     expectedPhoneHint: input.expectedPhoneHint,
     expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+    identity: input.identity,
+  });
+  assertHostedPrivyIdentityMatchesExpectedEmail({
+    expectedEmailLookupKey: input.expectedEmailLookupKey,
     identity: input.identity,
   });
 

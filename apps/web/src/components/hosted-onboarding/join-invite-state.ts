@@ -116,6 +116,9 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
     case "expired":
       return "Invite link expired";
     case "verify":
+      if (status.invite?.verificationMode === "invite_email") {
+        return "Verify your email";
+      }
       return status.invite?.verificationMode === "manual_phone"
         ? "Add your phone"
         : "Verify your phone";
@@ -138,6 +141,9 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "expired":
       return "Text Murph again for a fresh link.";
     case "verify":
+      if (status.invite?.verificationMode === "invite_email") {
+        return "Use the iMessage email address that received this join link.";
+      }
       return status.invite?.verificationMode === "manual_phone"
         ? "Add the phone number Murph should use for experiment check-ins."
         : "Use the number that received this join link.";

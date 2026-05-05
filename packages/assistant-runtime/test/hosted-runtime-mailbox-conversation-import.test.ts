@@ -8,6 +8,10 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
 } from "@murphai/hosted-execution/contracts";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import type {
   HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution/contracts";
@@ -187,6 +191,80 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(afterProjection.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
+  });
+
+  test("uses the Linq email contact lookup as the assistant conversation identity seed", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-email-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const contactLookupKey = "hbidx:email:v1:mailbox";
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        contactKind: "email",
+        contactLookupKey,
+        linqMessage: {
+          chatId: "chat_email_identity",
+          from: "buddy@example.test",
+          isFromMe: false,
+          messageId: "msg_email_identity",
+          parts: [
+            {
+              type: "text",
+              value: "hello from email",
+            },
+          ],
+          service: "iMessage",
+        },
+        phoneLookupKey: null,
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_email_identity_001",
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_email_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    const event = listed.events[0];
+    assert.ok(event);
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: contactLookupKey,
+      userId: TEST_USER_ID,
+    });
+    const expectedAccountId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      contactLookupKey,
+    );
+    const expectedThreadId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      "chat_email_identity",
+    );
+
+    assert.equal(event.conversation?.accountId, expectedAccountId);
+    assert.equal(event.conversation?.source, "linq");
+    assert.equal(event.conversation?.threadId, expectedThreadId);
+    assert.equal(event.replyTarget?.threadId, "chat_email_identity");
+    assert.equal(event.replyTarget?.messageId, "msg_email_identity");
   });
 
   test("records hosted attachment evidence after successful inbox projection", async () => {

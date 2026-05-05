@@ -123,6 +123,71 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
+  it("promotes an email-handle pending Linq thread without requiring a member phone", async () => {
+    const emailLookupKey = "hbidx:email:v1:test";
+    const member = buildMember({
+      pendingLinqChatId: "chat_pending_email",
+      pendingLinqParticipantContact: {
+        kind: "email",
+        lookupKey: emailLookupKey,
+        observedAt: new Date("2026-04-12T00:01:00.000Z"),
+        value: "buddy@icloud.com",
+      },
+      pendingLinqRecipientPhone: null,
+    });
+    member.identity = member.identity
+      ? {
+          ...member.identity,
+          phoneLookupKey: null,
+          phoneNumber: null,
+        }
+      : null;
+    member.emailAuthorization = {
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "buddy@icloud.com",
+        lookupKey: emailLookupKey,
+        verifiedAt: new Date("2026-04-12T00:02:00.000Z"),
+      },
+    };
+    mocks.getHostedOnboardingEnvironment.mockReturnValue({
+      linqConversationPhoneNumbers: ["+15550100001"],
+      linqMaxActiveMembersPerConversationPhone: 3,
+    });
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
+      new Map([["+15550100001", 0]]),
+    );
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member,
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: {
+        actorId: null,
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_pending_email",
+        },
+        identityId: hashHostedLinqRouteIdentifier(emailLookupKey, emailLookupKey),
+        threadId: hashHostedLinqRouteIdentifier("chat_pending_email", emailLookupKey),
+        threadIsDirect: true,
+      },
+    });
+
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
+      clearPending: true,
+      linqChatId: "chat_pending_email",
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: "+15550100001",
+    });
+  });
+
   it("assigns the pooled home line and returns a participant welcome route when there is no reusable pending thread", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15550100001", "+15550100002"],
@@ -189,10 +254,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   });
 });
 
-function hashHostedLinqRouteIdentifier(value: string): string {
+function hashHostedLinqRouteIdentifier(
+  value: string,
+  secret = "hbidx:phone:v1:test",
+): string {
   return hashHostedAssistantConversationIdentifier(
     createHostedAssistantConversationIdentifierBlind({
-      secret: "hbidx:phone:v1:test",
+      secret,
       userId: "member_123",
     }),
     value,
@@ -232,6 +300,7 @@ function buildMember(
       linqRecipientPhone: null,
       memberId: "member_123",
       pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
       pendingLinqRecipientPhone: null,
       telegramThreadId: null,
       telegramUserId: null,

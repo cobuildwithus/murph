@@ -16,10 +16,6 @@ import {
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
 import {
-  readHostedMemberRoutingTelegramPrivateState,
-} from "./member-private-codecs";
-
-import {
   type HostedMemberStripeBillingRefSnapshot,
   projectHostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
@@ -141,7 +137,14 @@ export interface HostedMemberSnapshot extends HostedMemberBillingSnapshot {
 
 export interface HostedMemberMessagingSetupState {
   identity: Pick<HostedMemberIdentityState, "phoneLookupKey"> | null;
-  routing: Pick<HostedMemberRoutingStateSnapshot, "telegramThreadId" | "telegramUserId"> | null;
+  routing: Pick<
+    HostedMemberRoutingStateSnapshot,
+    | "linqChatId"
+    | "pendingLinqChatId"
+    | "pendingLinqParticipantContact"
+    | "telegramThreadId"
+    | "telegramUserId"
+  > | null;
 }
 
 export async function createHostedMember(input: {
@@ -381,12 +384,7 @@ export async function readHostedMemberMessagingSetupState(input: {
           phoneLookupKey: true,
         },
       },
-      routing: {
-        select: {
-          memberId: true,
-          telegramUserIdEncrypted: true,
-        },
-      },
+      routing: true,
     },
   });
 
@@ -394,8 +392,8 @@ export async function readHostedMemberMessagingSetupState(input: {
     return null;
   }
 
-  const telegramRouting = memberRecord.routing
-    ? await readHostedMemberRoutingTelegramPrivateState(memberRecord.routing, input.prisma)
+  const routing = memberRecord.routing
+    ? await projectHostedMemberRoutingState(memberRecord.routing, input.prisma)
     : null;
 
   return {
@@ -404,10 +402,13 @@ export async function readHostedMemberMessagingSetupState(input: {
           phoneLookupKey: memberRecord.identity.phoneLookupKey,
         }
       : null,
-    routing: telegramRouting
+    routing: routing
       ? {
-          telegramThreadId: telegramRouting.telegramThreadId,
-          telegramUserId: telegramRouting.telegramUserId,
+          linqChatId: routing.linqChatId,
+          pendingLinqChatId: routing.pendingLinqChatId,
+          pendingLinqParticipantContact: routing.pendingLinqParticipantContact,
+          telegramThreadId: routing.telegramThreadId,
+          telegramUserId: routing.telegramUserId,
         }
       : null,
   };
