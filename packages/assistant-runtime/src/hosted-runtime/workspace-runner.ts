@@ -671,21 +671,21 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   });
 }
 
-async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(input: {
+async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(context: {
   error: unknown;
   errorCode: "assistant_after_checkpoint_checkpoint_failed" | "assistant_after_checkpoint_failed";
   input: HostedWorkspaceRunnerInput;
 }): Promise<void> {
-  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(input.error);
+  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
   console.warn("Hosted assistant post-checkpoint cleanup failed after durable checkpoint.", {
-    errorCode: input.errorCode,
-    errorName: failure.name ?? (input.error instanceof Error ? input.error.name : typeof input.error),
+    errorCode: context.errorCode,
+    errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
   });
   await writeHostedRuntimeLogBestEffort({
     entry: {
-      ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
+      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
       component: "runner",
-      errorCode: input.errorCode,
+      errorCode: context.errorCode,
       eventCode: "runner.error",
       level: "warn",
       phase: "checkpoint",
@@ -697,8 +697,8 @@ async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(inpu
         nestedErrorCode: failure.errorCode,
       },
     },
-    now: input.input.now,
-    platform: input.input.platform,
+    now: context.input.now,
+    platform: context.input.platform,
   });
 }
 
