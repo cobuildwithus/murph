@@ -29,6 +29,7 @@ import {
   findCanonicalAssistantCronRecordInList,
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
+  resolveCanonicalAssistantCronJobId,
   resolveCanonicalRuntimeState,
   type ResolvedAssistantCronJob,
 } from './cron/canonical-jobs.ts'
@@ -37,6 +38,7 @@ import {
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
 } from './cron/execution.ts'
+import type { AssistantRunEvent } from './automation/shared.ts'
 import { resolveAssistantStatePaths } from './store/paths.ts'
 import type { AssistantOutboxDispatchMode } from './outbox.ts'
 import type { AssistantExecutionContext } from './execution-context.ts'
@@ -115,6 +117,7 @@ export interface ProcessDueAssistantCronJobsInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   limit?: number
+  onEvent?: (event: AssistantRunEvent) => void
   signal?: AbortSignal
   vault: string
 }
@@ -503,6 +506,11 @@ export async function processDueAssistantCronJobsLocal(
     succeeded: 0,
     failed: 0,
   }
+  await emitAssistantCronScanEvents({
+    onEvent: input.onEvent,
+    paths,
+    vault: input.vault,
+  })
 
   while (!input.signal?.aborted && summary.processed < limit) {
     const claimed = await claimNextDueAssistantCronJob(paths, input.vault)
@@ -526,9 +534,158 @@ export async function processDueAssistantCronJobsLocal(
     } else if (result.run.status === 'failed') {
       summary.failed += 1
     }
+    emitAssistantCronJobCompletedEvent({
+      job: result.job,
+      onEvent: input.onEvent,
+      runStatus: result.run.status,
+      sourceKind: claimed.kind === 'canonical' ? claimed.source.kind : 'local',
+    })
   }
 
   return summary
 }
 
 export { buildAssistantCronSchedule }
+
+async function emitAssistantCronScanEvents(input: {
+  onEvent?: (event: AssistantRunEvent) => void
+  paths: ReturnType<typeof resolveAssistantStatePaths>
+  vault: string
+}): Promise<void> {
+  if (!input.onEvent) {
+    return
+  }
+
+  const [store, canonicalRecords, runtimeStore] = await Promise.all([
+    readAssistantCronStore(input.paths),
+    listCanonicalAssistantCronRecords(input.vault, ['active']),
+    readAssistantCronCanonicalRuntimeStore(input.paths),
+  ])
+  const nowIso = new Date().toISOString()
+  const visibleLocalStore = buildVisibleLocalAssistantCronStore(store)
+  const canonicalEntries = canonicalRecords.map((source) => {
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    return {
+      source,
+      runtimeStatePresent: runtimeStore.jobs.some(
+        (record) => record.jobId === resolveCanonicalAssistantCronJobId(source),
+      ),
+      job: projectCanonicalAssistantCronJob({
+        source,
+        runtimeState,
+      }),
+    }
+  })
+  const jobs = sortAssistantCronJobs([
+    ...visibleLocalStore.jobs,
+    ...canonicalEntries.map((entry) => entry.job),
+  ])
+  const dueJobs = jobs.filter((job) => isAssistantCronJobDue(job, nowIso))
+
+  input.onEvent({
+    type: 'cron.scan.started',
+    details: `${jobs.length} scheduled job(s), ${dueJobs.length} due`,
+    safeDetails: 'cron_scan_started',
+    failureContext: {
+      canonicalJobs: canonicalEntries.length,
+      dueJobs: dueJobs.length,
+      localJobs: visibleLocalStore.jobs.length,
+      loadedJobs: jobs.length,
+    },
+    providerKind: 'status',
+    providerState: 'completed',
+  })
+
+  for (const job of jobs.slice(0, 50)) {
+    const canonicalEntry = canonicalEntries.find(
+      (entry) => resolveCanonicalAssistantCronJobId(entry.source) === job.jobId,
+    )
+    input.onEvent({
+      type: 'cron.scan.job',
+      details: 'scheduled job scan decision',
+      safeDetails: resolveAssistantCronDueReason(job, nowIso),
+      failureContext: {
+        due: isAssistantCronJobDue(job, nowIso),
+        enabled: job.enabled,
+        localTime:
+          job.schedule.kind === 'dailyLocal' ? job.schedule.localTime : null,
+        nextRunAt: job.state.nextRunAt,
+        reason: resolveAssistantCronDueReason(job, nowIso),
+        routeConfigured: assistantCronJobHasDeliveryRoute(job),
+        running: job.state.runningAt !== null,
+        scheduleKind: job.schedule.kind,
+        sourceKind: canonicalEntry?.source.kind ?? 'local',
+        timeZone:
+          canonicalEntry && 'timeZone' in canonicalEntry.source
+            ? canonicalEntry.source.timeZone
+            : null,
+        runtimeStatePresent: canonicalEntry?.runtimeStatePresent ?? true,
+      },
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+  }
+}
+
+function emitAssistantCronJobCompletedEvent(input: {
+  job: AssistantCronJob
+  onEvent?: (event: AssistantRunEvent) => void
+  runStatus: AssistantCronRunRecord['status']
+  sourceKind: string
+}): void {
+  const safeDetailsByStatus: Record<AssistantCronRunRecord['status'], string> = {
+    failed: 'cron_job_enqueue_failed',
+    skipped: 'cron_job_enqueue_skipped',
+    succeeded: 'cron_job_enqueue_succeeded',
+  }
+
+  input.onEvent?.({
+    type: 'cron.job.completed',
+    details: 'scheduled job run completed',
+    safeDetails: safeDetailsByStatus[input.runStatus],
+    failureContext: {
+      routeConfigured: assistantCronJobHasDeliveryRoute(input.job),
+      runStatus: input.runStatus,
+      scheduleKind: input.job.schedule.kind,
+      sourceKind: input.sourceKind,
+    },
+    providerKind: 'status',
+    providerState: 'completed',
+  })
+}
+
+function resolveAssistantCronDueReason(job: AssistantCronJob, nowIso: string): string {
+  if (!job.enabled) {
+    return 'disabled'
+  }
+
+  if (job.state.runningAt !== null) {
+    return 'running'
+  }
+
+  if (job.state.nextRunAt === null) {
+    return 'no_next_run'
+  }
+
+  return job.state.nextRunAt <= nowIso ? 'due' : 'not_due'
+}
+
+function assistantCronJobHasDeliveryRoute(job: AssistantCronJob): boolean {
+  if (job.scheduledLog) {
+    return true
+  }
+
+  if (!job.target.channel) {
+    return false
+  }
+
+  if (job.target.channel === 'email' && !job.target.identityId) {
+    return false
+  }
+
+  return Boolean(
+    job.target.deliveryTarget ||
+      job.target.participantId ||
+      job.target.threadId,
+  )
+}

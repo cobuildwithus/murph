@@ -136,7 +136,7 @@ export function resolveCanonicalRuntimeState(
       store,
       resolveCanonicalAssistantCronJobId(source),
     ) ??
-    createInitialCanonicalRuntimeState(source, new Date().toISOString())
+    createInitialCanonicalRuntimeState(source)
   )
 }
 
@@ -390,11 +390,10 @@ function resolveCanonicalAssistantCronJobLookupKeys(
 
 function createInitialCanonicalRuntimeState(
   source: CanonicalAssistantCronJobRecord,
-  now: string,
 ): AssistantCronCanonicalRuntimeRecord {
   return createAssistantCronCanonicalRuntimeRecord({
     jobId: resolveCanonicalAssistantCronJobId(source),
-    now,
+    now: source.createdAt,
   })
 }
 

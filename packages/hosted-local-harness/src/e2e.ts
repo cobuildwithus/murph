@@ -12,6 +12,7 @@ export type HostedLocalE2eScenarioName =
   | "mailbox-platform-env"
   | "linq-first-contact"
   | "linq-delivery"
+  | "linq-scheduled-reminder"
   | "linq-webhook"
   | "telegram"
   | "telegram-first-contact";
@@ -46,6 +47,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     aliases: ["linq-delivery"],
     file: "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     name: "linq-first-contact",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
+    name: "linq-scheduled-reminder",
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",

@@ -34,6 +34,9 @@ export interface AssistantRunEvent {
     | 'capture.routed'
     | 'capture.skipped'
     | 'daemon.failed'
+    | 'cron.job.completed'
+    | 'cron.scan.job'
+    | 'cron.scan.started'
     | 'reply.scan.started'
     | 'scan.started'
 }

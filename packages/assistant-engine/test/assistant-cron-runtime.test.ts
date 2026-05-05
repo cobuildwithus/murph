@@ -23,7 +23,7 @@ type MockAutomationRecord = {
   schedule: AssistantCronSchedule
   slug?: string
   status: 'active' | 'paused' | 'archived'
-  summary?: string
+  summary?: string | null
   tags: string[]
   title: string
   updatedAt: string
@@ -237,7 +237,7 @@ beforeEach(() => {
       schedule: AssistantCronSchedule
       slug?: string
       status: MockAutomationRecord['status']
-      summary?: string
+      summary?: string | null
       tags?: string[]
       title: string
       vaultRoot: string
@@ -648,6 +648,112 @@ describe('assistant cron runtime orchestration', () => {
     const updatedCanonical = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
     expect(updatedCanonical.state.lastSucceededAt).not.toBeNull()
     expect(updatedCanonical.state.runningAt).toBeNull()
+  })
+
+  it('processes a canonical daily-local midnight job when runtime state is missing', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'Asia/Kuala_Lumpur',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-kl-midnight-')
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-kl-midnight',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-05-03T22:17:55.000Z',
+      instructions: 'Remind me to sleep.',
+      route: {
+        channel: 'linq',
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '00:00',
+      },
+      slug: 'midnight-sleep-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Midnight sleep reminder',
+      updatedAt: '2026-05-03T22:17:55.000Z',
+    })
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      safeDetails?: string
+      type: string
+    }> = []
+
+    const summary = await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      onEvent: (event) => {
+        events.push(event)
+      },
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'linq',
+        deliveryDispatchMode: 'queue-only',
+        deliveryDedupeToken: expect.stringContaining(
+          'assistant-cron|automation-kl-midnight|2026-05-04T16:00:00.000Z',
+        ),
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    const updated = await getAssistantCronJob(vaultRoot, 'automation-kl-midnight')
+    expect(updated.state.lastSucceededAt).toBe('2026-05-04T16:00:12.000Z')
+    expect(updated.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            canonicalJobs: 1,
+            dueJobs: 1,
+            loadedJobs: 1,
+          }),
+          safeDetails: 'cron_scan_started',
+          type: 'cron.scan.started',
+        }),
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            due: true,
+            localTime: '00:00',
+            nextRunAt: '2026-05-04T16:00:00.000Z',
+            reason: 'due',
+            routeConfigured: true,
+            scheduleKind: 'dailyLocal',
+            sourceKind: 'automation',
+            timeZone: 'Asia/Kuala_Lumpur',
+            runtimeStatePresent: false,
+          }),
+          safeDetails: 'due',
+          type: 'cron.scan.job',
+        }),
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            routeConfigured: true,
+            runStatus: 'succeeded',
+            scheduleKind: 'dailyLocal',
+            sourceKind: 'automation',
+          }),
+          safeDetails: 'cron_job_enqueue_succeeded',
+          type: 'cron.job.completed',
+        }),
+      ]),
+    )
   })
 })
 

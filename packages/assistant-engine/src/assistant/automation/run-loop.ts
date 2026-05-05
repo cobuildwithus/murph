@@ -900,6 +900,7 @@ export async function runAssistantAutomationPass(
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
+        onEvent: input.onEvent,
         vault: input.vault,
         signal: input.signal,
         limit: input.maxPerScan,
