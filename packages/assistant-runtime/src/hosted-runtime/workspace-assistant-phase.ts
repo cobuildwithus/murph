@@ -87,6 +87,7 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "failureAssistantProviderErrorType",
   "failureCodexConnectionLost",
   "failureCodexExitCode",
+  "failureCodexDiagnosticsPresent",
   "failureCodexFailureDetailPresent",
   "failureCodexFailureStage",
   "failureCodexRetryable",
@@ -101,10 +102,13 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "failureRecoverableConnectionLoss",
   "failureRetryAfterSeconds",
   "failureRetryable",
+  "failureFieldsPresent",
   "deliveryDispatchMode",
   "notificationChannel",
   "errorCode",
+  "safeErrorLength",
   "safeErrorMessage",
+  "safeErrorPresent",
 ] as const;
 
 const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS = new Set([

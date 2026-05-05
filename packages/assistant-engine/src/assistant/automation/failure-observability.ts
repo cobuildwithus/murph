@@ -42,6 +42,7 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'connectionLost',
   'codexExitCode',
   'codexFailureDetailPresent',
+  'codexDiagnosticsPresent',
   'codexFailureStage',
   'codexSignalPresent',
   'codexStderrPresent',
@@ -65,7 +66,10 @@ export function describeAssistantAutoReplyFailure(
   const code = readFailureCode(error)
   const message = sanitizeFailureText(formatStructuredErrorMessage(error))
   const retryable = readFailureRetryable(error)
-  const context = readFailureContext(error)
+  const context = annotateMissingCodexFailureContext({
+    code,
+    context: readFailureContext(error),
+  })
   const kind = classifyFailureKind({
     code,
     message,
@@ -84,6 +88,32 @@ export function describeAssistantAutoReplyFailure(
       retryable,
     }),
   }
+}
+
+function annotateMissingCodexFailureContext(input: {
+  code: string | null
+  context: Record<string, unknown> | null
+}): Record<string, unknown> | null {
+  if (input.code !== 'ASSISTANT_CODEX_FAILED') {
+    return input.context
+  }
+
+  if (!input.context || !hasCodexFailureContext(input.context)) {
+    return {
+      ...(input.context ?? {}),
+      codexDiagnosticsPresent: false,
+    }
+  }
+
+  return input.context
+}
+
+function hasCodexFailureContext(context: Record<string, unknown>): boolean {
+  return Object.keys(context).some((key) =>
+    key.startsWith('codex') ||
+    key === 'providerActionCount' ||
+    key === 'providerSessionId',
+  )
 }
 
 function buildSafeSummary(input: {

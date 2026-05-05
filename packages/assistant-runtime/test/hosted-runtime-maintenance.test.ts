@@ -212,6 +212,7 @@ describe("runHostedAssistantAutomation", () => {
       input.onEvent?.({
         errorCode: "ASSISTANT_CODEX_FAILED",
         failureContext: {
+          codexDiagnosticsPresent: true,
           codexExitCode: 1,
           retryable: false,
         },
@@ -252,10 +253,15 @@ describe("runHostedAssistantAutomation", () => {
           message: "Hosted assistant automation event: input.reply-failed.",
           redacted: expect.objectContaining({
             errorCode: "ASSISTANT_CODEX_FAILED",
+            failureCodexDiagnosticsPresent: true,
             failureCodexExitCode: 1,
+            failureFieldsPresent: true,
             failureRetryable: false,
+            safeErrorLength:
+              "Codex app-server failed. connection refused by local bridge.".length,
             safeErrorMessage:
               "Codex app-server failed. connection refused by local bridge.",
+            safeErrorPresent: true,
             type: "input.reply-failed",
           }),
         }),

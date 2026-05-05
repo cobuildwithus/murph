@@ -390,13 +390,16 @@ function buildHostedAssistantAutomationEventLogDetails(
 ): Record<string, boolean | number | string | null> {
   return {
     errorCode: event.errorCode ?? null,
+    failureFieldsPresent: event.failureContext !== undefined,
     ...prefixHostedAssistantAutomationFailureContext(event.failureContext),
     inputIdPresent: "inputId" in event ? event.inputId != null : false,
     providerKind: event.providerKind ?? null,
     providerState: event.providerState ?? null,
     requestId,
     safeDetails: event.safeDetails ?? null,
+    safeErrorLength: event.safeErrorMessage?.length ?? null,
     safeErrorMessage: event.safeErrorMessage ?? null,
+    safeErrorPresent: event.safeErrorMessage !== undefined,
     toolCount: event.tools?.length ?? null,
     type: event.type,
   };

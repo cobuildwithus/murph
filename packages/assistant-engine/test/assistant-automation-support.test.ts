@@ -555,6 +555,26 @@ describe('assistant auto-reply failure observability', () => {
     expect(snapshot.message).not.toContain(syntheticHomePath)
   })
 
+  it('marks Codex provider failures that arrive without structured context', () => {
+    const error = Object.assign(
+      new Error('Codex app-server failed before structured diagnostics were attached.'),
+      {
+        code: 'ASSISTANT_CODEX_FAILED',
+      },
+    )
+
+    const snapshot = describeAssistantAutoReplyFailure(error)
+
+    expect(snapshot).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexDiagnosticsPresent: false,
+      },
+      kind: 'provider',
+      safeSummary: 'assistant provider failed (ASSISTANT_CODEX_FAILED)',
+    })
+  })
+
   it('classifies delivery failures and sanitizes allowed array context values', () => {
     const error = Object.assign(
       new Error('Outbound delivery failed for this reply.'),
