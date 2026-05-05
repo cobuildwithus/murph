@@ -115,6 +115,7 @@ function BiomarkersPageContent({ biomarkers }: BiomarkersPageClientProps) {
                 unit={card.unit}
                 summary={card.summary}
                 privateValue={resolvePrivateBiomarkerValue({ biomarkerKey: card.key, client, status })}
+                privateValueLoading={status === "loading"}
               />
             ))}
           </div>
