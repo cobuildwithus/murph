@@ -123,6 +123,7 @@ export async function assertHostedWebPortAvailable(input: {
 }
 
 export async function resolveHostedLocalWorkerPortMode(input: {
+  allowReuseExisting?: boolean;
   host: string;
   message: string;
   port: number;
@@ -131,6 +132,10 @@ export async function resolveHostedLocalWorkerPortMode(input: {
   const available = await isPortAvailable(input.host, input.port);
   if (available) {
     return "start";
+  }
+
+  if (input.allowReuseExisting !== true) {
+    throw new Error(input.message);
   }
 
   const health = await requestJson({

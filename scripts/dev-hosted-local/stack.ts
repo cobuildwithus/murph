@@ -49,6 +49,7 @@ import {
   spawnChildProcess,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
+  terminateChildProcess,
   terminateChildProcessAndWait,
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
@@ -94,6 +95,7 @@ export interface HostedLocalDevStack {
     web: BufferedNamedChildProcess | null;
   };
   ready: Promise<void>;
+  kill(signal?: NodeJS.Signals): void;
   linqWebhookTargetUrl: string | null;
   runtimeEnv: NodeJS.ProcessEnv;
   stderrTail(maxChars?: number): string;
@@ -143,10 +145,11 @@ export async function startHostedLocalDevStack(input: {
     });
   }
   const workerPortMode = await resolveHostedLocalWorkerPortMode({
+    allowReuseExisting: isHostedLocalWorkerReuseEnabled(initialEnv),
     host: config.workerHost,
     message: [
       `Local Cloudflare worker port ${config.workerPort} is already in use on ${config.workerHost}.`,
-      "Stop the existing listener or set MURPH_DEV_WORKER_PORT to a free port before running `pnpm dev`.",
+      "Stop the existing listener, set MURPH_DEV_WORKER_PORT to a free port, or set MURPH_DEV_REUSE_EXISTING_WORKER=1 if you intentionally want to reuse it.",
     ].join(" "),
     port: config.workerPort,
     protocol: config.workerProtocol,
@@ -522,6 +525,20 @@ export async function startHostedLocalDevStack(input: {
     }
 
     const webBaseUrl = config.skipWeb ? null : `http://${config.webHost}:${config.webPort}`;
+    const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
+      for (const { child } of children) {
+        terminateChildProcess(child, signal);
+      }
+      if (stripeListener !== null) {
+        terminateChildProcess(stripeListener.child, signal);
+      }
+      terminateKnownHostedLocalProcessResidue({
+        signal,
+        stripeForwardUrl: webBaseUrl === null ? null : `${webBaseUrl}${STRIPE_WEBHOOK_FORWARD_PATH}`,
+        workerHost: config.workerHost,
+        workerPort: config.workerPort,
+      });
+    };
     const cleanupTemporaryInputs = async (): Promise<void> => {
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true });
@@ -547,16 +564,20 @@ export async function startHostedLocalDevStack(input: {
         }
 
         stopped = true;
-        for (const { child } of children) {
-          await terminateChildProcessAndWait(child, { signal });
-        }
-        if (stripeListener !== null) {
-          await terminateChildProcessAndWait(stripeListener.child, { signal });
-        }
         if (keepAliveTimer !== null) {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
         }
+        kill(signal);
+        const terminationResults = await Promise.allSettled([
+          ...children.map(({ child }) => terminateChildProcessAndWait(child, { signal })),
+          ...(stripeListener !== null
+            ? [terminateChildProcessAndWait(stripeListener.child, { signal })]
+            : []),
+        ]);
+        const terminationFailure = terminationResults.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
         if (workerRuntimeEnv && workerPortMode === "start") {
           await cleanupHostedRunnerContainers({
             cwd: repoRoot,
@@ -565,6 +586,9 @@ export async function startHostedLocalDevStack(input: {
           });
         }
         await cleanupTemporaryInputs();
+        if (terminationFailure) {
+          throw terminationFailure.reason;
+        }
       })();
 
       return await stopPromise;
@@ -635,6 +659,7 @@ export async function startHostedLocalDevStack(input: {
 
     return {
       config,
+      kill,
       oidcIdentity,
       oidcToken,
       processes: {
@@ -1193,4 +1218,39 @@ function findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix: string)
   }
 
   return null;
+}
+
+function isHostedLocalWorkerReuseEnabled(env: Record<string, string | undefined>): boolean {
+  const value = env.MURPH_DEV_REUSE_EXISTING_WORKER?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
+function terminateKnownHostedLocalProcessResidue(input: {
+  signal: NodeJS.Signals;
+  stripeForwardUrl: string | null;
+  workerHost: string;
+  workerPort: number;
+}): void {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const patterns = [
+    `wrangler dev.*--port ${input.workerPort}`,
+    `workerd.*${escapeRegExp(`${input.workerHost}:${input.workerPort}`)}`,
+    "cloudflared tunnel.*cloudflared-linq-webhook",
+    ...(input.stripeForwardUrl === null
+      ? []
+      : [`stripe listen --forward-to ${escapeRegExp(input.stripeForwardUrl)}`]),
+  ];
+
+  for (const pattern of patterns) {
+    spawnSync("pkill", [`-${input.signal}`, "-f", pattern], {
+      stdio: "ignore",
+    });
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

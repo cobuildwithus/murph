@@ -118,10 +118,11 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
       return;
     }
     terminationSignal = signal;
+    stack.kill(signal);
     (io.stderr ?? process.stderr).write(`\nStopping hosted-local harness (${signal}).\n`);
     try {
-      await updateHostedLocalHarnessState(state, { status: "stopped" });
       await stopStack(signal);
+      await updateHostedLocalHarnessState(state, { status: "stopped" });
     } catch (error) {
       terminationCleanupError = error;
     } finally {
@@ -137,6 +138,10 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
   };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
+  const onExit = (): void => {
+    stack.kill("SIGKILL");
+  };
+  process.once("exit", onExit);
 
   try {
     try {
@@ -183,6 +188,7 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
   } finally {
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
+    process.off("exit", onExit);
   }
 }
 

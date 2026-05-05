@@ -109,6 +109,7 @@ const spawnStripeListenerWithSecretCapture = vi.fn<
   }) => Promise<{ child: BufferedNamedChildProcess; secret: string }>
 >();
 const terminateChildProcessAndWait = vi.fn(async () => {});
+const terminateChildProcess = vi.fn(() => {});
 const waitForHealthyHttpEndpoint = vi.fn(async () => {});
 const resolveHostedLocalWorkerPortMode = vi.fn<
   (input: {
@@ -256,6 +257,7 @@ vi.mock("./runtime.ts", () => ({
   spawnChildProcess,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
+  terminateChildProcess,
   terminateChildProcessAndWait,
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
@@ -451,6 +453,34 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("signals all child processes during stop before waiting for the first one to exit", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+    let releaseFirstTermination = (): void => {
+      throw new Error("first termination promise was not created");
+    };
+    terminateChildProcessAndWait
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseFirstTermination = resolve;
+      }))
+      .mockResolvedValueOnce(undefined);
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+
+    const stopPromise = stack.stop();
+    await Promise.resolve();
+
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    releaseFirstTermination();
+    await stopPromise;
   });
 
   it("includes the local E2E parser toolchain when preparing a parser-enabled runner bundle", async () => {
@@ -1015,7 +1045,10 @@ describe("hosted local dev stack", () => {
     const { startHostedLocalDevStack } = await import("./stack.ts");
 
     const stack = await startHostedLocalDevStack({
-      env: process.env,
+      env: {
+        ...process.env,
+        MURPH_DEV_REUSE_EXISTING_WORKER: "1",
+      },
       pipeOutput: false,
       stderrTarget,
     });
