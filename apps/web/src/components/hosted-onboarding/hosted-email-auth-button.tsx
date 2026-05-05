@@ -247,7 +247,7 @@ export function HostedEmailAuthButton({
             </div>
             <Button
               type="submit"
-              size="lg"
+              size="xl"
               disabled={disabled}
               className="w-full"
             >
@@ -328,7 +328,7 @@ export function HostedEmailAuthButton({
               />
               <Button
                 type="submit"
-                size="lg"
+                size="xl"
                 disabled={disabled}
                 className="w-full"
               >

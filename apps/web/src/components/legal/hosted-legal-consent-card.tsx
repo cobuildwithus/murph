@@ -420,16 +420,17 @@ function ConsentSkeleton() {
       <div className="space-y-6">
         <div className="flex items-start gap-4">
           <div className="size-7 shrink-0 rounded-lg bg-muted" />
-          <div className="flex-1 space-y-2 pt-1">
-            <div className="h-3.5 w-full rounded-full bg-muted" />
-            <div className="h-3.5 w-3/4 rounded-full bg-muted" />
+          <div className="flex-1 space-y-2.5 pt-0.5">
+            <div className="h-4 w-full rounded-full bg-muted" />
+            <div className="h-4 w-3/4 rounded-full bg-muted" />
           </div>
         </div>
         <div className="flex items-start gap-4">
           <div className="size-7 shrink-0 rounded-lg bg-muted" />
-          <div className="flex-1 space-y-2 pt-1">
-            <div className="h-3.5 w-full rounded-full bg-muted" />
-            <div className="h-3.5 w-4/5 rounded-full bg-muted" />
+          <div className="flex-1 space-y-2.5 pt-0.5">
+            <div className="h-4 w-full rounded-full bg-muted" />
+            <div className="h-4 w-full rounded-full bg-muted" />
+            <div className="h-4 w-3/5 rounded-full bg-muted" />
           </div>
         </div>
       </div>

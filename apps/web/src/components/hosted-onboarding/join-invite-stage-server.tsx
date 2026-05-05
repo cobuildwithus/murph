@@ -38,19 +38,18 @@ const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 const PULSE_TRIAL_FEATURES = [
-  "7 days of hosted Pulse",
-  "$2.50 hosted AI usage during trial",
-  "Card required",
-  "Then $8/month unless canceled",
+  "Full Pulse access for 7 days",
+  "Card required, cancel anytime",
+  "Then $8/month",
 ];
 
 const PULSE_FEATURES = [
-  "Private hosted Murph workspace",
-  "Access to frontier models",
-  "Wearable data sync",
-  "Before/after outcome cards",
+  "Run experiments, see what changed",
+  "Sync your health data",
+  "Private before/after outcomes",
   "Chat via iMessage, Telegram, or email",
   "Guided experiment setup",
+  "Access to frontier AI models",
 ];
 
 const EDGE_FEATURES = [
@@ -247,8 +246,8 @@ function JoinInviteCheckoutPanel({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
         <PricingTierCard
           tier="free"
-          name="Pulse Trial"
-          description="Try hosted Murph before the first monthly charge."
+          name="Free"
+          description="Try Murph for 7 days, no charge."
           price="$0"
           priceUnit="for 7 days"
           features={PULSE_TRIAL_FEATURES}
@@ -268,7 +267,7 @@ function JoinInviteCheckoutPanel({
         <PricingTierCard
           tier="go"
           name="Pulse"
-          description="Private experiments for one person."
+          description="Run experiments. See what worked."
           price={pulsePlan ? `$${Math.round(pulsePlan.recurringAmountUsdCents / 100)}` : "$8"}
           priceUnit="/ month"
           features={PULSE_FEATURES}
