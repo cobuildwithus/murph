@@ -33,6 +33,11 @@ on:
         required: false
         default: ""
         type: string
+      skip_predeploy_e2e:
+        description: Skip predeploy hosted-local E2E gates
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -40,6 +45,7 @@ permissions:
 jobs:
   codex-cache-prefix-gate:
     name: Codex cache-prefix E2E gate
+    if: ${{ !inputs.skip_predeploy_e2e }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
@@ -117,6 +123,7 @@ jobs:
 
   linq-delivery-gate:
     name: Linq delivery E2E gate
+    if: ${{ !inputs.skip_predeploy_e2e }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
@@ -194,6 +201,7 @@ jobs:
 
   linq-scheduled-reminder-gate:
     name: Linq scheduled reminder E2E gate
+    if: ${{ !inputs.skip_predeploy_e2e }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
@@ -275,6 +283,7 @@ jobs:
       - codex-cache-prefix-gate
       - linq-delivery-gate
       - linq-scheduled-reminder-gate
+    if: ${{ !cancelled() && (inputs.skip_predeploy_e2e || (needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success')) }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
