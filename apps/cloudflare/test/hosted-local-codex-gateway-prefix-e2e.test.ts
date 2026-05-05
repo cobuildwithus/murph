@@ -176,6 +176,14 @@ describe("hosted local Codex Gateway prefix e2e", () => {
       "/tmp/hosted-runner-launch-",
     );
     expect(
+      diagnostic.cacheablePrefixLengths.every((length) => length === cacheablePrefixFloor),
+      JSON.stringify(diagnostic),
+    ).toBe(true);
+    expect(
+      diagnostic.cacheablePrefixUniqueSha256,
+      JSON.stringify(diagnostic),
+    ).toHaveLength(1);
+    expect(
       diagnostic.prefix01Length,
       JSON.stringify(diagnostic),
     ).toBeGreaterThan(cacheablePrefixFloor);
@@ -291,8 +299,16 @@ function buildPrefixDiagnostic(input: {
   const thirdFullBody = input.responseRequests[input.representativeRequestIndexes[2] ?? -1]?.body ?? "";
   const fullBodyPrefix01Length = longestCommonPrefixLength(firstFullBody, secondFullBody);
   const fullBodyPrefix12Length = longestCommonPrefixLength(secondFullBody, thirdFullBody);
+  const cacheablePrefixes = input.serializedInputs.map((value) =>
+    value.slice(0, cacheablePrefixFloor)
+  );
+  const cacheablePrefixSha256 = cacheablePrefixes.map(hashText);
 
   return {
+    cacheablePrefixFloor,
+    cacheablePrefixLengths: cacheablePrefixes.map((value) => value.length),
+    cacheablePrefixSha256,
+    cacheablePrefixUniqueSha256: [...new Set(cacheablePrefixSha256)],
     completionOutcomes: input.completionOutcomes,
     firstDiff01: describeFirstDiff(first, second, prefix01Length),
     firstDiff12: describeFirstDiff(second, third, prefix12Length),
