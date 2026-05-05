@@ -382,6 +382,7 @@ describe("hosted runtime internal web routes", () => {
             redactedJson: {
               count: 1,
               lane: "conversation",
+              safeErrorMessage: "Codex app-server failed before producing a reply.",
             },
             workspaceVersion: "5",
           },
@@ -397,6 +398,7 @@ describe("hosted runtime internal web routes", () => {
       redacted: {
         count: 1,
         lane: "conversation",
+        safeErrorMessage: "Codex app-server failed before producing a reply.",
       },
       userId: "member_routes_1",
     }));
