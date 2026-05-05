@@ -89,6 +89,8 @@ export async function executeHostedMailboxEvent(input: {
     bootstrapResult,
     conversationMetrics: mailboxEffect.conversationMetrics,
     mailboxLane: mailboxEffect.mailboxLane,
+    nextWakeAt: mailboxEffect.nextWakeAt,
+    postCheckpointRecord: mailboxEffect.postCheckpointRecord,
     redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
   };
 }
@@ -145,7 +147,7 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
       });
     case "device-sync.wake":
-      await runHostedDeviceSyncWakeLane({
+      const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
@@ -156,6 +158,8 @@ async function executeHostedSystemWake(input: {
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "device-sync",
+        nextWakeAt: deviceSyncMetrics.nextWakeAt,
+        postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
       });
   }
 
@@ -276,11 +280,15 @@ function buildHostedAssistantNotificationLogDetails(
 function createNoopMailboxEffect(input: {
   conversationMetrics: HostedConversationWakeMetrics | null;
   mailboxLane: HostedMailboxLane;
+  nextWakeAt?: HostedMailboxOutcome["nextWakeAt"];
+  postCheckpointRecord?: HostedMailboxOutcome["postCheckpointRecord"];
   redactedLogEntries?: HostedExecutionRedactedLogEntry[];
 }): HostedMailboxOutcome {
   return {
     conversationMetrics: input.conversationMetrics,
+    nextWakeAt: input.nextWakeAt ?? null,
     mailboxLane: input.mailboxLane,
+    postCheckpointRecord: input.postCheckpointRecord ?? null,
     redactedLogEntries: input.redactedLogEntries ?? [],
   };
 }

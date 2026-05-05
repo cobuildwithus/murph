@@ -340,6 +340,59 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("fetches pending hosted device-sync dirty state through the signed web callback seam", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.json()).resolves.toEqual({
+        limit: 1,
+        userId: "member_123",
+      });
+
+      return new Response(JSON.stringify({
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const pending = await platform.deviceSyncPort!.fetchDirtyStates?.({
+      limit: 1,
+    });
+
+    expect(pending).toEqual({
+      hasMore: false,
+      items: [],
+      nextWakeAt: null,
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const { init, input: url } = requireFetchCallArgs(
+      fetchMock.mock.calls[0],
+      "device-sync dirty pending fetch",
+    );
+    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/runtime/dirty-pending");
+    expect(init?.method).toBe("POST");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
   it("forces hosted device-sync connect-link creation through the signed POST callback route", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://sync.example.test/oauth",

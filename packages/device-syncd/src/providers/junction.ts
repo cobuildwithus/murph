@@ -372,7 +372,6 @@ export function createJunctionDeviceSyncProvider(
       resource,
       sourceProviderSlug,
       summaryBackfillDays,
-      traceId: verified.messageId,
       window,
     });
 
@@ -884,7 +883,6 @@ function buildJunctionWebhookJobs(input: {
   resource: { name: string; category: "summary" | "timeseries" } | null;
   sourceProviderSlug: string | null;
   summaryBackfillDays: number;
-  traceId: string;
   window: { windowStart: string; windowEnd: string };
 }): DeviceSyncJobInput[] {
   if (isJunctionProviderConnectionEvent(input.eventType)) {
@@ -898,7 +896,12 @@ function buildJunctionWebhookJobs(input: {
           windowEnd: input.window.windowEnd,
         },
         priority: 35,
-        dedupeKey: sha256Text(JSON.stringify(["junction-webhook", input.traceId, input.eventType, "backfill"])),
+        dedupeKey: sha256Text(JSON.stringify([
+          "junction-webhook",
+          "connection-backfill",
+          backfillWindowStart,
+          input.window.windowEnd,
+        ])),
       },
       {
         kind: "reconcile",
@@ -907,7 +910,12 @@ function buildJunctionWebhookJobs(input: {
           windowEnd: input.window.windowEnd,
         },
         priority: 45,
-        dedupeKey: sha256Text(JSON.stringify(["junction-webhook", input.traceId, input.eventType, "reconcile"])),
+        dedupeKey: sha256Text(JSON.stringify([
+          "junction-webhook",
+          "connection-reconcile",
+          input.window.windowStart,
+          input.window.windowEnd,
+        ])),
       },
     ];
   }
@@ -929,11 +937,12 @@ function buildJunctionWebhookJobs(input: {
         priority: 65,
         dedupeKey: sha256Text(JSON.stringify([
           "junction-webhook",
-          input.traceId,
-          input.eventType,
-          input.resource.name,
-          input.objectId,
+          "resource",
           input.sourceProviderSlug,
+          input.resource.category,
+          input.resource.name,
+          input.window.windowStart,
+          input.window.windowEnd,
         ])),
       },
     ];
@@ -947,7 +956,12 @@ function buildJunctionWebhookJobs(input: {
         windowEnd: input.window.windowEnd,
       },
       priority: 50,
-      dedupeKey: sha256Text(JSON.stringify(["junction-webhook", input.traceId, input.eventType, "reconcile"])),
+      dedupeKey: sha256Text(JSON.stringify([
+        "junction-webhook",
+        "reconcile",
+        input.window.windowStart,
+        input.window.windowEnd,
+      ])),
     },
   ];
 }

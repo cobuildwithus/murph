@@ -68,6 +68,32 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      connectionId: "conn_123",
+      dirtyRevision: "12",
+      userId: "member_123",
+    },
+    name: "device-sync dirty state",
+    path: "/api/internal/device-sync/runtime/dirty-state",
+  },
+  {
+    body: {
+      limit: 1,
+      userId: "member_123",
+    },
+    name: "device-sync dirty pending",
+    path: "/api/internal/device-sync/runtime/dirty-pending",
+  },
+  {
+    body: {
+      connectionId: "conn_123",
+      processedRevision: "12",
+      userId: "member_123",
+    },
+    name: "device-sync dirty ack",
+    path: "/api/internal/device-sync/runtime/dirty-ack",
+  },
+  {
+    body: {
       bytes: 17,
       eventId: "evt_123",
     },

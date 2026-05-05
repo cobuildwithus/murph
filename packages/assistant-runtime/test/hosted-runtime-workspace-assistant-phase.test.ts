@@ -16,12 +16,14 @@ const mocks = vi.hoisted(() => ({
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantDeliverySideEffectsForCheckpoint: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
+  recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
   runHostedAssistantRuntimeTimerLane: vi.fn(),
+  runHostedDeviceSyncWakeLane: vi.fn(),
 }));
 
 vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
@@ -50,6 +52,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedAssistantRuntimeTimerLane: mocks.runHostedAssistantRuntimeTimerLane,
+  runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
 }));
 
 vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
@@ -61,6 +64,8 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
 vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
   prepareHostedSystemMailboxItemForCheckpoint:
     mocks.prepareHostedSystemMailboxItemForCheckpoint,
+  recordHostedDeviceSyncDirtyPostCheckpointRecord:
+    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint:
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
@@ -104,6 +109,11 @@ beforeEach(() => {
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
+  mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
+    nextWakeAt: null,
+    recorded: true,
+    stillDirty: false,
+  });
   mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
@@ -114,10 +124,20 @@ beforeEach(() => {
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValue({
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
     nextWakeAt: null,
     parserProcessed: 0,
+    postCheckpointRecord: null,
     progressed: false,
     redactedLogEntries: [],
+  });
+  mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
+    nextWakeAt: null,
+    parserProcessed: 0,
+    postCheckpointRecord: null,
   });
 });
 
@@ -740,6 +760,71 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         routeAction: "dispatch-assistant-notification",
         status: "recorded",
         wakeKind: "assistant.notification.requested",
+      }),
+    }));
+  });
+
+  it("drains dirty device-sync work alongside non-device system mailbox items", async () => {
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 2,
+      deviceSyncSkipped: false,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: {
+        connectionId: "dsc_dirty",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: "2026-04-27T00:11:00.000Z",
+        processedRevision: "42",
+      },
+    });
+    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:13:00.000Z",
+      recorded: true,
+      stillDirty: true,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(result.progressed).toBe(true);
+    expect(result.nextWakeAt).toBe("2026-04-27T00:11:00.000Z");
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wake: expect.objectContaining({
+          kind: "runtime.timer",
+          userId: "member_synthetic_phase",
+        }),
+      }),
+    );
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
+      record: {
+        connectionId: "dsc_dirty",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: "2026-04-27T00:11:00.000Z",
+        processedRevision: "42",
+      },
+      runtime: expect.any(Object),
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:13:00.000Z",
+      redactedStatus: expect.objectContaining({
+        hostedDeviceSyncDirtyAckRecorded: true,
+        hostedDeviceSyncDirtyStillPending: true,
+        hostedSystemMailboxRecorded: 1,
       }),
     }));
   });

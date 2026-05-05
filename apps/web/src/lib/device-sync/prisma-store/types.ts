@@ -42,6 +42,54 @@ export interface HostedSignalRecord {
   createdAt: string;
 }
 
+export interface HostedDeviceSyncDirtyResource {
+  count: number;
+  jobKind: string;
+  resource: string | null;
+  resourceCategory: string | null;
+  sourceProviderSlug: string | null;
+  windowEnd: string | null;
+  windowStart: string | null;
+}
+
+export interface HostedDeviceSyncDirtyConnectionRecord {
+  connectionId: string;
+  userId: string;
+  provider: string;
+  dirtyRevision: bigint;
+  processedRevision: bigint;
+  firstDirtyAt: string;
+  latestDirtyAt: string;
+  windowStart: string | null;
+  windowEnd: string | null;
+  eventCount: bigint;
+  latestTraceId: string | null;
+  latestEventType: string | null;
+  latestResourceCategory: string | null;
+  sourceProviderCounts: Record<string, number>;
+  resourceCategoryCounts: Record<string, number>;
+  dirtyResources: Record<string, HostedDeviceSyncDirtyResource>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertHostedDeviceSyncDirtyConnectionInput {
+  connectionId: string;
+  userId: string;
+  provider: string;
+  dirtyAt: string;
+  traceId?: string | null;
+  eventType?: string | null;
+  resourceCategory?: string | null;
+  resources?: readonly HostedDeviceSyncDirtyResource[];
+  tx?: HostedPrismaTransactionClient;
+}
+
+export interface UpsertHostedDeviceSyncDirtyConnectionResult {
+  dirty: HostedDeviceSyncDirtyConnectionRecord;
+  shouldRequestWake: boolean;
+}
+
 export type HostedTokenAuditAction = "token_exported" | "token_refreshed";
 
 export type HostedTokenAuditChannel = "agent_export" | "agent_refresh";

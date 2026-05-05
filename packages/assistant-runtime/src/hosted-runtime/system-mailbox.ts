@@ -30,6 +30,7 @@ import type {
 } from "./mailbox-import.ts";
 import type {
   HostedMailboxExecutionMetrics,
+  HostedSystemMailboxPostCheckpointRecord,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 
@@ -52,7 +53,7 @@ export interface HostedSystemMailboxPendingItem {
   mailboxDedupeKey: string;
   nextAttemptAt: string | null;
   occurredAt: string;
-  postCheckpointRecord: null;
+  postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
   requestId: string | null;
   routeAction: HostedSystemMailboxRouteAction;
   status: "pending" | "recording" | "sending";
@@ -83,10 +84,16 @@ export type HostedSystemMailboxCheckpointPreparation =
       status: "recording";
     };
 
-type HostedSystemMailboxRuntime = Pick<
+export type HostedSystemMailboxRuntime = Pick<
   NormalizedHostedAssistantRuntimeConfig,
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 >;
+
+interface HostedSystemMailboxPostCheckpointRecordResult {
+  nextWakeAt: string | null;
+  recorded: boolean;
+  stillDirty: boolean;
+}
 
 export async function enqueueHostedSystemMailboxItem(input: {
   item: HostedMailboxResolvedImportItem;
@@ -180,13 +187,20 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
     });
     const processedItem: HostedSystemMailboxPendingItem = {
       ...prepared,
-      postCheckpointRecord: null,
-      status: "sending",
+      postCheckpointRecord: metrics.postCheckpointRecord ?? null,
+      status: metrics.postCheckpointRecord ? "recording" : "sending",
     };
-    await removeHostedSystemMailboxPendingItem({
-      itemId: prepared.itemId,
-      vaultRoot: input.vaultRoot,
-    });
+    if (processedItem.postCheckpointRecord) {
+      await updateHostedSystemMailboxPendingItem({
+        item: processedItem,
+        vaultRoot: input.vaultRoot,
+      });
+    } else {
+      await removeHostedSystemMailboxPendingItem({
+        itemId: prepared.itemId,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     return {
       item: processedItem,
       itemId: prepared.itemId,
@@ -247,11 +261,43 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     };
   }
 
-  return {
-    failed: 0,
-    nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
-    recorded: 0,
-  };
+  try {
+    const recordResult = await recordHostedSystemMailboxPostCheckpointRecord({
+      record: input.item.postCheckpointRecord,
+      runtime: input.runtime,
+    });
+    await removeHostedSystemMailboxPendingItem({
+      itemId: input.item.itemId,
+      vaultRoot: input.vaultRoot,
+    });
+    const nextWakeAt = earliestHostedSystemMailboxWakeAt(
+      await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+      recordResult.nextWakeAt,
+    );
+    return {
+      failed: 0,
+      nextWakeAt,
+      recorded: recordResult.recorded ? 1 : 0,
+    };
+  } catch (error) {
+    const normalized = normalizeHostedSystemMailboxError(error);
+    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    await updateHostedSystemMailboxPendingItem({
+      item: {
+        ...input.item,
+        lastErrorCode: normalized.code,
+        lastErrorMessage: normalized.message,
+        nextAttemptAt: nextWakeAt,
+        status: "recording",
+      },
+      vaultRoot: input.vaultRoot,
+    });
+    return {
+      failed: 1,
+      nextWakeAt,
+      recorded: 0,
+    };
+  }
 }
 
 export async function readHostedSystemMailboxCheckpointRollbackState(input: {
@@ -490,13 +536,90 @@ function parseHostedSystemMailboxStatus(value: unknown): "pending" | "recording"
   throw new TypeError("hosted system mailbox status is invalid.");
 }
 
-function parseHostedSystemMailboxRecordRequest(value: unknown): never {
+function parseHostedSystemMailboxRecordRequest(
+  value: unknown,
+): HostedSystemMailboxPostCheckpointRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("hosted system mailbox postCheckpointRecord must be an object.");
   }
   const record = value as Record<string, unknown>;
 
+  if (record.kind === "device-sync.dirty-processed") {
+    return {
+      connectionId: readRequiredString(
+        record.connectionId,
+        "hosted system mailbox postCheckpointRecord connectionId",
+      ),
+      kind: "device-sync.dirty-processed",
+      ...(record.nextWakeAt === undefined
+        ? {}
+        : {
+            nextWakeAt: readNullableIsoTimestamp(
+              record.nextWakeAt,
+              "hosted system mailbox postCheckpointRecord nextWakeAt",
+            ),
+          }),
+      processedRevision: readRequiredString(
+        record.processedRevision,
+        "hosted system mailbox postCheckpointRecord processedRevision",
+      ),
+    };
+  }
+
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
+}
+
+export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {
+  record: HostedSystemMailboxPostCheckpointRecord;
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  return await recordHostedSystemMailboxPostCheckpointRecord(input);
+}
+
+async function recordHostedSystemMailboxPostCheckpointRecord(input: {
+  record: HostedSystemMailboxPostCheckpointRecord;
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  switch (input.record.kind) {
+    case "device-sync.dirty-processed":
+      if (!input.runtime.platform.deviceSyncPort?.ackDirtyStateProcessed) {
+        throw new Error("Hosted device-sync dirty ack requires a configured device-sync runtime port.");
+      }
+      const response = await input.runtime.platform.deviceSyncPort.ackDirtyStateProcessed({
+        connectionId: input.record.connectionId,
+        processedRevision: input.record.processedRevision,
+      });
+      return {
+        nextWakeAt: response.nextWakeAt,
+        recorded: response.recorded,
+        stillDirty: response.stillDirty,
+      };
+  }
+}
+
+function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function readNullableIsoTimestamp(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string or null.`);
+  }
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    throw new TypeError(`${label} must be an ISO timestamp.`);
+  }
+  return value;
 }
 
 function systemMailboxItemIsDue(

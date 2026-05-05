@@ -15,6 +15,8 @@ import {
 } from "@murphai/device-syncd/types";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
+  HostedExecutionDeviceSyncDirtyStateResponse,
+  HostedExecutionDeviceSyncDirtyPendingResponse,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeConnectionStatus,
   HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
@@ -154,6 +156,8 @@ function buildDeviceSyncWake(input: {
   connectionId: string;
   eventId?: string;
   hint?: {
+    dirtyConnectionId?: string | null;
+    dirtyRevision?: string | null;
     jobs?: Array<{
       availableAt?: string;
       dedupeKey?: string;
@@ -163,6 +167,7 @@ function buildDeviceSyncWake(input: {
       priority?: number;
     }>;
     nextReconcileAt?: string | null;
+    reason?: string | null;
   };
   occurredAt: string;
   reason: "disconnected" | "reauthorization_required" | "webhook_hint";
@@ -970,6 +975,232 @@ describe("hosted device-sync runtime", () => {
           priority: 7,
           status: "queued",
         },
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("dirty device-sync wakes fetch dirty state and enqueue semantic resource jobs", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+    const dirtyStateRequests: Array<{ connectionId: string; dirtyRevision: string }> = [];
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-wake",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_wake",
+        externalAccountId: connected.account.externalAccountId,
+      });
+      const dirtyState: HostedExecutionDeviceSyncDirtyStateResponse = {
+        connectionId: "hosted_conn_dirty_wake",
+        dirtyRevision: "42",
+        dirtyResources: [
+          {
+            count: 12,
+            jobKind: "resource",
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-02T00:00:00.000Z",
+          },
+        ],
+        eventCount: "12",
+        latestDirtyAt: "2026-04-04T10:00:00.000Z",
+        processedRevision: "0",
+        provider: "demo",
+        resourceCategoryCounts: {
+          timeseries: 12,
+        },
+        sourceProviderCounts: {
+          garmin: 12,
+        },
+        userId: "member_123",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyState(input) {
+            dirtyStateRequests.push(input);
+            return dirtyState;
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_dirty_wake",
+          eventId: "evt_device_sync_dirty_wake",
+          hint: {
+            dirtyConnectionId: "hosted_conn_dirty_wake",
+            dirtyRevision: "42",
+            reason: "dirty",
+          },
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(dirtyStateRequests, [
+        {
+          connectionId: "hosted_conn_dirty_wake",
+          dirtyRevision: "42",
+        },
+      ]);
+      assert.deepEqual(state.pendingDirtyAck, {
+        connectionId: "hosted_conn_dirty_wake",
+        localAccountId: connected.account.id,
+        nextWakeAt: null,
+        processedRevision: "42",
+      });
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      assert.deepEqual(
+        {
+          dedupeKey: jobs[0]?.dedupeKey,
+          kind: jobs[0]?.kind,
+          payload: jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : null,
+          priority: jobs[0]?.priority,
+          status: jobs[0]?.status,
+        },
+        {
+          dedupeKey:
+            "hosted-dirty:demo:resource:garmin:timeseries:steps:2026-04-02T00:00:00.000Z:2026-04-04T00:00:00.000Z",
+          kind: "resource",
+          payload: {
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-02T00:00:00.000Z",
+          },
+          priority: 60,
+          status: "queued",
+        },
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("runtime timer wakes pull pending dirty state without a mailbox wake", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+    const pendingRequests: Array<{ limit?: number | null }> = [];
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-pending",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_pending",
+        externalAccountId: connected.account.externalAccountId,
+      });
+      const dirtyState: HostedExecutionDeviceSyncDirtyStateResponse = {
+        connectionId: "hosted_conn_dirty_pending",
+        dirtyRevision: "7",
+        dirtyResources: [
+          {
+            count: 3,
+            jobKind: "resource",
+            resource: "sleep",
+            resourceCategory: "summary",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        eventCount: "3",
+        latestDirtyAt: "2026-04-04T10:00:00.000Z",
+        processedRevision: "0",
+        provider: "demo",
+        resourceCategoryCounts: {
+          summary: 3,
+        },
+        sourceProviderCounts: {
+          garmin: 3,
+        },
+        userId: "member_123",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      };
+      const pendingResponse: HostedExecutionDeviceSyncDirtyPendingResponse = {
+        hasMore: true,
+        items: [dirtyState],
+        nextWakeAt: "2026-04-04T10:00:01.000Z",
+        userId: "member_123",
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates(input = {}) {
+            pendingRequests.push(input);
+            return pendingResponse;
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(pendingRequests, [
+        {
+          limit: 1,
+        },
+      ]);
+      assert.deepEqual(state.pendingDirtyAck, {
+        connectionId: "hosted_conn_dirty_pending",
+        localAccountId: connected.account.id,
+        nextWakeAt: "2026-04-04T10:00:01.000Z",
+        processedRevision: "7",
+      });
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      assert.equal(
+        jobs[0]?.dedupeKey,
+        "hosted-dirty:demo:resource:garmin:summary:sleep:2026-04-03T00:00:00.000Z:2026-04-04T00:00:00.000Z",
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -2454,6 +2685,7 @@ describe("hosted device-sync runtime", () => {
           hostedToLocalAccountIds: new Map(),
           localToHostedAccountIds: new Map(),
           observedTokenVersions: new Map(),
+          pendingDirtyAck: null,
           snapshot: null,
         },
       });
@@ -2467,6 +2699,7 @@ describe("hosted device-sync runtime", () => {
           hostedToLocalAccountIds: new Map(),
           localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
           observedTokenVersions: new Map(),
+          pendingDirtyAck: null,
           snapshot: buildRuntimeSnapshot({
             connectionId: "hosted_missing",
             externalAccountId: "demo-missing",
@@ -2515,6 +2748,7 @@ describe("hosted device-sync runtime", () => {
           hostedToLocalAccountIds: new Map([["hosted_missing", "local_missing"]]),
           localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
           observedTokenVersions: new Map(),
+          pendingDirtyAck: null,
           snapshot: buildRuntimeSnapshot({
             connectionId: "hosted_missing",
             externalAccountId: "demo-missing",

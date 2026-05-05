@@ -115,7 +115,10 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
   requestId: string;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
+  >;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
@@ -130,6 +133,17 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation),
     );
   }
+
+  const deviceSyncResult = await runHostedDeviceSyncPass(
+    input.wake,
+    input.vaultRoot,
+    input.runtime.resolvedConfig.deviceSync,
+    input.runtime.platform.deviceSyncPort,
+    input.runtime.commitTimeoutMs,
+    {
+      runtimeLogPlatform: input.runtime.platform,
+    },
+  );
 
   const assistantResult = assistantAutomation.shouldRun
     ? await runHostedAssistantAutomation(
@@ -150,10 +164,17 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
   return {
-    deviceSyncProcessed: 0,
-    deviceSyncSkipped: true,
-    nextWakeAt,
+    deviceSyncProcessed: deviceSyncResult.processedJobs,
+    deviceSyncSkipped: deviceSyncResult.skipped,
+    nextWakeAt: earliestHostedMaintenanceWakeAt(
+      nextWakeAt,
+      earliestHostedMaintenanceWakeAt(
+        deviceSyncResult.nextWakeAt,
+        deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
+      ),
+    ),
     parserProcessed: 0,
+    postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
     ...(redactedLogEntries.length === 0 ? {} : { redactedLogEntries }),
   };
 }
@@ -420,7 +441,12 @@ export async function runHostedDeviceSyncPass(
   options: {
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   } = {},
-): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
+): Promise<{
+  nextWakeAt: string | null;
+  postCheckpointRecord: HostedMaintenanceMetrics["postCheckpointRecord"];
+  processedJobs: number;
+  skipped: boolean;
+}> {
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
     vaultRoot,
@@ -429,6 +455,7 @@ export async function runHostedDeviceSyncPass(
   if (!service) {
     return {
       nextWakeAt: null,
+      postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
     };
@@ -439,6 +466,7 @@ export async function runHostedDeviceSyncPass(
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
+    pendingDirtyAck: null,
     snapshot: null,
   };
   let controlPlaneSynced = false;
@@ -491,8 +519,13 @@ export async function runHostedDeviceSyncPass(
       }
     }
 
+    const postCheckpointRecord = resolveHostedDeviceSyncDirtyPostCheckpointRecord({
+      state: syncState,
+    });
+
     return {
       nextWakeAt: service.getNextWakeAt(),
+      postCheckpointRecord,
       processedJobs,
       skipped: false,
     };
@@ -525,8 +558,12 @@ export async function runHostedDeviceSyncWakeLane(input: {
   return {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: deviceSyncResult.nextWakeAt,
+    nextWakeAt: earliestHostedMaintenanceWakeAt(
+      deviceSyncResult.nextWakeAt,
+      deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
+    ),
     parserProcessed: 0,
+    postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
   };
 }
 
@@ -536,7 +573,35 @@ export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
     deviceSyncSkipped: true,
     nextWakeAt: null,
     parserProcessed: 0,
+    postCheckpointRecord: null,
   };
+}
+
+function resolveHostedDeviceSyncDirtyPostCheckpointRecord(input: {
+  state: HostedDeviceSyncRuntimeSyncState;
+}): HostedMaintenanceMetrics["postCheckpointRecord"] {
+  const pendingDirtyAck = input.state.pendingDirtyAck;
+  if (!pendingDirtyAck) {
+    return null;
+  }
+
+  return {
+    connectionId: pendingDirtyAck.connectionId,
+    kind: "device-sync.dirty-processed",
+    nextWakeAt: pendingDirtyAck.nextWakeAt,
+    processedRevision: pendingDirtyAck.processedRevision,
+  };
+}
+
+function earliestHostedMaintenanceWakeAt(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) <= Date.parse(right) ? left : right;
 }
 
 function reportHostedDeviceSyncControlPlaneFailure(

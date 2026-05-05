@@ -123,8 +123,18 @@ export interface HostedAssistantDeliveryOutcome {
 
 export interface HostedMailboxEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
+  nextWakeAt?: string | null;
+  postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
 }
+
+export type HostedSystemMailboxPostCheckpointRecord =
+  | {
+      connectionId: string;
+      kind: "device-sync.dirty-processed";
+      nextWakeAt?: string | null;
+      processedRevision: string;
+    };
 
 export interface HostedConversationWakeMetrics {
   nextWakeAt: string | null;
@@ -148,6 +158,7 @@ export interface HostedMaintenanceMetrics {
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;
   parserProcessed: number;
+  postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
 }
 
