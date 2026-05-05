@@ -487,17 +487,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         phase: "wake.running",
         redacted: {
           errorCode: "ASSISTANT_CODEX_FAILED",
+          failureCodexDiagnosticsPresent: true,
           failureCodexExitCode: 1,
           failureCodexFailureDetailPresent: true,
           failureCodexFailureStage: "process_exit",
           failureCodexRetryable: false,
           failureCodexStderrPresent: true,
           failureProviderActionCount: 4,
+          failureFieldsPresent: true,
           failureRetryable: false,
           requestId: "hosted-workspace-invocation:workspace-invocation-16:assistant",
           safeDetails: "provider usage limit reached (ASSISTANT_CODEX_FAILED)",
+          safeErrorLength:
+            "Codex app-server failed.\ndetails:\n- usage limit reached; try again later\n- workspace: <HOME_DIR>/project".length,
           safeErrorMessage:
             "Codex app-server failed.\ndetails:\n- usage limit reached; try again later\n- workspace: <HOME_DIR>/project",
+          safeErrorPresent: true,
           type: "input.reply-failed",
         },
       }],
@@ -539,6 +544,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redacted: {
           errorCode: "ASSISTANT_CODEX_FAILED",
           safeErrorMessage: "Authorization: Bearer raw-token-value",
+          safeErrorPresent: true,
+          safeErrorLength: "Authorization: Bearer raw-token-value".length,
           type: "input.reply-failed",
         },
       }],
@@ -548,7 +555,54 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       errorCode: "ASSISTANT_CODEX_FAILED",
+      safeErrorLength: "Authorization: Bearer raw-token-value".length,
+      safeErrorPresent: true,
       type: "input.reply-failed",
+    }));
+    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
+      expect.objectContaining({
+        safeErrorMessage: expect.anything(),
+      }),
+    );
+  });
+
+  it("persists diagnostics when Codex context is missing and raw error text is unsafe", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      nextWakeAt: null,
+      parserProcessed: 0,
+      progressed: false,
+      redactedLogEntries: [{
+        component: "runtime",
+        level: "info",
+        message: "Hosted assistant automation event: input.reply-failed.",
+        phase: "wake.running",
+        redacted: {
+          errorCode: "ASSISTANT_CODEX_FAILED",
+          failureCodexDiagnosticsPresent: false,
+          failureFieldsPresent: true,
+          safeDetails: "assistant provider failed (ASSISTANT_CODEX_FAILED)",
+          safeErrorLength: "Codex app-server failed at /tmp/workspace".length,
+          safeErrorMessage: "Codex app-server failed at /tmp/workspace",
+          safeErrorPresent: true,
+          type: "input.reply-failed",
+        },
+      }],
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+
+    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+      errorCode: "ASSISTANT_CODEX_FAILED",
+      redactedJson: expect.objectContaining({
+        errorCode: "ASSISTANT_CODEX_FAILED",
+        failureCodexDiagnosticsPresent: false,
+        failureFieldsPresent: true,
+        safeDetails: "assistant provider failed (ASSISTANT_CODEX_FAILED)",
+        safeErrorLength: "Codex app-server failed at /tmp/workspace".length,
+        safeErrorPresent: true,
+        type: "input.reply-failed",
+      }),
     }));
     expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
       expect.objectContaining({
