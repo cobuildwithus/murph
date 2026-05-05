@@ -2,13 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   AlertCircleIcon,
-  CheckCircle2Icon,
+  ArrowRightIcon,
   MessageCircleIcon,
   RefreshCwIcon,
   SendIcon,
-  SettingsIcon,
 } from "lucide-react";
+import { WatchCheckIcon } from "@/src/components/icons/home-icons";
 import { resolveDeviceConnectSourceById } from "@murphai/device-syncd/config";
+
+import { AutoOpenLink } from "./auto-open-link";
 
 import { buttonVariants } from "@/src/components/ui/button";
 import {
@@ -26,7 +28,6 @@ import { getHostedAppSession, type HostedAppSession } from "@/src/lib/hosted-onb
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
-import { cn } from "@/src/lib/utils";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Device Connected - Murph",
@@ -94,35 +95,29 @@ export default async function DeviceSyncConnectCompletePage({
     providerLabel,
     source: state.connectedSource,
   });
-  const StatusIcon = failed ? AlertCircleIcon : CheckCircle2Icon;
-  const SecondaryActionIcon = failed ? RefreshCwIcon : SettingsIcon;
+  const SecondaryActionIcon = failed ? RefreshCwIcon : ArrowRightIcon;
   const secondaryAction = failed
     ? { href: "/connect", label: "Try again" }
-    : { href: "/settings", label: "View devices" };
+    : { href: "/", label: "Go home" };
 
   return (
-    <main className="min-h-[72vh] bg-background px-4 py-16 text-foreground sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-background px-4 py-16 text-foreground sm:px-6 lg:px-8">
       <section className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
-        <div
-          className={cn(
-            "mb-7 flex size-16 items-center justify-center rounded-lg border",
-            failed
-              ? "border-destructive/20 bg-destructive/10 text-destructive"
-              : "border-primary/20 bg-primary/10 text-primary",
-          )}
-        >
-          <StatusIcon aria-hidden="true" className="size-8" />
-        </div>
-
-        <p className="mb-3 font-mono text-xs font-medium text-muted-foreground">
-          Device connection
-        </p>
+        {failed ? (
+          <div className="mb-7 flex size-16 items-center justify-center rounded-lg border border-destructive/20 bg-destructive/10 text-destructive">
+            <AlertCircleIcon aria-hidden="true" className="size-8" />
+          </div>
+        ) : (
+          <WatchCheckIcon aria-hidden="true" className="mb-7 size-16 text-primary" />
+        )}
         <h1 className="max-w-2xl font-serif text-4xl font-semibold leading-tight text-foreground sm:text-5xl">
           {title}
         </h1>
         <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
           {detail}
         </p>
+
+        {state.contactAction ? <AutoOpenLink href={state.contactAction.href} /> : null}
 
         <div className="mt-9 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
           {state.contactAction ? (

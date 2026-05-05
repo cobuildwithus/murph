@@ -88,7 +88,7 @@ test("DeviceSyncConnectCompletePage prefers the signed-in member's assigned Mess
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
-  assert.match(markup, /href="\/settings"[^>]*>.*View devices/s);
+  assert.match(markup, /href="\/"[^>]*>.*Go home/s);
   expect(mocks.buildHostedDeviceSyncSettingsResponse).toHaveBeenCalledWith({
     member: buildHostedAppSession().member,
   });
@@ -162,7 +162,7 @@ test("DeviceSyncConnectCompletePage uses connect source labels for Junction-back
   assert.doesNotMatch(markup, /I%20just%20connected%20my%20Junction/);
 });
 
-test("DeviceSyncConnectCompletePage keeps the settings fallback when there is no messaging destination", async () => {
+test("DeviceSyncConnectCompletePage keeps the home fallback when there is no messaging destination", async () => {
   const { default: DeviceSyncConnectCompletePage } = await import(
     "../app/device-sync/connect/complete/page"
   );
@@ -186,7 +186,7 @@ test("DeviceSyncConnectCompletePage keeps the settings fallback when there is no
 
   assert.match(markup, /WHOOP is connected/);
   assert.match(markup, /WHOOP is connected and ready in Murph\. No extra step is needed\./);
-  assert.match(markup, /href="\/settings"[^>]*>.*View devices/s);
+  assert.match(markup, /href="\/"[^>]*>.*Go home/s);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
