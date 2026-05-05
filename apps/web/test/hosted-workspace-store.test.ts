@@ -560,6 +560,72 @@ describe("hosted runtime log store", () => {
     });
   });
 
+  it("allows metadata-only redacted keys that mention sensitive field names", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "assistant",
+      errorCode: "ASSISTANT_CODEX_FAILED",
+      eventCode: "assistant.automation_detail",
+      level: "warn",
+      phase: "invoke",
+      redacted: {
+        authorizationHeaderPresent: false,
+        codexInvalidOutputErrorMessageLength: 96,
+        codexResumeFailureErrorMessageLength: 251,
+        messageStatus: "failed",
+        promptTokenCount: 120,
+        rawPayloadBytes: 2048,
+      },
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(result.redactedJson).toEqual({
+      authorizationHeaderPresent: false,
+      codexInvalidOutputErrorMessageLength: 96,
+      codexResumeFailureErrorMessageLength: 251,
+      messageStatus: "failed",
+      promptTokenCount: 120,
+      rawPayloadBytes: 2048,
+    });
+  });
+
+  it("rejects raw-value redacted keys that mention sensitive field names", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    for (const rawKey of [
+      "authorizationHeaderValue",
+      "bodyJson",
+      "messageContent",
+      "payloadValue",
+      "tokenPreview",
+    ]) {
+      await expect(recordHostedRuntimeLogTx({
+        at: "2026-04-26T00:02:00.000Z",
+        component: "assistant",
+        errorCode: "ASSISTANT_CODEX_FAILED",
+        eventCode: "assistant.automation_detail",
+        level: "warn",
+        phase: "invoke",
+        redacted: {
+          [rawKey]: "redacted",
+        },
+        tx,
+        userId: "member_workspace_1",
+      })).rejects.toThrow(/not allowed/u);
+    }
+  });
+
   it("rejects unsafe or oversized redacted log metadata before persistence", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({

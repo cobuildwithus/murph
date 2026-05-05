@@ -42,7 +42,7 @@ export {
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
 };
 
-const FORBIDDEN_HOSTED_RUNTIME_REDACTED_KEY_PARTS = [
+const FORBIDDEN_RAW_HOSTED_RUNTIME_REDACTED_KEY_NAMES = [
   "address",
   "authorization",
   "body",
@@ -65,6 +65,30 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEYS = new Set([
   "failureAssistantProviderErrorStatusText",
   "safeErrorMessage",
 ]);
+const SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES = [
+  "Bytes",
+  "Code",
+  "Codes",
+  "Count",
+  "Counts",
+  "Index",
+  "Indexes",
+  "Kind",
+  "Kinds",
+  "Length",
+  "Lengths",
+  "Ordinal",
+  "Ordinals",
+  "Present",
+  "Seq",
+  "Seqs",
+  "Size",
+  "Sizes",
+  "Status",
+  "Statuses",
+  "Type",
+  "Types",
+] as const;
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 48;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
@@ -604,11 +628,21 @@ function assertAllowedHostedRuntimeRedactedKey(key: string, label: string): void
 
   const normalized = key.toLowerCase();
 
-  for (const forbidden of FORBIDDEN_HOSTED_RUNTIME_REDACTED_KEY_PARTS) {
-    if (normalized.includes(forbidden)) {
+  for (const forbidden of FORBIDDEN_RAW_HOSTED_RUNTIME_REDACTED_KEY_NAMES) {
+    if (
+      normalized.includes(forbidden)
+      && !isSafeHostedRuntimeRedactedMetadataKey(key)
+    ) {
       throw new TypeError(`${label} is not allowed in hosted runtime redacted JSON.`);
     }
   }
+}
+
+function isSafeHostedRuntimeRedactedMetadataKey(key: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/u.test(key)
+    && SAFE_HOSTED_RUNTIME_REDACTED_METADATA_KEY_SUFFIXES.some((suffix) =>
+      key.endsWith(suffix)
+    );
 }
 
 function assertSafeHostedRuntimeRedactedString(value: string, label: string): void {
