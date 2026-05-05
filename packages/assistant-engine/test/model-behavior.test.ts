@@ -443,6 +443,15 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Never restate information the user has already acknowledged')
     expect(prompt).toContain('Do not surface raw revision hashes, field names, or test-plan ids')
     expect(prompt).toContain('Ask what the user wants to get out of the experiment')
+    expect(prompt).toContain(
+      'When a connected wearable or relevant wearable history is visible',
+    )
+    expect(prompt).toContain(
+      'Do not ask the user to text or manually restate those fields',
+    )
+    expect(prompt).toContain(
+      'If wearable coverage is stale, sparse, or missing the needed signal',
+    )
     expect(prompt).toContain('Stop gathering info and create the run when you have enough context')
     expect(prompt).not.toContain('scaffold and update the experiment record')
     expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
@@ -571,6 +580,15 @@ describe('assistant conversation onboarding guidance', () => {
     expect(prompt).toContain('Identify data sources in one short message')
     expect(prompt).toContain(
       'if a supported hosted wearable connection is already visible in context',
+    )
+    expect(prompt).toContain(
+      'do not ask them to send activity, steps, workouts, sleep, or recovery by message',
+    )
+    expect(prompt).toContain(
+      'activity, sleep, and recovery data can come from that source',
+    )
+    expect(prompt).toContain(
+      'Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data',
     )
     expect(prompt).toContain('WHOOP')
     expect(prompt).toContain('one lightweight, bounded experiment at a time')
