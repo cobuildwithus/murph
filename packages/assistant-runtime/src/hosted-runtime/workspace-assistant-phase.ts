@@ -504,7 +504,7 @@ export async function runHostedWorkspaceAssistantPhase(
         resolvedConfig: input.runtime.resolvedConfig,
       },
       signal: input.signal ?? undefined,
-      skipDeviceSync: input.initialMailboxImport.importResult.importedCount > 0,
+      skipDeviceSync: shouldSkipDeviceSyncForAssistantPhase(input),
       vaultRoot: input.restored.vaultRoot,
       wake,
     });
@@ -769,6 +769,15 @@ function buildHostedProviderCleanupRedactedStatus(input: {
     hostedProviderCleanupDeletedLinqItems: input.deletedLinqMessageCount,
     hostedProviderCleanupFailedLinqItems: input.failedLinqMessageCount,
   };
+}
+
+function shouldSkipDeviceSyncForAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  return (
+    input.request.reason === "nudge"
+    || input.initialMailboxImport.importResult.importedCount > 0
+  );
 }
 
 async function writeHostedSystemMailboxRuntimeLog(input: {
