@@ -1,6 +1,7 @@
 import {
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
+  sanitizeHostedExecutionStructuredLogText,
   type HostedExecutionRedactedLogEntry,
 } from "@murphai/hosted-execution";
 import type {
@@ -1078,8 +1079,9 @@ function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
   }
 
   const value = input[key];
-  if (isHostedRuntimeRedactedLogValue(key, value)) {
-    output[key] = value;
+  const redactedValue = normalizeHostedRuntimeRedactedLogValue(key, value);
+  if (redactedValue !== undefined) {
+    output[key] = redactedValue;
   }
 }
 
@@ -1151,6 +1153,52 @@ function isHostedRuntimeRedactedLogValue(
   }
 
   return isHostedRuntimeRedactedLogScalar(value);
+}
+
+function normalizeHostedRuntimeRedactedLogValue(
+  key: string,
+  value: unknown,
+): HostedRuntimeRedactedJson[string] | undefined {
+  if (isHostedRuntimeSafeDiagnosticTextKey(key)) {
+    return redactHostedRuntimeSafeDiagnosticText(value);
+  }
+
+  return isHostedRuntimeRedactedLogValue(key, value) ? value : undefined;
+}
+
+function redactHostedRuntimeSafeDiagnosticText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = sanitizeHostedExecutionStructuredLogText(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  const redacted = normalized
+    .replace(/<HOME_DIR>(?:\/[^\s)"']*)?/gu, "<REDACTED_PATH>")
+    .replace(/file:\/\/[^\s)"']+/giu, "<REDACTED_PATH>")
+    .replace(/(^|[\s(])\/[^\s)"']+/gu, "$1<REDACTED_PATH>")
+    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<REDACTED_PATH>")
+    .replace(
+      /\b((?:authorization|proxy-authorization|cookie|set-cookie|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|secret|token))\b\s*[:=]\s*(?:Bearer\s+|Basic\s+)?(?:\[[^\]]+\]|[^"',\s}]+)/giu,
+      "$1 [redacted]",
+    )
+    .replace(/\b(Basic|Bearer)\s+(?!\[redacted\])[A-Za-z0-9._~+/=-]+\b/giu, "$1 [redacted]")
+    .replace(/\+\d[\d().\s-]{7,}\d/gu, "[redacted-phone]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, "[redacted-email]")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (redacted.length === 0) {
+    return undefined;
+  }
+
+  const bounded = redacted.length <= HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH
+    ? redacted
+    : `${redacted.slice(0, HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH - 3).trimEnd()}...`;
+
+  return isHostedRuntimeSafeDiagnosticTextValue(bounded) ? bounded : undefined;
 }
 
 function isHostedRuntimeSafeDiagnosticTextKey(key: string): boolean {

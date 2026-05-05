@@ -501,7 +501,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           safeErrorLength:
             "Codex app-server failed.\ndetails:\n- usage limit reached; try again later\n- workspace: <HOME_DIR>/project".length,
           safeErrorMessage:
-            "Codex app-server failed.\ndetails:\n- usage limit reached; try again later\n- workspace: <HOME_DIR>/project",
+            "Codex app-server failed. details: - usage limit reached; try again later - workspace: <REDACTED_PATH>",
           safeErrorPresent: true,
           type: "input.reply-failed",
         },
@@ -530,7 +530,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("does not persist unsafe diagnostic error text", async () => {
+  it("redacts unsafe diagnostic error text before persistence", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       nextWakeAt: null,
@@ -556,17 +556,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       errorCode: "ASSISTANT_CODEX_FAILED",
       safeErrorLength: "Authorization: Bearer raw-token-value".length,
+      safeErrorMessage: "Authorization [redacted]",
       safeErrorPresent: true,
       type: "input.reply-failed",
     }));
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
-      expect.objectContaining({
-        safeErrorMessage: expect.anything(),
-      }),
-    );
+    expect(JSON.stringify(logRequests)).not.toContain("raw-token-value");
   });
 
-  it("persists diagnostics when Codex context is missing and raw error text is unsafe", async () => {
+  it("persists diagnostics when Codex context is missing and error text needs path redaction", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       nextWakeAt: null,
@@ -600,15 +597,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         failureFieldsPresent: true,
         safeDetails: "assistant provider failed (ASSISTANT_CODEX_FAILED)",
         safeErrorLength: "Codex app-server failed at /tmp/workspace".length,
+        safeErrorMessage: "Codex app-server failed at <REDACTED_PATH>",
         safeErrorPresent: true,
         type: "input.reply-failed",
       }),
     }));
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
-      expect.objectContaining({
-        safeErrorMessage: expect.anything(),
-      }),
-    );
+
   });
 
   it("writes an outbox delivery summary after committed delivery effects drain", async () => {
