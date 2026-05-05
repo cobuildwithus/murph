@@ -186,6 +186,7 @@ export function createHostedWorkspaceInvocationRunner(
         ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
         platform: runtimePlatform,
         readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
+        requireMailboxPayloadDecoder: Boolean(internalWorkerProxyToken),
         request: input.request,
         runtime,
         vaultRoot: resolveHostedWorkspaceInProcessVaultRoot(),

@@ -90,6 +90,7 @@ export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   readEncryptionEnvironment?: (
     input: { userId: string },
   ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
+  requireMailboxPayloadDecoder?: boolean;
   request: HostedWorkspaceInvocationRequest;
   runtime: HostedAssistantRuntimeConfig;
   vaultRoot: string;
@@ -105,6 +106,10 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
   const readCurrentLease = input.readCurrentLease
     ?? (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.request));
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, input.platform);
+  if (input.requireMailboxPayloadDecoder && !input.decodeMailboxPayload) {
+    throw new Error("Hosted mailbox payload decoder is required for this invocation.");
+  }
+
   const decodeMailboxPayload = input.decodeMailboxPayload
     ?? createLegacyHostedMailboxPayloadDecoder({
       readEncryptionEnvironment: input.readEncryptionEnvironment
