@@ -87,6 +87,7 @@ const mocks = vi.hoisted(() => {
       startedAtMs: 0,
       step,
     })),
+    readHostedLinqDailyState: vi.fn(async () => null),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
@@ -137,6 +138,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
   incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
+  readHostedLinqDailyState: mocks.readHostedLinqDailyState,
   resolveHostedLinqDayUtc: vi.fn(),
 }));
 
@@ -326,6 +328,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
+    mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
@@ -579,6 +582,7 @@ https://join.example.test/join/code_first_text`);
 
   it("preserves all active-member Linq text parts when the inbound part count exceeds the old cap", async () => {
     const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -647,6 +651,7 @@ https://join.example.test/join/code_first_text`);
 
   it("prioritizes active-member Linq text when attachment descriptors arrive first", async () => {
     const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -1482,8 +1487,8 @@ https://join.example.test/join/code_first_text`);
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0],
     );
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
@@ -2158,6 +2163,7 @@ https://join.example.test/join/code_first_text`);
       },
     });
     const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -2198,8 +2204,8 @@ https://join.example.test/join/code_first_text`);
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -2463,8 +2469,8 @@ https://join.example.test/join/code_first_text`);
   });
 
   it("suppresses repeat signup links after the first send that day", async () => {
-    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 2,
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+      inboundCount: 1,
       onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
     }));
     const prisma = asPrismaTransactionClient({
@@ -2510,14 +2516,25 @@ https://join.example.test/join/code_first_text`);
       reason: "signup-link-already-sent",
     });
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("suppresses signup links when another transaction already claimed the one-shot notice", async () => {
+  it("sends signup links before marking the one-shot notice sent", async () => {
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValueOnce(false);
-    const hostedInviteCreate = vi.fn();
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
+    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState());
+    const hostedInviteCreate = vi.fn().mockResolvedValue({
+      channel: "linq",
+      id: "invite_123",
+      inviteCode: "code_first_text",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    });
     const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -2531,8 +2548,12 @@ https://join.example.test/join/code_first_text`);
       },
       hostedInvite: {
         create: hostedInviteCreate,
-        findFirst: vi.fn(),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            inviteCode: "code_first_text",
+          }),
+        update: vi.fn().mockResolvedValue({}),
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -2547,7 +2568,7 @@ https://join.example.test/join/code_first_text`);
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_signup_claim_lost",
+        eventId: "evt_signup_mark_after_send",
         service: "iMessage",
       }),
       signature: null,
@@ -2555,17 +2576,19 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(response).toMatchObject({
-      ignored: true,
       ok: true,
-      reason: "signup-link-already-sent",
+      reason: "sent-signup-link",
     });
+    expect(hostedInviteCreate).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(hostedInviteCreate).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0],
+    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
@@ -2614,8 +2637,8 @@ https://join.example.test/join/code_first_text`);
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -2631,11 +2654,11 @@ https://join.example.test/join/code_first_text`);
     expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
   });
 
-  it("suppresses duplicate quota replies when another transaction already claimed the daily notice", async () => {
+  it("uses the sent quota marker, not a pre-send claim, to suppress repeat quota replies", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 101,
+      quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
-    mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValueOnce(false);
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -2672,17 +2695,13 @@ https://join.example.test/join/code_first_text`);
       ok: true,
       reason: "daily-quota-reached",
     });
-    expect(mocks.claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-    });
+    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
-  it("keeps the daily quota marker claimed when the inline active-member quota reply fails", async () => {
+  it("does not mark the daily quota notice sent when the inline active-member quota reply fails", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 101,
     }));
@@ -2718,14 +2737,7 @@ https://join.example.test/join/code_first_text`);
       timestamp: null,
     })).rejects.toThrow("linq send failed");
 
-    expect(mocks.claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-    });
-    expect(mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
-    );
+    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(readHostedWebhookReceiptCreateMock(prisma)).not.toHaveBeenCalled();
     expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();

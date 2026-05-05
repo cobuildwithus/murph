@@ -19,11 +19,20 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   sendHostedLinqChatMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
+  claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
+  claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
+}));
+
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   buildHostedLinqConversationHomeRedirectReply,
   sendHostedLinqChatMessage,
 } from "@/src/lib/hosted-onboarding/linq";
+import {
+  claimHostedLinqOnboardingLinkNotice,
+  claimHostedLinqQuotaReplyNotice,
+} from "@/src/lib/hosted-onboarding/linq-daily-state";
 import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
@@ -140,6 +149,7 @@ describe("hosted Linq webhook transport", () => {
         id: "invite-1",
       },
     });
+    expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
   it("logs safe structured Linq side-effect details when delivery fails", async () => {
@@ -157,6 +167,8 @@ describe("hosted Linq webhook transport", () => {
     ));
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-1",
       template: "daily_quota",
@@ -185,6 +197,7 @@ describe("hosted Linq webhook transport", () => {
           template: "daily_quota",
         }),
       );
+      expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
     }

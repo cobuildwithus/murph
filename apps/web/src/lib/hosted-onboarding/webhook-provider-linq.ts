@@ -23,9 +23,8 @@ import {
   readHostedMemberHomeLinqRoute,
 } from "./hosted-member-routing-store";
 import {
-  claimHostedLinqOnboardingLinkNotice,
-  claimHostedLinqQuotaReplyNotice,
   incrementHostedLinqOutboundDailyState,
+  readHostedLinqDailyState,
 } from "./linq-daily-state";
 import {
   type HostedLinqMessageReceivedEvent,
@@ -36,7 +35,10 @@ import {
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "./linq-routing-policy";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import {
+  appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey,
+} from "../hosted-mailbox/store";
 import {
   resolveHostedAiUsageGate,
 } from "../hosted-execution/usage-allowance";
@@ -158,6 +160,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return buildIgnoredLinqWebhookPlan("unknown-home-line");
     }
 
+    const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+      dedupeKey: input.event.event_id,
+      prisma: input.prisma,
+      userId: existingMember.id,
+    });
+
+    if (existingMailboxItem) {
+      return buildActiveMemberDirectPlan({
+        desiredSideEffects: [],
+        response: {
+          duplicate: true,
+          ignored: true,
+          ok: true,
+          reason: "duplicate-webhook-event",
+        },
+      });
+    }
+
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
       chatId: summary.chatId,
       memberId: existingMember.id,
@@ -176,19 +196,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return buildIgnoredLinqWebhookPlan("daily-quota-reached");
       }
 
-      const claimedQuotaReply = await claimHostedLinqQuotaReplyNotice({
-        memberId: existingMember.id,
-        occurredAt,
-        prisma: input.prisma,
-      });
-
-      if (!claimedQuotaReply) {
-        return buildIgnoredLinqWebhookPlan("daily-quota-reached");
-      }
-
       return buildQuotaReplyResponse({
         chatId: summary.chatId,
+        memberId: existingMember.id,
         messageId: summary.messageId,
+        occurredAt,
         sourceEventId: input.event.event_id,
       });
     }
@@ -207,21 +219,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return buildIgnoredLinqWebhookPlan("ai-usage-quota-reached");
       }
 
-      const claimedQuotaReply = await claimHostedLinqQuotaReplyNotice({
-        memberId: existingMember.id,
-        occurredAt,
-        prisma: input.prisma,
-      });
-
-      if (!claimedQuotaReply) {
-        return buildIgnoredLinqWebhookPlan("ai-usage-quota-reached");
-      }
-
       return buildAiUsageQuotaReplyResponse({
         chatId: summary.chatId,
+        memberId: existingMember.id,
         message: usageGate.userNotice.message,
         messageId: summary.messageId,
         noticeCode: usageGate.userNotice.code,
+        occurredAt,
         sourceEventId: input.event.event_id,
       });
     }
@@ -282,6 +286,16 @@ export async function planHostedOnboardingLinqWebhook(input: {
           observedAt: new Date(occurredAt),
           prisma: input.prisma,
         }));
+  const existingDailyState = await readHostedLinqDailyState({
+    memberId: member.id,
+    occurredAt,
+    prisma: input.prisma,
+  });
+
+  if (existingDailyState?.onboardingLinkSentAt) {
+    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
+  }
+
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
     chatId: summary.chatId,
     memberId: member.id,
@@ -295,16 +309,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
   }
 
-  const claimedOnboardingLink = await claimHostedLinqOnboardingLinkNotice({
-    memberId: member.id,
-    occurredAt,
-    prisma: input.prisma,
-  });
-
-  if (!claimedOnboardingLink) {
-    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
-  }
-
   const invite = await issueHostedInviteTx({
     channel: "linq",
     memberId: member.id,
@@ -315,7 +319,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
     chatId: summary.chatId,
     inviteCode: invite.inviteCode,
     inviteId: invite.id,
+    memberId: member.id,
     messageId: summary.messageId,
+    occurredAt,
     sourceEventId: input.event.event_id,
   });
 }
