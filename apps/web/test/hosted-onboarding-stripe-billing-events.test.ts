@@ -1,12 +1,13 @@
 import { HostedBillingStatus } from "@prisma/client";
 import type Stripe from "stripe";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
   activateHostedMemberForPositiveSourceTx: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
+  findMemberForStripeSubscription: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   return {
     ...actual,
     findMemberForStripeInvoice: mocks.findMemberForStripeInvoice,
+    findMemberForStripeSubscription: mocks.findMemberForStripeSubscription,
   };
 });
 
@@ -51,7 +53,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   };
 });
 
-import { applyStripeInvoicePaid } from "@/src/lib/hosted-onboarding/stripe-billing-events";
+import {
+  applyStripeInvoicePaid,
+  applyStripeSubscriptionUpdated,
+} from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
 describe("hosted onboarding stripe billing events", () => {
   beforeEach(() => {
@@ -59,6 +64,7 @@ describe("hosted onboarding stripe billing events", () => {
 
     const member = makeMemberSnapshot();
     mocks.findMemberForStripeInvoice.mockResolvedValue(member);
+    mocks.findMemberForStripeSubscription.mockResolvedValue(member);
     mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValue({
       canonicalBillingStatus: HostedBillingStatus.active,
       member,
@@ -78,6 +84,10 @@ describe("hosted onboarding stripe billing events", () => {
       hostedExecutionEventId: "wake_123",
       memberId: member.core.id,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("normalizes duplicate invoice.paid Stripe events onto the same activation source id", async () => {
@@ -231,6 +241,32 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).not.toHaveBeenCalled();
   });
+
+  it("infers subscription plan code from any base price before usage prices", async () => {
+    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_base");
+    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_usage");
+    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge_base");
+    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge_usage");
+
+    await applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        items: ["price_edge_usage", "price_edge_base"],
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_sub_updated",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPlanCode: "launch_edge_monthly",
+      }),
+    );
+  });
 });
 
 function makeMemberSnapshot(): HostedMemberBillingSnapshot {
@@ -265,4 +301,26 @@ function makeStripeInvoice(
     id: overrides?.id ?? "in_123",
     subscription: overrides?.subscription ?? "sub_123",
   } as Stripe.Invoice;
+}
+
+function makeStripeSubscription(
+  overrides?: Partial<{
+    customer: string | null;
+    id: string;
+    items: string[];
+    status: Stripe.Subscription.Status;
+  }>,
+): Stripe.Subscription {
+  return {
+    customer: overrides?.customer ?? "cus_123",
+    id: overrides?.id ?? "sub_123",
+    items: {
+      data: (overrides?.items ?? []).map((priceId) => ({
+        price: {
+          id: priceId,
+        },
+      })),
+    },
+    status: overrides?.status ?? "active",
+  } as Stripe.Subscription;
 }

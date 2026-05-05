@@ -233,6 +233,7 @@ Hosted AI usage metering:
 - `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests only when `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`.
 - `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` must be a Stripe restricted key with billing meter-event write permission only; it is forwarded to hosted execution, never persisted with usage rows, and ignored unless it starts with `rk_`.
 - Hosted AI included-allowance gating is app-owned: web prices imported `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
+- Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 Hosted runner cleanup:
 

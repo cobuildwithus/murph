@@ -22,6 +22,12 @@ function formatHostedAiUsageGateDecision(
       }
     : {
         allowed: false,
+        ...(decision.userNotice
+          ? {
+              noticeCode: decision.userNotice.code,
+              userNotice: decision.userNotice.message,
+            }
+          : {}),
         reason: decision.reason,
         retryAfter: decision.retryAfter.toISOString(),
       };

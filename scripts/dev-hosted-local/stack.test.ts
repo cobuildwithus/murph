@@ -1198,7 +1198,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "vercel-ai-gateway");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-4.1-mini");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.4-mini");
 
     const environmentModule = await import("./environment.ts");
 
@@ -1220,7 +1220,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
         HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       }),
       expect.any(Object),
