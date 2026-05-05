@@ -80,8 +80,10 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
   });
   const nextConfig = await readFile(nextCodex.codexConfigPath, "utf8");
 
-  assert.match(nextConfig, /model_provider = "vercel-ai-gateway"/u);
+  assert.match(nextConfig, /model_provider = "hosted-openai"/u);
+  assert.match(nextConfig, /\[model_providers\."hosted-openai"\]/u);
   assert.match(nextConfig, /wire_api = "responses"/u);
+  assert.match(nextConfig, /requires_openai_auth = false/u);
   assert.doesNotMatch(nextConfig, /not valid hosted codex config/u);
   assert.equal(
     await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
@@ -92,8 +94,8 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
 
 function createHostedCodexRuntimeEnv(): Record<string, string> {
   return {
-    HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-    VERCEL_AI_API_KEY: "test-vercel-key",
+    HOSTED_ASSISTANT_PROVIDER: "openai",
+    OPENAI_API_KEY: "test-vercel-key",
   };
 }
 

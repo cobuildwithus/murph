@@ -75,6 +75,7 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
 ] as const;
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
+const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
 const HOSTED_CODEX_LOCAL_TEST_MODEL_PROVIDER_ID = "openai-local-test";
 
 export interface HostedCodexRuntimeEnvironmentInput {
@@ -195,15 +196,19 @@ function resolveHostedCodexModelProviderConfig(input: {
   provider: string | null;
   runtimeEnv: Readonly<Record<string, string | undefined>>;
 }): AssistantCodexModelProviderConfig {
-  const providerConfig = input.provider === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+  const resolvedProviderConfig = input.provider === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
     ? resolveAssistantCodexModelProviderConfig(input.provider)
     : null;
-  if (!providerConfig) {
+  if (!resolvedProviderConfig) {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_INVALID",
       `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL}.`,
     );
   }
+  const providerConfig = {
+    ...resolvedProviderConfig,
+    id: HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID,
+  };
 
   const override = normalizeHostedCodexEnvString(
     input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
@@ -306,22 +311,21 @@ export function buildHostedCodexConfigToml(input: {
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string;
 }): string {
-  const providerConfigLines = isHostedCodexBuiltInProvider(input.provider)
-    ? []
-    : [
-        `[model_providers.${tomlQuotedKey(input.provider.id)}]`,
-        `name = ${tomlString(input.provider.name)}`,
-        `base_url = ${tomlString(input.provider.baseUrl)}`,
-        `env_key = ${tomlString(input.provider.envKey)}`,
-        `wire_api = ${tomlString(input.provider.wireApi)}`,
-        ...(input.disableProviderRetries
-          ? [
-              "request_max_retries = 0",
-              "stream_max_retries = 0",
-            ]
-          : []),
-        "",
-      ];
+  const providerConfigLines = [
+    `[model_providers.${tomlQuotedKey(input.provider.id)}]`,
+    `name = ${tomlString(input.provider.name)}`,
+    `base_url = ${tomlString(input.provider.baseUrl)}`,
+    `env_key = ${tomlString(input.provider.envKey)}`,
+    `wire_api = ${tomlString(input.provider.wireApi)}`,
+    "requires_openai_auth = false",
+    ...(input.disableProviderRetries
+      ? [
+          "request_max_retries = 0",
+          "stream_max_retries = 0",
+        ]
+      : []),
+    "",
+  ];
 
   return [
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
@@ -344,15 +348,6 @@ export function buildHostedCodexConfigToml(input: {
     `include_only = ${tomlStringArray(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
   ].join("\n");
-}
-
-function isHostedCodexBuiltInProvider(
-  provider: AssistantCodexModelProviderConfig,
-): boolean {
-  return provider.id === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
-    && provider.baseUrl === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl
-    && provider.envKey === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey
-    && provider.wireApi === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.wireApi;
 }
 
 function normalizeHostedCodexEnvString(value: string | null | undefined): string | null {

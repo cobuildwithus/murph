@@ -24,10 +24,15 @@ const HOSTED_ASSISTANT_ENV = {
   HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
 } as const;
 
-test("hosted assistant default target uses the local Codex recorder provider only for test overrides", async () => {
+test("hosted assistant default target follows the effective Codex provider id", async () => {
   await withTemporaryHostedAssistantEnv(async () => {
     const productionTarget = await readHostedAssistantExecutionDefaultTarget();
     assert.equal(productionTarget?.modelProvider, "openai");
+
+    process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] =
+      "hosted-openai";
+    const hostedOpenAiTarget = await readHostedAssistantExecutionDefaultTarget();
+    assert.equal(hostedOpenAiTarget?.modelProvider, "hosted-openai");
 
     process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] =
       "openai-local-test";
