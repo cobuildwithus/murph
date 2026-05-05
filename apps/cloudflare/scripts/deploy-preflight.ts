@@ -2,6 +2,10 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
 import {
+  HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
+  isHostedAiUsageAllowancePricedModelId,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
 
@@ -185,6 +189,17 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   if (!deployContext) {
     return errors;
+  }
+
+  const hostedAssistantModel = normalizeOptionalString(source.HOSTED_ASSISTANT_MODEL);
+  if (!hostedAssistantModel) {
+    errors.push(
+      `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS.join(", ")} for hosted AI usage allowance pricing.`,
+    );
+  } else if (!isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)) {
+    errors.push(
+      `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS.join(", ")} for hosted AI usage allowance pricing.`,
+    );
   }
 
   const hostedCryptoEnv = normalizeOptionalString(source.HOSTED_CRYPTO_ENV);

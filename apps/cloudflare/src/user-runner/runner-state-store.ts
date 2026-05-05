@@ -231,6 +231,19 @@ export class RunnerStateStore {
     };
   }
 
+  async recordInvocationStartFailure(input: {
+    error: unknown;
+    failedAt?: string | null;
+  }): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    meta.last_error_at = input.failedAt ?? new Date().toISOString();
+    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
+    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
   async markPendingInvocationNudge(input: {
     preferredWakeAt?: string | null;
   } = {}): Promise<RunnerStateRecord> {

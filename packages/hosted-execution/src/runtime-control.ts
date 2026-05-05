@@ -31,6 +31,22 @@ export const HOSTED_MAILBOX_KINDS = [
 
 export type HostedMailboxKind = (typeof HOSTED_MAILBOX_KINDS)[number];
 
+export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
+  "gpt-5.4-mini",
+  "gpt-5.5",
+] as const;
+
+export type HostedAiUsageAllowancePricedModel =
+  (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
+
+export function isHostedAiUsageAllowancePricedModelId(
+  value: string,
+): value is HostedAiUsageAllowancePricedModel {
+  return HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS.includes(
+    value as HostedAiUsageAllowancePricedModel,
+  );
+}
+
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";
 export const HOSTED_MAILBOX_PAYLOAD_SCHEMA = "murph.hosted-mailbox-payload.v1";
 

@@ -1141,8 +1141,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     const { alarms, invoke, runner } = createRunnerCryptoContextHarness(null, {
       usageGateResponse: {
         allowed: false,
+        noticeCode: "pulse_upgrade_edge",
         reason: "ai_usage_limit_exceeded",
         retryAfter: "2026-05-01T00:00:00.000Z",
+        userNotice: "Hey - you've reached your usage limit for the month. Upgrade to Edge for more usage.",
       },
     });
     await runner.bindUser("member_123");
@@ -1151,6 +1153,8 @@ describe("HostedUserRunner runtime crypto context", () => {
       nextWakeAt: "2026-05-01T00:00:00.000Z",
       redactedStatus: {
         aiUsageGateBlocked: true,
+        aiUsageGateNotice: "Hey - you've reached your usage limit for the month. Upgrade to Edge for more usage.",
+        aiUsageGateNoticeCode: "pulse_upgrade_edge",
         aiUsageGateReason: "ai_usage_limit_exceeded",
         aiUsageGateRetryAfter: "2026-05-01T00:00:00.000Z",
       },
@@ -1164,7 +1168,8 @@ describe("HostedUserRunner runtime crypto context", () => {
   it("fails closed with a retry alarm when the web AI usage gate is unavailable", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-    const { alarms, invoke, runner } = createRunnerCryptoContextHarness(null, {
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      maxEventAttempts: 2,
       usageGateResponse: {
         error: "Unavailable",
       },
@@ -1184,6 +1189,29 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).not.toHaveBeenCalled();
     expect(alarms).toContain("2026-04-27T00:00:30.000Z");
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: "2026-04-27T00:00:30.000Z",
+      retry_failure_count: 1,
+    }]);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: null,
+      retry_failure_count: 2,
+    }]);
   });
 
   it("refreshes the cached runtime crypto context after the web TTL expires", async () => {

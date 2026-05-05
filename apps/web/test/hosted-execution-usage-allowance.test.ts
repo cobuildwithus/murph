@@ -1,4 +1,7 @@
 import { HostedBillingStatus } from "@prisma/client";
+import {
+  HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
+} from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/runtime-state/node/assistant-usage";
 import { describe, expect, it, vi } from "vitest";
 
@@ -45,6 +48,9 @@ const BASE_USAGE_RECORD = {
   usageExtractionVersion: "codex-usage-v1",
 } as const satisfies AssistantUsageRecord;
 
+type AllowanceExecuteRaw = (sql: TemplateStringsArray, ...params: unknown[]) => Promise<number>;
+type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
+
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
@@ -71,12 +77,24 @@ describe("hosted AI usage allowance pricing", () => {
       servedModel: "gpt-unpriced",
     })).toThrow("pricing is missing");
   });
+
+  it("prices every hosted assistant launch model accepted by deploy preflight", () => {
+    for (const model of HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS) {
+      expect(priceHostedAiUsageForAllowance({
+        ...BASE_USAGE_RECORD,
+        requestedModel: model,
+        servedModel: model,
+      })).toMatchObject({
+        counted: true,
+      });
+    }
+  });
 });
 
 describe("accountHostedAiUsageForAllowanceTx", () => {
   it("increments the period once when a usage row wins the accounting claim", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
-    const executeRaw = vi.fn(async () => 1);
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
       executeRaw,
       hostedAiUsageUpdateMany: updateMany,
@@ -106,7 +124,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
   });
 
   it("does not increment again when allowanceAccountedAt was already set", async () => {
-    const executeRaw = vi.fn(async () => 1);
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
       executeRaw,
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 0 })),
@@ -122,7 +140,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
   });
 
   it("does not increment allowance spend for member credentials", async () => {
-    const executeRaw = vi.fn(async () => 1);
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
       executeRaw,
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
@@ -170,9 +188,33 @@ describe("resolveHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: false,
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message: "Hey - you've reached your usage limit for the month. Upgrade to Edge for more usage.",
+      },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
       spentUsdMicros: 10_000_000n,
+    });
+  });
+
+  it("uses the Edge usage-based pricing notice when an Edge member is over limit", async () => {
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      spentUsdMicros: 25_000_000n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      userNotice: {
+        code: "edge_enable_usage_based_pricing",
+        message: "Hey - you've reached your usage limit for the month. Go to the dashboard to enable usage based pricing.",
+      },
     });
   });
 
@@ -212,7 +254,11 @@ describe("resolveHostedAiUsageGate", () => {
   });
 
   it("carries only in-period fallback usage into the Stripe period when billing markers arrive", async () => {
-    const executeRaw = vi.fn(async () => 1);
+    let rawSqlText = "";
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async (sql) => {
+      rawSqlText = sql.join("");
+      return 1;
+    });
     const queryRaw = vi.fn(async () => [
       {
         allowance_cost_usd_micros: 6_000_000n,
@@ -268,6 +314,15 @@ describe("resolveHostedAiUsageGate", () => {
     });
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(rawSqlText).toContain(
+      '"last_usage_at" = CASE',
+    );
+    expect(rawSqlText).toContain(
+      'WHEN "last_usage_at" IS NULL THEN',
+    );
+    expect(rawSqlText).toContain(
+      'ELSE "last_usage_at"',
+    );
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
@@ -282,7 +337,7 @@ describe("resolveHostedAiUsageGate", () => {
 });
 
 function createAllowanceTx(input: {
-  executeRaw: ReturnType<typeof vi.fn>;
+  executeRaw: AllowanceExecuteRawMock;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
 }) {
   return {

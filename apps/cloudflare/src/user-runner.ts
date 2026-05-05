@@ -75,13 +75,17 @@ const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
 type HostedAiUsageGateDecision =
   | {
     allowed: true;
+    noticeCode: null;
     reason: null;
     retryAfter: null;
+    userNotice: null;
   }
   | {
     allowed: false;
+    noticeCode: string | null;
     reason: string;
     retryAfter: string;
+    userNotice: string | null;
   };
 
 export interface HostedRunnerUserDataDeletionResult {
@@ -521,22 +525,48 @@ export class HostedUserRunner {
 
     const gate = await this.readHostedAiUsageGateBeforeInvocation(initialRecord.userId);
     if (!gate.allowed) {
+      if (gate.reason === "ai_usage_gate_unavailable") {
+        const error = new Error("Hosted AI usage gate was unavailable.");
+        await this.stateStore.recordInvocationStartFailure({
+          error,
+          failedAt: new Date().toISOString(),
+        });
+        await this.scheduleHostedWakeRetryAlarm({
+          respectMaxAttempts: true,
+          userId: initialRecord.userId,
+        });
+        const record = await this.stateStore.readState();
+        return {
+          nextWakeAt: record.nextWakeAt,
+          redactedStatus: {
+            aiUsageGateBlocked: true,
+            aiUsageGateReason: gate.reason,
+            aiUsageGateRetryAfter: gate.retryAfter,
+          },
+          status: "scheduled",
+        };
+      }
+
       const record = await this.markPendingNudgeAndApplyAlarm({
         preferredWakeAt: gate.retryAfter,
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
+          noticeCode: gate.noticeCode,
           reason: gate.reason,
           retryAfter: gate.retryAfter,
         },
         message: "Hosted runner skipped workspace invocation because the AI usage gate denied the start.",
         phase: "scheduled",
+        userId: initialRecord.userId,
       });
       return {
         nextWakeAt: record.nextWakeAt,
         redactedStatus: {
           aiUsageGateBlocked: true,
+          ...(gate.noticeCode ? { aiUsageGateNoticeCode: gate.noticeCode } : {}),
+          ...(gate.userNotice ? { aiUsageGateNotice: gate.userNotice } : {}),
           aiUsageGateReason: gate.reason,
           aiUsageGateRetryAfter: gate.retryAfter,
         },
@@ -818,11 +848,14 @@ export class HostedUserRunner {
         level: "warn",
         message: "Hosted runner skipped workspace invocation because the AI usage gate was unavailable.",
         phase: "scheduled",
+        userId,
       });
       return {
         allowed: false,
+        noticeCode: null,
         reason: "ai_usage_gate_unavailable",
         retryAfter,
+        userNotice: null,
       };
     }
   }
@@ -1105,8 +1138,10 @@ function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecisi
   if (record.allowed === true) {
     return {
       allowed: true,
+      noticeCode: null,
       reason: null,
       retryAfter: null,
+      userNotice: null,
     };
   }
 
@@ -1116,8 +1151,10 @@ function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecisi
 
   return {
     allowed: false,
+    noticeCode: parseOptionalHostedAiUsageGateString(record.noticeCode, "noticeCode"),
     reason: requireHostedAiUsageGateString(record.reason, "reason"),
     retryAfter: requireHostedAiUsageGateIsoDateString(record.retryAfter, "retryAfter"),
+    userNotice: parseOptionalHostedAiUsageGateString(record.userNotice, "userNotice"),
   };
 }
 
@@ -1135,6 +1172,17 @@ function requireHostedAiUsageGateString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function parseOptionalHostedAiUsageGateString(
+  value: unknown,
+  label: string,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return requireHostedAiUsageGateString(value, label);
 }
 
 function requireHostedAiUsageGateIsoDateString(value: unknown, label: string): string {

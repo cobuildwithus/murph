@@ -7,6 +7,10 @@ import type {
   AssistantUsageCredentialSource,
   AssistantUsageRecord,
 } from "@murphai/runtime-state/node/assistant-usage";
+import {
+  isHostedAiUsageAllowancePricedModelId,
+  type HostedAiUsageAllowancePricedModel,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   getHostedAiUsageMonthlyAllowanceUsdMicros,
@@ -21,6 +25,10 @@ type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 export type HostedAiUsageGateDeniedReason =
   | "ai_usage_limit_exceeded"
   | "hosted_access_inactive";
+
+export type HostedAiUsageGateNoticeCode =
+  | "edge_enable_usage_based_pricing"
+  | "pulse_upgrade_edge";
 
 export type HostedAiUsageGateDecision =
   | {
@@ -44,7 +52,13 @@ export type HostedAiUsageGateDecision =
     remainingUsdMicros: bigint;
     retryAfter: Date;
     spentUsdMicros: bigint;
+    userNotice: HostedAiUsageGateUserNotice | null;
   };
+
+export interface HostedAiUsageGateUserNotice {
+  code: HostedAiUsageGateNoticeCode;
+  message: string;
+}
 
 export interface HostedAiUsageAllowancePricingResult {
   costUsdMicros: bigint;
@@ -67,11 +81,6 @@ const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
-  "gpt-5.4": {
-    cachedInputUsdMicrosPerMillionTokens: 250_000n,
-    inputUsdMicrosPerMillionTokens: 2_500_000n,
-    outputUsdMicrosPerMillionTokens: 15_000_000n,
-  },
   "gpt-5.4-mini": {
     cachedInputUsdMicrosPerMillionTokens: 75_000n,
     inputUsdMicrosPerMillionTokens: 750_000n,
@@ -82,10 +91,14 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
     inputUsdMicrosPerMillionTokens: 5_000_000n,
     outputUsdMicrosPerMillionTokens: 30_000_000n,
   },
-} as const;
-
-type HostedAiUsageAllowancePricedModel =
-  keyof typeof HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES;
+} as const satisfies Record<
+  HostedAiUsageAllowancePricedModel,
+  {
+    cachedInputUsdMicrosPerMillionTokens: bigint;
+    inputUsdMicrosPerMillionTokens: bigint;
+    outputUsdMicrosPerMillionTokens: bigint;
+  }
+>;
 
 export function priceHostedAiUsageForAllowance(
   record: AssistantUsageRecord,
@@ -112,7 +125,7 @@ export function priceHostedAiUsageForAllowance(
     };
   }
 
-  if (!model || !isHostedAiUsageAllowancePricedModel(model)) {
+  if (!model || !isHostedAiUsageAllowancePricedModelId(model)) {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the model.");
   }
 
@@ -248,10 +261,13 @@ export async function resolveHostedAiUsageGate(input: {
         remainingUsdMicros,
         retryAfter: period.periodEnd,
         spentUsdMicros: period.spentUsdMicros,
+        userNotice: null,
       };
     }
 
     if (period.spentUsdMicros >= period.limitUsdMicros) {
+      const userNotice = buildHostedAiUsageGateLimitNotice(period.billingPlanCode);
+
       return {
         allowed: false,
         billingPlanCode: period.billingPlanCode,
@@ -263,6 +279,7 @@ export async function resolveHostedAiUsageGate(input: {
         remainingUsdMicros,
         retryAfter: period.periodEnd,
         spentUsdMicros: period.spentUsdMicros,
+        userNotice,
       };
     }
 
@@ -633,7 +650,11 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
         THEN ${input.now}
         ELSE "blocked_at"
       END,
-      "last_usage_at" = ${input.usageAt},
+      "last_usage_at" = CASE
+        WHEN "last_usage_at" IS NULL THEN ${input.usageAt}
+        WHEN ${input.usageAt} > "last_usage_at" THEN ${input.usageAt}
+        ELSE "last_usage_at"
+      END,
       "updated_at" = ${input.now}
     WHERE "member_id" = ${input.memberId}
       AND "period_start" = ${input.periodStart}
@@ -697,13 +718,22 @@ function normalizeHostedAiUsageAllowanceModel(value: string | null): string | nu
   return normalized.length > 0 ? normalized : null;
 }
 
-function isHostedAiUsageAllowancePricedModel(
-  value: string,
-): value is HostedAiUsageAllowancePricedModel {
-  return Object.prototype.hasOwnProperty.call(
-    HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES,
-    value,
-  );
+function buildHostedAiUsageGateLimitNotice(
+  billingPlanCode: HostedBillingPlanCode,
+): HostedAiUsageGateUserNotice {
+  const base = "Hey - you've reached your usage limit for the month.";
+
+  if (billingPlanCode === "launch_edge_monthly") {
+    return {
+      code: "edge_enable_usage_based_pricing",
+      message: `${base} Go to the dashboard to enable usage based pricing.`,
+    };
+  }
+
+  return {
+    code: "pulse_upgrade_edge",
+    message: `${base} Upgrade to Edge for more usage.`,
+  };
 }
 
 function normalizeTokenCount(value: number | null | undefined): bigint {

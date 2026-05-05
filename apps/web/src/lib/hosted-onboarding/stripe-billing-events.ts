@@ -373,14 +373,22 @@ function resolveHostedStripeSubscriptionBillingPlanCode(
     return metadataPlanCode;
   }
 
-  const priceId = readHostedStripeSubscriptionPriceId(subscription);
-  if (!priceId) {
+  const priceIds = readHostedStripeSubscriptionPriceIds(subscription);
+  if (priceIds.length === 0) {
     return null;
   }
 
   for (const code of HOSTED_BILLING_PLAN_CODES) {
     const expectedPriceId = process.env[getHostedBillingPlanDefinition(code).priceIdEnvKey];
-    if (expectedPriceId && expectedPriceId === priceId) {
+    if (expectedPriceId && priceIds.includes(expectedPriceId)) {
+      return code;
+    }
+  }
+
+  for (const code of HOSTED_BILLING_PLAN_CODES) {
+    const expectedUsagePriceId =
+      process.env[getHostedBillingPlanDefinition(code).usagePriceIdEnvKey];
+    if (expectedUsagePriceId && priceIds.includes(expectedUsagePriceId)) {
       return code;
     }
   }
@@ -388,18 +396,19 @@ function resolveHostedStripeSubscriptionBillingPlanCode(
   return null;
 }
 
-function readHostedStripeSubscriptionPriceId(
+function readHostedStripeSubscriptionPriceIds(
   subscription: Stripe.Subscription,
-): string | null {
+): string[] {
   const items = subscription.items?.data ?? [];
+  const priceIds: string[] = [];
   for (const item of items) {
     const priceId = typeof item.price?.id === "string" ? item.price.id : null;
     if (priceId) {
-      return priceId;
+      priceIds.push(priceId);
     }
   }
 
-  return null;
+  return priceIds;
 }
 
 function readHostedStripeSubscriptionPeriodDate(
