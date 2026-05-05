@@ -470,6 +470,7 @@ describe("hosted deploy automation helpers", () => {
       ...workflow.matchAll(/docker run \\/gmu),
     ]).toHaveLength(3);
     expect(workflow).not.toContain("services:");
+    expect(workflow).toContain('          )"\n          if [[ -z "${latest_log}" ]]; then');
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");
     }
