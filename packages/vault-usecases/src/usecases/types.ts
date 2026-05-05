@@ -739,6 +739,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       primaryBiomarkerKey?: string
       secondaryBiomarkerKey?: readonly string[]
       desiredDirection?: "increase" | "decrease" | "stabilize"
+      expectedDirection?: readonly string[]
       analysisNote?: readonly string[]
       onboardingCompletedAt?: string
       setupAnswer?: readonly string[]

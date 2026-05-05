@@ -681,6 +681,7 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
     analysisPlan: {
       primaryBiomarkerKey: "biomarker:hrv",
       secondaryBiomarkerKeys: [
+        "biomarker:resting-heart-rate",
         "biomarker:sleep-efficiency",
         "biomarker:deep-sleep",
         "biomarker:respiratory-rate",
@@ -688,6 +689,10 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
         "biomarker:unknown-signal",
       ],
       desiredDirection: "increase",
+      expectedDirections: [
+        { biomarkerKey: "biomarker:hrv", direction: "increase" },
+        { biomarkerKey: "biomarker:resting-heart-rate", direction: "decrease" },
+      ],
     },
     assistantSupport: {
       remindersEnabled: false,
@@ -804,6 +809,22 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
       unit: "celsius",
       value: 0.2,
     }),
+    makeObservation({
+      entityId: "evt_rhr_baseline",
+      dayKey: "2026-05-01",
+      metric: "resting-heart-rate",
+      occurredAt: "2026-05-01T06:00:00.000Z",
+      unit: "bpm",
+      value: 50,
+    }),
+    makeObservation({
+      entityId: "evt_rhr_intervention",
+      dayKey: "2026-05-03",
+      metric: "resting-heart-rate",
+      occurredAt: "2026-05-03T06:00:00.000Z",
+      unit: "bpm",
+      value: 48,
+    }),
   ];
   const vault = createVaultReadModel({
     vaultRoot: "/virtual/experiment-analysis-metrics",
@@ -841,6 +862,7 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
     progress.signals.map((signal) => [signal.biomarkerKey, signal.unit]),
     [
       ["biomarker:hrv", "ms"],
+      ["biomarker:resting-heart-rate", "bpm"],
       ["biomarker:sleep-efficiency", "%"],
       ["biomarker:deep-sleep", "minutes"],
       ["biomarker:respiratory-rate", "breaths_per_minute"],
@@ -850,7 +872,11 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
   );
   assert.equal(progress.signals[0]?.deltaAbs, 5);
   assert.equal(progress.signals[0]?.movedAsExpected, true);
-  assert.equal(progress.signals[5]?.completeness, "insufficient");
+  assert.equal(progress.signals[1]?.expectedDirection, "decrease");
+  assert.equal(progress.signals[1]?.deltaAbs, -2);
+  assert.equal(progress.signals[1]?.movedAsExpected, true);
+  assert.equal(progress.signals[2]?.expectedDirection, null);
+  assert.equal(progress.signals[6]?.completeness, "insufficient");
   assert.deepEqual(progress.confounders, ["Late caffeine on 2026-05-04"]);
   assert.equal(progress.protocolRef, null);
 });

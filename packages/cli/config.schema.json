@@ -9763,6 +9763,14 @@
                             "stabilize"
                           ]
                         },
+                        "expectedDirection": {
+                          "description": "Per-biomarker expected direction as biomarker:key=increase|decrease|stabilize. Repeat --expected-direction for multiple biomarkers.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
                         "analysisNote": {
                           "description": "Analysis plan note. Repeat --analysis-note for multiple values.",
                           "type": "array",

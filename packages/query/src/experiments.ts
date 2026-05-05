@@ -438,7 +438,7 @@ function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetric
         ? round(((interventionMean - baselineMean) / Math.abs(baselineMean)) * 100)
         : null;
     const unit = intervention[0]?.unit ?? baseline[0]?.unit ?? null;
-    const expectedDirection = context.frontmatter.analysisPlan?.desiredDirection ?? null;
+    const expectedDirection = resolveExpectedDirection(context.frontmatter.analysisPlan, biomarkerKey);
     const baselineSummary = {
       daysWithData: baseline.length,
       mean: baselineMean,
@@ -469,6 +469,24 @@ function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetric
       unit,
     };
   });
+}
+
+function resolveExpectedDirection(
+  analysisPlan: QueryExperimentFrontmatter["analysisPlan"] | undefined,
+  biomarkerKey: string,
+): ExperimentMetricResult["expectedDirection"] {
+  const explicitDirection = analysisPlan?.expectedDirections?.find(
+    (entry) => entry.biomarkerKey === biomarkerKey,
+  )?.direction;
+  if (explicitDirection) {
+    return explicitDirection;
+  }
+
+  if (analysisPlan?.primaryBiomarkerKey === biomarkerKey) {
+    return analysisPlan.desiredDirection ?? null;
+  }
+
+  return null;
 }
 
 function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {

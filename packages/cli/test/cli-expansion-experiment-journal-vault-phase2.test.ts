@@ -674,6 +674,10 @@ test.sequential(
         'biomarker:sleep-efficiency',
         '--desired-direction',
         'decrease',
+        '--expected-direction',
+        'biomarker:resting-heart-rate=decrease',
+        '--expected-direction',
+        'biomarker:sleep-efficiency=increase',
         '--analysis-note',
         'Compare the seven-day baseline to the intervention window.',
         '--onboarding-completed-at',
@@ -792,6 +796,10 @@ test.sequential(
         'biomarker:sleep-efficiency',
       ])
       assert.equal(analysisPlan.desiredDirection, 'decrease')
+      assert.deepEqual(analysisPlan.expectedDirections, [
+        { biomarkerKey: 'biomarker:resting-heart-rate', direction: 'decrease' },
+        { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
+      ])
       assert.deepEqual(analysisPlan.notes, [
         'Compare the seven-day baseline to the intervention window.',
       ])
@@ -1049,6 +1057,10 @@ test.sequential(
             primaryBiomarkerKey: 'biomarker:resting-heart-rate',
             secondaryBiomarkerKeys: ['biomarker:sleep-efficiency'],
             desiredDirection: 'decrease',
+            expectedDirections: [
+              { biomarkerKey: 'biomarker:resting-heart-rate', direction: 'decrease' },
+              { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
+            ],
           },
           assistantSupport: {
             remindersEnabled: true,
