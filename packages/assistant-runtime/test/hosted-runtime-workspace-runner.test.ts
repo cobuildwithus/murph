@@ -2550,6 +2550,104 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("does not unwind reply intent when post-assistant cleanup throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const events: string[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_assistant_cleanup_failed",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_assistant_cleanup_failed",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_post_assistant_cleanup_failed",
+          leaseGeneration: "3",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase() {
+          events.push("assistant");
+          return {
+            afterCheckpoint: async () => {
+              events.push("optional:post-assistant-cleanup");
+              throw Object.assign(new Error("provider cleanup unavailable"), {
+                code: "PROVIDER_CLEANUP_UNAVAILABLE",
+              });
+            },
+            checkpointReason: "outbox_intent",
+            progressed: true,
+            redactedStatus: {
+              hostedOutboxIntentCheckpointed: true,
+            },
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.progressed, true);
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.deepEqual(events, [
+        "assistant",
+        "optional:post-assistant-cleanup",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "outbox_intent",
+      ]);
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "0",
+        hostedMailboxFetchedCount: 0,
+        hostedMailboxImportedCount: 0,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+        hostedOutboxIntentCheckpointed: true,
+      });
+
+      const postCheckpointFailureLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "runner.error");
+      assert.ok(postCheckpointFailureLog);
+      assert.doesNotThrow(() =>
+        parseHostedRuntimeLogRequest({ entries: [postCheckpointFailureLog] })
+      );
+      assert.equal(postCheckpointFailureLog.errorCode, "assistant_after_checkpoint_failed");
+      assert.equal(postCheckpointFailureLog.level, "warn");
+      assert.deepEqual(postCheckpointFailureLog.redactedJson, {
+        checkpointed: true,
+        failureCodeDetails: ["PROVIDER_CLEANUP_UNAVAILABLE"],
+        failureNames: ["Error"],
+        failureSummaries: ["provider cleanup unavailable"],
+        nestedErrorCode: "runtime_error",
+      });
+    } finally {
+      warn.mockRestore();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("summarizes active-turn refreshes without exposing payload state", async () => {
     const idle = await runActiveTurnRefreshSummaryScenario({
       lateItem: null,
