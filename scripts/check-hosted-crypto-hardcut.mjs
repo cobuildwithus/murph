@@ -53,6 +53,7 @@ const explicitScanFiles = [
 
 const ignoredDirectoryNames = new Set([
   ".git",
+  ".deploy",
   ".next",
   ".next-dev",
   ".next-smoke",
