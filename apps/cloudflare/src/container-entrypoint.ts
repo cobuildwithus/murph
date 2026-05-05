@@ -124,6 +124,7 @@ export async function startHostedContainerEntrypoint(input: {
   const controlToken = normalizeOptionalString(input.controlToken);
   let activeHostedRunnerJobCount = 0;
   const server = createServer(async (request, response) => {
+    response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
     let job: HostedExecutionRunnerJobInput | null = null;
@@ -151,6 +152,7 @@ export async function startHostedContainerEntrypoint(input: {
         request.method !== "POST"
         || requestUrl.pathname !== "/internal/workspace-invocation"
       ) {
+        discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
         return;
@@ -159,6 +161,7 @@ export async function startHostedContainerEntrypoint(input: {
       const bearerToken = readBearerAuthorizationToken(request.headers.authorization);
 
       if (!controlToken) {
+        discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "error",
@@ -172,6 +175,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (controlToken && (!bearerToken || !timingSafeEquals(bearerToken, controlToken))) {
+        discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "warn",
@@ -185,6 +189,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (activeHostedRunnerJobCount > 0) {
+        discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "warn",
@@ -490,6 +495,12 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+function discardUnreadRequestBody(request: IncomingMessage): void {
+  if (!request.readableEnded && !request.destroyed) {
+    request.resume();
+  }
 }
 
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {

@@ -132,6 +132,7 @@ async function prepareHostedLocalRunnerBundle(input: {
     ...input.env,
     MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
       input.env.MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
+    MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
   };
   if (input.scenarios.some((scenario) => scenario.requiresParserToolchain)) {
     env.MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN = "1";
