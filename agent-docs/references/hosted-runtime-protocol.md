@@ -168,20 +168,15 @@ liveness heartbeats surface that input is available so the active-turn refresh
 path can import late mailbox rows; the alarm remains the durable backstop if the
 active path does not consume or commit them.
 
-The runtime reads `HostedWorkspace` and may start a read-only mailbox prefetch
-immediately after workspace version/user validation when all required
-imported-sequence hints are present in `HostedWorkspace.redactedStatusJson`.
-Those hints are correctness-neutral latency hints only. Existing workspaces with
-missing or invalid hints skip prefetch and fetch only after authoritative local
-state has been restored. A true null/bootstrap workspace may prefetch from empty
-watermarks because there is no restored mailbox state yet. The encrypted local
-workspace restore remains authoritative for mailbox import progress: after
-restore, the runtime uses the prefetch only when its lanes, limits, and imported
-sequences exactly match the checkpointed per-lane watermarks in
-`.runtime/operations/assistant/hosted-mailbox.json`; otherwise it discards the
-prefetch and performs the normal authoritative fetch from the restored
-watermarks. The runtime stages decoded conversation rows as assistant input,
-checkpoints immediately after staging, and attempts inbox projection once as a
+The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
+then restores the encrypted local workspace before fetching mailbox rows. The
+restored `.runtime/operations/assistant/hosted-mailbox.json` file is the
+authoritative source for imported per-lane watermarks; `HostedWorkspace`
+redacted status is a diagnostic/status surface, not an import progress input.
+Fetching after restore keeps user messages appended during restore visible to
+the same invocation instead of hiding them behind a stale pre-restore read. The
+runtime stages decoded conversation rows as assistant input, checkpoints
+immediately after staging, and attempts inbox projection once as a
 post-checkpoint enrichment effect before assistant admission. Projection status
 and artifacts checkpoint separately and best-effort, so failed or slow
 projection does not delay the staged mailbox watermark and does not imply a

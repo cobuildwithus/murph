@@ -771,13 +771,11 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(artifactGetCalls, [bundleHash]);
       assert.deepEqual(imported, ["4"]);
-      assert.equal(fetchRequests.length, 2);
-      assert.equal(readConversationImportedSeq(fetchRequests[0]), "0");
-      assert.equal(readConversationImportedSeq(fetchRequests[1]), "3");
+      assert.equal(fetchRequests.length, 1);
+      assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
       assert.deepEqual(events, [
         "workspace.read",
-        "mailbox.fetch",
         "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
@@ -788,7 +786,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("reuses a matching mailbox prefetch hint after authoritative restore", async () => {
+  test("fetches mailbox rows from the authoritative restored watermark", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -872,7 +870,105 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("skips mailbox prefetch for incomplete or malformed existing-workspace hints", async () => {
+  test("does not let a stale pre-restore mailbox read hide a conversation item appended during restore", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const restoredState = createEmptyHostedMailboxImportState();
+    restoredState.watermarks.conversation = "3";
+    const bundle = createMailboxImportStateBundle(restoredState);
+    const mailboxItems: HostedMailboxItem[] = [];
+    const imported: string[] = [];
+    const artifactLabelsByHash = new Map([[bundle.hash, "workspace-bundle"]]);
+
+    try {
+      const platform = createPlatform({
+        artifactBytesByHash: new Map([[bundle.hash, bundle.bytes]]),
+        artifactLabelsByHash,
+        mailboxPort: createMailboxPort({
+          events,
+          fetchRequests,
+          items: mailboxItems,
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({
+            redactedStatus: {
+              hostedMailboxConversationImportedSeq: "3",
+              hostedMailboxSystemImportedSeq: "0",
+            },
+            snapshotRef: createBundleRef({
+              hash: bundle.hash,
+              key: "users/bundles/member-synthetic/prefetch-stale-before-import.bundle.json",
+              size: bundle.bytes.byteLength,
+            }),
+            version: "9",
+          }),
+        }),
+      });
+      const platformWithAppendDuringRestore: HostedRuntimePlatform = {
+        ...platform,
+        artifactStore: {
+          ...platform.artifactStore,
+          async get(sha256) {
+            const bytes = await platform.artifactStore.get(sha256);
+            if (sha256 === bundle.hash && mailboxItems.length === 0) {
+              events.push("artifact.get:workspace-bundle");
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_prefetch_stale_new",
+                laneSeq: "4",
+              }));
+            }
+            return bytes;
+          },
+        },
+      };
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            workspaceVersion: "9",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/prefetch-stale-after-import.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(item.item.laneSeq);
+            return { status: "imported" };
+          },
+          platform: platformWithAppendDuringRestore,
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(imported, ["4"]);
+      assert.equal(fetchRequests.length, 1);
+      assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
+      assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
+      assert.deepEqual(events, [
+        "workspace.read",
+        "artifact.get:workspace-bundle",
+        "mailbox.fetch",
+        "snapshot:4",
+        "workspace.checkpoint",
+      ]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("falls back to restored mailbox state for incomplete or malformed existing-workspace hints", async () => {
     const redactedStatuses: Array<HostedWorkspaceState["redactedStatus"]> = [
       null,
       {
@@ -1409,7 +1505,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(mailboxImportedLog);
 
       assert.equal(events[0], "workspace.read");
-      assert.ok(mailboxFetchIndex < firstArtifactFetchIndex);
+      assert.ok(firstArtifactFetchIndex < mailboxFetchIndex);
       assert.equal(artifactGetCalls.length, externalArtifactCount + 1);
       assert.equal(importedEvents.length, mailboxItemCount);
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
