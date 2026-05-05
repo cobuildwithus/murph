@@ -12,9 +12,9 @@ import {
 } from "@/src/lib/hosted-execution/usage-allowance";
 
 const BASE_USAGE_RECORD = {
-  apiKeyEnv: "VERCEL_AI_API_KEY",
+  apiKeyEnv: "OPENAI_API_KEY",
   attemptCount: 1,
-  baseUrl: "https://ai-gateway.vercel.sh/v1",
+  baseUrl: "https://api.openai.com/v1",
   cacheWriteTokens: null,
   cachedInputTokens: 12,
   credentialSource: "platform",
@@ -25,7 +25,7 @@ const BASE_USAGE_RECORD = {
   occurredAt: "2026-03-29T12:00:00.000Z",
   outputTokens: 45,
   provider: "codex-cli",
-  providerName: "vercel-ai-gateway",
+  providerName: "openai",
   providerRequestId: "req_123",
   providerRequestOutcome: "succeeded",
   providerRequestOrdinal: 0,
@@ -90,7 +90,7 @@ describe("hosted AI usage allowance pricing", () => {
     }
   });
 
-  it("prices Vercel AI Gateway provider-prefixed OpenAI model ids", () => {
+  it("prices provider-prefixed OpenAI model ids", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: "openai/gpt-5.5",
