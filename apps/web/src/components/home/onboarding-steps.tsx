@@ -8,7 +8,7 @@ import {
   FlaskSparkleIcon,
   LabReportIcon,
   WatchHeartIcon,
-} from "./home-icons";
+} from "@/src/components/icons/home-icons";
 
 const steps: {
   id: "devices" | "experiments" | "labs";
@@ -105,7 +105,7 @@ export function OnboardingSteps({
                   Step {i + 1}
                 </span>
                 <div className="flex size-14 items-center justify-center rounded-2xl bg-[#f0ede8] ring-1 ring-[#e5e0d8]/60 transition-transform duration-300 group-hover:scale-105">
-                  <Icon className="size-6 text-[#7a8c6e]" />
+                  <Icon className="size-8 text-[#7a8c6e]" />
                 </div>
               </div>
               <h2 className="mb-2.5 font-serif text-[22px] font-semibold tracking-tight text-foreground">
