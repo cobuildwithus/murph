@@ -15,6 +15,8 @@ const deltaVariants = cva("ml-2 text-sm font-semibold", {
   },
 });
 
+const neutralDeltaClassName = "ml-2 text-sm font-semibold text-muted-foreground";
+
 const arrows: Record<string, string> = {
   up: "↑",
   down: "↓",
@@ -26,6 +28,7 @@ interface MetricCardProps extends VariantProps<typeof deltaVariants> {
   value: string;
   unit?: string;
   delta: string;
+  deltaTone?: "directional" | "neutral";
   expected?: string;
   baseline?: string;
   className?: string;
@@ -37,6 +40,7 @@ export function MetricCard({
   unit,
   delta,
   direction = "neutral",
+  deltaTone = "directional",
   expected,
   baseline,
   className,
@@ -56,7 +60,7 @@ export function MetricCard({
           {value}
         </span>
         {unit && <span className="text-sm text-muted-foreground">{unit}</span>}
-        <span className={deltaVariants({ direction })}>
+        <span className={deltaTone === "neutral" ? neutralDeltaClassName : deltaVariants({ direction })}>
           {arrows[direction ?? "neutral"]} {delta}
         </span>
       </div>
