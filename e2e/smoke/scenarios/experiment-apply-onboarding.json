@@ -7,5 +7,11 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/experiment-create",
-  "purpose": "Documents schema-discoverable protocol onboarding and run setup without hidden stdin payloads."
+  "purpose": "Documents schema-discoverable protocol onboarding and run setup without hidden stdin payloads.",
+  "coverageNotes": [
+    "First-session setup can record onboarding.setupAnswers.first_session_start_at.",
+    "First-session setup can record onboarding.setupAnswers.first_session_prep_reminder_at.",
+    "First-session setup can record onboarding.setupAnswers.first_session_prep_automation_slug.",
+    "First-session prep setup uses assistantSupport.reminderPolicy=pre_session and assistantSupport.remindersEnabled=true."
+  ]
 }

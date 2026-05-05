@@ -21,6 +21,7 @@ interface ScenarioManifest {
   vaultFixture?: unknown;
   goldenOutput?: unknown;
   inputs?: unknown;
+  coverageNotes?: unknown;
 }
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -245,6 +246,21 @@ export async function verifyScenarioIntegrity(options?: {
 
     if (!expectStringArray(errors, scenario.inputs, "scenario inputs", relativeScenarioPath)) {
       continue;
+    }
+
+    if (
+      scenario.coverageNotes !== undefined &&
+      !expectStringArray(errors, scenario.coverageNotes, "scenario coverage notes", relativeScenarioPath)
+    ) {
+      continue;
+    }
+
+    if (Array.isArray(scenario.coverageNotes)) {
+      for (const note of scenario.coverageNotes) {
+        if (typeof note !== "string" || note.length === 0) {
+          errors.push(`Invalid scenario coverage note in ${relativeScenarioPath}`);
+        }
+      }
     }
 
     const expectedFileName = `${scenario.id}.json`;

@@ -389,6 +389,84 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('scaffold and update the experiment record')
     expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
   })
+
+  it('guides first-session prep reminders through one-shot automations after run creation', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      currentLocalDate: '2026-05-05',
+      currentTimeZone: 'America/New_York',
+    }))
+
+    expect(prompt).toContain('# First-session prep reminders')
+    expect(prompt).toContain(
+      'During experiment onboarding, try to resolve the user\'s first planned intervention session date and time.',
+    )
+    expect(prompt).toContain(
+      'Use the user\'s canonical timezone and current local date from the prompt context',
+    )
+    expect(prompt).toContain(
+      'create the run first, then automatically schedule one first-session prep reminder',
+    )
+    expect(prompt).toContain(
+      'Do not ask a separate permission question for this first prep reminder.',
+    )
+    expect(prompt).toContain(
+      'Default lead time is 15 minutes before the planned first session',
+    )
+    expect(prompt).toContain('first_session_start_at')
+    expect(prompt).toContain('first_session_prep_reminder_at')
+    expect(prompt).toContain('first_session_prep_automation_slug')
+    expect(prompt).toContain(
+      'apply them immediately after run creation with `vault-cli experiment apply-onboarding <id> --setup-answer first_session_start_at=<ISO timestamp>',
+    )
+    expect(prompt).toContain(
+      'do not silently treat a user-provided time as session one',
+    )
+    expect(prompt).toContain(
+      'vault-cli automation save <title> --slug experiment-first-prep-<experiment-slug>-<YYYY-MM-DD> --schedule-kind at --schedule-at <ISO timestamp>',
+    )
+    expect(prompt).toContain(
+      'Use generic tags by default: `assistant`, `scheduled`, `experiment`, and `first-session-prep`.',
+    )
+    expect(prompt).toContain(
+      'Add protocol-specific tags only when they are necessary and non-sensitive.',
+    )
+    expect(prompt).toContain(
+      'read `vault-cli experiment show <id> --format json` and `vault-cli commons protocol show <key-or-route> --format json` before sending',
+    )
+    expect(prompt).toContain(
+      'Protocol `assistantPolicy.askBeforeCreatingAutomations` applies to recurring or post-session support',
+    )
+  })
+})
+
+describe('assistant notification decision guidance', () => {
+  it('carves first-session prep automations out of deterministic followup due checks', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        activeExperimentContext: 'Experiment first-session prep reminder is due.',
+      }),
+    ).prompt
+
+    expect(prompt).toContain(
+      'For experiment-related scheduled checks other than first-session prep, call `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` first.',
+    )
+    expect(prompt).toContain(
+      'First-session prep automations are one-shot pre-session support, not missed-log or weekly-digest checks.',
+    )
+    expect(prompt).toContain(
+      'For first-session prep automations, do not call `experiment followup due`',
+    )
+    expect(prompt).toContain(
+      'read `vault-cli experiment show <id> --format json` and `vault-cli commons protocol show <key-or-route> --format json` directly',
+    )
+    expect(prompt).toContain(
+      'skip if the run is inactive, the first session has already been logged, the reminder was cancelled or moved, or the saved plan no longer matches the scheduled first session',
+    )
+    expect(prompt).toContain('Send the prep reminder when those direct checks pass.')
+    expect(prompt).toContain(
+      'Default to skip for experiment notifications other than first-session prep unless the due check says `notify`',
+    )
+  })
 })
 
 describe('assistant conversation onboarding guidance', () => {
