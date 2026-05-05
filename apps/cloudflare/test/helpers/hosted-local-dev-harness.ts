@@ -169,6 +169,13 @@ export async function startHostedLocalDevHarness(input: {
           });
           lastStatus = status;
 
+          if (hostedStatusHasCompletedWithError(status)) {
+            throw new Error(formatFailure([
+              `Hosted runner reported terminal error for ${userId}.`,
+              `last status: ${JSON.stringify(status)}`,
+            ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
+          }
+
           if (
             !status.inFlight
             && status.mailboxLag.every((lane) => lane.lag === "0")
@@ -336,6 +343,10 @@ function hostedStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean 
       return lane.lag !== "0";
     }
   });
+}
+
+function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {
+  return !status.inFlight && Boolean(status.lastErrorCode);
 }
 
 function resolveHostedLocalHarnessDistDir(
