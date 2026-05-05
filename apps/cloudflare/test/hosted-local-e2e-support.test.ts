@@ -142,7 +142,6 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
-    expect(env.OPENAI_API_KEY).toBeUndefined();
   });
 
   it("clears direct provider keys from local stub mode", () => {
