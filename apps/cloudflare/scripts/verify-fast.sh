@@ -9,7 +9,8 @@ if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
     bash "$script_dir/verify-fast.sh" "$@"
 fi
 
-verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
+verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
 skip_typecheck="${MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK:-0}"
 tracked_background_pids=()
 
