@@ -2722,6 +2722,78 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.writeAssistantChatErrorArtifacts).toHaveBeenCalledOnce()
   })
 
+  it('emits provider failure diagnostics for hosted runtime logs', async () => {
+    const codexError = Object.assign(
+      new Error('Codex app-server turn failed. status failed.'),
+      {
+        code: 'ASSISTANT_CODEX_FAILED',
+      },
+    )
+    replyMocks.sendAssistantMessage.mockRejectedValue(codexError)
+    replyMocks.describeAssistantAutoReplyFailure.mockReturnValue({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexFailureDetailPresent: true,
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+        providerActionCount: 2,
+        retryable: false,
+      },
+      kind: 'provider',
+      message: 'Codex app-server turn failed. status failed.',
+      retryable: false,
+      safeSummary: 'assistant provider failed (ASSISTANT_CODEX_FAILED)',
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const events: Array<Record<string, unknown>> = []
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      onEvent: (event) => {
+        events.push(toSnapshotRecord(event))
+      },
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      failed: 1,
+      replied: 0,
+      skipped: 0,
+    })
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'input.reply-failed',
+      inputId: expect.stringMatching(/^ain_/u),
+      details: 'Codex app-server turn failed. status failed.',
+      errorCode: 'ASSISTANT_CODEX_FAILED',
+      failureContext: expect.objectContaining({
+        codexFailureDetailPresent: true,
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+        providerActionCount: 2,
+        retryable: false,
+      }),
+      safeDetails: 'assistant provider failed (ASSISTANT_CODEX_FAILED)',
+      safeErrorMessage: 'Codex app-server turn failed. status failed.',
+    }))
+  })
+
   it('keeps raw upstream quota failures on the current cursor for retry', async () => {
     replyMocks.sendAssistantMessage.mockRejectedValue(
       new Error(
