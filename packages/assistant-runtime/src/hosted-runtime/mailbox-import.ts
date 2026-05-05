@@ -76,6 +76,13 @@ export interface HostedMailboxImportLoopBlockedItem {
   seq: string | null;
 }
 
+export interface HostedMailboxPrefixPrefetch {
+  importedSeqByLane: Record<HostedMailboxLane, string>;
+  lanes: readonly HostedMailboxLane[];
+  limitPerLane: number;
+  response: Promise<HostedMailboxFetchResponse>;
+}
+
 export class HostedMailboxUserMismatchError extends Error {
   readonly itemId: string | null;
   readonly scope: "fetch_response" | "item";
@@ -91,6 +98,41 @@ export class HostedMailboxUserMismatchError extends Error {
   }
 }
 
+export function prefetchHostedMailboxPrefix(input: {
+  lanes?: readonly HostedMailboxLane[];
+  limitPerLane: number;
+  mailboxPort: HostedRuntimeMailboxPort;
+  requestId: string;
+  state: HostedMailboxImportState;
+}): HostedMailboxPrefixPrefetch {
+  const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
+  const importedSeqByLane = Object.fromEntries(
+    HOSTED_MAILBOX_LANES.map((lane) => [lane, input.state.watermarks[lane]]),
+  ) as Record<HostedMailboxLane, string>;
+  const request = {
+    lanes: lanes.map((lane) => ({
+      importedSeq: importedSeqByLane[lane],
+      lane,
+    })),
+    limitPerLane: input.limitPerLane,
+    requestId: input.requestId,
+  };
+  let response: Promise<HostedMailboxFetchResponse>;
+  try {
+    response = input.mailboxPort.fetch(request);
+  } catch (error) {
+    response = Promise.reject(error);
+  }
+  void response.catch(() => undefined);
+
+  return {
+    importedSeqByLane,
+    lanes,
+    limitPerLane: input.limitPerLane,
+    response,
+  };
+}
+
 export async function fetchAndProcessHostedMailboxPrefix(input: {
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
@@ -98,18 +140,19 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   now?: () => string;
+  prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxImportLoopResult> {
   const now = input.now ?? (() => new Date().toISOString());
   const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
-  const fetched = await input.mailboxPort.fetch({
-    lanes: lanes.map((lane) => ({
-      importedSeq: input.state.watermarks[lane],
-      lane,
-    })),
+  const fetched = await fetchHostedMailboxPrefix({
+    lanes,
     limitPerLane: input.limitPerLane,
+    mailboxPort: input.mailboxPort,
+    prefetch: input.prefetch ?? null,
     requestId: input.requestId,
+    state: input.state,
   });
   assertHostedMailboxFetchUser({
     expectedUserId: input.expectedUserId,
@@ -283,6 +326,79 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };
+}
+
+async function fetchHostedMailboxPrefix(input: {
+  lanes: readonly HostedMailboxLane[];
+  limitPerLane: number;
+  mailboxPort: HostedRuntimeMailboxPort;
+  prefetch: HostedMailboxPrefixPrefetch | null;
+  requestId: string;
+  state: HostedMailboxImportState;
+}): Promise<HostedMailboxFetchResponse> {
+  if (input.prefetch && canUseHostedMailboxPrefixPrefetch({
+    lanes: input.lanes,
+    limitPerLane: input.limitPerLane,
+    prefetch: input.prefetch,
+    state: input.state,
+  })) {
+    try {
+      return await input.prefetch.response;
+    } catch {
+      return await fetchHostedMailboxPrefixFromPort(input);
+    }
+  }
+
+  return await fetchHostedMailboxPrefixFromPort(input);
+}
+
+async function fetchHostedMailboxPrefixFromPort(input: {
+  lanes: readonly HostedMailboxLane[];
+  limitPerLane: number;
+  mailboxPort: HostedRuntimeMailboxPort;
+  requestId: string;
+  state: HostedMailboxImportState;
+}): Promise<HostedMailboxFetchResponse> {
+  return await input.mailboxPort.fetch({
+    lanes: input.lanes.map((lane) => ({
+      importedSeq: input.state.watermarks[lane],
+      lane,
+    })),
+    limitPerLane: input.limitPerLane,
+    requestId: input.requestId,
+  });
+}
+
+function canUseHostedMailboxPrefixPrefetch(input: {
+  lanes: readonly HostedMailboxLane[];
+  limitPerLane: number;
+  prefetch: HostedMailboxPrefixPrefetch;
+  state: HostedMailboxImportState;
+}): boolean {
+  const prefetch = input.prefetch;
+  if (prefetch.limitPerLane !== input.limitPerLane) {
+    return false;
+  }
+
+  if (!sameHostedMailboxLaneSet(prefetch.lanes, input.lanes)) {
+    return false;
+  }
+
+  return input.lanes.every((lane) =>
+    prefetch.importedSeqByLane[lane] === input.state.watermarks[lane]
+  );
+}
+
+function sameHostedMailboxLaneSet(
+  left: readonly HostedMailboxLane[],
+  right: readonly HostedMailboxLane[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightSet = new Set(right);
+  return left.every((lane) => rightSet.has(lane));
 }
 
 function assertHostedMailboxFetchUser(input: {
