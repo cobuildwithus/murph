@@ -43,6 +43,12 @@ const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   "murph.assistant-provider-plan-diagnostics.v1";
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = "assistant.provider.plan";
+const ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
+  "murph.assistant-codex-invalid-output-diagnostics.v1";
+const ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
+  "assistant.codex.invalid_output_resume_failure";
+const ASSISTANT_CODEX_INVALID_OUTPUT_FALLBACK_TRACE_TYPE =
+  "assistant.codex.invalid_output_resume_fallback";
 const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -52,6 +58,106 @@ const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
   "hosted-stable-proc-cwd",
   "raw",
 ]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES = new Set([
+  "fallback-failed",
+  "fallback-succeeded",
+  "resume-failed",
+]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_RESULT_VALUES = new Set([
+  "failed",
+  "succeeded",
+]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES = new Set([
+  "ASSISTANT_CODEX_APP_SERVER_FAILED",
+  "ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE",
+  "ASSISTANT_CODEX_CONNECTION_LOST",
+  "ASSISTANT_CODEX_FAILED",
+  "ASSISTANT_CODEX_NOT_FOUND",
+  "ASSISTANT_CODEX_RESUME_STALE",
+  "ASSISTANT_PROVIDER_UNSUPPORTED",
+]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_KIND_VALUES = new Set([
+  "invalid-input-output",
+  "invalid-output",
+]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
+  "initialize",
+  "thread/resume",
+  "thread/start",
+  "turn/completed",
+  "turn/interrupt",
+  "turn/start",
+  "turn/started",
+  "turn/steer",
+]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES = new Set([
+  "array",
+  "boolean",
+  "cancelled",
+  "canceled",
+  "command.execution",
+  "completed",
+  "dynamic.tool.call",
+  "error",
+  "failed",
+  "file.change",
+  "function_call",
+  "function_call_output",
+  "image",
+  "in_progress",
+  "input_image",
+  "input_text",
+  "interrupted",
+  "message",
+  "null",
+  "number",
+  "object",
+  "other",
+  "reasoning",
+  "running",
+  "string",
+  "succeeded",
+  "undefined",
+  "unknown",
+]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_KEY_BUCKET_VALUES = new Set([
+  "[key]",
+  "[sensitive-key]",
+  "content",
+  "id",
+  "image_url",
+  "kind",
+  "method",
+  "output",
+  "params",
+  "status",
+  "text",
+  "type",
+]);
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_BOOLEAN_KEYS = [
+  "codexInvalidOutputFallbackAttempted",
+  "codexInvalidOutputFallbackErrorMessagePresent",
+  "codexInvalidOutputFallbackSessionChanged",
+  "codexInvalidOutputFallbackSessionPresent",
+  "codexInvalidOutputFallbackTurnPresent",
+  "codexInvalidOutputFailureSessionPresent",
+  "codexInvalidOutputFailureTurnPresent",
+  "codexInvalidOutputResumeMatchesFailureSession",
+  "codexInvalidOutputResumeSessionPresent",
+] as const;
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_KEYS = [
+  "codexInvalidOutputFallbackEventCount",
+  "codexInvalidOutputFallbackErrorMessageLength",
+  "codexInvalidOutputFallbackProviderActionCount",
+  "codexInvalidOutputFailureEventCount",
+  "codexInvalidOutputFailureProviderActionCount",
+  "codexInvalidOutputErrorMessageLength",
+  "codexInvalidOutputInputIndex",
+] as const;
+const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_ARRAY_KEYS = [
+  "codexInvalidOutputFailureOutputArrayLengths",
+  "codexInvalidOutputFailureOutputStringLengths",
+] as const;
 
 export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
@@ -332,20 +438,25 @@ export function emitHostedAssistantProviderTraceLog(input: {
   event: unknown;
   wake: HostedRuntimeEvent;
 }): HostedExecutionRedactedLogEntry | null {
-  const diagnostic = readHostedAssistantProviderPlanDiagnosticTrace(input.event);
+  const diagnostic = readHostedAssistantProviderDiagnosticTrace(input.event);
   if (!diagnostic) {
     return null;
   }
 
-  const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
-    ...(input.details ?? {}),
-    ...diagnostic,
-  });
+  const redactedDiagnostic =
+    sanitizeHostedExecutionStructuredLogDetails(diagnostic.details) ?? {};
+  const redactedContext =
+    sanitizeHostedExecutionStructuredLogDetails(input.details ?? {}) ?? {};
+  const redactedDetails = {
+    ...redactedDiagnostic,
+    ...redactedContext,
+    ...redactedDiagnostic,
+  };
 
   emitHostedExecutionStructuredLog({
     component: "runtime.provider",
     details: redactedDetails,
-    message: "Hosted assistant provider plan captured.",
+    message: diagnostic.message,
     phase: "wake.running",
     wake: input.wake,
   });
@@ -354,25 +465,46 @@ export function emitHostedAssistantProviderTraceLog(input: {
     component: "runtime.provider",
     eventId: input.wake.eventId,
     level: "info",
-    message: "Hosted assistant provider plan captured.",
+    message: diagnostic.message,
     phase: "wake.running",
     redacted: redactedDetails,
   };
 }
 
+function readHostedAssistantProviderDiagnosticTrace(
+  event: unknown,
+): {
+  details: HostedExecutionStructuredLogDetails;
+  message: string;
+} | null {
+  const planDiagnostic = readHostedAssistantProviderPlanDiagnosticTrace(event);
+  if (planDiagnostic) {
+    return {
+      details: planDiagnostic,
+      message: "Hosted assistant provider plan captured.",
+    };
+  }
+
+  const invalidOutputDiagnostic =
+    readHostedAssistantCodexInvalidOutputDiagnosticTrace(event);
+  if (invalidOutputDiagnostic) {
+    return {
+      details: invalidOutputDiagnostic,
+      message: "Hosted assistant Codex invalid-output diagnostics captured.",
+    };
+  }
+
+  return null;
+}
+
 function readHostedAssistantProviderPlanDiagnosticTrace(
   event: unknown,
 ): HostedExecutionStructuredLogDetails | null {
-  if (!event || typeof event !== "object" || Array.isArray(event)) {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
     return null;
   }
 
-  const rawEvent = (event as { rawEvent?: unknown }).rawEvent;
-  if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
-    return null;
-  }
-
-  const record = rawEvent as Record<string, unknown>;
   const schema = readHostedAssistantProviderPlanString(record, "schema");
   const type = readHostedAssistantProviderPlanString(record, "type");
   if (
@@ -423,6 +555,175 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
   };
 }
 
+function readHostedAssistantCodexInvalidOutputDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA
+    || (
+      type !== ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
+      && type !== ASSISTANT_CODEX_INVALID_OUTPUT_FALLBACK_TRACE_TYPE
+    )
+  ) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    codexInvalidOutputTraceType:
+      type === ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
+        ? "failure"
+        : "fallback",
+    providerTraceKind:
+      type === ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
+        ? "codex.invalid_output_resume_failure"
+        : "codex.invalid_output_resume_fallback",
+    schema: ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA,
+  };
+
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexInvalidOutputPhase",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexInvalidOutputPhase",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexInvalidOutputFallbackResult",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexInvalidOutputFallbackResult",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_RESULT_VALUES,
+    ),
+  );
+
+  for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_BOOLEAN_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexInvalidOutputErrorCode",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexInvalidOutputErrorCode",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexInvalidOutputFallbackErrorCode",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexInvalidOutputFallbackErrorCode",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexInvalidOutputErrorField",
+    readHostedAssistantCodexInvalidOutputField(record),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexInvalidOutputErrorKind",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexInvalidOutputErrorKind",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_KIND_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexInvalidOutputFailureEventMethods",
+    readHostedAssistantProviderDiagnosticAllowedStringArray(
+      record,
+      "codexInvalidOutputFailureEventMethods",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES,
+    ),
+  );
+  for (const key of [
+    "codexInvalidOutputFailureEventKinds",
+    "codexInvalidOutputFailureEventStatuses",
+    "codexInvalidOutputFailureOutputKinds",
+    "codexInvalidOutputFailureOutputPartTypes",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticAllowedStringArray(
+        record,
+        key,
+        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
+      ),
+    );
+  }
+  for (const key of [
+    "codexInvalidOutputFailureOutputObjectKeys",
+    "codexInvalidOutputFailureParamKeys",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticKeySummaryArray(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_ARRAY_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNumberArray(record, key),
+    );
+  }
+
+  return details;
+}
+
+function readHostedAssistantProviderRawTraceRecord(
+  event: unknown,
+): Record<string, unknown> | null {
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    return null;
+  }
+
+  const rawEvent = (event as { rawEvent?: unknown }).rawEvent;
+  if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+    return null;
+  }
+
+  return rawEvent as Record<string, unknown>;
+}
+
+function maybeSetHostedAssistantProviderDiagnosticDetail(
+  details: HostedExecutionStructuredLogDetails,
+  key: string,
+  value: HostedExecutionStructuredLogDetails[string] | undefined,
+): void {
+  if (value !== undefined) {
+    details[key] = value;
+  }
+}
+
 function readHostedAssistantProviderPlanBoolean(
   record: Record<string, unknown>,
   key: string,
@@ -459,6 +760,155 @@ function readHostedAssistantProviderPlanString(
 
   const normalized = value.trim();
   return normalized.length > 0 && normalized.length <= 128 ? normalized : null;
+}
+
+function readHostedAssistantProviderDiagnosticBoolean(
+  record: Record<string, unknown>,
+  key: string,
+): boolean | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  return value === null || typeof value === "boolean" ? value : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticNonnegativeNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticAllowedString(
+  record: Record<string, unknown>,
+  key: string,
+  allowedValues: ReadonlySet<string>,
+): string | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+
+  const stringValue = readHostedAssistantProviderPlanString(record, key);
+  return stringValue && allowedValues.has(stringValue) ? stringValue : undefined;
+}
+
+function readHostedAssistantCodexInvalidOutputField(
+  record: Record<string, unknown>,
+): string | null | undefined {
+  const key = "codexInvalidOutputErrorField";
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+
+  const stringValue = readHostedAssistantProviderPlanString(record, key);
+  return stringValue && /^input\.\d+\.output$/u.test(stringValue)
+    ? stringValue
+    : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticAllowedStringArray(
+  record: Record<string, unknown>,
+  key: string,
+  allowedValues: ReadonlySet<string>,
+): string[] | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length > 16) {
+    return undefined;
+  }
+
+  const output = value.flatMap((entry) => {
+    if (typeof entry !== "string") {
+      return [];
+    }
+    const normalized = entry.trim();
+    return allowedValues.has(normalized) ? [normalized] : [];
+  });
+  return output.length > 0 ? output : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticKeySummaryArray(
+  record: Record<string, unknown>,
+  key: string,
+): string[] | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length > 16) {
+    return undefined;
+  }
+
+  const output = value.flatMap((entry) => {
+    if (typeof entry !== "string") {
+      return [];
+    }
+    const tokens = entry.split(",");
+    return tokens.length > 0
+      && tokens.every((token) =>
+        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_KEY_BUCKET_VALUES.has(token),
+      )
+      ? [tokens.join(",")]
+      : [];
+  });
+  return output.length > 0 ? output : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticNumberArray(
+  record: Record<string, unknown>,
+  key: string,
+): number[] | null | undefined {
+  if (!(key in record)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length > 16) {
+    return undefined;
+  }
+
+  const output = value.flatMap((entry) =>
+    typeof entry === "number" && Number.isFinite(entry) && entry >= 0
+      ? [entry]
+      : [],
+  );
+  return output.length > 0 ? output : undefined;
 }
 
 function buildAssistantNotificationInput(
