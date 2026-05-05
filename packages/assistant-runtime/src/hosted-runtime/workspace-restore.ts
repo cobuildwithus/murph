@@ -19,6 +19,8 @@ import {
   restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
 import {
+  buildHostedRuntimeLogContextFields,
+  type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 
@@ -53,51 +55,106 @@ export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
 }
 
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
+  logContext?: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
+  const restoreStartedAt = Date.now();
+  const localRootsStartedAt = Date.now();
   const restored = await createHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
+  const localRootsElapsedMs = Date.now() - localRootsStartedAt;
   const snapshotRef = input.workspace?.snapshotRef ?? null;
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
 
   if (!baseSnapshotRef && !hotSnapshotRef) {
+    await writeHostedWorkspaceRestoreStartedLog({
+      baseSnapshotRef: null,
+      hotSnapshotRef: null,
+      localRootsElapsedMs,
+      logContext: input.logContext ?? null,
+      mode: "null-bootstrap",
+      platform: input.platform,
+    });
+    await writeHostedWorkspaceRestoreFinishedLog({
+      baseSnapshotRef: null,
+      hotSnapshotRef: null,
+      logContext: input.logContext ?? null,
+      mode: "null-bootstrap",
+      platform: input.platform,
+      totalElapsedMs: Date.now() - restoreStartedAt,
+    });
     return {
       ...restored,
       mode: "null-bootstrap",
     };
   }
 
+  await writeHostedWorkspaceRestoreStartedLog({
+    baseSnapshotRef,
+    hotSnapshotRef,
+    localRootsElapsedMs,
+    logContext: input.logContext ?? null,
+    mode: "snapshot",
+    platform: input.platform,
+  });
+
   let baseProvidesCodexProviderContinuity = false;
   if (baseSnapshotRef) {
+    const layerStartedAt = Date.now();
+    const fetchStartedAt = Date.now();
     const baseBundle = await readHostedWorkspaceRuntimeBundle({
       platform: input.platform,
       ref: baseSnapshotRef,
     });
+    const fetchElapsedMs = Date.now() - fetchStartedAt;
+    const repairStartedAt = Date.now();
     const baseRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
       bundle: baseBundle,
+      logContext: input.logContext ?? null,
       platform: input.platform,
       snapshotLayer: "base",
     });
+    const repairElapsedMs = Date.now() - repairStartedAt;
+    const materializeStartedAt = Date.now();
     await restoreHostedWorkspaceRuntimeBundle({
       bundle: baseRepair.bundle,
       platform: input.platform,
       ref: baseSnapshotRef,
       restored,
     });
+    const materializeElapsedMs = Date.now() - materializeStartedAt;
     baseProvidesCodexProviderContinuity = hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
       bundle: baseRepair.bundle,
+    });
+    await writeHostedWorkspaceRestoreLayerFinishedLog({
+      bundleBytes: readBundleByteLength(baseRepair.bundle),
+      fetchElapsedMs,
+      logContext: input.logContext ?? null,
+      materializeElapsedMs,
+      platform: input.platform,
+      ref: baseSnapshotRef,
+      repairElapsedMs,
+      repairRemovedMalformedSessionCount: baseRepair.removedMalformedSessionCount,
+      repairScrubbedSessionCount: baseRepair.scrubbedSessionCount,
+      snapshotLayer: "base",
+      totalElapsedMs: Date.now() - layerStartedAt,
     });
   }
 
   if (hotSnapshotRef) {
+    const layerStartedAt = Date.now();
+    const fetchStartedAt = Date.now();
     const hotBundle = await readHostedWorkspaceRuntimeBundle({
       platform: input.platform,
       ref: hotSnapshotRef,
     });
+    const fetchElapsedMs = Date.now() - fetchStartedAt;
+    const repairStartedAt = Date.now();
     const hotRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
       bundle: hotBundle,
+      logContext: input.logContext ?? null,
       platform: input.platform,
       snapshotLayer: "hot",
       skipLegacyContinuityRepair: (
@@ -105,8 +162,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         && isHostedAssistantRuntimeHotStateBundleRef(hotSnapshotRef)
       ),
     });
+    const repairElapsedMs = Date.now() - repairStartedAt;
     const hotBundleRepaired =
       hotRepair.removedMalformedSessionCount > 0 || hotRepair.scrubbedSessionCount > 0;
+    const clearStartedAt = Date.now();
     await clearHostedAssistantRuntimeHotState({
       operatorHomeRoot: hotBundleRepaired || hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
         bundle: hotRepair.bundle,
@@ -115,13 +174,39 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         : null,
       vaultRoot: restored.vaultRoot,
     });
+    const clearElapsedMs = Date.now() - clearStartedAt;
+    const materializeStartedAt = Date.now();
     await restoreHostedWorkspaceRuntimeBundle({
       bundle: hotRepair.bundle,
       platform: input.platform,
       ref: hotSnapshotRef,
       restored,
     });
+    const materializeElapsedMs = Date.now() - materializeStartedAt;
+    await writeHostedWorkspaceRestoreLayerFinishedLog({
+      bundleBytes: readBundleByteLength(hotRepair.bundle),
+      clearElapsedMs,
+      fetchElapsedMs,
+      logContext: input.logContext ?? null,
+      materializeElapsedMs,
+      platform: input.platform,
+      ref: hotSnapshotRef,
+      repairElapsedMs,
+      repairRemovedMalformedSessionCount: hotRepair.removedMalformedSessionCount,
+      repairScrubbedSessionCount: hotRepair.scrubbedSessionCount,
+      snapshotLayer: "hot",
+      totalElapsedMs: Date.now() - layerStartedAt,
+    });
   }
+
+  await writeHostedWorkspaceRestoreFinishedLog({
+    baseSnapshotRef,
+    hotSnapshotRef,
+    logContext: input.logContext ?? null,
+    mode: "snapshot",
+    platform: input.platform,
+    totalElapsedMs: Date.now() - restoreStartedAt,
+  });
 
   return {
     ...restored,
@@ -131,6 +216,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
 async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
   bundle: Uint8Array | ArrayBuffer;
+  logContext?: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
   skipLegacyContinuityRepair?: boolean;
   snapshotLayer: "base" | "hot";
@@ -156,6 +242,7 @@ async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
 
   await writeHostedRuntimeLogBestEffort({
     entry: {
+      ...buildHostedRuntimeLogContextFields(input.logContext),
       component: "workspace",
       eventCode: "workspace.legacy_codex_resume_repaired",
       level: "warn",
@@ -170,6 +257,104 @@ async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
     platform: input.platform,
   });
   return repair;
+}
+
+async function writeHostedWorkspaceRestoreStartedLog(input: {
+  baseSnapshotRef: HostedExecutionBundleRef | null;
+  hotSnapshotRef: HostedExecutionBundleRef | null;
+  localRootsElapsedMs: number;
+  logContext: HostedRuntimeLogContext | null;
+  mode: HostedWorkspaceRuntimeRestoreMode;
+  platform: HostedRuntimePlatform;
+}): Promise<void> {
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.logContext),
+      component: "workspace",
+      eventCode: "workspace.restore_started",
+      level: "info",
+      phase: "restore",
+      redactedJson: {
+        baseBundleRefSize: input.baseSnapshotRef?.size ?? null,
+        baseSnapshotPresent: input.baseSnapshotRef !== null,
+        hotBundleRefSize: input.hotSnapshotRef?.size ?? null,
+        hotSnapshotPresent: input.hotSnapshotRef !== null,
+        localRootsElapsedMs: input.localRootsElapsedMs,
+        restoreMode: input.mode,
+      },
+    },
+    platform: input.platform,
+  });
+}
+
+async function writeHostedWorkspaceRestoreLayerFinishedLog(input: {
+  bundleBytes: number;
+  clearElapsedMs?: number;
+  fetchElapsedMs: number;
+  logContext: HostedRuntimeLogContext | null;
+  materializeElapsedMs: number;
+  platform: HostedRuntimePlatform;
+  ref: HostedExecutionBundleRef;
+  repairElapsedMs: number;
+  repairRemovedMalformedSessionCount: number;
+  repairScrubbedSessionCount: number;
+  snapshotLayer: "base" | "hot";
+  totalElapsedMs: number;
+}): Promise<void> {
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.logContext),
+      component: "workspace",
+      eventCode: "workspace.restore_layer_finished",
+      level: "info",
+      phase: "restore",
+      redactedJson: {
+        bundleBytes: input.bundleBytes,
+        bundleRefSize: input.ref.size,
+        clearElapsedMs: input.clearElapsedMs ?? null,
+        fetchElapsedMs: input.fetchElapsedMs,
+        materializeElapsedMs: input.materializeElapsedMs,
+        repairElapsedMs: input.repairElapsedMs,
+        repairRemovedMalformedSessionCount: input.repairRemovedMalformedSessionCount,
+        repairScrubbedSessionCount: input.repairScrubbedSessionCount,
+        snapshotLayer: input.snapshotLayer,
+        totalElapsedMs: input.totalElapsedMs,
+      },
+    },
+    platform: input.platform,
+  });
+}
+
+async function writeHostedWorkspaceRestoreFinishedLog(input: {
+  baseSnapshotRef: HostedExecutionBundleRef | null;
+  hotSnapshotRef: HostedExecutionBundleRef | null;
+  logContext: HostedRuntimeLogContext | null;
+  mode: HostedWorkspaceRuntimeRestoreMode;
+  platform: HostedRuntimePlatform;
+  totalElapsedMs: number;
+}): Promise<void> {
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.logContext),
+      component: "workspace",
+      eventCode: "workspace.restore_finished",
+      level: "info",
+      phase: "restore",
+      redactedJson: {
+        baseBundleRefSize: input.baseSnapshotRef?.size ?? null,
+        baseSnapshotPresent: input.baseSnapshotRef !== null,
+        hotBundleRefSize: input.hotSnapshotRef?.size ?? null,
+        hotSnapshotPresent: input.hotSnapshotRef !== null,
+        restoreMode: input.mode,
+        totalElapsedMs: input.totalElapsedMs,
+      },
+    },
+    platform: input.platform,
+  });
+}
+
+function readBundleByteLength(bundle: Uint8Array | ArrayBuffer): number {
+  return bundle.byteLength;
 }
 
 function isHostedAssistantRuntimeHotStateBundleRef(ref: HostedExecutionBundleRef): boolean {
