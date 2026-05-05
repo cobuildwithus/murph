@@ -171,6 +171,20 @@ pid/socket files, global cache/tmp, and rebuildable projections. This is
 intentionally denylist-based so newly added hosted operational state is not
 silently dropped from later checkpoints.
 
+Assistant liveness is the stronger invariant than dashboard sidecar freshness.
+The web checkpoint callback must accept a valid workspace snapshot checkpoint
+from an older or partially deployed runner when `browserVaultReplicaRef` is
+absent or explicitly null. Missing browser-vault replica continuity is
+recoverable dashboard state and must not stop mailbox import, assistant
+admission, outbox checkpointing, or the runner's ability to reach idle. When a
+replica ref is supplied, web still validates that it matches the checkpoint base
+snapshot hash; stale or mismatched replica metadata may be rejected because that
+indicates an internally inconsistent sidecar, not a recoverable omission. Future
+checkpoint fields that are not required to answer user messages must follow the
+same compatibility rule: old deployed runners may omit them without blocking
+assistant progress, and any stricter lockstep contract needs an explicit
+capability/version rollout plan before it can be required in production.
+
 Hosted snapshots also preserve safe non-secret Codex home continuity under
 `.codex-hosted/**` by default, while excluding environment files, credential,
 auth, token, key, cert, temp, cache, log, lock, pid, socket, and secret-looking

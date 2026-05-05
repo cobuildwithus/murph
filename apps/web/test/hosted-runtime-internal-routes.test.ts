@@ -300,6 +300,45 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(conflictPayload)).not.toMatch(/runId|committedSeq|finalizeRequired|source_cursor/u);
   });
 
+  it("accepts old runner checkpoint payloads without browser-vault replica refs", async () => {
+    mocks.checkpointHostedWorkspace.mockResolvedValue({
+      status: "updated",
+      workspace: buildWorkspaceRecord({
+        checkpointedAt: "2026-04-26T00:01:00.000Z",
+        snapshotRef: createBundleRef("snapshot_2"),
+        version: "5",
+      }),
+    });
+
+    const response = await workspaceCheckpointRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/checkpoint",
+      {
+        attemptId: "attempt_legacy_runner_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "2",
+        reason: "import",
+        snapshotRef: createBundleRef("snapshot_2"),
+      },
+    ));
+    const payload = parseHostedWorkspaceCheckpointResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      checkpointed: true,
+      workspace: {
+        browserVaultReplicaRef: null,
+        snapshotRef: createBundleRef("snapshot_2"),
+        version: "5",
+      },
+    });
+    expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      expectedVersion: "4",
+      reason: "import",
+      snapshotRef: createBundleRef("snapshot_2"),
+      userId: "member_routes_1",
+    });
+  });
+
   it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
     mocks.recordHostedRuntimeLog.mockResolvedValue({
       at: FIXED_NOW,
