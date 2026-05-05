@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import path from "node:path";
-import { lstat, mkdir, readdir } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm } from "node:fs/promises";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -13,7 +13,11 @@ import {
   RUNTIME_ROOT_RELATIVE_PATH,
   RUNTIME_TEMP_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
-import type { HostedBundleArtifactRef } from "./hosted-bundle.ts";
+import {
+  isHostedBundleArtifactEntry,
+  parseHostedBundleArchive,
+  type HostedBundleArtifactRef,
+} from "./hosted-bundle.ts";
 import {
   materializeHostedBundleArtifacts,
   restoreHostedBundleRoots,
@@ -32,6 +36,37 @@ const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
 const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
 const HOSTED_CODEX_HOME_INCLUDED_HASH_LIMIT = 16;
 const HOSTED_CODEX_HOME_EXCLUDED_SUMMARY_LIMIT = 16;
+const HOSTED_HOT_STATE_MAX_FILES = 5_000;
+const HOSTED_HOT_STATE_MAX_INLINE_BYTES = 16 * 1024 * 1024;
+const HOSTED_HOT_STATE_MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
+
+const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS = [
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/accepted-turn-inputs`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/auto-reply`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/automation-state.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/automation-runtime.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/jobs.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-mailbox.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-provider-cleanup.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-system-mailbox.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/indexes.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/input-events`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/issues/pending`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/receipts`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/state`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/transcripts`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/usage/pending`,
+] as const;
+
+const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_EXCLUDED_PATHS = [
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/runs`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/diagnostics`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/journals`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/runtime-budgets.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/status.json`,
+] as const;
 
 export interface HostedCodexHomeSnapshotDiagnostics {
   codexHomeIncludedRelHashes: string[];
@@ -42,6 +77,30 @@ export interface HostedCodexHomeSnapshotDiagnostics {
 
 export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
   ref: HostedBundleArtifactRef;
+}
+
+export interface HostedAssistantRuntimeHotStateSnapshot {
+  bundle: Uint8Array;
+  bundleBytes: number;
+  fileCount: number;
+  inlineBytes: number;
+}
+
+interface HostedAssistantRuntimeHotStateBudgetMetrics {
+  fileCount: number;
+  inlineBytes: number;
+  minimumBundleBytes: number;
+}
+
+export class HostedAssistantRuntimeHotStateBudgetExceededError extends Error {
+  constructor(
+    readonly budget: "files" | "inline_bytes" | "bundle_bytes",
+    readonly limit: number,
+    readonly actual: number,
+  ) {
+    super("Hosted assistant runtime hot-state snapshot exceeded its budget.");
+    this.name = "HostedAssistantRuntimeHotStateBudgetExceededError";
+  }
 }
 
 export type HostedWorkspaceArtifactResolver = (
@@ -130,6 +189,59 @@ export async function snapshotHostedExecutionContext(input: {
   };
 }
 
+export async function snapshotHostedAssistantRuntimeHotState(input: {
+  vaultRoot: string;
+}): Promise<HostedAssistantRuntimeHotStateSnapshot> {
+  const vaultRoot = path.resolve(input.vaultRoot);
+  const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  await ensureAssistantStateDirectory(assistantStateRoot);
+  await assertHostedAssistantRuntimeHotStatePreBundleBudget({ vaultRoot });
+
+  const bundle = await snapshotHostedBundleRoots({
+    kind: "vault",
+    roots: [
+      {
+        root: vaultRoot,
+        rootKey: "vault",
+        shouldIncludeRelativePath(relativePath) {
+          return shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath);
+        },
+      },
+    ],
+  });
+
+  if (bundle === null) {
+    throw new Error(`Hosted assistant runtime hot-state bundle could not be created for ${vaultRoot}.`);
+  }
+
+  const metrics = measureHostedAssistantRuntimeHotStateBundle(bundle);
+  assertHostedAssistantRuntimeHotStateBudget({
+    ...metrics,
+    bundleBytes: bundle.byteLength,
+  });
+  return {
+    bundle,
+    bundleBytes: bundle.byteLength,
+    fileCount: metrics.fileCount,
+    inlineBytes: metrics.inlineBytes,
+  };
+}
+
+export async function clearHostedAssistantRuntimeHotState(input: {
+  vaultRoot: string;
+}): Promise<void> {
+  const vaultRoot = path.resolve(input.vaultRoot);
+  const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+
+  await Promise.all(HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS.map((relativePath) =>
+    rm(path.join(vaultRoot, relativePath), {
+      force: true,
+      recursive: true,
+    })
+  ));
+  await ensureAssistantStateDirectory(assistantStateRoot);
+}
+
 export async function restoreHostedExecutionContext(input: {
   artifactResolver?: HostedWorkspaceArtifactResolver;
   bundle?: Uint8Array | ArrayBuffer | null;
@@ -200,6 +312,76 @@ export async function materializeHostedExecutionArtifacts(input: {
   });
 }
 
+async function assertHostedAssistantRuntimeHotStatePreBundleBudget(input: {
+  vaultRoot: string;
+}): Promise<void> {
+  const metrics = await collectHostedAssistantRuntimeHotStateBudgetMetrics({
+    root: input.vaultRoot,
+  });
+  assertHostedAssistantRuntimeHotStateBudget({
+    bundleBytes: metrics.minimumBundleBytes,
+    fileCount: metrics.fileCount,
+    inlineBytes: metrics.inlineBytes,
+  });
+}
+
+async function collectHostedAssistantRuntimeHotStateBudgetMetrics(input: {
+  relativeDirectory?: string;
+  root: string;
+}): Promise<HostedAssistantRuntimeHotStateBudgetMetrics> {
+  const relativeDirectory = input.relativeDirectory ?? "";
+  const directoryPath = relativeDirectory ? path.join(input.root, relativeDirectory) : input.root;
+  const entries = await readdir(directoryPath, { withFileTypes: true });
+  const metrics: HostedAssistantRuntimeHotStateBudgetMetrics = {
+    fileCount: 0,
+    inlineBytes: 0,
+    minimumBundleBytes: 0,
+  };
+
+  for (const entry of entries) {
+    const relativePath = relativeDirectory
+      ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
+      : entry.name;
+
+    if (!shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath)) {
+      continue;
+    }
+
+    const absolutePath = path.join(directoryPath, entry.name);
+    if (entry.isDirectory()) {
+      const childMetrics = await collectHostedAssistantRuntimeHotStateBudgetMetrics({
+        relativeDirectory: path.join(relativeDirectory, entry.name),
+        root: input.root,
+      });
+      metrics.fileCount += childMetrics.fileCount;
+      metrics.inlineBytes += childMetrics.inlineBytes;
+      metrics.minimumBundleBytes += childMetrics.minimumBundleBytes;
+      assertHostedAssistantRuntimeHotStateBudget({
+        bundleBytes: metrics.minimumBundleBytes,
+        fileCount: metrics.fileCount,
+        inlineBytes: metrics.inlineBytes,
+      });
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const stat = await lstat(absolutePath);
+    metrics.fileCount += 1;
+    metrics.inlineBytes += stat.size;
+    metrics.minimumBundleBytes += Math.ceil(stat.size / 3) * 4;
+    assertHostedAssistantRuntimeHotStateBudget({
+      bundleBytes: metrics.minimumBundleBytes,
+      fileCount: metrics.fileCount,
+      inlineBytes: metrics.inlineBytes,
+    });
+  }
+
+  return metrics;
+}
+
 function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
 
@@ -217,6 +399,81 @@ function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): 
       || localStateDescriptor.portability === "portable"
     )
   );
+}
+
+function shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+
+  if (
+    HOSTED_ASSISTANT_RUNTIME_HOT_STATE_EXCLUDED_PATHS.some((excludedPath) =>
+      hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, excludedPath),
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    isAssistantRuntimeRelativePath(normalizedRelativePath)
+    && isHostedAssistantRuntimeSnapshotExcludedRelativePath(normalizedRelativePath)
+  ) {
+    return false;
+  }
+
+  return HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS.some((includedPath) =>
+    normalizedRelativePath === includedPath
+    || normalizedRelativePath.startsWith(`${includedPath}${path.posix.sep}`)
+    || includedPath.startsWith(`${normalizedRelativePath}${path.posix.sep}`)
+  );
+}
+
+function measureHostedAssistantRuntimeHotStateBundle(bundle: Uint8Array): {
+  fileCount: number;
+  inlineBytes: number;
+} {
+  const archive = parseHostedBundleArchive(bundle);
+  let inlineBytes = 0;
+
+  for (const file of archive.files) {
+    if (isHostedBundleArtifactEntry(file)) {
+      throw new Error("Hosted assistant runtime hot-state snapshots must not externalize artifacts.");
+    }
+    inlineBytes += Buffer.from(file.contentsBase64, "base64").byteLength;
+  }
+
+  return {
+    fileCount: archive.files.length,
+    inlineBytes,
+  };
+}
+
+function assertHostedAssistantRuntimeHotStateBudget(input: {
+  bundleBytes: number;
+  fileCount: number;
+  inlineBytes: number;
+}): void {
+  if (input.fileCount > HOSTED_HOT_STATE_MAX_FILES) {
+    throw new HostedAssistantRuntimeHotStateBudgetExceededError(
+      "files",
+      HOSTED_HOT_STATE_MAX_FILES,
+      input.fileCount,
+    );
+  }
+
+  if (input.inlineBytes > HOSTED_HOT_STATE_MAX_INLINE_BYTES) {
+    throw new HostedAssistantRuntimeHotStateBudgetExceededError(
+      "inline_bytes",
+      HOSTED_HOT_STATE_MAX_INLINE_BYTES,
+      input.inlineBytes,
+    );
+  }
+
+  if (input.bundleBytes > HOSTED_HOT_STATE_MAX_BUNDLE_BYTES) {
+    throw new HostedAssistantRuntimeHotStateBudgetExceededError(
+      "bundle_bytes",
+      HOSTED_HOT_STATE_MAX_BUNDLE_BYTES,
+      input.bundleBytes,
+    );
+  }
 }
 
 function shouldIncludeWorkspaceSnapshotRuntimeRelativePath(relativePath: string): boolean {

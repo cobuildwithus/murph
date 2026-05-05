@@ -248,6 +248,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     requestId: input.requestId,
   });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
+  if (input.runAssistantPhase) {
+    await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      input,
+      phase: "import",
+    });
+  }
 
   if (!input.runAssistantPhase) {
     await drainHostedWorkspaceUsageExportBestEffort({
@@ -539,6 +546,11 @@ function withActiveTurnInputWorkspacePorts(input: {
       if (shouldRecordHostedActiveTurnMailboxRefreshResult(result)) {
         input.checkpointRequestBuilder.recordCheckpointResult(result);
       }
+      await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+        checkpointRequestBuilder: input.checkpointRequestBuilder,
+        input: input.input,
+        phase: "active_turn_input",
+      });
 
       return summarizeMailboxRefreshResult(result);
     },
@@ -1065,6 +1077,52 @@ async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(inpu
     // Projection checkpoints are best-effort. Assistant input and mailbox
     // watermarks are already durable by the time these effects run.
   }
+}
+
+async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  input: HostedWorkspaceRunnerInput;
+  phase: "active_turn_input" | "import";
+}): Promise<void> {
+  const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
+  if (effects.length === 0) {
+    return;
+  }
+
+  const result = await runHostedMailboxPostCheckpointEffectsBestEffort(effects);
+  if (!result.attempted) {
+    return;
+  }
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
+      component: "mailbox",
+      eventCode: "mailbox.post_checkpoint_effects_finished",
+      level: result.failed > 0 || result.partial > 0 ? "warn" : "info",
+      phase: input.phase,
+      redactedJson: {
+        attemptedCount: effects.length,
+        effectAttachmentEvidenceUpdated: result.effectAttachmentEvidenceUpdated.slice(0, 16),
+        effectKinds: result.effectKinds.slice(0, 16),
+        effectProjectionUpdated: result.effectProjectionUpdated.slice(0, 16),
+        effectReasonCodes: result.effectReasonCodes.slice(0, 16),
+        effectStatuses: result.effectStatuses.slice(0, 16),
+        errorCodes: compactHostedRuntimeLogCodes(result.errorCodes),
+        ...(result.failureCodeDetails.length > 0
+          ? { failureCodeDetails: [...result.failureCodeDetails] }
+          : {}),
+        ...(result.failureNames.length > 0 ? { failureNames: [...result.failureNames] } : {}),
+        ...(result.failureSummaries.length > 0
+          ? { failureSummaries: [...result.failureSummaries] }
+          : {}),
+        failedCount: result.failed,
+        partialCount: result.partial,
+        succeededCount: result.succeeded,
+      },
+    },
+    now: input.input.now,
+    platform: input.input.platform,
+  });
 }
 
 async function checkpointHostedWorkspaceAssistantPhase(input: {

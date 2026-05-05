@@ -22,8 +22,14 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotHotRef,
+} from "@murphai/hosted-execution/parsers";
+import {
   readHostedBundleTextFile,
   resolveAssistantStatePaths,
+  sha256HostedBundleHex,
+  snapshotHostedBundleRoots,
 } from "@murphai/runtime-state/node";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -58,7 +64,7 @@ afterEach(async () => {
 });
 
 describe("hosted runtime checkpoint baseline", () => {
-  it("measures mailbox checkpoint side effects for 100 artifacts and 300 assistant messages", async () => {
+  it("measures hot mailbox checkpoint side effects for 100 artifacts and 300 assistant messages", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-baseline-"));
     cleanupPaths.push(vaultRoot, `${vaultRoot}-operator-home`);
     await writeSyntheticVaultMetadata(vaultRoot);
@@ -70,6 +76,25 @@ describe("hosted runtime checkpoint baseline", () => {
 
     const artifactPutCalls: BaselineArtifactPutCall[] = [];
     const artifactPutBytesByHash = new Map<string, Uint8Array>();
+    const baseBundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [
+        {
+          root: vaultRoot,
+          rootKey: "vault",
+        },
+      ],
+    });
+    if (!baseBundle) {
+      throw new Error("Synthetic checkpoint baseline base bundle could not be created.");
+    }
+    const baseBundleHash = sha256HostedBundleHex(baseBundle);
+    artifactPutBytesByHash.set(baseBundleHash, baseBundle);
+    const existingBaseSnapshotRef = createSnapshotBundleRef({
+      hash: baseBundleHash,
+      size: baseBundle.byteLength,
+    });
+    const existingBrowserVaultReplicaRef = createBrowserVaultReplicaRef(baseBundleHash);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeLogRequests: HostedRuntimeLogRequest[] = [];
@@ -93,6 +118,8 @@ describe("hosted runtime checkpoint baseline", () => {
       workspacePort: createBaselineWorkspacePort({
         checkpointRequests,
         workspace: createWorkspaceState({
+          browserVaultReplicaRef: existingBrowserVaultReplicaRef,
+          snapshotRef: existingBaseSnapshotRef,
           version: request.workspaceVersion,
         }),
       }),
@@ -134,7 +161,10 @@ describe("hosted runtime checkpoint baseline", () => {
       vaultRoot,
     });
 
-    const snapshotHash = checkpointRequests[0]?.snapshotRef?.hash ?? null;
+    const snapshotRef = checkpointRequests[0]?.snapshotRef ?? null;
+    const restoredBaseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
+    const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
+    const snapshotHash = hotSnapshotRef?.hash ?? null;
     const snapshotBundleBytes = snapshotHash ? artifactPutBytesByHash.get(snapshotHash) ?? null : null;
     const bundledTranscriptText = readHostedBundleTextFile({
       bytes: snapshotBundleBytes,
@@ -159,6 +189,10 @@ describe("hosted runtime checkpoint baseline", () => {
         runtimeLogRequests,
         "workspace.codex_home_snapshot",
       ),
+      checkpointMetricLogWrites: countRuntimeLogEntries(
+        runtimeLogRequests,
+        "checkpoint.snapshot_finished",
+      ),
       checkpointElapsedMs: roundBaselineMs(checkpointElapsedMs),
       externalArtifactPutCalls: externalArtifactPutCalls.length,
       importedMailboxItems,
@@ -170,28 +204,31 @@ describe("hosted runtime checkpoint baseline", () => {
 
     expect(result.status).toBe("idle");
     expect(metrics).toMatchObject({
-      artifactPutCalls: BASELINE_ARTIFACT_COUNT + 1,
+      artifactPutCalls: 1,
       assistantMessageCount: BASELINE_ASSISTANT_MESSAGE_COUNT,
       assistantMessagesInSnapshotBundle: BASELINE_ASSISTANT_MESSAGE_COUNT,
       bridgeLeaseReadCalls: 2,
       bundlePutCalls: 1,
-      checkpointDiagnosticLogWrites: 1,
-      externalArtifactPutCalls: BASELINE_ARTIFACT_COUNT,
+      checkpointDiagnosticLogWrites: 0,
+      checkpointMetricLogWrites: 1,
+      externalArtifactPutCalls: 0,
       importedMailboxItems: 1,
       mailboxFetchCalls: 1,
       rawArtifactCount: BASELINE_ARTIFACT_COUNT,
-      runtimeLogWrites: 4,
       workspaceCheckpointCalls: 1,
     });
-    expect(metrics.artifactPutBytes).toBeGreaterThan(BASELINE_ARTIFACT_COUNT * 512);
+    expect(metrics.runtimeLogWrites).toBeGreaterThanOrEqual(1);
+    expect(metrics.artifactPutBytes).toBeGreaterThan(0);
     expect(Number.isFinite(metrics.checkpointElapsedMs)).toBe(true);
     expect(bundledTranscriptText).toContain("Synthetic checkpoint baseline assistant message 300");
     expect(checkpointRequests[0]?.reason).toBe("import");
-    expect(checkpointRequests[0]?.snapshotRef).toEqual(expect.objectContaining({
+    expect(restoredBaseSnapshotRef).toEqual(existingBaseSnapshotRef);
+    expect(hotSnapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      key: expect.stringMatching(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
       size: expect.any(Number),
     }));
+    expect(checkpointRequests[0]?.browserVaultReplicaRef).toEqual(existingBrowserVaultReplicaRef);
 
     if (process.env.HOSTED_CHECKPOINT_BASELINE_LOG === "1") {
       process.stdout.write(`hosted-checkpoint-baseline ${JSON.stringify(metrics)}\n`);
@@ -270,8 +307,8 @@ function createBaselinePlatform(input: {
 }): HostedRuntimePlatform {
   return {
     artifactStore: {
-      async get() {
-        return null;
+      async get(sha256) {
+        return input.artifactPutBytesByHash.get(sha256) ?? null;
       },
       async put(putInput) {
         input.artifactPutCalls.push({
@@ -403,6 +440,34 @@ function createWorkspaceState(overrides: Partial<HostedWorkspaceState> = {}): Ho
     userId: TEST_USER_ID,
     version: "0",
     ...overrides,
+  };
+}
+
+function createSnapshotBundleRef(input: {
+  hash: string;
+  size: number;
+}): NonNullable<HostedWorkspaceState["snapshotRef"]> {
+  return {
+    hash: input.hash,
+    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
+    size: input.size,
+    updatedAt: TEST_NOW,
+  };
+}
+
+function createBrowserVaultReplicaRef(
+  sourceBundleHash: string,
+): NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]> {
+  return {
+    byteLength: 256,
+    dataVersion: "synthetic-checkpoint-baseline-browser-vault",
+    generatedAt: TEST_NOW,
+    keyId: "browser-key-synthetic-checkpoint-baseline",
+    objectKey: "browser-vault/synthetic-checkpoint-baseline/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:synthetic-checkpoint-baseline",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
   };
 }
 

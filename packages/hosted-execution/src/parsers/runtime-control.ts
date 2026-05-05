@@ -75,7 +75,7 @@ import {
 } from "./assertions.ts";
 import {
   parseHostedBrowserVaultReplicaRef,
-  parseHostedExecutionBundleRef,
+  parseHostedExecutionSnapshotRef,
 } from "./cursor.ts";
 
 const FORBIDDEN_REDACTED_KEY_PARTS = [
@@ -418,7 +418,7 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
             "Hosted workspace state redactedStatus",
           ),
         }),
-    snapshotRef: parseHostedExecutionBundleRef(
+    snapshotRef: parseHostedExecutionSnapshotRef(
       record.snapshotRef === undefined ? null : record.snapshotRef,
       "Hosted workspace state snapshotRef",
     ),
@@ -488,7 +488,7 @@ export function parseHostedWorkspaceCheckpointRequest(
             "Hosted workspace checkpoint request redactedStatus",
           ),
         }),
-    snapshotRef: parseHostedExecutionBundleRef(
+    snapshotRef: parseHostedExecutionSnapshotRef(
       record.snapshotRef === undefined ? null : record.snapshotRef,
       "Hosted workspace checkpoint request snapshotRef",
     ),
