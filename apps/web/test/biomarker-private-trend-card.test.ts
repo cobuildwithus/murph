@@ -183,7 +183,7 @@ test("does not label glucose values with an unrelated sole wearable source", () 
       ["2026-04-26", 78],
       ["2026-04-27", 80],
     ],
-    sourceLabel: "CGM import",
+    sourceLabel: "Comprehensive metabolic panel from Labcorp April blood result panel with glucose",
     unit: "mg/dL",
   });
 
@@ -218,7 +218,12 @@ test("does not label glucose values with an unrelated sole wearable source", () 
     createElement(BiomarkerPrivateTrendCard, { biomarker }),
   );
 
-  assert.match(markup, /CGM Import/u);
+  assert.match(markup, /Comprehensive Metabolic Panel From Labcorp April Blood Result Panel With Glucose/u);
+  assert.match(
+    markup,
+    /title="Comprehensive Metabolic Panel From Labcorp April Blood Result Panel With Glucose · Apr 27"/u,
+  );
+  assert.match(markup, /class="[^"]*truncate[^"]*text-xs[^"]*"/u);
   assert.doesNotMatch(markup, /WHOOP/u);
 });
 
