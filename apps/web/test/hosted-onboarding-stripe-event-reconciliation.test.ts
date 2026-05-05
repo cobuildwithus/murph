@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
+  sendHostedSignupWelcomeEmailForMember: vi.fn(),
   stripe: {
     events: {
       retrieve: vi.fn(),
@@ -52,6 +53,17 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     requireHostedStripeApi: () => mocks.stripe,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/signup-welcome-email")
+  >("@/src/lib/hosted-onboarding/signup-welcome-email");
+
+  return {
+    ...actual,
+    sendHostedSignupWelcomeEmailForMember: mocks.sendHostedSignupWelcomeEmailForMember,
   };
 });
 
@@ -124,6 +136,10 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeSubscriptionUpdated.mockResolvedValue(undefined);
     mocks.resolveStripeCustomerContext.mockResolvedValue({
       customerId: null,
+    });
+    mocks.sendHostedSignupWelcomeEmailForMember.mockResolvedValue({
+      providerMessageId: "resend_email_123",
+      status: "sent",
     });
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription());
   });
@@ -200,6 +216,10 @@ describe("hosted Stripe event reconciliation", () => {
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,
     }));
+    expect(mocks.sendHostedSignupWelcomeEmailForMember).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prisma.client,
+    });
   });
 
   it("routes checkout completion through the live Stripe event without activating access", async () => {
@@ -228,6 +248,41 @@ describe("hosted Stripe event reconciliation", () => {
       event.data.object,
       expect.anything(),
     );
+    expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+  });
+
+  it("does not fail Stripe reconciliation when the welcome email provider fails", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.sendHostedSignupWelcomeEmailForMember.mockRejectedValueOnce(
+      new Error("Resend unavailable"),
+    );
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      eventId: "evt_invoice_paid_123",
+      hostedExecutionEventId: "dispatch_123",
+      status: "completed",
+    });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      status: HostedStripeEventStatus.completed,
+    }));
+    expect(warnSpy).toHaveBeenCalledWith("Hosted signup welcome email send failed.", {
+      errorName: "Error",
+    });
   });
 
   it("uses the live Stripe subscription state instead of a stale subscription event payload", async () => {

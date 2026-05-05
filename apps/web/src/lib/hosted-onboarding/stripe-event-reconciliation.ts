@@ -37,6 +37,10 @@ import {
 } from "./logging";
 import { requireHostedStripeApi } from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
+import {
+  HostedSignupWelcomeEmailError,
+  sendHostedSignupWelcomeEmailForMember,
+} from "./signup-welcome-email";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
@@ -439,6 +443,12 @@ async function processClaimedHostedStripeEvent(
         status: HostedStripeEventStatus.completed,
       },
     });
+    if (result.activatedMemberId) {
+      await sendHostedSignupWelcomeEmailBestEffort({
+        memberId: result.activatedMemberId,
+        prisma,
+      });
+    }
     finishHostedOnboardingTiming(timing, "completed", {
       activatedMember: Boolean(result.activatedMemberId),
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
@@ -489,6 +499,29 @@ async function processClaimedHostedStripeEvent(
       hostedExecutionEventId: null,
       status: "failed",
     };
+  }
+}
+
+async function sendHostedSignupWelcomeEmailBestEffort(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  try {
+    await sendHostedSignupWelcomeEmailForMember({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.warn("Hosted signup welcome email send failed.", {
+      ...(error instanceof HostedSignupWelcomeEmailError
+        ? {
+            errorCode: error.code,
+            providerStatus: error.providerStatus,
+          }
+        : {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          }),
+    });
   }
 }
 
