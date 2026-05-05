@@ -421,6 +421,7 @@ async function runWithHostedProcessEnvironment<T>(input: {
   vaultRoot: string;
 }, run: () => Promise<T>): Promise<T> {
   const previousEnvironment = { ...process.env };
+  const previousWorkingDirectory = process.cwd();
   const nextEnvironment: NodeJS.ProcessEnv = {
     ...buildHostedBaseProcessEnvironment(previousEnvironment),
     ...input.envOverrides,
@@ -432,9 +433,14 @@ async function runWithHostedProcessEnvironment<T>(input: {
   replaceProcessEnvironment(nextEnvironment);
 
   try {
+    process.chdir(input.vaultRoot);
     return await run();
   } finally {
-    replaceProcessEnvironment(previousEnvironment);
+    try {
+      process.chdir(previousWorkingDirectory);
+    } finally {
+      replaceProcessEnvironment(previousEnvironment);
+    }
   }
 }
 
