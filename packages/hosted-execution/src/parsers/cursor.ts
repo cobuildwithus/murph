@@ -8,9 +8,12 @@ import {
   type HostedBrowserVaultReplicaCursorRef,
   type HostedBrowserVaultReplicaRef,
 } from "../contracts.ts";
-import type {
-  HostedExecutionBundlePayload,
-  HostedExecutionBundleRefState,
+import {
+  HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  type HostedExecutionBundlePayload,
+  type HostedExecutionBundleRefState,
+  type HostedExecutionLayeredSnapshotRef,
+  type HostedExecutionSnapshotRefState,
 } from "../bundles.ts";
 import {
   requireObject,
@@ -36,10 +39,70 @@ export function parseHostedExecutionBundleRef(
 export function parseHostedExecutionSnapshotRef(
   value: unknown,
   label = "Hosted execution snapshot ref",
-): HostedExecutionBundleRefState {
-  return parseHostedExecutionBundleRef(value === undefined ? null : value, label);
+): HostedExecutionSnapshotRefState {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+  const schema = record.schema;
+  if (schema === HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA) {
+    requireHostedExecutionLayeredSnapshotField(record, "base", label);
+    requireHostedExecutionLayeredSnapshotField(record, "hot", label);
+    return {
+      base: parseRuntimeHostedExecutionBundleRef(record.base, `${label}.base`),
+      hot: parseRuntimeHostedExecutionBundleRef(record.hot, `${label}.hot`),
+      schema,
+    } satisfies HostedExecutionLayeredSnapshotRef;
+  }
+
+  return parseHostedExecutionBundleRef(value, label);
 }
 
+export function isHostedExecutionLayeredSnapshotRef(
+  value: HostedExecutionSnapshotRefState,
+): value is HostedExecutionLayeredSnapshotRef {
+  return value !== null
+    && "schema" in value
+    && value.schema === HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA;
+}
+
+export function readHostedExecutionSnapshotBaseRef(
+  value: HostedExecutionSnapshotRefState,
+): HostedExecutionBundleRefState {
+  if (!value) {
+    return null;
+  }
+
+  return isHostedExecutionLayeredSnapshotRef(value) ? value.base : value;
+}
+
+export function readHostedExecutionSnapshotHotRef(
+  value: HostedExecutionSnapshotRefState,
+): HostedExecutionBundleRefState {
+  return isHostedExecutionLayeredSnapshotRef(value) ? value.hot : null;
+}
+
+export function buildHostedExecutionLayeredSnapshotRef(input: {
+  base: HostedExecutionBundleRefState;
+  hot: HostedExecutionBundleRefState;
+}): HostedExecutionLayeredSnapshotRef {
+  return {
+    base: input.base,
+    hot: input.hot,
+    schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  };
+}
+
+function requireHostedExecutionLayeredSnapshotField(
+  record: Record<string, unknown>,
+  field: "base" | "hot",
+  label: string,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(record, field)) {
+    throw new TypeError(`${label}.${field} is required for layered snapshot refs.`);
+  }
+}
 
 export function parseHostedBrowserVaultReplicaRef(
   value: unknown,

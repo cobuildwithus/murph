@@ -56,10 +56,14 @@ import {
   readOptionalStringArray,
 } from "./parsers/assertions.ts";
 import {
+  buildHostedExecutionLayeredSnapshotRef,
+  isHostedExecutionLayeredSnapshotRef,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 import {
   parseHostedExecutionDeviceSyncReason,
@@ -68,10 +72,14 @@ import {
 import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
 export {
+  buildHostedExecutionLayeredSnapshotRef,
+  isHostedExecutionLayeredSnapshotRef,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 export {
   parseHostedMailboxFetchRequest,
