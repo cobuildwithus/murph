@@ -13,6 +13,7 @@ pnpm hosted-local up
 pnpm hosted-local e2e
 pnpm hosted-local e2e checkpoint-baseline --no-bundle
 pnpm hosted-local e2e linq-webhook
+pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live
 pnpm hosted-local e2e --list
 pnpm hosted-local profiles
 pnpm hosted-local doctor
@@ -55,9 +56,12 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    scenario scripts.
 3. E2E scenario names live in `src/e2e.ts`; scripts pass scenario names to the
    harness instead of hard-coding Vitest files.
-4. Programmatic users call `startHostedLocalHarness(...)`, not
+4. Diagnostic E2E scenarios that can intentionally fail while investigating
+   provider behavior are opt-in by explicit scenario name and are excluded from
+   `pnpm hosted-local e2e`.
+5. Programmatic users call `startHostedLocalHarness(...)`, not
    `scripts/dev-hosted-local/*` directly.
-5. Every run writes a redacted state file under
+6. Every run writes a redacted state file under
    `.artifacts/hosted-local/<run-id>/state.json`.
 
 The old `scripts/dev-hosted-local.ts` and

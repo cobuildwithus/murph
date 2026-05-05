@@ -19,6 +19,9 @@ import type {
   HostedExecutionOidcIdentity,
   HostedLocalDevConfig,
 } from "./types.ts";
+import {
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+} from "./constants.ts";
 
 const localConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
@@ -498,6 +501,38 @@ describe("mergeCloudflareLocalEnv", () => {
     );
   });
 
+  it("drops stale test-only Codex model provider base URL overrides unless supplied by this run", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+          "http://127.0.0.1:4111/v1",
+      },
+      oidcIdentity,
+    });
+
+    expect(merged[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]).toBeUndefined();
+  });
+
+  it("preserves a current test-only Codex model provider base URL override", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+          "http://127.0.0.1:4111/v1",
+      },
+      oidcIdentity,
+      overrides: {
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+          "http://127.0.0.1:5222/v1",
+      },
+    });
+
+    expect(merged[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]).toBe(
+      "http://127.0.0.1:5222/v1",
+    );
+  });
+
   it("drops stale local OIDC JWKS overrides inherited from existing dev vars", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -815,6 +850,8 @@ describe("buildWranglerVarArgs", () => {
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
         LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+          "http://127.0.0.1:4222/v1",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
         NODE_ENV: "test",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
@@ -831,6 +868,8 @@ describe("buildWranglerVarArgs", () => {
       "LINQ_ATTACHMENT_CDN_BASE_URL:http://127.0.0.1:4011/attachment-downloads",
       "--var",
       "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL:http://127.0.0.1:4111/v1",
+      "--var",
+      "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL:http://127.0.0.1:4222/v1",
       "--var",
       "NODE_ENV:test",
       "--var",

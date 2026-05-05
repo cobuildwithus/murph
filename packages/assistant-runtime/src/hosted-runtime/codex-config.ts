@@ -12,6 +12,7 @@ import {
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
+  type AssistantCodexModelProviderConfig,
   VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
@@ -23,6 +24,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "./launch-spec.ts";
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
@@ -94,7 +96,13 @@ export async function prepareHostedCodexRuntimeEnvironment(
     );
   }
 
-  const providerConfig = VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
+  const providerConfig = resolveHostedCodexModelProviderConfig({
+    runtimeEnv: input.runtimeEnv,
+  });
+  const usesTestProviderBaseUrlOverride =
+    normalizeHostedCodexEnvString(
+      input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
+    ) !== null;
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
 
   if (!apiKeyValue) {
@@ -131,6 +139,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   await writeFile(
     codexConfigPath,
     buildHostedCodexConfigToml({
+      disableProviderRetries: usesTestProviderBaseUrlOverride,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       provider: providerConfig,
       reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
@@ -181,6 +190,54 @@ function rejectDeprecatedHostedCodexAppServerProxyEnv(
     "HOSTED_ASSISTANT_CONFIG_INVALID",
     `${configuredProxyEnvKeys.join(", ")} are no longer supported by hosted Codex runtime; configure HOSTED_ASSISTANT_PROVIDER=${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id} with ${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey}.`,
   );
+}
+
+function resolveHostedCodexModelProviderConfig(input: {
+  runtimeEnv: Readonly<Record<string, string>>;
+}): AssistantCodexModelProviderConfig {
+  const override = normalizeHostedCodexEnvString(
+    input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
+  );
+
+  if (!override) {
+    return VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
+  }
+
+  if (normalizeHostedCodexEnvString(input.runtimeEnv.NODE_ENV) !== "test") {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV} is test-only.`,
+    );
+  }
+
+  let url: URL;
+  try {
+    url = new URL(override);
+  } catch {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV} must be an absolute URL.`,
+    );
+  }
+
+  if (url.protocol !== "http:") {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV} must use http.`,
+    );
+  }
+
+  if (!isHostedLocalCodexTestHostname(normalizeHostedCodexUrlHostname(url.hostname))) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV} must point at a local test host.`,
+    );
+  }
+
+  return {
+    ...VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+    baseUrl: url.toString(),
+  };
 }
 
 async function maybeInstallHostedE2ECodexAppServerStub(input: {
@@ -263,7 +320,7 @@ function readHostedE2ECodexAppServerStubBaseUrl(
     );
   }
 
-  if (!isHostedLocalCodexStubHostname(normalizeHostedCodexUrlHostname(url.hostname))) {
+  if (!isHostedLocalCodexTestHostname(normalizeHostedCodexUrlHostname(url.hostname))) {
     throw new HostedAssistantConfigurationError(
       "HOSTED_ASSISTANT_CONFIG_INVALID",
       `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must point at a local test host.`,
@@ -273,7 +330,7 @@ function readHostedE2ECodexAppServerStubBaseUrl(
   return url.toString();
 }
 
-function isHostedLocalCodexStubHostname(hostname: string): boolean {
+function isHostedLocalCodexTestHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   return normalized === "127.0.0.1"
     || normalized === "localhost"
@@ -578,8 +635,9 @@ rl.on("line", (line) => {
 }
 
 export function buildHostedCodexConfigToml(input: {
+  disableProviderRetries?: boolean;
   model: string | null;
-  provider: typeof VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG;
+  provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string;
 }): string {
   return [
@@ -594,6 +652,18 @@ export function buildHostedCodexConfigToml(input: {
     `base_url = ${tomlString(input.provider.baseUrl)}`,
     `env_key = ${tomlString(input.provider.envKey)}`,
     `wire_api = ${tomlString(input.provider.wireApi)}`,
+    ...(input.disableProviderRetries
+      ? [
+          "request_max_retries = 0",
+          "stream_max_retries = 0",
+        ]
+      : []),
+    "",
+    "[skills]",
+    "include_instructions = false",
+    "",
+    "[skills.bundled]",
+    "enabled = false",
     "",
     "[shell_environment_policy]",
     `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,

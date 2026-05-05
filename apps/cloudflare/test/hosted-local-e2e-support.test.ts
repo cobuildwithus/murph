@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
   buildHostedLocalDeviceSyncProviderEnvClearances,
+  buildHostLoopbackStubBaseUrl,
   HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS,
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
   mergeRequiredEnvProfile,
   resolveHostedAssistantLocalDevEnv,
+  startAssistantProviderStubServer,
+  stopHttpStubServer,
 } from "./helpers/hosted-local-e2e-support.js";
 
 describe("mergeRequiredEnvProfile", () => {
@@ -18,6 +22,92 @@ describe("mergeRequiredEnvProfile", () => {
 
   it("adds the required profile without duplicating existing entries", () => {
     expect(mergeRequiredEnvProfile("assistant,linq", "linq")).toBe("assistant,linq");
+  });
+});
+
+describe("startAssistantProviderStubServer", () => {
+  it("streams Responses API fixtures for real Codex app-server recorder mode", async () => {
+    const requests: Array<{ body: string; method: string; url: string }> = [];
+    const server = await startAssistantProviderStubServer({
+      onRequest: (request) => {
+        requests.push(request);
+      },
+      responseState: {
+        queuedResponseTexts: ["streamed recorder reply"],
+      },
+    });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [],
+            model: "gpt-5.5",
+            stream: true,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      expect(body).toContain("response.completed");
+      expect(body).toContain("streamed recorder reply");
+      expect(requests).toHaveLength(1);
+      expect(JSON.parse(requests[0]!.body)).toMatchObject({
+        stream: true,
+      });
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("caps recorded Responses API request bodies in diagnostic recorder mode", async () => {
+    const requests: Array<{ body: string; method: string; url: string }> = [];
+    const server = await startAssistantProviderStubServer({
+      maxResponsesApiRequestBodies: 1,
+      onRequest: (request) => {
+        requests.push(request);
+      },
+      responseState: {
+        queuedResponseTexts: ["first reply", "second reply"],
+      },
+    });
+
+    try {
+      const baseUrl = `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`;
+      const firstResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [],
+          model: "gpt-5.5",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+      const secondResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [],
+          model: "gpt-5.5",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(firstResponse.status).toBe(200);
+      expect(secondResponse.status).toBe(429);
+      expect(requests).toHaveLength(1);
+    } finally {
+      await stopHttpStubServer(server);
+    }
   });
 });
 
@@ -88,5 +178,24 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     ).toThrow(
       "Hosted local test requires explicit hosted assistant config in live mode.",
     );
+  });
+
+  it("passes through live mode when explicit hosted assistant config is supplied", () => {
+    expect(
+      resolveHostedAssistantLocalDevEnv(
+        {
+          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "23456",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            "http://127.0.0.1:4567/v1",
+        },
+        "live",
+        "http://127.0.0.1:1234/v1",
+        "Hosted local test",
+      ),
+    ).toEqual({
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "23456",
+    });
   });
 });

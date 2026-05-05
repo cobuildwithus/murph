@@ -6,6 +6,7 @@ import {
   normalizeLegacyCloudflareHostedLocalE2eArgs,
 } from "../packages/hosted-local-harness/src/compat.ts";
 import {
+  listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
 } from "../packages/hosted-local-harness/src/e2e.ts";
 import {
@@ -82,6 +83,18 @@ describe("hosted-local harness", () => {
     );
     expect(resolveHostedLocalE2eScenarios("linq-delivery")[0]?.name).toBe(
       "linq-first-contact",
+    );
+  });
+
+  test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {
+    expect(resolveHostedLocalE2eScenarios("codex-gateway-prefix")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
+      "codex-gateway-prefix",
+    );
+    expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
+      "codex-gateway-prefix",
     );
   });
 

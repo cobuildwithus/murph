@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { test } from "vitest";
 import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
@@ -16,6 +19,7 @@ import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   buildHostedRuntimeResolvedConfig,
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
   readHostedRuntimeCommitTimeoutConfigValue,
 } from "../src/hosted-runtime/launch-spec.ts";
@@ -573,6 +577,35 @@ test("hosted runtime config strips ingress-only secrets from forwarded env", () 
   });
 });
 
+test("hosted runtime config lets platform forward the test Gateway base URL but strips user overrides", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+          "http://127.0.0.1:4111/v1",
+        VERCEL_AI_API_KEY: "vercel-secret",
+      },
+      userEnv: {
+        [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+          "http://evil.example.test/v1",
+        VERCEL_AI_API_KEY: "user-vercel-secret",
+      },
+    },
+    platform,
+  );
+
+  assert.deepEqual(normalized.forwardedEnv, {
+    [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+      "http://127.0.0.1:4111/v1",
+    VERCEL_AI_API_KEY: "vercel-secret",
+  });
+  assert.deepEqual(normalized.userEnv, {
+    VERCEL_AI_API_KEY: "user-vercel-secret",
+  });
+});
+
 test("hosted runtime config strips platform-only Telegram vars from forwarded and user env", () => {
   const platform = createHostedRuntimePlatformStub();
 
@@ -783,9 +816,11 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
 });
 
 test("withHostedProcessEnvironment restores overwritten and newly introduced env values", async () => {
+  const roots = await createHostedProcessEnvironmentTestRoots("hosted-env-restore-");
   const originalHome = process.env.HOME;
   const originalVault = process.env.VAULT;
   const originalCustom = process.env.CUSTOM_HOSTED_ENV;
+  const originalWorkingDirectory = process.cwd();
 
   process.env.HOME = "/tmp/original-home";
   process.env.VAULT = "/tmp/original-vault";
@@ -797,16 +832,18 @@ test("withHostedProcessEnvironment restores overwritten and newly introduced env
         envOverrides: {
           CUSTOM_HOSTED_ENV: "present",
         },
-        operatorHomeRoot: "/tmp/override-home",
-        vaultRoot: "/tmp/override-vault",
+        operatorHomeRoot: roots.operatorHomeRoot,
+        vaultRoot: roots.vaultRoot,
       },
       async () => {
-        assert.equal(process.env.HOME, "/tmp/override-home");
-        assert.equal(process.env.VAULT, "/tmp/override-vault");
+        assert.equal(process.cwd(), roots.vaultRoot);
+        assert.equal(process.env.HOME, roots.operatorHomeRoot);
+        assert.equal(process.env.VAULT, roots.vaultRoot);
         assert.equal(process.env.CUSTOM_HOSTED_ENV, "present");
       },
     );
 
+    assert.equal(process.cwd(), originalWorkingDirectory);
     assert.equal(process.env.HOME, "/tmp/original-home");
     assert.equal(process.env.VAULT, "/tmp/original-vault");
     assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);
@@ -828,10 +865,12 @@ test("withHostedProcessEnvironment restores overwritten and newly introduced env
     } else {
       process.env.CUSTOM_HOSTED_ENV = originalCustom;
     }
+    await removeHostedProcessEnvironmentTestRoots(roots);
   }
 });
 
 test("withHostedProcessEnvironment replaces ambient env with the hosted runtime projection", async () => {
+  const roots = await createHostedProcessEnvironmentTestRoots("hosted-env-projection-");
   const originalValues = new Map(
     [
       "AMBIENT_CHANNEL_SECRET",
@@ -867,8 +906,8 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
           CUSTOM_HOSTED_ENV: "runtime-value",
           VERCEL_AI_API_KEY: "runtime-vercel-secret",
         },
-        operatorHomeRoot: "/tmp/hosted-home",
-        vaultRoot: "/tmp/hosted-vault",
+        operatorHomeRoot: roots.operatorHomeRoot,
+        vaultRoot: roots.vaultRoot,
       },
       async () => {
         assert.equal(process.env.AMBIENT_CHANNEL_SECRET, undefined);
@@ -876,10 +915,11 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
         assert.equal(process.env.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
         assert.equal(process.env.HOSTED_EXECUTION_CONTROL_TOKEN, undefined);
         assert.equal(process.env.CUSTOM_HOSTED_ENV, "runtime-value");
-        assert.equal(process.env.HOME, "/tmp/hosted-home");
+        assert.equal(process.cwd(), roots.vaultRoot);
+        assert.equal(process.env.HOME, roots.operatorHomeRoot);
         assert.equal(process.env.PATH, "/usr/bin");
         assert.equal(process.env.MURPH_HOSTED_RUNTIME_PROCESS, "1");
-        assert.equal(process.env.VAULT, "/tmp/hosted-vault");
+        assert.equal(process.env.VAULT, roots.vaultRoot);
         assert.equal(process.env.VERCEL_AI_API_KEY, "runtime-vercel-secret");
         process.env.MUTATED_DURING_HOSTED_ENV = "must-restore-away";
       },
@@ -907,10 +947,12 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
         process.env[key] = value;
       }
     }
+    await removeHostedProcessEnvironmentTestRoots(roots);
   }
 });
 
 test("withHostedProcessEnvironment omits ambient operator parser tool env", async () => {
+  const roots = await createHostedProcessEnvironmentTestRoots("hosted-env-parser-");
   const originalValues = new Map(
     [
       "FFMPEG_COMMAND",
@@ -941,10 +983,11 @@ test("withHostedProcessEnvironment omits ambient operator parser tool env", asyn
         envOverrides: {
           CUSTOM_HOSTED_ENV: "runtime-value",
         },
-        operatorHomeRoot: "/tmp/hosted-home",
-        vaultRoot: "/tmp/hosted-vault",
+        operatorHomeRoot: roots.operatorHomeRoot,
+        vaultRoot: roots.vaultRoot,
       },
       async () => {
+        assert.equal(process.cwd(), roots.vaultRoot);
         assert.equal(process.env.FFMPEG_COMMAND, undefined);
         assert.equal(process.env.FILE_COMMAND, undefined);
         assert.equal(process.env.MUTOOL_COMMAND, undefined);
@@ -964,13 +1007,17 @@ test("withHostedProcessEnvironment omits ambient operator parser tool env", asyn
         process.env[key] = value;
       }
     }
+    await removeHostedProcessEnvironmentTestRoots(roots);
   }
 });
 
 test("withHostedProcessEnvironment serializes overlapping process env overrides", async () => {
+  const firstRoots = await createHostedProcessEnvironmentTestRoots("hosted-env-first-");
+  const secondRoots = await createHostedProcessEnvironmentTestRoots("hosted-env-second-");
   const originalHome = process.env.HOME;
   const originalVault = process.env.VAULT;
   const originalCustom = process.env.CUSTOM_HOSTED_ENV;
+  const originalWorkingDirectory = process.cwd();
   let releaseFirstRun = () => {};
   const firstRunGate = new Promise<void>((resolve) => {
     releaseFirstRun = resolve;
@@ -987,13 +1034,17 @@ test("withHostedProcessEnvironment serializes overlapping process env overrides"
         envOverrides: {
           CUSTOM_HOSTED_ENV: "first",
         },
-        operatorHomeRoot: "/tmp/first-home",
-        vaultRoot: "/tmp/first-vault",
+        operatorHomeRoot: firstRoots.operatorHomeRoot,
+        vaultRoot: firstRoots.vaultRoot,
       },
       async () => {
-        observed.push(`first-start:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
+        observed.push(
+          `first-start:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}:${process.cwd()}`,
+        );
         await firstRunGate;
-        observed.push(`first-end:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
+        observed.push(
+          `first-end:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}:${process.cwd()}`,
+        );
       },
     );
     await Promise.resolve();
@@ -1003,32 +1054,38 @@ test("withHostedProcessEnvironment serializes overlapping process env overrides"
         envOverrides: {
           CUSTOM_HOSTED_ENV: "second",
         },
-        operatorHomeRoot: "/tmp/second-home",
-        vaultRoot: "/tmp/second-vault",
+        operatorHomeRoot: secondRoots.operatorHomeRoot,
+        vaultRoot: secondRoots.vaultRoot,
       },
       async () => {
-        observed.push(`second-start:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
-        observed.push(`second-end:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
+        observed.push(
+          `second-start:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}:${process.cwd()}`,
+        );
+        observed.push(
+          `second-end:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}:${process.cwd()}`,
+        );
       },
     );
     await Promise.resolve();
 
     assert.deepEqual(observed, [
-      "first-start:/tmp/first-home:first",
+      `first-start:${firstRoots.operatorHomeRoot}:first:${firstRoots.vaultRoot}`,
     ]);
-    assert.equal(process.env.HOME, "/tmp/first-home");
-    assert.equal(process.env.VAULT, "/tmp/first-vault");
+    assert.equal(process.cwd(), firstRoots.vaultRoot);
+    assert.equal(process.env.HOME, firstRoots.operatorHomeRoot);
+    assert.equal(process.env.VAULT, firstRoots.vaultRoot);
     assert.equal(process.env.CUSTOM_HOSTED_ENV, "first");
 
     releaseFirstRun();
     await Promise.all([firstRun, secondRun]);
 
     assert.deepEqual(observed, [
-      "first-start:/tmp/first-home:first",
-      "first-end:/tmp/first-home:first",
-      "second-start:/tmp/second-home:second",
-      "second-end:/tmp/second-home:second",
+      `first-start:${firstRoots.operatorHomeRoot}:first:${firstRoots.vaultRoot}`,
+      `first-end:${firstRoots.operatorHomeRoot}:first:${firstRoots.vaultRoot}`,
+      `second-start:${secondRoots.operatorHomeRoot}:second:${secondRoots.vaultRoot}`,
+      `second-end:${secondRoots.operatorHomeRoot}:second:${secondRoots.vaultRoot}`,
     ]);
+    assert.equal(process.cwd(), originalWorkingDirectory);
     assert.equal(process.env.HOME, "/tmp/original-home");
     assert.equal(process.env.VAULT, "/tmp/original-vault");
     assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);
@@ -1050,5 +1107,35 @@ test("withHostedProcessEnvironment serializes overlapping process env overrides"
     } else {
       process.env.CUSTOM_HOSTED_ENV = originalCustom;
     }
+    await removeHostedProcessEnvironmentTestRoots(firstRoots);
+    await removeHostedProcessEnvironmentTestRoots(secondRoots);
   }
 });
+
+async function createHostedProcessEnvironmentTestRoots(prefix: string): Promise<{
+  operatorHomeRoot: string;
+  root: string;
+  vaultRoot: string;
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), prefix));
+  const operatorHomeRoot = path.join(root, "home");
+  const vaultRoot = path.join(root, "vault");
+  await Promise.all([
+    mkdir(operatorHomeRoot),
+    mkdir(vaultRoot),
+  ]);
+  return {
+    operatorHomeRoot: await realpath(operatorHomeRoot),
+    root: await realpath(root),
+    vaultRoot: await realpath(vaultRoot),
+  };
+}
+
+async function removeHostedProcessEnvironmentTestRoots(input: {
+  root: string;
+}): Promise<void> {
+  await rm(input.root, {
+    force: true,
+    recursive: true,
+  });
+}

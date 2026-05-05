@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createServer as createNetServer } from "node:net";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   deviceSyncProviderRuntimeSecretEnvKeys,
@@ -94,11 +95,12 @@ function dequeueAssistantProviderResponseText(input: {
 
 function buildAssistantProviderResponsesApiStubResponse(input: {
   modelId: string;
+  responseId?: string;
   responseText: string;
 }): Record<string, unknown> {
   return {
     created_at: Math.floor(Date.now() / 1000),
-    id: "resp_stub_hosted_local_e2e",
+    id: input.responseId ?? "resp_stub_hosted_local_e2e",
     model: input.modelId,
     output: [
       {
@@ -121,20 +123,142 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
   };
 }
 
+function writeAssistantProviderResponsesApiStubStream(input: {
+  modelId: string;
+  response: ServerResponse;
+  responseId: string;
+  responseText: string;
+}): void {
+  const messageId = `msg_${input.responseId}`;
+  const content = {
+    annotations: [],
+    text: input.responseText,
+    type: "output_text",
+  };
+  const outputItem = {
+    content: [content],
+    id: messageId,
+    role: "assistant",
+    status: "completed",
+    type: "message",
+  };
+  const completedResponse = {
+    ...buildAssistantProviderResponsesApiStubResponse({
+      modelId: input.modelId,
+      responseId: input.responseId,
+      responseText: input.responseText,
+    }),
+    output: [outputItem],
+    status: "completed",
+  };
+
+  input.response.statusCode = 200;
+  input.response.setHeader("cache-control", "no-cache");
+  input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  writeAssistantProviderSseEvent(input.response, "response.created", {
+    response: {
+      ...completedResponse,
+      output: [],
+      status: "in_progress",
+    },
+    type: "response.created",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
+    item: {
+      ...outputItem,
+      content: [],
+      status: "in_progress",
+    },
+    output_index: 0,
+    type: "response.output_item.added",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.content_part.added", {
+    content_index: 0,
+    item_id: messageId,
+    output_index: 0,
+    part: {
+      annotations: [],
+      text: "",
+      type: "output_text",
+    },
+    type: "response.content_part.added",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.output_text.delta", {
+    content_index: 0,
+    delta: input.responseText,
+    item_id: messageId,
+    output_index: 0,
+    type: "response.output_text.delta",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.output_text.done", {
+    content_index: 0,
+    item_id: messageId,
+    output_index: 0,
+    text: input.responseText,
+    type: "response.output_text.done",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.content_part.done", {
+    content_index: 0,
+    item_id: messageId,
+    output_index: 0,
+    part: content,
+    type: "response.content_part.done",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.output_item.done", {
+    item: outputItem,
+    output_index: 0,
+    type: "response.output_item.done",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.completed", {
+    response: completedResponse,
+    type: "response.completed",
+  });
+  input.response.write("data: [DONE]\n\n");
+  input.response.end();
+}
+
+function writeAssistantProviderSseEvent(
+  response: ServerResponse,
+  event: string,
+  payload: Record<string, unknown>,
+): void {
+  response.write(`event: ${event}\n`);
+  response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
 export async function startAssistantProviderStubServer(input: {
   fallbackResponseText?: string | null;
+  maxResponsesApiRequestBodies?: number;
   modelId?: string;
   onRequest?: (request: HostedLocalAssistantProviderStubRequest) => void;
   responseState?: HostedLocalAssistantProviderStubState;
 } = {}): Promise<ReturnType<typeof createServer>> {
   const modelId = input.modelId ?? "gpt-5.5";
+  let responseSequence = 0;
+  let responsesApiRequestBodyCount = 0;
 
   const server = createServer(async (request, response) => {
+    const requestMethod = request.method ?? "GET";
+    const requestUrl = request.url ?? "/";
+    if (
+      requestMethod === "POST"
+      && requestUrl === "/v1/responses"
+      && typeof input.maxResponsesApiRequestBodies === "number"
+      && responsesApiRequestBodyCount >= input.maxResponsesApiRequestBodies
+    ) {
+      response.setHeader("connection", "close");
+      writeJsonResponse(response, 429, {
+        error: "Assistant provider stub captured the maximum configured Responses API request bodies.",
+      });
+      request.destroy();
+      return;
+    }
+
     const body = await readRequestBody(request);
     const requestRecord = {
       body,
-      method: request.method ?? "GET",
-      url: request.url ?? "/",
+      method: requestMethod,
+      url: requestUrl,
     } satisfies HostedLocalAssistantProviderStubRequest;
     input.onRequest?.(requestRecord);
     if (process.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB === "1") {
@@ -155,6 +279,7 @@ export async function startAssistantProviderStubServer(input: {
     }
 
     if (request.method === "POST" && request.url === "/v1/responses") {
+      responsesApiRequestBodyCount += 1;
       const bodyJson = parseJsonObject(body);
       if (!bodyJson || typeof bodyJson !== "object") {
         writeJsonResponse(response, 400, {
@@ -174,14 +299,23 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
-      writeJsonResponse(
-        response,
-        200,
-        buildAssistantProviderResponsesApiStubResponse({
+      responseSequence += 1;
+      const responseId = `resp_stub_hosted_local_e2e_${responseSequence}`;
+      if (bodyJson.stream === true) {
+        writeAssistantProviderResponsesApiStubStream({
           modelId,
+          response,
+          responseId,
           responseText,
-        }),
-      );
+        });
+        return;
+      }
+
+      writeJsonResponse(response, 200, buildAssistantProviderResponsesApiStubResponse({
+        modelId,
+        responseId,
+        responseText,
+      }));
       return;
     }
 
