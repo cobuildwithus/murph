@@ -320,6 +320,51 @@ describe("runner bundle runtime artifact staging", () => {
     });
   });
 
+  it("includes the workspace package name when npm pack fails", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-fail-"));
+    const appsDir = path.join(rootDir, "apps");
+    const binDir = path.join(rootDir, "bin");
+    const packageDir = path.join(rootDir, "packages", "runtime-state");
+    const tarballsDir = path.join(rootDir, "tarballs");
+
+    temporaryDirectories.push(rootDir);
+    await mkdir(appsDir, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await mkdir(packageDir, { recursive: true });
+    await mkdir(tarballsDir, { recursive: true });
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "@murphai/runtime-state",
+          version: "1.2.3",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(binDir, "npm"),
+      "#!/usr/bin/env node\nprocess.exit(1);\n",
+      "utf8",
+    );
+    await chmod(path.join(binDir, "npm"), 0o755);
+
+    vi.stubEnv("PATH", `${binDir}${path.delimiter}${process.env.PATH ?? ""}`);
+
+    await expect(
+      packWorkspacePackageArtifacts(
+        ["@murphai/runtime-state"],
+        tarballsDir,
+        {
+          repoRoot: rootDir,
+          skipPreflights: true,
+        },
+      ),
+    ).rejects.toThrow("Failed to pack @murphai/runtime-state.");
+  });
+
   it("packs the Health Commons runtime and generated catalog for hosted runner installs", async () => {
     const tarballsDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-"));
 
@@ -343,10 +388,6 @@ describe("runner bundle runtime artifact staging", () => {
     const { stdout } = await execFileAsync("tar", [
       "-tzf",
       healthCommonsTarball,
-      "package/dist/index.js",
-      "package/dist/runtime.js",
-      "package/generated/catalog.json",
-      "package/package.json",
     ]);
     const entries = stdout.split("\n");
 
@@ -354,6 +395,8 @@ describe("runner bundle runtime artifact staging", () => {
     expect(entries).toContain("package/dist/runtime.js");
     expect(entries).toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
+    expect(entries).not.toContain("package/generated/web/routes/index.json");
+    expect(entries.some((entry) => entry.startsWith("package/content/"))).toBe(false);
 
     const extractDir = path.join(tarballsDir, "health-commons-extract");
     await mkdir(extractDir, { recursive: true });
@@ -376,6 +419,87 @@ describe("runner bundle runtime artifact staging", () => {
       slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
       title: "Finnish Dry Sauna",
     });
+  });
+
+  it("packs the runner CLI without its public bundled dependency payload", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-cli-pack-"));
+    const packageDir = path.join(rootDir, "packages", "cli");
+    const tarballsDir = path.join(rootDir, "tarballs");
+
+    temporaryDirectories.push(rootDir);
+    await mkdir(path.join(rootDir, "apps"), { recursive: true });
+    await mkdir(path.join(packageDir, "dist"), { recursive: true });
+    await mkdir(tarballsDir, { recursive: true });
+    await writeFile(path.join(packageDir, "dist", "bin.js"), "#!/usr/bin/env node\n", "utf8");
+    await writeFile(path.join(packageDir, "README.md"), "readme\n", "utf8");
+    await writeFile(path.join(packageDir, "CHANGELOG.md"), "changelog\n", "utf8");
+    await writeFile(path.join(packageDir, "config.schema.json"), "{}\n", "utf8");
+    await writeFile(path.join(packageDir, "LICENSE"), "license\n", "utf8");
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "@murphai/murph",
+          version: "1.2.3",
+          type: "module",
+          bin: {
+            murph: "dist/bin.js",
+            "vault-cli": "dist/bin.js",
+          },
+          bundleDependencies: [
+            "@murphai/assistant-engine",
+            "@murphai/health-commons",
+          ],
+          dependencies: {
+            "@murphai/assistant-engine": "workspace:*",
+            "@murphai/health-commons": "workspace:*",
+          },
+          files: [
+            "dist",
+            "README.md",
+            "CHANGELOG.md",
+            "config.schema.json",
+            "LICENSE",
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const tarballs = await packWorkspacePackageArtifacts(
+      ["@murphai/murph"],
+      tarballsDir,
+      {
+        repoRoot: rootDir,
+        skipPreflights: true,
+      },
+    );
+    const cliTarball = tarballs.get("@murphai/murph");
+
+    if (!cliTarball) {
+      throw new Error("CLI tarball was not packed.");
+    }
+
+    const extractDir = path.join(rootDir, "extract");
+    await mkdir(extractDir, { recursive: true });
+    await execFileAsync("tar", ["-xzf", cliTarball, "-C", extractDir]);
+    const packedPackageJson = JSON.parse(
+      await readFile(path.join(extractDir, "package", "package.json"), "utf8"),
+    ) as {
+      bin?: Record<string, string>;
+      bundleDependencies?: string[];
+    };
+
+    expect(packedPackageJson.bin).toEqual({
+      murph: "dist/bin.js",
+      "vault-cli": "dist/bin.js",
+    });
+    expect(packedPackageJson.bundleDependencies).toBeUndefined();
+    await expect(
+      readFile(path.join(extractDir, "package", "node_modules", "@murphai", "health-commons", "package.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("packs the Contracts runtime entrypoint for hosted runner installs", async () => {

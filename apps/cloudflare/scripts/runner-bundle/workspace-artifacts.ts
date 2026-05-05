@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import path from "node:path";
 
@@ -13,11 +13,15 @@ import { runNpmCommand, runPnpmCommand } from "./process.js";
 
 const HEALTH_COMMONS_PACKAGE_NAME = "@murphai/health-commons";
 const CONTRACTS_PACKAGE_NAME = "@murphai/contracts";
+const CLI_PACKAGE_NAME = "@murphai/murph";
 
 interface WorkspacePackageManifest {
+  bundleDependencies?: string[];
+  bundledDependencies?: string[];
   dependencies?: Record<string, string>;
   engines?: Record<string, string>;
   exports?: Record<string, unknown> | string;
+  files?: string[];
   license?: string;
   main?: string;
   name?: string;
@@ -174,16 +178,33 @@ async function packWorkspacePackage(
   },
 ): Promise<string> {
   const before = new Set(await readdir(tarballsDir));
-  const packageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
-
-  await assertWorkspacePackageRuntimeFiles(packageName, packageDir);
-
-  await runNpmCommand(
-    ["pack", "--ignore-scripts", "--silent", "--pack-destination", tarballsDir],
-    {
-      cwd: packageDir,
-    },
+  const sourcePackageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
+  const packRoot = await prepareRunnerPackagePackRoot(
+    packageName,
+    sourcePackageDir,
+    tarballsDir,
   );
+  const packageDir = packRoot ?? sourcePackageDir;
+
+  try {
+    await assertWorkspacePackageRuntimeFiles(packageName, packageDir);
+
+    try {
+      await runNpmCommand(
+        ["pack", "--ignore-scripts", "--silent", "--pack-destination", tarballsDir],
+        {
+          cwd: packageDir,
+        },
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      throw new Error(`Failed to pack ${packageName}.${detail}`);
+    }
+  } finally {
+    if (packRoot) {
+      await rm(packRoot, { force: true, recursive: true });
+    }
+  }
 
   const tarballName = (await readdir(tarballsDir)).find(
     (entry) => !before.has(entry) && entry.endsWith(".tgz"),
@@ -194,6 +215,100 @@ async function packWorkspacePackage(
   }
 
   return path.join(tarballsDir, tarballName);
+}
+
+async function prepareRunnerPackagePackRoot(
+  packageName: string,
+  sourcePackageDir: string,
+  tarballsDir: string,
+): Promise<string | null> {
+  if (packageName === CLI_PACKAGE_NAME) {
+    return await prepareRunnerCliPackagePackRoot(sourcePackageDir, tarballsDir);
+  }
+
+  if (packageName === HEALTH_COMMONS_PACKAGE_NAME) {
+    return await prepareRunnerHealthCommonsPackagePackRoot(sourcePackageDir, tarballsDir);
+  }
+
+  return null;
+}
+
+async function prepareRunnerCliPackagePackRoot(
+  sourcePackageDir: string,
+  tarballsDir: string,
+): Promise<string> {
+  const packRoot = await mkdtemp(path.join(tarballsDir, ".runner-cli-pack-"));
+  const packageJson = await readWorkspacePackageManifest(sourcePackageDir);
+
+  delete packageJson.bundleDependencies;
+  delete packageJson.bundledDependencies;
+
+  await copyPackageEntries(sourcePackageDir, packRoot, [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "config.schema.json",
+    "LICENSE",
+  ]);
+  await writeFile(
+    path.join(packRoot, "package.json"),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    "utf8",
+  );
+
+  return packRoot;
+}
+
+async function prepareRunnerHealthCommonsPackagePackRoot(
+  sourcePackageDir: string,
+  tarballsDir: string,
+): Promise<string> {
+  const packRoot = await mkdtemp(path.join(tarballsDir, ".runner-health-commons-pack-"));
+  const packageJson = await readWorkspacePackageManifest(sourcePackageDir);
+
+  packageJson.files = [
+    "dist",
+    "generated/catalog.json",
+    "README.md",
+    "LICENSE",
+  ];
+
+  await copyPackageEntries(sourcePackageDir, packRoot, [
+    "dist",
+    "generated/catalog.json",
+    "README.md",
+    "LICENSE",
+  ]);
+  await writeFile(
+    path.join(packRoot, "package.json"),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    "utf8",
+  );
+
+  return packRoot;
+}
+
+async function readWorkspacePackageManifest(
+  packageDir: string,
+): Promise<WorkspacePackageManifest> {
+  return JSON.parse(
+    await readFile(path.join(packageDir, "package.json"), "utf8"),
+  ) as WorkspacePackageManifest;
+}
+
+async function copyPackageEntries(
+  sourcePackageDir: string,
+  packRoot: string,
+  entries: readonly string[],
+): Promise<void> {
+  for (const entry of entries) {
+    const targetPath = path.join(packRoot, entry);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await cp(path.join(sourcePackageDir, entry), targetPath, {
+      force: true,
+      recursive: true,
+    });
+  }
 }
 
 async function runWorkspacePackagePackPreflights(

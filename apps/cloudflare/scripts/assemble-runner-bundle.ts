@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -31,6 +32,8 @@ import {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(appDir, "../..");
+const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const workspaceArtifactLockHeldEnv = "MURPH_WORKSPACE_ARTIFACT_LOCK_HELD";
 const runnerBundleDeployRoot = path.join(
   resolveCloudflareDeployPaths().deployDir,
   runnerBundleDirectoryName,
@@ -45,7 +48,44 @@ const shouldSkipPackPreflights =
   process.argv.includes("--skip-pack-preflights") ||
   process.env.MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS === "1";
 
+rerunUnderWorkspaceArtifactLockIfNeeded();
+
 await assembleRunnerBundle();
+
+function rerunUnderWorkspaceArtifactLockIfNeeded(): void {
+  if (process.env[workspaceArtifactLockHeldEnv] === "1") {
+    return;
+  }
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs"),
+      "cloudflare runner bundle",
+      "--",
+      pnpmCommand,
+      "--dir",
+      repoRoot,
+      "exec",
+      "tsx",
+      "--tsconfig",
+      "apps/cloudflare/tsconfig.scripts.json",
+      "apps/cloudflare/scripts/assemble-runner-bundle.ts",
+      ...process.argv.slice(2),
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: "inherit",
+    },
+  );
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  process.exit(result.status ?? 1);
+}
 
 async function assembleRunnerBundle(): Promise<void> {
   const stagingRoot = await mkdtemp(
@@ -82,7 +122,7 @@ async function assembleRunnerBundle(): Promise<void> {
       tarballsDir,
       {
         repoRoot,
-        skipPreflights: shouldSkipPackPreflights,
+        skipPreflights: shouldSkipPackPreflights || !shouldSkipBuild,
       },
     );
 

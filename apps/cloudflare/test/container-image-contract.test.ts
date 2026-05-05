@@ -63,6 +63,9 @@ describe("hosted runner container image contract", () => {
     );
 
     expect(bundleAssemblyScript).toContain("const runnerBundleDeployRoot = path.join(");
+    expect(bundleAssemblyScript).toContain("const workspaceArtifactLockHeldEnv = ");
+    expect(bundleAssemblyScript).toContain("rerunUnderWorkspaceArtifactLockIfNeeded();");
+    expect(bundleAssemblyScript).toContain("run-with-workspace-artifact-lock.mjs");
     expect(bundleAssemblyScript).toContain('const shouldSkipBuild = process.argv.includes("--skip-build");');
     expect(bundleAssemblyScript).toContain(
       'import { resolveCloudflareDeployPaths } from "./deploy-automation.js";',
