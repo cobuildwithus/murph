@@ -422,6 +422,9 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runtime.usage_export_finished",
   "workspace.codex_home_snapshot",
   "workspace.legacy_codex_resume_repaired",
+  "workspace.restore_finished",
+  "workspace.restore_layer_finished",
+  "workspace.restore_started",
 ] as const;
 
 export type HostedRuntimeLogEventCode =

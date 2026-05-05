@@ -363,6 +363,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       );
     const restored = await raceHostedRuntimeLiveness(
       restoreHostedWorkspaceRuntimeJobWorkspace({
+        logContext: runtimeLogContext,
         platform: guardedRuntime.platform,
         vaultRoot: options.vaultRoot,
         workspace: workspaceRead.workspace,

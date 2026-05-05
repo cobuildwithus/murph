@@ -91,6 +91,7 @@ describe("hosted workspace restore Codex continuity", () => {
       const baseHash = sha256HostedBundleHex(baseBundle);
       const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
       const artifactGetCalls: string[] = [];
+      const logRequests: HostedRuntimeLogRequest[] = [];
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
         platform: createRestorePlatform({
@@ -99,6 +100,7 @@ describe("hosted workspace restore Codex continuity", () => {
             [hotHash, hotSnapshot.bundle],
           ]),
           artifactGetCalls,
+          logRequests,
         }),
         vaultRoot: restoredVaultRoot,
         workspace: createWorkspaceState({
@@ -142,6 +144,29 @@ describe("hosted workspace restore Codex continuity", () => {
       );
       await assert.rejects(
         readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "latest.json"), "utf8"),
+      );
+      const restoreLayerLogs = flattenLogEntries(logRequests).filter((entry) =>
+        entry.eventCode === "workspace.restore_layer_finished"
+      );
+      assert.deepEqual(
+        restoreLayerLogs.map((entry) => entry.redactedJson?.snapshotLayer),
+        ["base", "hot"],
+      );
+      assert.equal(restoreLayerLogs[0]?.redactedJson?.bundleBytes, baseBundle.byteLength);
+      assert.equal(restoreLayerLogs[1]?.redactedJson?.bundleBytes, hotSnapshot.bundle.byteLength);
+      assert.equal(restoreLayerLogs.every((entry) =>
+        typeof entry.redactedJson?.fetchElapsedMs === "number"
+        && typeof entry.redactedJson?.materializeElapsedMs === "number"
+        && typeof entry.redactedJson?.totalElapsedMs === "number"
+      ), true);
+      assert.deepEqual(
+        flattenLogEntries(logRequests).map((entry) => entry.eventCode),
+        [
+          "workspace.restore_started",
+          "workspace.restore_layer_finished",
+          "workspace.restore_layer_finished",
+          "workspace.restore_finished",
+        ],
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
@@ -219,12 +244,12 @@ describe("hosted workspace restore Codex continuity", () => {
         )).resumeState,
         null,
       );
-      assert.equal(logRequests.length, 1);
-      assert.deepEqual(logRequests[0]?.entries.map((entry) => entry.eventCode), [
-        "workspace.legacy_codex_resume_repaired",
-      ]);
-      assert.equal(logRequests[0]?.entries[0]?.redactedJson?.snapshotLayer, "base");
-      assert.equal(logRequests[0]?.entries[0]?.redactedJson?.nativeResumeDisabled, true);
+      const repairLogs = flattenLogEntries(logRequests).filter((entry) =>
+        entry.eventCode === "workspace.legacy_codex_resume_repaired"
+      );
+      assert.equal(repairLogs.length, 1);
+      assert.equal(repairLogs[0]?.redactedJson?.snapshotLayer, "base");
+      assert.equal(repairLogs[0]?.redactedJson?.nativeResumeDisabled, true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -325,17 +350,23 @@ describe("hosted workspace restore Codex continuity", () => {
       await assert.rejects(
         readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"), "utf8"),
       );
-      assert.equal(logRequests.length, 1);
-      assert.deepEqual(logRequests[0]?.entries.map((entry) => entry.eventCode), [
-        "workspace.legacy_codex_resume_repaired",
-      ]);
-      assert.equal(logRequests[0]?.entries[0]?.redactedJson?.snapshotLayer, "hot");
-      assert.equal(logRequests[0]?.entries[0]?.redactedJson?.nativeResumeDisabled, true);
+      const repairLogs = flattenLogEntries(logRequests).filter((entry) =>
+        entry.eventCode === "workspace.legacy_codex_resume_repaired"
+      );
+      assert.equal(repairLogs.length, 1);
+      assert.equal(repairLogs[0]?.redactedJson?.snapshotLayer, "hot");
+      assert.equal(repairLogs[0]?.redactedJson?.nativeResumeDisabled, true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
 });
+
+function flattenLogEntries(
+  requests: readonly HostedRuntimeLogRequest[],
+): HostedRuntimeLogRequest["entries"] {
+  return requests.flatMap((request) => request.entries);
+}
 
 function createCodexSessionRecord(input: {
   alias?: string | null;
