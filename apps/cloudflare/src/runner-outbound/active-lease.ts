@@ -11,6 +11,11 @@ const HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER = "x-hosted-runtime-workspace-vers
 export interface RunnerActiveInvocationLeaseHeaders {
   attemptId: string;
   leaseGeneration: string;
+  workspaceVersion: string | null;
+}
+
+export interface RunnerActiveInvocationLeaseWriteHeaders
+  extends RunnerActiveInvocationLeaseHeaders {
   workspaceVersion: string;
 }
 
@@ -28,7 +33,7 @@ export function readRunnerActiveInvocationLeaseHeaders(
   const leaseGeneration = request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
   const workspaceVersion = request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
 
-  if (!attemptId || !leaseGeneration || !workspaceVersion) {
+  if (!attemptId || !leaseGeneration) {
     return null;
   }
 
@@ -54,11 +59,11 @@ export async function requireRunnerActiveInvocationLease(input: {
     stub,
     "ownsActiveInvocationLease",
   );
+  // Workspace version is enforced by the checkpoint route, not by invocation-local side effects.
   const ownsLease = await ownsActiveInvocationLease({
     attemptId: headers.attemptId,
     leaseGeneration: headers.leaseGeneration,
     userId: input.userId,
-    workspaceVersion: headers.workspaceVersion,
   });
   if (!ownsLease) {
     throw new RunnerActiveInvocationLeaseError();
@@ -69,7 +74,7 @@ export async function requireRunnerActiveInvocationLease(input: {
 
 export function writeRunnerActiveInvocationLeaseHeaders(
   headers: Headers,
-  lease: RunnerActiveInvocationLeaseHeaders,
+  lease: RunnerActiveInvocationLeaseWriteHeaders,
 ): void {
   headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, lease.attemptId);
   headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, lease.leaseGeneration);

@@ -81,6 +81,12 @@ projection reference data to reconstruct the work without raw payload
 duplication. Inbox capture and parser state remain useful projections for
 search, display, attachment enrichment, and debugging, but hosted callers must
 not stage hidden runtime-only inbox rows to make Codex admission succeed.
+Invocation-local Worker routes such as artifact writes, browser-vault replica
+writes, provider effects, and mailbox payload decode authorize the current
+runner by active invocation identity (`attemptId`, `leaseGeneration`, and
+`userId`). `workspaceVersion` is the workspace checkpoint compare-and-swap
+guard and must stay on the checkpoint path rather than becoming generic
+side-effect authorization.
 
 ## Current Protocol
 
