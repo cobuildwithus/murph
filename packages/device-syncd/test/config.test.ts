@@ -245,6 +245,7 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "WHOOP_CLIENT_SECRET",
     "STRAVA_CLIENT_ID",
     "STRAVA_CLIENT_SECRET",
+    "STRAVA_WEBHOOK_SIGNING_SECRET",
   ]);
   assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
     "JUNCTION_ENV",
@@ -280,6 +281,7 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "STRAVA_RECONCILE_INTERVAL_MS",
     "STRAVA_REQUEST_TIMEOUT_MS",
     "STRAVA_SCOPES",
+    "STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
   ]);
 });
 
@@ -303,6 +305,8 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
       clientSecret: "strava-client-secret",
       fetchImpl: fetch,
       scopes: ["activity:read", "activity:read_all"],
+      webhookSigningSecret: "signing-secret-for-tests",
+      webhookTimestampToleranceMs: 300_000,
       webhookVerifyToken: "verify-token-for-tests",
     },
   });
@@ -322,6 +326,7 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
       clientId: "strava-client-id",
       clientSecret: "strava-client-secret",
       scopes: ["activity:read", "activity:read_all"],
+      webhookTimestampToleranceMs: 300_000,
     },
   });
 });
@@ -581,6 +586,21 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs rejects unknown provi
         "runtime.providerConfigs",
       ),
     /runtime\.providerConfigs\.oura\.webhookVerificationToken is a provider-owned admin secret/u,
+  );
+
+  assert.throws(
+    () =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          strava: {
+            clientId: "strava-client-id",
+            clientSecret: "strava-client-secret",
+            webhookSigningSecret: "signing-secret-for-tests",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    /runtime\.providerConfigs\.strava\.webhookSigningSecret is a provider-owned webhook signing secret/u,
   );
 
   assert.throws(
@@ -868,7 +888,7 @@ test("readConfiguredWhoopDeviceSyncProviderConfig trims scopes and parses intege
   });
 });
 
-test("readConfiguredStravaDeviceSyncProviderConfig trims scopes and keeps the webhook verify token", () => {
+test("readConfiguredStravaDeviceSyncProviderConfig trims scopes and keeps provider-owned webhook secrets", () => {
   const config = readConfiguredStravaDeviceSyncProviderConfig({
     STRAVA_CLIENT_ID: "strava-client-id",
     STRAVA_CLIENT_SECRET: "strava-client-secret",
@@ -877,6 +897,8 @@ test("readConfiguredStravaDeviceSyncProviderConfig trims scopes and keeps the we
     STRAVA_RECONCILE_DAYS: "7",
     STRAVA_RECONCILE_INTERVAL_MS: "14400000",
     STRAVA_REQUEST_TIMEOUT_MS: "15000",
+    STRAVA_WEBHOOK_SIGNING_SECRET: "signing-secret-for-tests",
+    STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "300000",
     STRAVA_WEBHOOK_VERIFY_TOKEN: "verify-token-for-tests",
   });
 
@@ -890,6 +912,8 @@ test("readConfiguredStravaDeviceSyncProviderConfig trims scopes and keeps the we
     reconcileDays: 7,
     reconcileIntervalMs: 14_400_000,
     requestTimeoutMs: 15_000,
+    webhookSigningSecret: "signing-secret-for-tests",
+    webhookTimestampToleranceMs: 300_000,
     webhookVerifyToken: "verify-token-for-tests",
   });
 });

@@ -256,11 +256,14 @@ describe("deviceSyncProviderManifests", () => {
         reconcileIntervalMs: 3_600_000,
         requestTimeoutMs: 10_000,
         scopes: ["activity:read"],
+        webhookSigningSecret: "<REDACTED_WEBHOOK_SECRET>",
+        webhookTimestampToleranceMs: 300_000,
         webhookVerifyToken: "<REDACTED_WEBHOOK_SECRET>",
       },
     });
 
     expect(cloned.oura).not.toHaveProperty("webhookVerificationToken");
+    expect(cloned.strava).not.toHaveProperty("webhookSigningSecret");
     expect(cloned.strava).not.toHaveProperty("webhookVerifyToken");
     expect(cloned.junction).not.toHaveProperty("apiKey");
     expect(cloned.junction).not.toHaveProperty("allowCustomBaseUrl");
