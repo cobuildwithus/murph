@@ -5917,6 +5917,84 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
+  it('skips active-turn mailbox admission for hosted queue-only auto-replies', async () => {
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      }),
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: unknown
+      activeTurnInput?: unknown
+      deliveryDispatchMode?: string
+    }) => {
+      expect(input.activeTurnCheckpoint).toBeUndefined()
+      expect(input.activeTurnInput).toBeUndefined()
+      expect(input.deliveryDispatchMode).toBe('queue-only')
+      return {
+        delivery: null,
+        deliveryDeferred: true,
+        deliveryError: null,
+        deliveryIntentId: 'intent-queue-only',
+        response: 'queued response text',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['telegram'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
+    expect(inputSource.refresh).not.toHaveBeenCalled()
+    expect(inputSource.listNewConversationInputs).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps degraded hosted email in mixed retry groups before prompt construction', async () => {
     const promptReadyThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-ready@example.test>',

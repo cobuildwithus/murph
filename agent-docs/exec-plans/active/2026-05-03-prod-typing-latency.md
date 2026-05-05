@@ -74,6 +74,7 @@ Updated: 2026-05-06
 - 2026-05-06 provider timing decision: emit metadata-only Codex app-server timing trace stages (`spawn-ready`, initialize, thread start/resume, turn start/completion, shutdown) so live logs can split the remaining assistant pass latency without storing prompts, messages, identifiers, paths, or provider payloads.
 - 2026-05-06 automation timing decision: emit metadata-only assistant automation pass timing stages around diagnostics, maintenance, recovery, scan, cron, status refresh, and outbox summary so the remaining warm-path gap can be isolated without storing prompts, messages, identifiers, paths, or provider payloads.
 - 2026-05-06 status refresh latency decision: hosted queue-only auto-replies should not await status snapshot refresh before fast outbox dispatch; the status snapshot is operator metadata and can be refreshed by non-critical lanes after the user-visible send path is unblocked.
+- 2026-05-06 active-turn admission latency decision: hosted queue-only auto-replies should not install active-turn mailbox admission hooks because the request/commit boundary refreshes re-import and checkpoint mailbox state on the user-visible reply path; late same-conversation input can arrive through the next webhook/wake instead.
 
 ## Current evidence
 
@@ -90,6 +91,7 @@ Updated: 2026-05-06
 - Those same probes spent roughly 11-12.5s inside the assistant automation pass after restore/import, so the next deploy must preserve warm container state and expose provider-stage timings before another live message is sent.
 - After the warm-retention deploy, live probes restored in roughly 0.3s with base/hot cache hits, but the second warm probe still took roughly 13.8s append-to-send. The Codex app-server trace was roughly 2.1s, while the assistant automation pass was roughly 8.5s, so the remaining bottleneck is inside the automation/send envelope rather than snapshot restore.
 - Code inspection after that probe found two awaited status snapshot refreshes on the hosted queue-only auto-reply path: one in the message turn cleanup and one in the automation pass after scanning. Both occur before the hosted runtime can fast-dispatch queued delivery effects, so they are now skipped only for hosted queue-only automation passes.
+- The post-status-skip live probe confirmed status refresh was skipped, but the first run cold-restored the base snapshot after deploy and the warm follow-up still spent roughly 8.3s inside scan while Codex itself took roughly 1.7s. Code inspection mapped that gap to hosted active-turn mailbox refresh/admission hooks that re-import/checkpoint during provider request boundaries.
 
 ## Verification
 
@@ -126,3 +128,6 @@ Updated: 2026-05-06
   - `git diff --check -- packages/assistant-engine/src/assistant/automation/run-loop.ts packages/assistant-runtime/src/hosted-runtime/events.ts packages/assistant-engine/test/assistant-automation-runtime.test.ts packages/assistant-runtime/test/hosted-runtime-events.test.ts`
   - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-automation-runtime.test.ts --testNamePattern "timing traces|status refresh on hosted|store-backed input source|no-canonical-write"`
   - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-local-service-runtime.test.ts --testNamePattern "queue-only mode|successful turn"`
+  - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-automation-runtime.test.ts --testNamePattern "active-turn mailbox admission|status refresh on hosted"`
+  - `pnpm --dir packages/assistant-engine typecheck`
+  - `git diff --check`
