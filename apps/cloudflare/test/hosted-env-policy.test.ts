@@ -19,6 +19,7 @@ import {
 const requiredWorkerSecrets = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
+  OPENAI_API_KEY: "openai-secret",
 } satisfies Record<string, string>;
 const requiredHostedAssistantProvider = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -144,7 +145,6 @@ describe("buildHostedWorkerSecretsPayload", () => {
     const payload = buildHostedWorkerSecretsPayload({
       ...requiredWorkerSecrets,
       OLLAMA_API_KEY: "ollama-secret",
-      OPENAI_API_KEY: "openai-secret",
       VERCEL_AI_API_KEY: "vercel-secret",
     });
 

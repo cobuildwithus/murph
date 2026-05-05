@@ -611,6 +611,7 @@ describe("hosted deploy automation helpers", () => {
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      OPENAI_API_KEY: "openai-key",
     });
 
     expect(payload.GARMIN_CLIENT_ID).toBeUndefined();
@@ -654,6 +655,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      OPENAI_API_KEY: "openai-key",
       OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",
     }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
 

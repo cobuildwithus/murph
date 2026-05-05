@@ -21,6 +21,7 @@ import {
 } from "../src/runner-env.js";
 import { readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
 import {
+  HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
 } from "../scripts/deploy-automation/worker-secret-names.ts";
 import {
@@ -1077,9 +1078,9 @@ describe("hosted deploy automation device-sync surface", () => {
         "LINQ_API_TOKEN",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",
-        "OPENAI_API_KEY",
       ]),
     );
+    expect(HOSTED_WORKER_REQUIRED_SECRET_NAMES).toContain("OPENAI_API_KEY");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_AI_USAGE_BILLING_MODE",
