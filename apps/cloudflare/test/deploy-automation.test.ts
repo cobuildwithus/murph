@@ -388,11 +388,15 @@ describe("hosted deploy automation helpers", () => {
       "runs-on: blacksmith-4vcpu-ubuntu-2404",
       "name: Codex cache-prefix E2E gate",
       "name: Linq delivery E2E gate",
+      "name: Linq scheduled reminder E2E gate",
       "pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live 2>&1 \\",
       "pnpm hosted-local e2e linq-delivery 2>&1 \\",
+      "pnpm hosted-local e2e linq-scheduled-reminder 2>&1 \\",
       "cloudflare-hosted-deploy-codex-cache-prefix-logs",
       "cloudflare-hosted-deploy-linq-delivery-logs",
+      "cloudflare-hosted-deploy-linq-scheduled-reminder-logs",
       "- linq-delivery-gate",
+      "- linq-scheduled-reminder-gate",
       "name: Start Postgres",
       "docker run \\",
       "--name \"${postgres_container}\"",
@@ -445,10 +449,10 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
-    ]).toHaveLength(3);
+    ]).toHaveLength(4);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
-    ]).toHaveLength(2);
+    ]).toHaveLength(3);
     expect(workflow).not.toContain("services:");
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");

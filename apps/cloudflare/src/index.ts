@@ -63,6 +63,9 @@ import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import { handleLegacyHostedRunnerWakeQueue } from "./legacy-runner-wake-queue.ts";
 import {
+  createHostedArtifactStore,
+} from "./bundle-store.ts";
+import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
   HostedBrowserVaultReplicaOwnershipError,
@@ -121,6 +124,32 @@ const workerPublicRoutes: readonly DeclarativeRoute<{
 ];
 
 const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return isHostedWorkerTestEnvironment(context.env) ? null : notFound();
+    },
+    async handle(context) {
+      return handleTestArtifactSeedRoute(context);
+    },
+    match: matchExactPath("/__test/artifacts"),
+    methods: ["PUT"],
+    name: "test-artifact-seed",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return isHostedWorkerTestEnvironment(context.env) ? null : notFound();
+    },
+    async handle(context, params) {
+      return handleTestRunUntilIdleRoute(context, params.userId);
+    },
+    match: matchTestUserRoute("/__test/users/", "/run-until-idle"),
+    methods: ["POST"],
+    name: "test-run-until-idle",
+    wrongMethodResponse: "not-found",
+  },
   {
     authorization: "web-callback-signature",
     async handle(context) {
@@ -304,6 +333,14 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     reason: HostedWorkspaceInvocationReason;
   }): Promise<HostedWorkspaceInvocationResult> {
     return this.runner.runUntilIdleOrBudget(input);
+  }
+
+  async runUntilIdleForTest(input: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  }): Promise<HostedWorkspaceInvocationResult> {
+    await this.runner.bindUser(input.userId);
+    return this.runner.runUntilIdleOrBudget({ reason: input.reason });
   }
 
   async fetch(): Promise<Response> {
@@ -504,6 +541,97 @@ function resolveDeployContainerSmokeObjectName(
   return workerVersionId
     ? `__deploy-smoke-${workerVersionId}`
     : "__deploy-smoke";
+}
+
+async function handleTestArtifactSeedRoute(
+  context: WorkerRouteContext,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = context.url.searchParams.get("userId")?.trim() ?? "";
+  const sha256 = context.url.searchParams.get("sha256")?.trim() ?? "";
+
+  if (!userId) {
+    return json({ error: "userId is required." }, 400);
+  }
+
+  if (!/^[a-f0-9]{64}$/u.test(sha256)) {
+    return json({ error: "sha256 is required." }, 400);
+  }
+
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test artifact user.",
+    "test-artifact-bound-user-mismatch",
+    "test-artifact-seed",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const crypto = await resolveHostedExecutionUserCryptoContext({
+    bucket: context.env.BUNDLES,
+    domain: "runtime",
+    environment: context.environment,
+    userId,
+  });
+  const artifactStore = createHostedArtifactStore({
+    bucket: context.env.BUNDLES,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+    resolveKeyById: crypto.resolveKeyById,
+    userId,
+  });
+  const bytes = new Uint8Array(await context.request.arrayBuffer());
+  await artifactStore.writeArtifact(sha256, bytes);
+
+  return json({
+    ok: true,
+    sha256,
+    size: bytes.byteLength,
+    userId,
+  });
+}
+
+function isHostedWorkerTestEnvironment(env: WorkerEnvironmentSource): boolean {
+  const stringEnv = asWorkerStringEnvironment(env);
+  return stringEnv.NODE_ENV === "test" && stringEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+}
+
+async function handleTestRunUntilIdleRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-run-until-idle",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId) as UserRunnerDurableObjectStubLike & {
+    runUntilIdleForTest(input: {
+      reason: HostedWorkspaceInvocationReason;
+      userId: string;
+    }): Promise<HostedWorkspaceInvocationResult>;
+  };
+  return json(await stub.runUntilIdleForTest({
+    reason: "manual",
+    userId,
+  }));
 }
 
 async function handleRunnerNudgeRoute(
@@ -998,6 +1126,17 @@ function readOptionalTrimmedHeader(request: Request, name: string): string | nul
 function matchExactPath(...paths: readonly string[]): RouteMatcher {
   const allowedPaths = new Set(paths);
   return (pathname) => (allowedPaths.has(pathname) ? {} : null);
+}
+
+function matchTestUserRoute(prefix: string, suffix: string): RouteMatcher {
+  return (pathname) => {
+    if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
+      return null;
+    }
+
+    const userId = pathname.slice(prefix.length, pathname.length - suffix.length);
+    return userId.length > 0 ? { userId } : null;
+  };
 }
 
 function respondToWrongMethod(response: WrongMethodResponse): Response {

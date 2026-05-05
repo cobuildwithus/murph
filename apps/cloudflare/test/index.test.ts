@@ -498,6 +498,70 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("keeps hosted-local test routes hidden without the explicit test-route flag", async () => {
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+        {
+          body: "artifact-payload",
+          method: "PUT",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      createWorkerEnv(createUserRunnerStub(), {
+        NODE_ENV: "test",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
+  it("requires hosted-local test route callers to be bound to the target user", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const artifactResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+        {
+          body: "artifact-payload",
+          method: "PUT",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(artifactResponse.status).toBe(401);
+    await expect(artifactResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test artifact user.",
+    });
+
+    const runResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/run-until-idle",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(runResponse.status).toBe(401);
+    await expect(runResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+  });
+
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
     const stub = createUserRunnerStub();
     const wake = createWake("evt_123");

@@ -399,6 +399,9 @@ function prefixHostedAssistantAutomationFailureContext(
 function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
   return new Set([
     "capture.failed",
+    "cron.job.completed",
+    "cron.scan.job",
+    "cron.scan.started",
     "input.replied",
     "input.reply-failed",
     "input.reply-skipped",
