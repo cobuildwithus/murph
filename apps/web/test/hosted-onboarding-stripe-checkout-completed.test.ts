@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeCheckoutSession: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
+  upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
 }));
 
@@ -22,6 +23,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   return {
     ...actual,
     readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
+    upsertHostedMemberStripeCheckoutEmailIfFreshTx:
+      mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
   };
 });
 
@@ -61,6 +64,15 @@ describe("applyStripeCheckoutCompleted", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     });
+    mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: {
+        address: "payer@example.com",
+        collectedAt: new Date(1_744_416_000 * 1000),
+      },
+      verifiedEmail: null,
+    });
   });
 
   it("writes checkout-session refs with a session-derived freshness watermark", async () => {
@@ -69,6 +81,9 @@ describe("applyStripeCheckoutCompleted", () => {
         {
           created: 1_744_416_000,
           customer: "cus_123",
+          customer_details: {
+            email: " payer@example.com ",
+          },
           id: "cs_123",
           subscription: "sub_123",
         } as never,
@@ -86,9 +101,15 @@ describe("applyStripeCheckoutCompleted", () => {
       stripeSubscriptionId: "sub_123",
       tx: {},
     });
+    expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
+      address: "payer@example.com",
+      collectedAt: new Date(1_744_416_000 * 1000),
+      memberId: "member_123",
+      prisma: {},
+    });
   });
 
-  it("ignores stale checkout sessions once a fresher billing ref watermark exists", async () => {
+  it("ignores stale checkout billing refs without dropping the email hint", async () => {
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot({
       billingRef: {
         lastStripeEventCreatedAt: new Date("2026-04-12T02:00:00.000Z"),
@@ -103,6 +124,7 @@ describe("applyStripeCheckoutCompleted", () => {
         {
           created: 1_744_412_400,
           customer: "cus_old",
+          customer_email: "old-payer@example.com",
           id: "cs_old",
           subscription: "sub_old",
         } as never,
@@ -114,6 +136,12 @@ describe("applyStripeCheckoutCompleted", () => {
     });
 
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
+      address: "old-payer@example.com",
+      collectedAt: new Date(1_744_412_400 * 1000),
+      memberId: "member_123",
+      prisma: {},
+    });
   });
 });
 

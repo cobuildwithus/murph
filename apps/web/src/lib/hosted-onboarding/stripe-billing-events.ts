@@ -15,6 +15,9 @@ import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
 import {
+  upsertHostedMemberStripeCheckoutEmailIfFreshTx,
+} from "./hosted-member-store";
+import {
   findMemberForStripeCheckoutSession,
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
@@ -67,14 +70,24 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
   memberId: string;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await writeHostedMemberStripeBillingRefIfFreshTx({
-    dispatchContext: buildHostedStripeCheckoutSessionFreshness(input.session),
+}) {
+  const dispatchContext = buildHostedStripeCheckoutSessionFreshness(input.session);
+  const billingSnapshot = await writeHostedMemberStripeBillingRefIfFreshTx({
+    dispatchContext,
     memberId: input.memberId,
     stripeCustomerId: coerceStripeObjectId(input.session.customer) ?? undefined,
     stripeSubscriptionId: coerceStripeSubscriptionId(input.session.subscription) ?? undefined,
     tx: input.tx,
   });
+
+  await writeHostedStripeCheckoutEmailIfPresentTx({
+    collectedAt: dispatchContext.eventCreatedAt,
+    memberId: input.memberId,
+    stripeEmailAddress: readHostedStripeCheckoutSessionEmailAddress(input.session),
+    tx: input.tx,
+  });
+
+  return billingSnapshot;
 }
 
 export async function applyStripeCheckoutExpired(
@@ -171,6 +184,13 @@ export async function applyStripeInvoicePaid(
       hostedExecutionEventId: null,
     };
   }
+
+  await writeHostedStripeCheckoutEmailIfPresentTx({
+    collectedAt: dispatchContext.eventCreatedAt,
+    memberId: updatedMember.core.id,
+    stripeEmailAddress: readHostedStripeInvoiceEmailAddress(invoice),
+    tx: prisma,
+  });
 
   if (isHostedAccessBlockedBillingStatus(startingBillingStatus)) {
     return {
@@ -269,6 +289,45 @@ export async function applyStripeRefundCreated(
     stripeCustomerId: customerId ?? undefined,
     tx: prisma,
   });
+}
+
+async function writeHostedStripeCheckoutEmailIfPresentTx(input: {
+  collectedAt: Date;
+  memberId: string;
+  stripeEmailAddress: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.stripeEmailAddress) {
+    return;
+  }
+
+  await upsertHostedMemberStripeCheckoutEmailIfFreshTx({
+    address: input.stripeEmailAddress,
+    collectedAt: input.collectedAt,
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+}
+
+function readHostedStripeCheckoutSessionEmailAddress(
+  session: Stripe.Checkout.Session,
+): string | null {
+  return normalizeHostedStripeEmailAddress(
+    session.customer_details?.email ?? session.customer_email ?? null,
+  );
+}
+
+function readHostedStripeInvoiceEmailAddress(invoice: Stripe.Invoice): string | null {
+  return normalizeHostedStripeEmailAddress(invoice.customer_email ?? null);
+}
+
+function normalizeHostedStripeEmailAddress(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function buildHostedStripeInvoiceActivationDispatchContext(

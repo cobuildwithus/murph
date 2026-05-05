@@ -317,6 +317,41 @@ describe("hosted signup welcome email", () => {
     expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
   });
 
+  it("uses the unverified Stripe checkout email when no verified email is linked yet", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.to).toEqual(["payer@example.com"]);
+      expect(payload.text).toContain("Hey, welcome to Murph!");
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: {
+        address: "payer@example.com",
+        collectedAt: new Date("2026-05-01T00:00:00.000Z"),
+      },
+      verifiedEmail: null,
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+  });
+
   it("skips sending for members without a verified email address", async () => {
     const fetchMock: typeof fetch = async () => {
       throw new Error("fetch should not be called");
@@ -337,7 +372,7 @@ describe("hosted signup welcome email", () => {
       fetchImpl: fetchMock,
       memberId: "member_123",
     })).resolves.toEqual({
-      reason: "no_verified_email",
+      reason: "no_welcome_email_recipient",
       status: "skipped",
     });
 

@@ -371,16 +371,18 @@ model HostedMemberBillingRef {
 }
 
 model HostedMemberEmailAuthorization {
-  memberId                           String       @unique @map("member_id")
-  verifiedEmailLookupKey             String?      @unique @map("verified_email_lookup_key")
-  verifiedEmailAddressEncrypted      String?      @map("verified_email_address_encrypted")
-  verifiedEmailVerifiedAt            DateTime?    @map("verified_email_verified_at")
-  directPublicSenderLookupKey        String?      @unique @map("direct_public_sender_lookup_key")
-  directPublicSenderAddressEncrypted String?      @map("direct_public_sender_address_encrypted")
-  directPublicSenderAuthorizedAt     DateTime?    @map("direct_public_sender_authorized_at")
-  createdAt                          DateTime     @default(now()) @map("created_at")
-  updatedAt                          DateTime     @updatedAt @map("updated_at")
-  member                             HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId                            String       @unique @map("member_id")
+  verifiedEmailLookupKey              String?      @unique @map("verified_email_lookup_key")
+  verifiedEmailAddressEncrypted       String?      @map("verified_email_address_encrypted")
+  verifiedEmailVerifiedAt             DateTime?    @map("verified_email_verified_at")
+  directPublicSenderLookupKey         String?      @unique @map("direct_public_sender_lookup_key")
+  directPublicSenderAddressEncrypted  String?      @map("direct_public_sender_address_encrypted")
+  directPublicSenderAuthorizedAt      DateTime?    @map("direct_public_sender_authorized_at")
+  stripeCheckoutEmailAddressEncrypted String?      @map("stripe_checkout_email_address_encrypted")
+  stripeCheckoutEmailCollectedAt      DateTime?    @map("stripe_checkout_email_collected_at")
+  createdAt                           DateTime     @default(now()) @map("created_at")
+  updatedAt                           DateTime     @updatedAt @map("updated_at")
+  member                              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_email_authorization")
 }

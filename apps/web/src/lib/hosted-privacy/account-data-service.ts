@@ -996,6 +996,12 @@ function projectAccountSnapshotForExport(
               }
             : null,
           memberId: snapshot.emailAuthorization.memberId,
+          stripeCheckoutEmail: snapshot.emailAuthorization.stripeCheckoutEmail
+            ? {
+                address: snapshot.emailAuthorization.stripeCheckoutEmail.address,
+                collectedAt: snapshot.emailAuthorization.stripeCheckoutEmail.collectedAt,
+              }
+            : null,
           verifiedEmail: snapshot.emailAuthorization.verifiedEmail
             ? {
                 address: snapshot.emailAuthorization.verifiedEmail.address,
