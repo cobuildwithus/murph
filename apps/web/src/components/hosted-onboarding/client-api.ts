@@ -1,5 +1,8 @@
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
-import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
+import type {
+  HostedBillingPlanCode,
+  HostedPublicBillingCheckoutOffer,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 
 interface ApiErrorPayload {
   error: {
@@ -82,11 +85,13 @@ export async function requestHostedOnboardingJson<T>(input: {
 
 export async function requestHostedBillingCheckout(input: {
   billingPlanCode?: HostedBillingPlanCode | null;
+  checkoutOffer?: HostedPublicBillingCheckoutOffer | null;
   inviteCode: string;
 }): Promise<HostedBillingCheckoutResponse> {
   return requestHostedOnboardingJson<HostedBillingCheckoutResponse>({
     payload: {
       ...(input.billingPlanCode ? { billingPlanCode: input.billingPlanCode } : {}),
+      ...(input.checkoutOffer ? { checkoutOffer: input.checkoutOffer } : {}),
       inviteCode: input.inviteCode,
     },
     url: "/api/hosted-onboarding/billing/checkout",

@@ -233,6 +233,7 @@ Hosted AI usage metering:
 - `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests only when `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`.
 - `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` must be a Stripe restricted key with billing meter-event write permission only; it is forwarded to hosted execution, never persisted with usage rows, and ignored unless it starts with `rk_`.
 - Hosted AI included-allowance gating is app-owned: web prices imported `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
+- Pulse Trial uses the same allowance system with a phase-aware 2.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 Hosted runner cleanup:
@@ -565,8 +566,9 @@ The onboarding lane is intentionally thin:
 - Privy verifies login, linking, and security-sensitive identity operations;
   successful hosted completion issues a first-party opaque app session stored as
   a hashed `HostedWebSession`.
-- Stripe Checkout is subscription-only and `invoice.paid` remains the only
-  positive entitlement source.
+- Stripe Checkout is subscription-only. `invoice.paid` remains the normal
+  positive entitlement source, with one metadata-gated exception: a valid
+  Pulse Trial Checkout completion can activate Pulse in `trial` phase.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
 - Cloudflare-bound execution from onboarding and exact message ingress appends
@@ -580,6 +582,13 @@ Current hosted billing assumptions:
 
 - Hosted checkout is always Stripe subscription mode.
 - The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
-- `invoice.paid` is the only positive activation source.
-- `checkout.session.completed` and `customer.subscription.*` do not grant access.
+- `invoice.paid` is the paid activation and paid-cycle source of truth.
+- `checkout.session.completed` normally binds refs only, except for the
+  Pulse Trial offer (`pulse_trial_7d`) when metadata, member ownership, and
+  the expanded/retrieved subscription prove an active seven-day trial.
+- `customer.subscription.*` does not newly activate access and cannot promote
+  a Pulse Trial to paid before the accepted paid invoice.
 - Chargebacks, disputes, and refunds suspend hosted access pending manual review.
+- Pulse Trial rollout is gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`;
+  keep the flag off until the nullable billing-ref migration and backend
+  reconciliation code are deployed.

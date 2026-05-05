@@ -19,10 +19,14 @@ import {
   requiresHostedCanonicalStripeBillingStatus,
   resolveHostedStripeBillingStatusForWrite,
 } from "./stripe-billing-status";
+import {
+  HOSTED_PULSE_TRIAL_OFFER,
+} from "./billing-plans";
 
 export type HostedStripeBillingFreshnessPolicy =
   | "strict"
-  | "positive-invoice-entitlement";
+  | "positive-invoice-entitlement"
+  | "trial-checkout-entitlement";
 
 export async function prepareHostedMemberStripeBillingWrite(input: {
   canonicalBillingStatus?: HostedBillingStatus | null;
@@ -51,12 +55,18 @@ export async function prepareHostedMemberStripeBillingWrite(input: {
 export async function writeHostedMemberStripeBillingTx(input: {
   billingStatus: HostedBillingStatus;
   canonicalBillingStatus: HostedBillingStatus | null;
+  currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
+  currentCheckoutOffer?: string | null;
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
+  currentTrialEndsAt?: Date | null;
+  currentTrialStartedAt?: Date | null;
   dispatchContext: HostedStripeDispatchContext;
   freshnessPolicy?: HostedStripeBillingFreshnessPolicy;
   member: HostedMemberBillingSnapshot;
+  pulseTrialPolicyVersion?: string | null;
+  pulseTrialRedeemedAt?: Date | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   suspendedAtOverride?: Date | null;
@@ -73,6 +83,17 @@ export async function writeHostedMemberStripeBillingTx(input: {
   }
 
   const freshnessPolicy = input.freshnessPolicy ?? "strict";
+  if (shouldRejectTrialCheckoutEntitlementWriteForCurrentMember({
+    billingRef: currentMember.billingRef,
+    currentBillingStatus: currentMember.core.billingStatus,
+    currentBillingPhase: input.currentBillingPhase,
+    currentCheckoutOffer: input.currentCheckoutOffer,
+    dispatchContext: input.dispatchContext,
+    freshnessPolicy,
+  })) {
+    return null;
+  }
+
   const isStale = isHostedStripeBillingWriteStale(currentMember.billingRef, input.dispatchContext);
   const allowStalePositiveInvoiceWrite = isStale && shouldAllowStalePositiveInvoiceBillingWrite({
     billingRef: currentMember.billingRef,
@@ -84,14 +105,26 @@ export async function writeHostedMemberStripeBillingTx(input: {
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
+  const allowStaleTrialCheckoutWrite = isStale && shouldAllowStaleTrialCheckoutBillingWrite({
+    billingRef: currentMember.billingRef,
+    billingStatus: input.billingStatus,
+    canonicalBillingStatus: input.canonicalBillingStatus,
+    currentBillingPhase: input.currentBillingPhase,
+    currentBillingStatus: currentMember.core.billingStatus,
+    currentCheckoutOffer: input.currentCheckoutOffer,
+    dispatchContext: input.dispatchContext,
+    freshnessPolicy,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  });
 
-  if (isStale && !allowStalePositiveInvoiceWrite) {
+  if (isStale && !allowStalePositiveInvoiceWrite && !allowStaleTrialCheckoutWrite) {
     return null;
   }
 
   const billingRefWriteValues = resolveHostedStripeBillingRefWriteValues({
     billingRef: currentMember.billingRef,
-    preserveCurrentWhenNextMissing: allowStalePositiveInvoiceWrite,
+    preserveCurrentWhenNextMissing: allowStalePositiveInvoiceWrite || allowStaleTrialCheckoutWrite,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
@@ -112,9 +145,15 @@ export async function writeHostedMemberStripeBillingTx(input: {
 
   await writeHostedMemberStripeBillingRefTx({
     memberId: currentMember.core.id,
+    currentBillingPhase: input.currentBillingPhase,
     currentBillingPlanCode: input.currentBillingPlanCode,
+    currentCheckoutOffer: input.currentCheckoutOffer,
     currentPeriodEnd: input.currentPeriodEnd,
     currentPeriodStart: input.currentPeriodStart,
+    currentTrialEndsAt: input.currentTrialEndsAt,
+    currentTrialStartedAt: input.currentTrialStartedAt,
+    pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
+    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
     stripeEventCreatedAt: resolveHostedStripeBillingRefEventCreatedAt({
       billingRef: currentMember.billingRef,
       dispatchContext: input.dispatchContext,
@@ -133,11 +172,17 @@ export async function writeHostedMemberStripeBillingTx(input: {
 export const updateHostedMemberStripeBillingIfFreshTx = writeHostedMemberStripeBillingTx;
 
 export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
+  currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
+  currentCheckoutOffer?: string | null;
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
+  currentTrialEndsAt?: Date | null;
+  currentTrialStartedAt?: Date | null;
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
   memberId: string;
+  pulseTrialPolicyVersion?: string | null;
+  pulseTrialRedeemedAt?: Date | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   tx: Prisma.TransactionClient;
@@ -158,9 +203,15 @@ export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
 
   await writeHostedMemberStripeBillingRefTx({
     memberId: input.memberId,
+    currentBillingPhase: input.currentBillingPhase,
     currentBillingPlanCode: input.currentBillingPlanCode,
+    currentCheckoutOffer: input.currentCheckoutOffer,
     currentPeriodEnd: input.currentPeriodEnd,
     currentPeriodStart: input.currentPeriodStart,
+    currentTrialEndsAt: input.currentTrialEndsAt,
+    currentTrialStartedAt: input.currentTrialStartedAt,
+    pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
+    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
     stripeEventCreatedAt: input.dispatchContext.eventCreatedAt,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
@@ -248,6 +299,81 @@ function shouldAllowStalePositiveInvoiceBillingWrite(input: {
 
   return hostedStripeBillingRefValueMatches(input.billingRef?.stripeCustomerId, input.stripeCustomerId) &&
     hostedStripeBillingRefValueMatches(input.billingRef?.stripeSubscriptionId, input.stripeSubscriptionId);
+}
+
+function shouldAllowStaleTrialCheckoutBillingWrite(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  billingStatus: HostedBillingStatus;
+  canonicalBillingStatus: HostedBillingStatus | null;
+  currentBillingPhase?: string | null;
+  currentBillingStatus: HostedBillingStatus;
+  currentCheckoutOffer?: string | null;
+  dispatchContext: Pick<HostedStripeDispatchContext, "sourceType">;
+  freshnessPolicy: HostedStripeBillingFreshnessPolicy;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+}): boolean {
+  if (input.freshnessPolicy !== "trial-checkout-entitlement") {
+    return false;
+  }
+
+  if (input.dispatchContext.sourceType !== "stripe.checkout.session.completed") {
+    return false;
+  }
+
+  if (
+    input.billingStatus !== HostedBillingStatus.active ||
+    input.canonicalBillingStatus !== HostedBillingStatus.active
+  ) {
+    return false;
+  }
+
+  if (input.currentBillingPhase !== "trial" || input.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
+    return false;
+  }
+
+  if (input.billingRef?.currentBillingPhase === "paid") {
+    return false;
+  }
+
+  if (!canOlderPositiveInvoiceWriteCurrentBillingStatus(input.currentBillingStatus)) {
+    return false;
+  }
+
+  return hostedStripeBillingRefValueMatches(input.billingRef?.stripeCustomerId, input.stripeCustomerId) &&
+    hostedStripeBillingRefValueMatches(input.billingRef?.stripeSubscriptionId, input.stripeSubscriptionId);
+}
+
+function shouldRejectTrialCheckoutEntitlementWriteForCurrentMember(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  currentBillingPhase?: string | null;
+  currentBillingStatus: HostedBillingStatus;
+  currentCheckoutOffer?: string | null;
+  dispatchContext: Pick<HostedStripeDispatchContext, "sourceType">;
+  freshnessPolicy: HostedStripeBillingFreshnessPolicy;
+}): boolean {
+  if (input.freshnessPolicy !== "trial-checkout-entitlement") {
+    return false;
+  }
+
+  if (input.dispatchContext.sourceType !== "stripe.checkout.session.completed") {
+    return false;
+  }
+
+  if (input.currentBillingPhase !== "trial" || input.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
+    return false;
+  }
+
+  if (input.billingRef?.pulseTrialRedeemedAt) {
+    return true;
+  }
+
+  if (input.billingRef?.currentBillingPhase === "paid") {
+    return true;
+  }
+
+  return input.currentBillingStatus === HostedBillingStatus.active &&
+    input.billingRef?.currentBillingPhase !== "trial";
 }
 
 function canOlderPositiveInvoiceWriteCurrentBillingStatus(

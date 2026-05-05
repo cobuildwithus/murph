@@ -13,9 +13,14 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  HOSTED_PULSE_TRIAL_OFFER,
+  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedDefaultBillingPlanCode,
   parseHostedBillingPlanCode,
+  parseHostedBillingPhase,
+  parseHostedBillingCheckoutOffer,
+  requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import { getPrisma } from "../prisma";
@@ -24,11 +29,14 @@ type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 
 export type HostedAiUsageGateDeniedReason =
   | "ai_usage_limit_exceeded"
-  | "hosted_access_inactive";
+  | "hosted_access_inactive"
+  | "trial_expired_pending_billing";
 
 export type HostedAiUsageGateNoticeCode =
   | "edge_enable_usage_based_pricing"
-  | "pulse_upgrade_edge";
+  | "pulse_upgrade_edge"
+  | "trial_usage_limit_reached"
+  | "trial_conversion_pending";
 
 export type HostedAiUsageGateDecision =
   | {
@@ -67,12 +75,58 @@ export interface HostedAiUsageAllowancePricingResult {
   pricingVersion: string;
 }
 
+type HostedAiUsageAllowancePricingModelSource =
+  | "requested"
+  | "served";
+
+interface HostedAiUsageAllowancePricingModelResolution {
+  model: HostedAiUsageAllowancePricedModel | null;
+  requestedModel: string | null;
+  servedModel: string | null;
+  source: HostedAiUsageAllowancePricingModelSource | null;
+}
+
 interface HostedAiUsageAllowancePeriod {
   billingPlanCode: HostedBillingPlanCode;
   limitUsdMicros: bigint;
   periodEnd: Date;
   periodStart: Date;
   spentUsdMicros: bigint;
+}
+
+type HostedAiUsageAllowancePeriodResult =
+  | ({ kind: "period" } & HostedAiUsageAllowancePeriod)
+  | ({
+    kind: "denied";
+    spentUsdMicros: bigint;
+  } & Extract<HostedAiUsageAllowancePeriodResolution, { kind: "denied" }>);
+
+type HostedAiUsageAllowancePeriodResolution =
+  | ({
+    kind: "period";
+    source: "billing" | "calendar" | "trial";
+  } & Omit<HostedAiUsageAllowancePeriod, "spentUsdMicros">)
+  | {
+    billingPlanCode: HostedBillingPlanCode;
+    kind: "denied";
+    limitUsdMicros: bigint;
+    periodEnd: Date;
+    periodStart: Date;
+    reason: "trial_expired_pending_billing";
+    retryAfter: Date;
+    userNotice: HostedAiUsageGateUserNotice;
+  };
+
+interface HostedAiUsageAllowanceBillingRef {
+  currentBillingPhase: string | null;
+  currentBillingPlanCode: string | null;
+  currentCheckoutOffer: string | null;
+  currentPeriodEnd: Date | null;
+  currentPeriodStart: Date | null;
+  currentTrialEndsAt: Date | null;
+  currentTrialStartedAt: Date | null;
+  pulseTrialPolicyVersion: string | null;
+  pulseTrialRedeemedAt: Date | null;
 }
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
@@ -105,9 +159,7 @@ export function priceHostedAiUsageForAllowance(
 ): HostedAiUsageAllowancePricingResult {
   const credentialSource = normalizeAssistantUsageCredentialSource(record.credentialSource);
   const counted = credentialSource !== "member";
-  const model = normalizeHostedAiUsageAllowanceModel(
-    record.servedModel ?? record.requestedModel ?? null,
-  );
+  const modelResolution = resolveHostedAiUsageAllowancePricingModel(record);
   const tokenSnapshot = buildHostedAiUsageAllowanceTokenSnapshot(record);
 
   if (!counted) {
@@ -116,7 +168,7 @@ export function priceHostedAiUsageForAllowance(
       counted: false,
       pricingSnapshot: {
         credentialSource,
-        model,
+        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
         pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
         schema: "murph.hosted-ai-usage-allowance-pricing.v1",
         tokens: tokenSnapshot,
@@ -125,6 +177,7 @@ export function priceHostedAiUsageForAllowance(
     };
   }
 
+  const model = modelResolution.model;
   if (!model) {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the model.");
   }
@@ -155,7 +208,7 @@ export function priceHostedAiUsageForAllowance(
     counted: true,
     pricingSnapshot: {
       credentialSource,
-      model,
+      ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
       pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
       ratesUsdMicrosPerMillionTokens: {
         cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
@@ -185,6 +238,17 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     now,
     tx: input.tx,
   });
+  if (period.kind === "denied") {
+    await markHostedAiUsageAllowanceDeniedTx({
+      memberId: input.memberId,
+      now,
+      period,
+      record: input.record,
+      tx: input.tx,
+    });
+    return;
+  }
+
   const priced = priceHostedAiUsageForAllowance(input.record);
 
   const accounted = await input.tx.hostedAiUsage.updateMany({
@@ -217,6 +281,36 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 }
 
+async function markHostedAiUsageAllowanceDeniedTx(input: {
+  memberId: string;
+  now: Date;
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "denied" }>;
+  record: AssistantUsageRecord;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedAiUsage.updateMany({
+    where: {
+      allowanceAccountedAt: null,
+      id: input.record.usageId,
+    },
+    data: {
+      allowanceAccountedAt: input.now,
+      allowanceCostUsdMicros: 0n,
+      allowanceCounted: false,
+      allowancePeriodEnd: input.period.periodEnd,
+      allowancePeriodStart: input.period.periodStart,
+      allowancePricingSnapshotJson: {
+        credentialSource: normalizeAssistantUsageCredentialSource(input.record.credentialSource),
+        reason: input.period.reason,
+        requestedModel: input.record.requestedModel ?? null,
+        schema: "murph.hosted-ai-usage-allowance-denied.v1",
+        servedModel: input.record.servedModel ?? null,
+      },
+      allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
+    },
+  });
+}
+
 export async function resolveHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
@@ -226,30 +320,51 @@ export async function resolveHostedAiUsageGate(input: {
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
   return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
+    const memberState = await tx.hostedMember.findUnique({
+      where: {
+        id: input.memberId,
+      },
+      select: {
+        billingRef: {
+          select: {
+            currentBillingPhase: true,
+            currentBillingPlanCode: true,
+            currentCheckoutOffer: true,
+            currentPeriodEnd: true,
+            currentPeriodStart: true,
+            currentTrialEndsAt: true,
+            currentTrialStartedAt: true,
+            pulseTrialPolicyVersion: true,
+            pulseTrialRedeemedAt: true,
+          },
+        },
+        billingStatus: true,
+        suspendedAt: true,
+      },
+    });
+
+    if (!memberState) {
+      throw new TypeError("Hosted AI usage allowance member does not exist.");
+    }
+
+    if (
+      memberState.billingStatus !== HostedBillingStatus.active ||
+      memberState.suspendedAt !== null
+    ) {
+      return resolveHostedAiUsageInactiveGateDecision({
+        at: now,
+        billingRef: memberState.billingRef,
+        memberId: input.memberId,
+      });
+    }
+
     const period = await ensureHostedAiUsageAllowancePeriodTx({
       at: now,
       memberId: input.memberId,
       now,
       tx,
     });
-    const active = await tx.hostedMember.findUnique({
-      where: {
-        id: input.memberId,
-      },
-      select: {
-        billingStatus: true,
-        suspendedAt: true,
-      },
-    });
-    const remainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
-      ? period.limitUsdMicros - period.spentUsdMicros
-      : 0n;
-
-    if (
-      !active
-      || active.billingStatus !== HostedBillingStatus.active
-      || active.suspendedAt !== null
-    ) {
+    if (period.kind === "denied") {
       return {
         allowed: false,
         billingPlanCode: period.billingPlanCode,
@@ -257,16 +372,23 @@ export async function resolveHostedAiUsageGate(input: {
         memberId: input.memberId,
         periodEnd: period.periodEnd,
         periodStart: period.periodStart,
-        reason: "hosted_access_inactive",
-        remainingUsdMicros,
-        retryAfter: period.periodEnd,
+        reason: period.reason,
+        remainingUsdMicros: 0n,
+        retryAfter: period.retryAfter,
         spentUsdMicros: period.spentUsdMicros,
-        userNotice: null,
+        userNotice: period.userNotice,
       };
     }
 
+    const remainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
+      ? period.limitUsdMicros - period.spentUsdMicros
+      : 0n;
+
     if (period.spentUsdMicros >= period.limitUsdMicros) {
-      const userNotice = buildHostedAiUsageGateLimitNotice(period.billingPlanCode);
+      const userNotice = buildHostedAiUsageGateLimitNotice({
+        billingPlanCode: period.billingPlanCode,
+        limitUsdMicros: period.limitUsdMicros,
+      });
 
       return {
         allowed: false,
@@ -296,12 +418,48 @@ export async function resolveHostedAiUsageGate(input: {
   });
 }
 
+function resolveHostedAiUsageInactiveGateDecision(input: {
+  at: Date;
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+  memberId: string;
+}): HostedAiUsageGateDecision {
+  const resolved = resolveHostedAiUsageAllowancePeriod({
+    at: input.at,
+    billingRef: input.billingRef,
+  });
+  const period = resolved.kind === "denied"
+    ? resolved
+    : {
+        billingPlanCode: resolved.billingPlanCode,
+        limitUsdMicros: resolved.limitUsdMicros,
+        periodEnd: resolved.periodEnd,
+        periodStart: resolved.periodStart,
+      };
+  const retryAfter = period.periodEnd.getTime() > input.at.getTime()
+    ? period.periodEnd
+    : new Date(input.at.getTime() + 15 * 60_000);
+
+  return {
+    allowed: false,
+    billingPlanCode: period.billingPlanCode,
+    limitUsdMicros: period.limitUsdMicros,
+    memberId: input.memberId,
+    periodEnd: period.periodEnd,
+    periodStart: period.periodStart,
+    reason: "hosted_access_inactive",
+    remainingUsdMicros: period.limitUsdMicros,
+    retryAfter,
+    spentUsdMicros: 0n,
+    userNotice: null,
+  };
+}
+
 async function ensureHostedAiUsageAllowancePeriodTx(input: {
   at: Date;
   memberId: string;
   now: Date;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageAllowancePeriod> {
+}): Promise<HostedAiUsageAllowancePeriodResult> {
   const member = await input.tx.hostedMember.findUnique({
     where: {
       id: input.memberId,
@@ -309,9 +467,15 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     select: {
       billingRef: {
         select: {
+          currentBillingPhase: true,
           currentBillingPlanCode: true,
+          currentCheckoutOffer: true,
           currentPeriodEnd: true,
           currentPeriodStart: true,
+          currentTrialEndsAt: true,
+          currentTrialStartedAt: true,
+          pulseTrialPolicyVersion: true,
+          pulseTrialRedeemedAt: true,
         },
       },
       id: true,
@@ -326,6 +490,20 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     at: input.at,
     billingRef: member.billingRef,
   });
+  if (resolved.kind === "denied") {
+    return {
+      kind: "denied",
+      billingPlanCode: resolved.billingPlanCode,
+      limitUsdMicros: resolved.limitUsdMicros,
+      periodEnd: resolved.periodEnd,
+      periodStart: resolved.periodStart,
+      reason: resolved.reason,
+      retryAfter: resolved.retryAfter,
+      spentUsdMicros: 0n,
+      userNotice: resolved.userNotice,
+    };
+  }
+
   await input.tx.hostedAiUsagePeriod.upsert({
     where: {
       memberId_periodStart: {
@@ -366,6 +544,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     select: {
       billingPlanCode: true,
+      blockedAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -373,10 +552,17 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
   });
 
-  if (current.limitUsdMicros >= resolved.limitUsdMicros) {
+  const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
+    ?? resolved.billingPlanCode;
+  const periodMatches =
+    currentBillingPlanCode === resolved.billingPlanCode &&
+    current.limitUsdMicros === resolved.limitUsdMicros &&
+    current.periodEnd.getTime() === resolved.periodEnd.getTime();
+
+  if (periodMatches) {
     return {
-      billingPlanCode: parseHostedBillingPlanCode(current.billingPlanCode)
-        ?? resolved.billingPlanCode,
+      kind: "period",
+      billingPlanCode: currentBillingPlanCode,
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
@@ -393,8 +579,11 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     data: {
       billingPlanCode: resolved.billingPlanCode,
-      blockedAt: current.spentUsdMicros < resolved.limitUsdMicros ? null : undefined,
+      blockedAt: current.spentUsdMicros >= resolved.limitUsdMicros
+        ? current.blockedAt ?? input.now
+        : null,
       limitUsdMicros: resolved.limitUsdMicros,
+      periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },
     select: {
@@ -407,6 +596,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   });
 
   return {
+    kind: "period",
     billingPlanCode: parseHostedBillingPlanCode(upgraded.billingPlanCode)
       ?? resolved.billingPlanCode,
     limitUsdMicros: upgraded.limitUsdMicros,
@@ -418,21 +608,36 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
 
 function resolveHostedAiUsageAllowancePeriod(input: {
   at: Date;
-  billingRef: {
-    currentBillingPlanCode: string | null;
-    currentPeriodEnd: Date | null;
-    currentPeriodStart: Date | null;
-  } | null;
-}): {
-  billingPlanCode: HostedBillingPlanCode;
-  limitUsdMicros: bigint;
-  periodEnd: Date;
-  periodStart: Date;
-  source: "billing" | "calendar";
-} {
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+}): HostedAiUsageAllowancePeriodResolution {
   const billingPlanCode =
     parseHostedBillingPlanCode(input.billingRef?.currentBillingPlanCode)
     ?? getHostedDefaultBillingPlanCode();
+  const billingPhase = parseHostedBillingPhase(input.billingRef?.currentBillingPhase);
+  const checkoutOffer = parseHostedBillingCheckoutOffer(input.billingRef?.currentCheckoutOffer);
+
+  if (
+    billingPhase !== "paid" &&
+    (checkoutOffer === HOSTED_PULSE_TRIAL_OFFER || billingPhase === "trial")
+  ) {
+    return resolveHostedPulseTrialAllowancePeriod({
+      at: input.at,
+      billingPlanCode,
+      billingRef: input.billingRef,
+      billingPhase,
+      checkoutOffer,
+    });
+  }
+
+  if (input.billingRef && billingPhase !== "paid" && input.billingRef.pulseTrialRedeemedAt) {
+    return buildHostedPulseTrialPendingBillingDeniedPeriod({
+      at: input.at,
+      billingPlanCode,
+      periodEnd: input.billingRef.currentTrialEndsAt,
+      periodStart: input.billingRef.currentTrialStartedAt,
+    });
+  }
+
   const currentPeriodStart = input.billingRef?.currentPeriodStart ?? null;
   const currentPeriodEnd = input.billingRef?.currentPeriodEnd ?? null;
   const period =
@@ -453,10 +658,76 @@ function resolveHostedAiUsageAllowancePeriod(input: {
 
   return {
     billingPlanCode,
+    kind: "period",
     limitUsdMicros: getHostedAiUsageMonthlyAllowanceUsdMicros(billingPlanCode),
     periodEnd: period.periodEnd,
     periodStart: period.periodStart,
     source: period.source,
+  };
+}
+
+function resolveHostedPulseTrialAllowancePeriod(input: {
+  at: Date;
+  billingPhase: ReturnType<typeof parseHostedBillingPhase>;
+  billingPlanCode: HostedBillingPlanCode;
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+  checkoutOffer: ReturnType<typeof parseHostedBillingCheckoutOffer>;
+}): HostedAiUsageAllowancePeriodResolution {
+  const trialPolicy = requireHostedPulseTrialPolicy(input.billingRef?.pulseTrialPolicyVersion);
+  const trialStart = input.billingRef?.currentTrialStartedAt ?? null;
+  const trialEnd = input.billingRef?.currentTrialEndsAt ?? null;
+
+  if (
+    input.billingPhase !== "trial" ||
+    input.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER ||
+    input.billingPlanCode !== "launch_monthly" ||
+    !trialPolicy ||
+    !trialStart ||
+    !trialEnd ||
+    trialStart.getTime() >= trialEnd.getTime() ||
+    input.at.getTime() < trialStart.getTime() ||
+    input.at.getTime() >= trialEnd.getTime()
+  ) {
+    return buildHostedPulseTrialPendingBillingDeniedPeriod({
+      at: input.at,
+      billingPlanCode: input.billingPlanCode,
+      periodEnd: trialEnd,
+      periodStart: trialStart,
+      trialPolicy,
+    });
+  }
+
+  return {
+    billingPlanCode: "launch_monthly",
+    kind: "period",
+    limitUsdMicros: trialPolicy.usageLimitUsdMicros,
+    periodEnd: trialEnd,
+    periodStart: trialStart,
+    source: "trial",
+  };
+}
+
+function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
+  at: Date;
+  billingPlanCode: HostedBillingPlanCode;
+  periodEnd: Date | null;
+  periodStart: Date | null;
+  trialPolicy?: ReturnType<typeof requireHostedPulseTrialPolicy>;
+}): Extract<HostedAiUsageAllowancePeriodResolution, { kind: "denied" }> {
+  const retryAfter = new Date(input.at.getTime() + 15 * 60_000);
+
+  return {
+    billingPlanCode: input.billingPlanCode,
+    kind: "denied",
+    limitUsdMicros: input.trialPolicy?.usageLimitUsdMicros ?? 0n,
+    periodEnd: input.periodEnd ?? retryAfter,
+    periodStart: input.periodStart ?? input.at,
+    reason: "trial_expired_pending_billing",
+    retryAfter,
+    userNotice: {
+      code: "trial_conversion_pending",
+      message: "Your trial has ended and billing is being updated. Try again shortly.",
+    },
   };
 }
 
@@ -467,7 +738,7 @@ async function carryOverHostedAiUsageFallbackPeriodTx(input: {
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
-    source: "billing" | "calendar";
+    source: "billing" | "calendar" | "trial";
   };
   tx: Prisma.TransactionClient;
 }): Promise<void> {
@@ -719,12 +990,67 @@ function normalizeHostedAiUsageAllowanceModel(
   return normalizeHostedAiUsageAllowancePricedModelId(value);
 }
 
-function buildHostedAiUsageGateLimitNotice(
-  billingPlanCode: HostedBillingPlanCode,
-): HostedAiUsageGateUserNotice {
+function resolveHostedAiUsageAllowancePricingModel(
+  record: AssistantUsageRecord,
+): HostedAiUsageAllowancePricingModelResolution {
+  const requestedModel = record.requestedModel ?? null;
+  const servedModel = record.servedModel ?? null;
+  const served = normalizeHostedAiUsageAllowanceModel(servedModel);
+  if (served) {
+    return {
+      model: served,
+      requestedModel,
+      servedModel,
+      source: "served",
+    };
+  }
+
+  const requested = normalizeHostedAiUsageAllowanceModel(requestedModel);
+  if (requested) {
+    return {
+      model: requested,
+      requestedModel,
+      servedModel,
+      source: "requested",
+    };
+  }
+
+  return {
+    model: null,
+    requestedModel,
+    servedModel,
+    source: null,
+  };
+}
+
+function buildHostedAiUsageAllowanceModelSnapshot(
+  resolution: HostedAiUsageAllowancePricingModelResolution,
+): Prisma.InputJsonObject {
+  return {
+    model: resolution.model,
+    modelSource: resolution.source,
+    requestedModel: resolution.requestedModel,
+    servedModel: resolution.servedModel,
+  };
+}
+
+function buildHostedAiUsageGateLimitNotice(input: {
+  billingPlanCode: HostedBillingPlanCode;
+  limitUsdMicros: bigint;
+}): HostedAiUsageGateUserNotice {
+  if (
+    input.billingPlanCode === "launch_monthly" &&
+    input.limitUsdMicros === HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS
+  ) {
+    return {
+      code: "trial_usage_limit_reached",
+      message: "You've reached the hosted AI usage included in your trial.",
+    };
+  }
+
   const base = "Hey - you've reached your usage limit for the month.";
 
-  if (billingPlanCode === "launch_edge_monthly") {
+  if (input.billingPlanCode === "launch_edge_monthly") {
     return {
       code: "edge_enable_usage_based_pricing",
       message: `${base} Go to the dashboard to enable usage based pricing.`,

@@ -247,8 +247,56 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
       event.data.object,
       expect.anything(),
+      expect.objectContaining({
+        sourceEventId: event.id,
+        sourceType: "stripe.checkout.session.completed",
+      }),
+      null,
     );
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+  });
+
+  it("retrieves Pulse Trial checkout subscription before opening the reconciliation transaction", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makePulseTrialCheckoutCompletedEvent();
+    const subscription = makeCanonicalSubscription({
+      customer: "cus_checkout",
+      id: "sub_checkout_123",
+      metadata: {
+        checkoutOffer: "pulse_trial_7d",
+      },
+      status: "trialing",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(subscription);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_checkout_123");
+    const transactionMock = vi.mocked(prisma.client.$transaction);
+    expect(mocks.stripe.subscriptions.retrieve.mock.invocationCallOrder[0])
+      .toBeLessThan(transactionMock.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      event.data.object,
+      expect.anything(),
+      expect.objectContaining({
+        sourceType: "stripe.checkout.session.completed",
+      }),
+      subscription,
+    );
   });
 
   it("does not fail Stripe reconciliation when the welcome email provider fails", async () => {
@@ -583,6 +631,38 @@ function makeCheckoutCompletedEvent(): Stripe.Event {
       },
     },
     id: "evt_checkout_completed_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type: "checkout.session.completed",
+  });
+}
+
+function makePulseTrialCheckoutCompletedEvent(): Stripe.Event {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708801,
+    data: {
+      object: {
+        client_reference_id: "member_123",
+        customer: "cus_checkout",
+        id: "cs_trial_123",
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "pulse_trial_7d",
+          memberId: "member_123",
+          trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        },
+        mode: "subscription",
+        status: "complete",
+        subscription: "sub_checkout_123",
+      },
+    },
+    id: "evt_trial_checkout_completed_123",
     livemode: false,
     object: "event",
     pending_webhooks: 0,

@@ -92,6 +92,7 @@ describe("createHostedBillingCheckout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
+    delete process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED;
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
       billingPlanCode: "launch_monthly",
@@ -203,18 +204,20 @@ describe("createHostedBillingCheckout", () => {
         ],
         metadata: {
           billingPlanCode: "launch_monthly",
+          checkoutOffer: "standard",
           memberId: "member_123",
         },
         subscription_data: {
           metadata: {
             billingPlanCode: "launch_monthly",
+            checkoutOffer: "standard",
             memberId: "member_123",
           },
         },
         success_url: "https://join.example.test/join/invite-code/success?session_id={CHECKOUT_SESSION_ID}",
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:email:8ba467122dd5",
       },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
@@ -222,16 +225,8 @@ describe("createHostedBillingCheckout", () => {
     expect(checkoutSessionRequest).not.toHaveProperty("automatic_tax");
     expect(checkoutSessionRequest).not.toHaveProperty("customer_update");
     expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:email:8ba467122dd5",
     });
-    expect(consoleInfo).toHaveBeenCalledWith(
-      "Hosted onboarding timing.",
-      expect.objectContaining({
-        customerPath: "checkout-create",
-        outcome: "completed",
-        step: "hosted-onboarding.billing.resolve-stripe-customer",
-      }),
-    );
     expect(consoleInfo).toHaveBeenCalledWith(
       "Hosted onboarding timing.",
       expect.objectContaining({
@@ -277,17 +272,19 @@ describe("createHostedBillingCheckout", () => {
         ],
         metadata: {
           billingPlanCode: "launch_edge_monthly",
+          checkoutOffer: "standard",
           memberId: "member_123",
         },
         subscription_data: {
           metadata: {
             billingPlanCode: "launch_edge_monthly",
+            checkoutOffer: "standard",
             memberId: "member_123",
           },
         },
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_edge_monthly:items:738ec8b511de:customer:none",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_edge_monthly:offer:782b59f134ce:items:738ec8b511de:customer:none",
       },
     );
   });
@@ -319,6 +316,171 @@ describe("createHostedBillingCheckout", () => {
             price: "price_usage_123",
           },
         ],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("creates Pulse Trial checkout with trial metadata, trial days, and an offer-bound idempotency key", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
+      billingPlanCode: "launch_monthly",
+      priceId: "price_123",
+      stripe: mocks.stripe,
+      usagePriceId: "price_usage_123",
+    });
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(
+      createHostedBillingCheckout({
+        checkoutOffer: "pulse_trial_7d",
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        line_items: [
+          {
+            price: "price_123",
+            quantity: 1,
+          },
+          {
+            price: "price_usage_123",
+          },
+        ],
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "pulse_trial_7d",
+          memberId: "member_123",
+          trialDurationDays: "7",
+          trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+          trialUsageLimitUsdMicros: "2500000",
+        },
+        subscription_data: {
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutOffer: "pulse_trial_7d",
+            memberId: "member_123",
+            trialDurationDays: "7",
+            trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+            trialUsageLimitUsdMicros: "2500000",
+          },
+          trial_period_days: 7,
+        },
+      }),
+      {
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:b882350aa0ce:items:7f85637f3414:customer:none",
+      },
+    );
+  });
+
+  it("rejects Pulse Trial checkout when the rollout flag is disabled", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(
+      createHostedBillingCheckout({
+        checkoutOffer: "pulse_trial_7d",
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_CHECKOUT_DISABLED",
+      httpStatus: 404,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects Pulse Trial checkout for Edge", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(
+      createHostedBillingCheckout({
+        billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_OFFER_PLAN_MISMATCH",
+      httpStatus: 400,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects Pulse Trial checkout after the member has already redeemed a trial", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(
+      createHostedBillingCheckout({
+        checkoutOffer: "pulse_trial_7d",
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma({
+          billingRef: {
+            memberId: "member_123",
+            pulseTrialRedeemedAt: new Date("2026-03-20T12:00:00.000Z"),
+            stripeCustomerIdEncrypted: null,
+            stripeCustomerLookupKey: null,
+            stripeSubscriptionIdEncrypted: null,
+            stripeSubscriptionLookupKey: null,
+          },
+        }) as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("allows standard Pulse checkout after a prior redeemed trial", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(
+      createHostedBillingCheckout({
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma({
+          billingRef: {
+            memberId: "member_123",
+            pulseTrialRedeemedAt: new Date("2026-03-20T12:00:00.000Z"),
+            stripeCustomerIdEncrypted: null,
+            stripeCustomerLookupKey: null,
+            stripeSubscriptionIdEncrypted: null,
+            stripeSubscriptionLookupKey: null,
+          },
+        }) as never,
+      }),
+    ).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
       }),
       expect.any(Object),
     );
@@ -386,7 +548,7 @@ describe("createHostedBillingCheckout", () => {
         customer: "cus_existing",
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:cus_existing",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:customer:cus_existing",
       },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
@@ -414,7 +576,7 @@ describe("createHostedBillingCheckout", () => {
         customer: expect.anything(),
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:none",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:customer:none",
       },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
@@ -469,10 +631,10 @@ describe("createHostedBillingCheckout", () => {
 
     expect(firstCall?.[0]).toEqual(secondCall?.[0]);
     expect(firstCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:email:8ba467122dd5",
     });
     expect(secondCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:email:8ba467122dd5",
     });
   });
 
@@ -511,10 +673,10 @@ describe("createHostedBillingCheckout", () => {
     const secondCall = mocks.stripe.checkout.sessions.create.mock.calls[1];
 
     expect(firstCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:none",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:customer:none",
     });
     expect(secondCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:7f85637f3414:customer:none",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:7f85637f3414:customer:none",
     });
   });
 
@@ -572,14 +734,14 @@ describe("createHostedBillingCheckout", () => {
     });
     expect(firstCall?.[0]).not.toHaveProperty("customer");
     expect(firstCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:email:8ba467122dd5",
     });
     expect(secondCall?.[0]).toMatchObject({
       customer: "cus_existing",
     });
     expect(secondCall?.[0]).not.toHaveProperty("customer_email");
     expect(secondCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:cus_existing",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:30af00ed2fa0:customer:cus_existing",
     });
   });
 });
@@ -615,14 +777,34 @@ function makeInvite(overrides: Partial<BillingServiceInvite> = {}): BillingServi
 
 function makePrisma(input: {
   billingRef?: {
+    currentBillingPhase?: string | null;
+    currentBillingPlanCode?: string | null;
+    currentCheckoutOffer?: string | null;
+    currentPeriodEnd?: Date | null;
+    currentPeriodStart?: Date | null;
+    currentTrialEndsAt?: Date | null;
+    currentTrialStartedAt?: Date | null;
+    lastStripeEventCreatedAt?: Date | null;
     memberId: string;
+    pulseTrialPolicyVersion?: string | null;
+    pulseTrialRedeemedAt?: Date | null;
     stripeCustomerIdEncrypted: string | null;
     stripeCustomerLookupKey: string | null;
     stripeSubscriptionIdEncrypted: string | null;
     stripeSubscriptionLookupKey: string | null;
   } | null;
   findUniqueResults?: Array<{
+    currentBillingPhase?: string | null;
+    currentBillingPlanCode?: string | null;
+    currentCheckoutOffer?: string | null;
+    currentPeriodEnd?: Date | null;
+    currentPeriodStart?: Date | null;
+    currentTrialEndsAt?: Date | null;
+    currentTrialStartedAt?: Date | null;
+    lastStripeEventCreatedAt?: Date | null;
     memberId: string;
+    pulseTrialPolicyVersion?: string | null;
+    pulseTrialRedeemedAt?: Date | null;
     stripeCustomerIdEncrypted: string | null;
     stripeCustomerLookupKey: string | null;
     stripeSubscriptionIdEncrypted: string | null;

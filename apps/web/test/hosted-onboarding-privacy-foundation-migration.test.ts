@@ -58,9 +58,15 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
     'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
+    'currentBillingPhase String? @map("current_billing_phase")',
     'currentBillingPlanCode String? @map("current_billing_plan_code")',
+    'currentCheckoutOffer String? @map("current_checkout_offer")',
     'currentPeriodStart DateTime? @map("current_period_start")',
     'currentPeriodEnd DateTime? @map("current_period_end")',
+    'pulseTrialRedeemedAt DateTime? @map("pulse_trial_redeemed_at")',
+    'pulseTrialPolicyVersion String? @map("pulse_trial_policy_version")',
+    'currentTrialStartedAt DateTime? @map("current_trial_started_at")',
+    'currentTrialEndsAt DateTime? @map("current_trial_ends_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -191,6 +197,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const pulseTrialCheckoutOfferMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050503_pulse_trial_checkout_offer/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -213,6 +226,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050500_device_sync_dirty_connection",
       "2026050501_stripe_checkout_email_authorization",
       "2026050502_hosted_ai_usage_allowance",
+      "2026050503_pulse_trial_checkout_offer",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -247,6 +261,28 @@ describe("hosted Prisma baseline migration", () => {
     expect(stripeCheckoutEmailMigrationSql).toContain(
       '"stripe_checkout_email_collected_at" TIMESTAMP(3)',
     );
+    expect(pulseTrialCheckoutOfferMigrationSql).toContain(
+      'ADD COLUMN "current_billing_phase" TEXT',
+    );
+    expect(pulseTrialCheckoutOfferMigrationSql).toContain(
+      'ADD COLUMN "current_checkout_offer" TEXT',
+    );
+    expect(pulseTrialCheckoutOfferMigrationSql).toContain(
+      'ADD COLUMN "pulse_trial_redeemed_at" TIMESTAMP(3)',
+    );
+    expect(pulseTrialCheckoutOfferMigrationSql).toContain(
+      'ADD COLUMN "pulse_trial_policy_version" TEXT',
+    );
+    expect(pulseTrialCheckoutOfferMigrationSql).toContain(
+      'ADD COLUMN "current_trial_started_at" TIMESTAMP(3)',
+    );
+    expect(pulseTrialCheckoutOfferMigrationSql).toContain(
+      'ADD COLUMN "current_trial_ends_at" TIMESTAMP(3)',
+    );
+    expect(pulseTrialCheckoutOfferMigrationSql).not.toContain("NOT NULL");
+    expect(pulseTrialCheckoutOfferMigrationSql).not.toContain("CREATE INDEX");
+    expect(pulseTrialCheckoutOfferMigrationSql).not.toContain("CREATE TYPE");
+    expect(pulseTrialCheckoutOfferMigrationSql).not.toContain("launch_trial");
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_payload" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event_alias" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event" CASCADE');

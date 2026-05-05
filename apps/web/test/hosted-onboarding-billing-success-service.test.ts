@@ -19,9 +19,11 @@ const mocks = vi.hoisted(() => {
 
   const state = {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
-    bindHostedStripeBillingRefsFromCheckoutSession: vi.fn(),
+    applyStripeCheckoutCompleted: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
+    listHostedStripeCheckoutSessionMemberIds: vi.fn(),
+    nudgeHostedRunnerBestEffort: vi.fn(),
     readHostedMemberCoreState: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
@@ -58,6 +60,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
 }));
 
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: mocks.requireHostedStripeApi,
 }));
@@ -70,11 +76,12 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   return {
     ...actual,
     findMemberForStripeCheckoutSession: mocks.findMemberForStripeObject,
+    listHostedStripeCheckoutSessionMemberIds: mocks.listHostedStripeCheckoutSessionMemberIds,
   };
 });
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
-  bindHostedStripeBillingRefsFromCheckoutSessionTx: mocks.bindHostedStripeBillingRefsFromCheckoutSession,
+  applyStripeCheckoutCompleted: mocks.applyStripeCheckoutCompleted,
 }));
 
 import { reconcileHostedBillingCheckoutSuccess } from "@/src/lib/hosted-onboarding/billing-success-service";
@@ -100,6 +107,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     });
     mocks.readHostedMemberCoreState.mockResolvedValue(createMemberSnapshot().core);
     mocks.findMemberForStripeObject.mockResolvedValue(createMemberSnapshot());
+    mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
       client_reference_id: "member_123",
       customer: "cus_123",
@@ -113,7 +121,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         status: "active",
       },
     });
-    mocks.bindHostedStripeBillingRefsFromCheckoutSession.mockResolvedValue(undefined);
+    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    });
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       stage: "activating",
     }));
@@ -165,9 +176,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         expect.any(Function),
         HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
       );
-      expect(mocks.bindHostedStripeBillingRefsFromCheckoutSession).toHaveBeenCalledWith({
-        memberId: "member_123",
-        session: expect.objectContaining({
+      expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+        expect.objectContaining({
           customer: "cus_123",
           id: `cs_${status}`,
           subscription: {
@@ -176,8 +186,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
           },
         }),
         tx,
-      });
+      );
       expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+      expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
     },
   );
 
@@ -203,9 +214,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       stage: "activating",
     }));
 
-    expect(mocks.bindHostedStripeBillingRefsFromCheckoutSession).toHaveBeenCalledWith({
-      memberId: "member_123",
-      session: expect.objectContaining({
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
         customer: "cus_123",
         id: "cs_123",
         subscription: {
@@ -214,8 +224,36 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         },
       }),
       tx,
-    });
+    );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("nudges the hosted runner when Pulse Trial success reconciliation activates access", async () => {
+    const tx = {
+      __tag: "tx",
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+    });
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).resolves.toEqual(createStatus({
+      stage: "activating",
+    }));
+
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
+      context: "stripe.checkout-success",
+      userId: "member_123",
+    });
   });
 
   it("only writes the durable billing reference when the checkout session has no subscription object", async () => {
@@ -250,16 +288,16 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       expect.any(Function),
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     );
-    expect(mocks.bindHostedStripeBillingRefsFromCheckoutSession).toHaveBeenCalledWith({
-      memberId: "member_123",
-      session: expect.objectContaining({
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
         customer: "cus_123",
         id: "cs_no_subscription",
         subscription: null,
       }),
       tx,
-    });
+    );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
   });
 
   it("rejects success reconciliation until the checkout session is complete", async () => {
@@ -289,7 +327,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       httpStatus: 409,
     });
 
-    expect(mocks.bindHostedStripeBillingRefsFromCheckoutSession).not.toHaveBeenCalled();
+    expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
@@ -316,6 +354,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   });
 
   it("rejects checkout sessions that resolve to a different member", async () => {
+    mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValueOnce(["member_other"]);
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
       client_reference_id: "member_other",
       customer: "cus_other",
@@ -340,7 +379,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       code: "STRIPE_CHECKOUT_MEMBER_MISMATCH",
     });
 
-    expect(mocks.bindHostedStripeBillingRefsFromCheckoutSession).not.toHaveBeenCalled();
+    expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 });

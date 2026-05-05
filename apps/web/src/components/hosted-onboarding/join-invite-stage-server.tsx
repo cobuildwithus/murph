@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
-  ArrowRightIcon,
   CheckCircleIcon,
   CheckIcon,
   DiamondIcon,
@@ -37,15 +36,15 @@ import {
 const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
-const FREE_FEATURES = [
-  "Bring your own API keys",
-  "Self-host or run locally",
-  "Own your data, export anytime",
-  "Community-supported setup",
+const PULSE_TRIAL_FEATURES = [
+  "7 days of hosted Pulse",
+  "$2.50 hosted AI usage during trial",
+  "Card required",
+  "Then $8/month unless canceled",
 ];
 
 const PULSE_FEATURES = [
-  "Everything in Free and:",
+  "Private hosted Murph workspace",
   "Access to frontier models",
   "Wearable data sync",
   "Before/after outcome cards",
@@ -238,6 +237,7 @@ function JoinInviteCheckoutPanel({
 }) {
   const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly") ?? null;
   const edgePlan = billingPlans.find((p) => p.code === "launch_edge_monthly") ?? null;
+  const pulseTrialCheckoutEnabled = isPulseTrialCheckoutEnabled();
   const buttonClassName =
     "h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90";
 
@@ -246,28 +246,21 @@ function JoinInviteCheckoutPanel({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
         <PricingTierCard
           tier="free"
-          name="Free"
-          description="Open-source, self-hosted Murph."
+          name="Pulse Trial"
+          description="Try hosted Murph before the first monthly charge."
           price="$0"
-          priceUnit="/ month"
-          features={FREE_FEATURES}
+          priceUnit="for 7 days"
+          features={PULSE_TRIAL_FEATURES}
           cta={
-            <Button
-              size="lg"
+            <JoinInviteCheckoutPlanButtonIsland
+              billingReady={billingReady && pulseTrialCheckoutEnabled}
+              checkoutOffer="pulse_trial_7d"
               className={buttonClassName}
-              render={
-                <Link
-                  href={MURPH_GITHUB_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                />
-              }
-            >
-              <span className="flex-1 text-center">View on GitHub</span>
-              <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
-                <ArrowRightIcon className="size-4" />
-              </span>
-            </Button>
+              disabledLabel="Trial unavailable"
+              idleLabel="Start 7-day trial"
+              inviteCode={inviteCode}
+              planCode={pulsePlan?.code ?? null}
+            />
           }
         />
 
@@ -309,6 +302,18 @@ function JoinInviteCheckoutPanel({
         />
       </div>
 
+      <div className="text-center text-sm text-muted-foreground">
+        Want to self-host?{" "}
+        <Link
+          href={MURPH_GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-foreground underline-offset-4 hover:underline"
+        >
+          View Murph on GitHub.
+        </Link>
+      </div>
+
       <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-0">
           <CheckoutTrustItem
@@ -332,6 +337,10 @@ function JoinInviteCheckoutPanel({
       </div>
     </div>
   );
+}
+
+function isPulseTrialCheckoutEnabled(): boolean {
+  return process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED === "1";
 }
 
 function PricingTierCard({

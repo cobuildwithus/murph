@@ -5,10 +5,17 @@ import {
   formatHostedLandingPricingShortSummary,
   getHostedBillingPlanDefinition,
   listHostedBillingPlanPresentations,
+  parseHostedBillingCheckoutOffer,
+  parseHostedBillingPhase,
+  parseHostedPublicBillingCheckoutOffer,
+  requireHostedPulseTrialPolicy,
   resolveConfiguredHostedBillingPlanCodes,
   resolveHostedBillingReady,
 } from "@/src/lib/hosted-onboarding/billing-plans";
-import { buildHostedBillingCheckoutLineItems } from "@/src/lib/hosted-onboarding/billing-service";
+import {
+  buildHostedBillingCheckoutLineItems,
+  deriveHostedBillingCheckoutOfferBindingKey,
+} from "@/src/lib/hosted-onboarding/billing-service";
 
 describe("hosted billing launch plan Stripe configuration", () => {
   const basePriceIds = {
@@ -28,6 +35,24 @@ describe("hosted billing launch plan Stripe configuration", () => {
     expect(getHostedBillingPlanDefinition("launch_edge_monthly")).toMatchObject({
       badge: null,
       recurringAmountUsdCents: 2_000,
+    });
+  });
+
+  it("keeps Pulse Trial as a checkout offer instead of a billing plan", () => {
+    expect(resolveConfiguredHostedBillingPlanCodes({
+      aiUsageBillingMode: "disabled",
+      stripePriceIdsByPlan: basePriceIds,
+      stripeUsagePriceIdsByPlan: usagePriceIds,
+    })).toEqual(["launch_monthly", "launch_edge_monthly"]);
+    expect(parseHostedPublicBillingCheckoutOffer("pulse_trial_7d")).toBe("pulse_trial_7d");
+    expect(parseHostedPublicBillingCheckoutOffer("standard")).toBeNull();
+    expect(parseHostedBillingCheckoutOffer("standard")).toBe("standard");
+    expect(parseHostedBillingCheckoutOffer("pulse_trial_7d")).toBe("pulse_trial_7d");
+    expect(parseHostedBillingPhase("trial")).toBe("trial");
+    expect(parseHostedBillingPhase("paid")).toBe("paid");
+    expect(requireHostedPulseTrialPolicy("pulse-trial-2026-05-05-v1")).toEqual({
+      durationDays: 7,
+      usageLimitUsdMicros: 2_500_000n,
     });
   });
 
@@ -175,5 +200,28 @@ describe("hosted billing launch plan Stripe configuration", () => {
         price: "price_usage_monthly",
       },
     ]);
+  });
+
+  it("binds Stripe checkout idempotency to the checkout offer and trial policy", () => {
+    const standard = deriveHostedBillingCheckoutOfferBindingKey({
+      checkoutOffer: "standard",
+    });
+    const trial = deriveHostedBillingCheckoutOfferBindingKey({
+      checkoutOffer: "pulse_trial_7d",
+    });
+
+    expect(standard).not.toBe(trial);
+    expect(deriveHostedBillingCheckoutOfferBindingKey({
+      checkoutOffer: "pulse_trial_7d",
+      trialPolicyVersion: "future-policy",
+    })).not.toBe(trial);
+    expect(deriveHostedBillingCheckoutOfferBindingKey({
+      checkoutOffer: "pulse_trial_7d",
+      trialDurationDays: 14,
+    })).not.toBe(trial);
+    expect(deriveHostedBillingCheckoutOfferBindingKey({
+      checkoutOffer: "pulse_trial_7d",
+      trialUsageLimitUsdMicros: 5_000_000n,
+    })).not.toBe(trial);
   });
 });

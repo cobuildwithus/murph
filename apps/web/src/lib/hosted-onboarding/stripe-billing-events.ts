@@ -11,8 +11,13 @@ import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
+  HOSTED_PULSE_TRIAL_OFFER,
+  HOSTED_PULSE_TRIAL_POLICY_VERSION,
+  HOSTED_STANDARD_CHECKOUT_OFFER,
   getHostedBillingPlanDefinition,
   HOSTED_BILLING_PLAN_CODES,
+  parseHostedBillingCheckoutOffer,
+  parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
@@ -20,6 +25,7 @@ import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
 import {
+  type HostedMemberBillingSnapshot,
   upsertHostedMemberStripeCheckoutEmailIfFreshTx,
 } from "./hosted-member-store";
 import {
@@ -27,6 +33,7 @@ import {
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
   findMemberForStripeReversal,
+  listHostedStripeCheckoutSessionMemberIds,
 } from "./stripe-billing-lookup";
 import {
   prepareHostedMemberStripeBillingWrite,
@@ -37,6 +44,7 @@ import {
 import {
   type HostedStripeDispatchContext,
 } from "./stripe-dispatch";
+import { requireHostedStripeApi } from "./runtime";
 
 type HostedStripeActivationOutcome = {
   activatedMemberId: string | null;
@@ -46,6 +54,8 @@ type HostedStripeActivationOutcome = {
 export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
   prisma: Prisma.TransactionClient,
+  dispatchContext?: HostedStripeDispatchContext,
+  checkoutSessionSubscription?: Stripe.Subscription | null,
 ): Promise<HostedStripeActivationOutcome> {
   const member = await findMemberForStripeCheckoutSession({
     prisma,
@@ -59,7 +69,18 @@ export async function applyStripeCheckoutCompleted(
     };
   }
 
+  if (session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
+    return applyPulseTrialCheckoutCompletedTx({
+      dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
+      member,
+      session,
+      subscription: checkoutSessionSubscription ?? null,
+      tx: prisma,
+    });
+  }
+
   await bindHostedStripeBillingRefsFromCheckoutSessionTx({
+    dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
     memberId: member.core.id,
     session,
     tx: prisma,
@@ -72,12 +93,14 @@ export async function applyStripeCheckoutCompleted(
 }
 
 export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
+  dispatchContext?: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
   memberId: string;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
 }) {
-  const dispatchContext = buildHostedStripeCheckoutSessionFreshness(input.session);
+  const dispatchContext = input.dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(input.session);
   const billingSnapshot = await writeHostedMemberStripeBillingRefIfFreshTx({
+    currentCheckoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
     dispatchContext,
     memberId: input.memberId,
     stripeCustomerId: coerceStripeObjectId(input.session.customer) ?? undefined,
@@ -93,6 +116,130 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
   });
 
   return billingSnapshot;
+}
+
+export async function applyPulseTrialCheckoutCompletedTx(input: {
+  dispatchContext: HostedStripeDispatchContext;
+  member: HostedMemberBillingSnapshot;
+  session: Stripe.Checkout.Session;
+  subscription?: Stripe.Subscription | null;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedStripeActivationOutcome> {
+  if (!isPulseTrialCheckoutSessionEntitlementCandidate(input.session, input.member.core.id)) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
+  const candidateMemberIds = await listHostedStripeCheckoutSessionMemberIds({
+    prisma: input.tx,
+    session: input.session,
+  });
+  if (candidateMemberIds.length !== 1 || candidateMemberIds[0] !== input.member.core.id) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
+  if (input.member.billingRef?.pulseTrialRedeemedAt) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
+  const subscription = input.subscription ??
+    await readHostedStripeCheckoutSessionSubscription(input.session);
+  if (!subscription || !isValidPulseTrialCheckoutSubscription({
+    eventCreatedAt: input.dispatchContext.eventCreatedAt,
+    session: input.session,
+    subscription,
+  })) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
+  const currentPeriodStart = readHostedStripeSubscriptionDate(subscription, "current_period_start");
+  const currentPeriodEnd = readHostedStripeSubscriptionDate(subscription, "current_period_end");
+  const currentTrialStartedAt = readHostedStripeSubscriptionDate(subscription, "trial_start");
+  const currentTrialEndsAt = readHostedStripeSubscriptionDate(subscription, "trial_end");
+
+  if (
+    !currentPeriodStart ||
+    !currentPeriodEnd ||
+    !currentTrialStartedAt ||
+    !currentTrialEndsAt ||
+    currentTrialStartedAt.getTime() >= currentTrialEndsAt.getTime() ||
+    currentPeriodStart.getTime() > currentTrialStartedAt.getTime() ||
+    currentPeriodEnd.getTime() < currentTrialEndsAt.getTime()
+  ) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
+  const hadActiveBilling = input.member.core.billingStatus === HostedBillingStatus.active;
+  const updatedMember = await writeHostedMemberStripeBillingTx({
+    billingStatus: HostedBillingStatus.active,
+    canonicalBillingStatus: HostedBillingStatus.active,
+    currentBillingPhase: "trial",
+    currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+    currentPeriodEnd,
+    currentPeriodStart,
+    currentTrialEndsAt,
+    currentTrialStartedAt,
+    dispatchContext: input.dispatchContext,
+    freshnessPolicy: "trial-checkout-entitlement",
+    member: input.member,
+    pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+    pulseTrialRedeemedAt: currentTrialStartedAt,
+    stripeCustomerId: coerceStripeObjectId(input.session.customer)
+      ?? coerceStripeObjectId(subscription.customer)
+      ?? null,
+    stripeSubscriptionId: subscription.id,
+    tx: input.tx,
+  });
+
+  if (!updatedMember || hadActiveBilling) {
+    if (updatedMember) {
+      await writeHostedStripeCheckoutEmailIfPresentTx({
+        collectedAt: input.dispatchContext.eventCreatedAt,
+        memberId: updatedMember.core.id,
+        stripeEmailAddress: readHostedStripeCheckoutSessionEmailAddress(input.session),
+        tx: input.tx,
+      });
+    }
+
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
+  await writeHostedStripeCheckoutEmailIfPresentTx({
+    collectedAt: input.dispatchContext.eventCreatedAt,
+    memberId: updatedMember.core.id,
+    stripeEmailAddress: readHostedStripeCheckoutSessionEmailAddress(input.session),
+    tx: input.tx,
+  });
+
+  const activation = await activateHostedMemberForPositiveSourceTx({
+    dispatchContext: input.dispatchContext,
+    memberId: updatedMember.core.id,
+    prisma: input.tx,
+    skipIfBillingAlreadyActive: false,
+  });
+
+  return {
+    activatedMemberId: activation.activated ? updatedMember.core.id : null,
+    hostedExecutionEventId: activation.hostedExecutionEventId,
+  };
 }
 
 export async function applyStripeCheckoutExpired(
@@ -130,6 +277,7 @@ export async function applyStripeSubscriptionUpdated(
     billingStatus: member.core.billingStatus,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     ...buildHostedStripeSubscriptionBillingPeriodSnapshot(subscription),
+    ...buildHostedStripeSubscriptionBillingPhaseSnapshot(subscription, member),
     dispatchContext,
     member: preparedMember,
     stripeCustomerId: coerceStripeObjectId(subscription.customer) ?? member.billingRef?.stripeCustomerId ?? null,
@@ -159,6 +307,31 @@ export async function applyStripeInvoicePaid(
     };
   }
 
+  if (isHostedStripeInitialPulseTrialInvoice({
+    invoice,
+    member,
+    subscription: canonicalSubscription,
+  })) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
+  if (
+    isHostedStripeTrialConversionInvoiceCandidate(member, canonicalSubscription) &&
+    !isHostedStripeAcceptedTrialConversionInvoice({
+      invoice,
+      subscription: canonicalSubscription,
+      subscriptionId,
+    })
+  ) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+    };
+  }
+
   const hadActiveBilling = member.core.billingStatus === HostedBillingStatus.active;
   const startingBillingStatus = member.core.billingStatus;
   const {
@@ -174,6 +347,9 @@ export async function applyStripeInvoicePaid(
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     ...(canonicalSubscription
       ? buildHostedStripeSubscriptionBillingPeriodSnapshot(canonicalSubscription)
+      : {}),
+    ...(canonicalSubscription
+      ? buildHostedStripeInvoicePaidBillingPhaseSnapshot(canonicalSubscription, member, invoice)
       : {}),
     dispatchContext,
     freshnessPolicy: "positive-invoice-entitlement",
@@ -253,6 +429,9 @@ export async function applyStripeInvoicePaymentFailed(
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     ...(canonicalSubscription
       ? buildHostedStripeSubscriptionBillingPeriodSnapshot(canonicalSubscription)
+      : {}),
+    ...(canonicalSubscription
+      ? buildHostedStripeSubscriptionBillingPhaseSnapshot(canonicalSubscription, member)
       : {}),
     dispatchContext,
     member: preparedMember,
@@ -341,11 +520,11 @@ function buildHostedStripeSubscriptionBillingPeriodSnapshot(
   currentPeriodStart?: Date | null;
 } {
   const currentBillingPlanCode = resolveHostedStripeSubscriptionBillingPlanCode(subscription);
-  const currentPeriodStart = readHostedStripeSubscriptionPeriodDate(
+  const currentPeriodStart = readHostedStripeSubscriptionDate(
     subscription,
     "current_period_start",
   );
-  const currentPeriodEnd = readHostedStripeSubscriptionPeriodDate(
+  const currentPeriodEnd = readHostedStripeSubscriptionDate(
     subscription,
     "current_period_end",
   );
@@ -363,6 +542,163 @@ function buildHostedStripeSubscriptionBillingPeriodSnapshot(
         }
       : {}),
   };
+}
+
+function buildHostedStripeSubscriptionBillingPhaseSnapshot(
+  subscription: Stripe.Subscription,
+  member: HostedMemberBillingSnapshot,
+): {
+  currentBillingPhase?: string | null;
+  currentCheckoutOffer?: string | null;
+  currentTrialEndsAt?: Date | null;
+  currentTrialStartedAt?: Date | null;
+} {
+  const metadataOffer = parseHostedBillingCheckoutOffer(subscription.metadata?.checkoutOffer);
+  const sameSubscription = member.billingRef?.stripeSubscriptionId === subscription.id;
+  const currentOffer = sameSubscription
+    ? parseHostedBillingCheckoutOffer(member.billingRef?.currentCheckoutOffer)
+    : null;
+  const currentPhase = sameSubscription
+    ? parseHostedBillingPhase(member.billingRef?.currentBillingPhase)
+    : null;
+  const checkoutOffer = metadataOffer ?? (sameSubscription ? currentOffer : null);
+
+  if (subscription.status === "trialing" && checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
+    return {
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+      ...buildHostedStripeSubscriptionTrialDateSnapshot(subscription),
+    };
+  }
+
+  if (subscription.status === "active") {
+    if (currentPhase === "trial" && checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
+      return {
+        currentBillingPhase: "trial",
+        currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+        ...buildHostedStripeSubscriptionTrialDateSnapshot(subscription),
+      };
+    }
+
+    return {
+      currentBillingPhase: "paid",
+      currentCheckoutOffer: checkoutOffer ?? HOSTED_STANDARD_CHECKOUT_OFFER,
+    };
+  }
+
+  if (
+    subscription.status === "canceled" ||
+    subscription.status === "incomplete" ||
+    subscription.status === "incomplete_expired" ||
+    subscription.status === "past_due" ||
+    subscription.status === "paused" ||
+    subscription.status === "unpaid"
+  ) {
+    return {
+      currentBillingPhase: null,
+      ...(checkoutOffer ? { currentCheckoutOffer: checkoutOffer } : {}),
+    };
+  }
+
+  return checkoutOffer ? { currentCheckoutOffer: checkoutOffer } : {};
+}
+
+function buildHostedStripeInvoicePaidBillingPhaseSnapshot(
+  subscription: Stripe.Subscription,
+  member: HostedMemberBillingSnapshot,
+  invoice: Stripe.Invoice,
+): {
+  currentBillingPhase?: string | null;
+  currentCheckoutOffer?: string | null;
+  currentTrialEndsAt?: Date | null;
+  currentTrialStartedAt?: Date | null;
+} {
+  if (!isHostedStripeTrialConversionInvoiceCandidate(member, subscription)) {
+    return buildHostedStripeSubscriptionBillingPhaseSnapshot(subscription, member);
+  }
+
+  if (!isHostedStripeAcceptedTrialConversionInvoice({
+    invoice,
+    subscription,
+    subscriptionId: coerceStripeInvoiceSubscriptionId(invoice),
+  })) {
+    return {};
+  }
+
+  return {
+    currentBillingPhase: "paid",
+    currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+    ...buildHostedStripeSubscriptionTrialDateSnapshot(subscription),
+  };
+}
+
+function buildHostedStripeSubscriptionTrialDateSnapshot(
+  subscription: Stripe.Subscription,
+): {
+  currentTrialEndsAt?: Date | null;
+  currentTrialStartedAt?: Date | null;
+} {
+  const currentTrialStartedAt = readHostedStripeSubscriptionDate(subscription, "trial_start");
+  const currentTrialEndsAt = readHostedStripeSubscriptionDate(subscription, "trial_end");
+
+  return {
+    ...(currentTrialStartedAt ? { currentTrialStartedAt } : {}),
+    ...(currentTrialEndsAt ? { currentTrialEndsAt } : {}),
+  };
+}
+
+function isHostedStripeInitialPulseTrialInvoice(input: {
+  invoice: Stripe.Invoice;
+  member: HostedMemberBillingSnapshot;
+  subscription?: Stripe.Subscription | null;
+}): boolean {
+  if (!isHostedStripeTrialConversionInvoiceCandidate(input.member, input.subscription)) {
+    return false;
+  }
+
+  return input.subscription?.status === "trialing" ||
+    readHostedStripeInvoiceBillingReason(input.invoice) === "subscription_create";
+}
+
+function isHostedStripeTrialConversionInvoiceCandidate(
+  member: HostedMemberBillingSnapshot,
+  subscription?: Stripe.Subscription | null,
+): boolean {
+  if (!subscription) {
+    return false;
+  }
+
+  const subscriptionOffer = parseHostedBillingCheckoutOffer(subscription?.metadata?.checkoutOffer);
+  const sameSubscription = member.billingRef?.stripeSubscriptionId === subscription.id;
+  const currentOffer = sameSubscription
+    ? parseHostedBillingCheckoutOffer(member.billingRef?.currentCheckoutOffer)
+    : null;
+  const currentPhase = sameSubscription
+    ? parseHostedBillingPhase(member.billingRef?.currentBillingPhase)
+    : null;
+
+  return subscriptionOffer === HOSTED_PULSE_TRIAL_OFFER ||
+    currentOffer === HOSTED_PULSE_TRIAL_OFFER ||
+    currentPhase === "trial";
+}
+
+function isHostedStripeAcceptedTrialConversionInvoice(input: {
+  invoice: Stripe.Invoice;
+  subscription?: Stripe.Subscription | null;
+  subscriptionId: string | null;
+}): boolean {
+  if (!input.subscription || !input.subscriptionId) {
+    return false;
+  }
+
+  return input.subscription.id === input.subscriptionId &&
+    input.subscription.status === "active" &&
+    readHostedStripeInvoiceBillingReason(input.invoice) !== "subscription_create";
+}
+
+function readHostedStripeInvoiceBillingReason(invoice: Stripe.Invoice): string | null {
+  const value = (invoice as Stripe.Invoice & { billing_reason?: unknown }).billing_reason;
+  return typeof value === "string" ? value : null;
 }
 
 function resolveHostedStripeSubscriptionBillingPlanCode(
@@ -411,9 +747,9 @@ function readHostedStripeSubscriptionPriceIds(
   return priceIds;
 }
 
-function readHostedStripeSubscriptionPeriodDate(
+function readHostedStripeSubscriptionDate(
   subscription: Stripe.Subscription,
-  field: "current_period_end" | "current_period_start",
+  field: "current_period_end" | "current_period_start" | "trial_end" | "trial_start",
 ): Date | null {
   const raw = Reflect.get(subscription, field);
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
@@ -444,18 +780,73 @@ function buildHostedStripeInvoiceActivationDispatchContext(
   };
 }
 
-function buildHostedStripeCheckoutSessionFreshness(
+async function readHostedStripeCheckoutSessionSubscription(
+  session: Stripe.Checkout.Session,
+): Promise<Stripe.Subscription | null> {
+  const subscriptionId = coerceStripeSubscriptionId(session.subscription);
+  if (!subscriptionId) {
+    return null;
+  }
+
+  if (
+    session.subscription &&
+    typeof session.subscription === "object" &&
+    "id" in session.subscription &&
+    session.subscription.id === subscriptionId
+  ) {
+    return session.subscription as Stripe.Subscription;
+  }
+
+  return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
+}
+
+function isPulseTrialCheckoutSessionEntitlementCandidate(
+  session: Stripe.Checkout.Session,
+  memberId: string,
+): boolean {
+  return session.status === "complete" &&
+    session.mode === "subscription" &&
+    session.client_reference_id === memberId &&
+    session.metadata?.memberId === memberId &&
+    session.metadata?.billingPlanCode === "launch_monthly" &&
+    session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
+    session.metadata?.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION;
+}
+
+function isValidPulseTrialCheckoutSubscription(input: {
+  eventCreatedAt: Date;
+  session: Stripe.Checkout.Session;
+  subscription: Stripe.Subscription;
+}): boolean {
+  const sessionSubscriptionId = coerceStripeSubscriptionId(input.session.subscription);
+  const sessionCustomerId = coerceStripeObjectId(input.session.customer);
+  const subscriptionCustomerId = coerceStripeObjectId(input.subscription.customer);
+  const trialEnd = readHostedStripeSubscriptionDate(input.subscription, "trial_end");
+
+  return Boolean(
+    sessionSubscriptionId &&
+    input.subscription.id === sessionSubscriptionId &&
+    (!sessionCustomerId || !subscriptionCustomerId || sessionCustomerId === subscriptionCustomerId) &&
+    input.subscription.status === "trialing" &&
+    trialEnd &&
+    trialEnd.getTime() > input.eventCreatedAt.getTime(),
+  );
+}
+
+function buildHostedStripeCheckoutSessionDispatchContext(
   session: Pick<Stripe.Checkout.Session, "created" | "id">,
-): Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId"> {
+): HostedStripeDispatchContext {
   const eventCreatedAt = Number.isFinite(session.created)
     ? new Date(session.created * 1000)
     : new Date(0);
 
   return {
     eventCreatedAt,
+    occurredAt: eventCreatedAt.toISOString(),
     sourceEventId: typeof session.id === "string" && session.id.length > 0
       ? `checkout.session:${session.id}`
       : "checkout.session:unknown",
+    sourceType: "stripe.checkout.session.completed",
   };
 }
 

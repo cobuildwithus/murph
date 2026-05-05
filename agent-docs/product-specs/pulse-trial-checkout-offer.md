@@ -2,7 +2,7 @@
 
 Last verified: 2026-05-05
 
-Status: Planned
+Status: Implemented locally
 
 ## Purpose
 
@@ -30,6 +30,7 @@ Success means:
 - The existing hosted AI usage allowance resolver returns a 2.50 USD trial allowance during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle.
 - A stale trial phase never falls back to the normal monthly Pulse allowance.
 - No Cloudflare/runtime enforcement wiring is added by this plan. Cloudflare already checks the signed web usage gate before hosted runner invocation, so this plan treats the web gate response shape, denial reason, notice, and `retryAfter` as runtime-facing API.
+- The trial CTA is release-gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`; the backend remains safe with the flag off.
 
 ## Clean Target Model
 
@@ -56,19 +57,26 @@ The core state machine is:
 
 This lets the implementation avoid a background trial-expiration job. Stripe webhooks reconcile the billing result, while the usage gate denies stale trial access at decision time.
 
-## Current Local Baseline
+Stress testing produced four final hardening decisions that are part of the target shape:
 
-The current local checkout already has the right foundation:
+- Billing phase is authoritative for usage allowance. `currentBillingPhase === "paid"` receives the normal paid plan allowance even if `currentCheckoutOffer` remains `pulse_trial_7d` for audit history.
+- Trial allowance periods do not receive calendar fallback carryover, and denied stale-trial usage imports are marked as allowance-denied instead of remaining invisible.
+- A delayed trial Checkout completion cannot overwrite an already paid phase or a redeemed trial marker.
+- A later standard Pulse subscription after a canceled/redeemed trial is treated as standard paid billing when its current offer/subscription prove it is not the original trial conversion.
+
+## Implemented Local Baseline
+
+The current local checkout now has the Pulse Trial shape implemented on that foundation:
 
 - `apps/web/src/lib/hosted-onboarding/billing-plans.ts` defines only `launch_monthly` and `launch_edge_monthly`.
 - `billing-plans.ts` stores included hosted AI usage allowances by plan: Pulse is 10.00 USD micros and Edge is 25.00 USD micros.
-- `apps/web/src/lib/hosted-onboarding/billing-service.ts` creates Stripe Checkout Sessions in `subscription` mode with plan line items, optional metered usage line items, session metadata, subscription metadata, card payment methods, and a deterministic Stripe idempotency key.
-- `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts` binds Stripe customer/subscription refs on `checkout.session.completed`, activates paid subscriptions from `invoice.paid`, and records subscription period markers from subscription events.
+- `apps/web/src/lib/hosted-onboarding/billing-service.ts` creates Stripe Checkout Sessions in `subscription` mode with plan line items, optional metered usage line items, session metadata, subscription metadata, card payment methods, and a deterministic Stripe idempotency key that includes the checkout offer and trial policy inputs.
+- `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts` binds Stripe customer/subscription refs on standard `checkout.session.completed`, activates paid subscriptions from `invoice.paid`, records subscription period markers from subscription events, and has one metadata-gated Pulse Trial activation path for Stripe trialing subscriptions.
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-status.ts` deliberately keeps subscription webhook writes conservative: Stripe `trialing` maps to hosted `active`, but subscription events that would make an inactive Murph member active are written as `incomplete` unless the member was already active.
-- `apps/web/prisma/schema.prisma` has `HostedMemberBillingRef` with Stripe customer/subscription refs, current plan code, current period start/end, and last Stripe event freshness, but it has no persisted phase or trial-end fields yet.
-- `apps/web/src/lib/hosted-execution/usage-allowance.ts` prices imported platform AI usage, skips member-provided credentials for allowance spend, maintains `HostedAiUsagePeriod`, and resolves the usage gate from billing period markers when present or a calendar-month fallback when not.
+- `apps/web/prisma/schema.prisma` has `HostedMemberBillingRef` with Stripe customer/subscription refs, current plan code, current period start/end, current billing phase, current checkout offer, immutable trial redemption metadata, trial start/end markers, and last Stripe event freshness.
+- `apps/web/src/lib/hosted-execution/usage-allowance.ts` prices imported platform AI usage, skips member-provided credentials for allowance spend, maintains `HostedAiUsagePeriod`, resolves trial allowances from persisted trial state, and denies stale/malformed trial state instead of using the calendar-month fallback.
 - `apps/web/app/api/internal/hosted-execution/usage/gate/route.ts` exposes the allowance decision over a signed internal web callback, and `apps/cloudflare/src/user-runner.ts` calls that gate before starting hosted workspace invocation.
-- `apps/web/src/components/hosted-onboarding/join-invite-stage-server.tsx` currently renders a first-class "Free" pricing card for self-hosted Murph and sends that CTA to GitHub.
+- `apps/web/src/components/hosted-onboarding/join-invite-stage-server.tsx` renders Pulse Trial, Pulse, and Edge as the pricing grid; the self-hosting GitHub link is secondary below the grid.
 
 ## External Stripe Constraints
 
@@ -127,6 +135,8 @@ Want to self-host? View Murph on GitHub.
 The product reason is that self-hosted Murph is still visible, but it is no longer presented as a hosted onboarding plan.
 
 Keep the copy factual rather than promotional: state duration, card requirement, post-trial price, cancellation implication, and hosted AI allowance plainly. Do not reintroduce a hosted "Free" plan label.
+
+Render the trial CTA only as enabled when `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`. The checkout service also enforces the same flag server-side, so a crafted request cannot start a trial while rollout is disabled.
 
 ### Client/API Shape
 
@@ -451,7 +461,7 @@ await writeHostedMemberStripeBillingTx({
 
 Then call `activateHostedMemberForPositiveSourceTx` with a checkout-trial dispatch context only if the member was not already active. Do not rely on `skipIfBillingAlreadyActive` to suppress duplicate activation across different Stripe source ids; either harden that helper to no-op when the member is already active or skip the helper explicitly in the trial conversion path.
 
-Implementation note: this future code changes the current architecture statement that `invoice.paid` is the only positive Stripe entitlement source. When implementation lands, update `ARCHITECTURE.md` and `apps/web/README.md` to describe the single metadata-gated trial exception.
+Implementation note: this changes the prior architecture statement that `invoice.paid` is the only positive Stripe entitlement source. `ARCHITECTURE.md` and `apps/web/README.md` now describe the single metadata-gated trial exception.
 
 ## Subscription And Invoice Reconciliation
 
