@@ -55,6 +55,7 @@ import {
   createHostedConversationMailboxImportItem,
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import {
+  createEmptyHostedMailboxImportState,
   readHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
@@ -122,6 +123,48 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("preserves explicit null browser-vault replica refs in checkpoint builders", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const requestInput = {
+      importResult: {
+        blocked: [],
+        fetchedCount: 0,
+        importedCount: 0,
+        state,
+      },
+      previousState: state,
+      reason: "maintenance",
+      redactedStatus: {},
+      state,
+    } satisfies Parameters<ReturnType<typeof createHostedWorkspaceCheckpointRequestBuilder>["createRequest"]>[0];
+    const checkpointBuilder = createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_synthetic_runner_null_replica",
+      browserVaultReplicaRef: null,
+      expectedWorkspaceVersion: "0",
+      leaseGeneration: "1",
+      snapshotRef: null,
+    });
+    const snapshotBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: () => ({
+        browserVaultReplicaRef: null,
+        snapshotRef: null,
+      }),
+      metadata: {
+        attemptId: "attempt_synthetic_runner_null_snapshot_replica",
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+      },
+    });
+
+    const checkpointRequest = await checkpointBuilder.createRequest(requestInput);
+    const snapshotRequest = await snapshotBuilder.createRequest(requestInput);
+
+    assert.equal(Object.hasOwn(checkpointRequest, "browserVaultReplicaRef"), true);
+    assert.equal(checkpointRequest.browserVaultReplicaRef, null);
+    assert.equal(Object.hasOwn(snapshotRequest, "browserVaultReplicaRef"), true);
+    assert.equal(snapshotRequest.browserVaultReplicaRef, null);
+  });
+
   test("imports mailbox and checkpoints before the assistant phase without inbox bootstrap", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({

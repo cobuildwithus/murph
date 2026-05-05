@@ -40,13 +40,15 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("writes local workspace snapshots through the artifact store", async () => {
+  it("writes local workspace snapshots through the artifact store and browser-vault replica port", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
     const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      platform: createPlatform({ putArtifact }),
+      platform: createPlatform({ putArtifact, writeBrowserVaultReplica }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
         leaseGeneration: "4",
@@ -73,6 +75,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }));
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
       sha256: result.snapshotRef!.hash,
+    }));
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: result.snapshotRef!.hash,
     }));
   });
 
@@ -429,6 +435,7 @@ function createCheckpointInput() {
 
 function createPlatform(input: {
   putArtifact: (payload: { bytes: Uint8Array; sha256: string }) => Promise<void>;
+  writeBrowserVaultReplica?: (payload: { replica: unknown }) => Promise<ReturnType<typeof createBrowserVaultReplicaRef>>;
   writeLog?: (request: {
     entries: readonly unknown[];
   }) => Promise<{ loggedCount: number }>;
@@ -437,6 +444,11 @@ function createPlatform(input: {
     artifactStore: {
       get: async () => null,
       put: input.putArtifact,
+    },
+    browserVaultReplicaPort: {
+      write: input.writeBrowserVaultReplica
+        ?? (async (payload: { replica: unknown }) =>
+          createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(payload.replica))),
     },
     effectsPort: {
       readRawEmailMessage: async () => null,
@@ -450,4 +462,36 @@ function createPlatform(input: {
         }
       : {}),
   };
+}
+
+function readBrowserVaultReplicaSourceBundleHash(replica: unknown): string {
+  if (!replica || typeof replica !== "object" || Array.isArray(replica)) {
+    throw new TypeError("Browser vault replica must be an object.");
+  }
+
+  const source = (replica as Record<string, unknown>).source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new TypeError("Browser vault replica source must be an object.");
+  }
+
+  const sourceBundleHash = (source as Record<string, unknown>).sourceBundleHash;
+  if (typeof sourceBundleHash !== "string") {
+    throw new TypeError("Browser vault replica sourceBundleHash must be a string.");
+  }
+
+  return sourceBundleHash;
+}
+
+function createBrowserVaultReplicaRef(sourceBundleHash: string) {
+  return {
+    byteLength: 256,
+    dataVersion: "workspace-bridge-test",
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    keyId: "browser-key-workspace-bridge",
+    objectKey: "browser-vault/member-test/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:workspace-bridge",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
+  } as const;
 }

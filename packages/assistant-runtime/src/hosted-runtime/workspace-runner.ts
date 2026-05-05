@@ -186,8 +186,8 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
     createRequest(input) {
       return {
         attemptId: metadata.attemptId,
-        ...(metadata.browserVaultReplicaRef
-          ? { browserVaultReplicaRef: metadata.browserVaultReplicaRef }
+        ...(Object.hasOwn(metadata, "browserVaultReplicaRef")
+          ? { browserVaultReplicaRef: metadata.browserVaultReplicaRef ?? null }
           : {}),
         expectedWorkspaceVersion: metadata.expectedWorkspaceVersion,
         leaseGeneration: metadata.leaseGeneration,
@@ -214,8 +214,8 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
       const snapshot = await input.createSnapshot(requestInput);
       return {
         attemptId: input.metadata.attemptId,
-        ...(snapshot.browserVaultReplicaRef
-          ? { browserVaultReplicaRef: snapshot.browserVaultReplicaRef }
+        ...(Object.hasOwn(snapshot, "browserVaultReplicaRef")
+          ? { browserVaultReplicaRef: snapshot.browserVaultReplicaRef ?? null }
           : {}),
         expectedWorkspaceVersion: input.metadata.expectedWorkspaceVersion,
         leaseGeneration: input.metadata.leaseGeneration,

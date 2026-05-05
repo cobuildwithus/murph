@@ -1,5 +1,6 @@
 export const CLOUDFLARE_HOSTED_RUNTIME_HOSTS = {
   artifactStore: "artifacts.worker",
+  browserVaultReplicaStore: "browser-vault.worker",
   effectsPort: "results.worker",
   runnerControl: "runner-control.worker",
   webControlPlane: "web-control.worker",
@@ -7,6 +8,7 @@ export const CLOUDFLARE_HOSTED_RUNTIME_HOSTS = {
 
 export const CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS = {
   artifactStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore}`,
+  browserVaultReplicaStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore}`,
   effectsPort: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort}`,
   runnerControl: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl}`,
   webControlPlane: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane}`,

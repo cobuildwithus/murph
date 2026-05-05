@@ -49,6 +49,20 @@ function requireFetchRequest(call: readonly unknown[] | undefined, label: string
   return input instanceof Request ? input : new Request(input, init);
 }
 
+function createBrowserVaultReplicaRef(sourceBundleHash: string) {
+  return {
+    byteLength: 256,
+    dataVersion: "runner-platform-test",
+    generatedAt: "2026-04-26T00:00:00.000Z",
+    keyId: "browser-key-runner-platform",
+    objectKey: "browser-vault/member-test/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:runner-platform",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
+  } as const;
+}
+
 describe("buildHostedExecutionRuntimePlatform", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
@@ -1039,6 +1053,53 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+  });
+
+  it("writes browser-vault replicas through the Cloudflare internal store with active lease headers", async () => {
+    const sourceBundleHash = "b".repeat(64);
+    const replica = {
+      generatedAt: "2026-04-26T00:00:00.000Z",
+      schema: "murph.browser-vault-replica",
+      source: {
+        dataVersion: "runner-platform-test",
+        sourceBundleHash,
+      },
+    };
+    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    const result = await platform.browserVaultReplicaPort!.write({ replica });
+
+    expect(result).toEqual(replicaRef);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault replica write");
+    expect(request.url).toBe("http://browser-vault.worker/replicas");
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+    await expect(request.json()).resolves.toEqual({ replica });
   });
 
   it("deduplicates successful artifact uploads by SHA within one platform instance", async () => {

@@ -1,4 +1,5 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
+import { createHostedBrowserVaultReplicaStore } from "./browser-vault-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import {
   buildHostedExecutionSafeErrorDetails,
@@ -72,6 +73,24 @@ export async function handleRunnerOutboundRequest(
       });
     }
 
+    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
+      if (url.pathname !== "/replicas") {
+        return notFound();
+      }
+
+      if (request.method !== "POST") {
+        return methodNotAllowed();
+      }
+
+      return handleRunnerBrowserVaultReplicaWriteRequest({
+        bucket: env.BUNDLES,
+        env,
+        environment,
+        request,
+        userId,
+      });
+    }
+
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
       const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
       if (!match?.groups) {
@@ -137,7 +156,7 @@ async function handleRunnerArtifactRequest(input: {
   userId: string;
 }): Promise<Response> {
   if (input.request.method === "PUT") {
-    const ownsActiveLease = await artifactWriteRequestOwnsActiveInvocationLease({
+    const ownsActiveLease = await writeRequestOwnsActiveInvocationLease({
       env: input.env,
       request: input.request,
       userId: input.userId,
@@ -187,7 +206,51 @@ async function handleRunnerArtifactRequest(input: {
   });
 }
 
-async function artifactWriteRequestOwnsActiveInvocationLease(input: {
+async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  const ownsActiveLease = await writeRequestOwnsActiveInvocationLease({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!ownsActiveLease) {
+    return unauthorized();
+  }
+
+  const body = await readJsonObject(input.request);
+  if (!Object.hasOwn(body, "replica")) {
+    throw new TypeError("Hosted browser-vault replica write request.replica is required.");
+  }
+
+  const crypto = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "runtime",
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+  const replicaStore = createHostedBrowserVaultReplicaStore({
+    bucket: input.bucket,
+    keysById: crypto.keysById,
+    resolveRootKeyById: crypto.resolveKeyById,
+    rootKey: crypto.rootKey,
+    rootKeyId: crypto.rootKeyId,
+    userId: input.userId,
+  });
+  const replicaRef = await replicaStore.writeBrowserVaultReplica({
+    replica: body.replica,
+    userId: input.userId,
+  });
+
+  return json({ replicaRef });
+}
+
+async function writeRequestOwnsActiveInvocationLease(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;

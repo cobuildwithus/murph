@@ -57,6 +57,7 @@ export interface RunnerOutboundEnvironmentSource
 
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,

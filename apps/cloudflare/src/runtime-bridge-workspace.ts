@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import {
+  createHostedBrowserVaultReplicaForSnapshot,
   createHostedConversationMailboxImportItem,
   enqueueHostedSystemMailboxItem,
   normalizeHostedAssistantRuntimeConfig,
@@ -92,8 +93,8 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     });
 
   return {
-    createCheckpointSnapshot: async (checkpointInput) => ({
-      snapshotRef: await createHostedWorkspaceBridgeCheckpointSnapshot({
+    createCheckpointSnapshot: async (checkpointInput) =>
+      await createHostedWorkspaceBridgeCheckpointSnapshot({
         platform: input.platform,
         readCurrentLease,
         request: {
@@ -117,7 +118,6 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
         userId: input.request.userId,
         vaultRoot,
       }),
-    }),
     importItem: createHostedWorkspaceBridgeMailboxImporter({
       readEncryptionEnvironment,
       runtime,
@@ -170,8 +170,11 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   request: HostedWorkspaceCheckpointRequest;
   userId: string;
   vaultRoot: string;
-}): Promise<HostedExecutionBundleRef> {
-  return await snapshotHostedRuntimeBridgeWorkspaceBundle({
+}): Promise<{
+  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  snapshotRef: HostedExecutionBundleRef;
+}> {
+  const snapshotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle({
     readCurrentLease: input.readCurrentLease,
     request: input.request,
     snapshotWorkspace: async () => {
@@ -210,6 +213,38 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
       };
     },
   });
+
+  const replica = await createHostedBrowserVaultReplicaForSnapshot({
+    generatedAt: snapshotRef.updatedAt,
+    snapshotRef,
+    vaultRoot: input.vaultRoot,
+  });
+
+  if (!replica) {
+    return {
+      browserVaultReplicaRef: null,
+      snapshotRef,
+    };
+  }
+
+  const browserVaultReplicaPort = input.platform.browserVaultReplicaPort;
+  if (!browserVaultReplicaPort) {
+    throw new TypeError(
+      "Hosted workspace runtime bridge requires a browser-vault replica port.",
+    );
+  }
+
+  const browserVaultReplicaRef = await browserVaultReplicaPort.write({ replica });
+  if (browserVaultReplicaRef.sourceBundleHash !== snapshotRef.hash) {
+    throw new TypeError(
+      "Hosted workspace runtime bridge published a browser-vault replica for a different snapshot.",
+    );
+  }
+
+  return {
+    browserVaultReplicaRef,
+    snapshotRef,
+  };
 }
 
 async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {

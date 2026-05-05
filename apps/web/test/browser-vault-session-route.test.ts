@@ -243,6 +243,42 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("returns empty when the workspace has a replica ref but no snapshot ref", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: null,
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state: "empty",
+    });
+  });
+
   it("returns empty when the workspace snapshot ref no longer matches the replica source bundle hash", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
