@@ -4,6 +4,12 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_STATE_PATH =
+  "/api/internal/device-sync/runtime/dirty-state";
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH =
+  "/api/internal/device-sync/runtime/dirty-pending";
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
+  "/api/internal/device-sync/runtime/dirty-ack";
 
 const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
 const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 2048;
@@ -196,6 +202,65 @@ export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
   userId: string;
 }
 
+export interface HostedExecutionDeviceSyncDirtyResource {
+  count: number;
+  jobKind: string;
+  resource: string | null;
+  resourceCategory: string | null;
+  sourceProviderSlug: string | null;
+  windowEnd: string | null;
+  windowStart: string | null;
+}
+
+export interface HostedExecutionDeviceSyncDirtyStateRequest {
+  connectionId: string;
+  dirtyRevision: string;
+  userId: string;
+}
+
+export interface HostedExecutionDeviceSyncDirtyPendingRequest {
+  limit?: number | null;
+  userId: string;
+}
+
+export interface HostedExecutionDeviceSyncDirtyStateResponse {
+  connectionId: string;
+  dirtyRevision: string;
+  dirtyResources: HostedExecutionDeviceSyncDirtyResource[];
+  eventCount: string;
+  latestDirtyAt: string;
+  processedRevision: string;
+  provider: string;
+  resourceCategoryCounts: Record<string, number>;
+  sourceProviderCounts: Record<string, number>;
+  userId: string;
+  windowEnd: string | null;
+  windowStart: string | null;
+}
+
+export interface HostedExecutionDeviceSyncDirtyPendingResponse {
+  hasMore: boolean;
+  items: HostedExecutionDeviceSyncDirtyStateResponse[];
+  nextWakeAt: string | null;
+  userId: string;
+}
+
+export interface HostedExecutionDeviceSyncDirtyAckRequest {
+  connectionId: string;
+  processedRevision: string;
+  userId: string;
+}
+
+export interface HostedExecutionDeviceSyncDirtyAckResponse {
+  connectionId: string;
+  dirtyRevision: string | null;
+  nextWakeAt: string | null;
+  processedRevision: string | null;
+  recorded: boolean;
+  stillDirty: boolean;
+  userId: string;
+}
+
 export function findHostedExecutionDeviceSyncRuntimeApplyEntry(
   response: HostedExecutionDeviceSyncRuntimeApplyResponse,
   connectionId: string,
@@ -219,6 +284,8 @@ export interface HostedExecutionDeviceSyncJobHint {
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
+  dirtyConnectionId?: string | null;
+  dirtyRevision?: string | null;
   eventType?: string | null;
   jobs?: HostedExecutionDeviceSyncJobHint[];
   nextReconcileAt?: string | null;
@@ -368,6 +435,149 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
   };
 }
 
+export function parseHostedExecutionDeviceSyncDirtyStateRequest(
+  value: unknown,
+  trustedUserId: string | null = null,
+): HostedExecutionDeviceSyncDirtyStateRequest {
+  const record = requireObject(value, "Hosted device-sync dirty state request");
+
+  return {
+    connectionId: requireString(record.connectionId, "Hosted device-sync dirty state request connectionId"),
+    dirtyRevision: requireBigIntString(record.dirtyRevision, "Hosted device-sync dirty state request dirtyRevision"),
+    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
+  value: unknown,
+  trustedUserId: string | null = null,
+): HostedExecutionDeviceSyncDirtyPendingRequest {
+  const record = requireObject(value, "Hosted device-sync dirty pending request");
+
+  return {
+    ...(record.limit === undefined
+      ? {}
+      : {
+          limit: readNullablePositiveInteger(
+            record.limit,
+            "Hosted device-sync dirty pending request limit",
+          ),
+        }),
+    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncDirtyStateResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncDirtyStateResponse | null {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, "Hosted device-sync dirty state response");
+
+  return {
+    connectionId: requireString(record.connectionId, "Hosted device-sync dirty state response connectionId"),
+    dirtyRevision: requireBigIntString(record.dirtyRevision, "Hosted device-sync dirty state response dirtyRevision"),
+    dirtyResources: requireArray(
+      record.dirtyResources,
+      "Hosted device-sync dirty state response dirtyResources",
+    ).map((entry, index) => parseHostedExecutionDeviceSyncDirtyResource(
+      entry,
+      `Hosted device-sync dirty state response dirtyResources[${index}]`,
+    )),
+    eventCount: requireBigIntString(record.eventCount, "Hosted device-sync dirty state response eventCount"),
+    latestDirtyAt: requireIsoTimestamp(record.latestDirtyAt, "Hosted device-sync dirty state response latestDirtyAt"),
+    processedRevision: requireBigIntString(
+      record.processedRevision,
+      "Hosted device-sync dirty state response processedRevision",
+    ),
+    provider: requireString(record.provider, "Hosted device-sync dirty state response provider"),
+    resourceCategoryCounts: parseHostedExecutionDeviceSyncDirtyCounters(
+      record.resourceCategoryCounts,
+      "Hosted device-sync dirty state response resourceCategoryCounts",
+    ),
+    sourceProviderCounts: parseHostedExecutionDeviceSyncDirtyCounters(
+      record.sourceProviderCounts,
+      "Hosted device-sync dirty state response sourceProviderCounts",
+    ),
+    userId: requireString(record.userId, "Hosted device-sync dirty state response userId"),
+    windowEnd: readNullableIsoTimestamp(record.windowEnd, "Hosted device-sync dirty state response windowEnd"),
+    windowStart: readNullableIsoTimestamp(record.windowStart, "Hosted device-sync dirty state response windowStart"),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncDirtyPendingResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncDirtyPendingResponse {
+  const record = requireObject(value, "Hosted device-sync dirty pending response");
+
+  return {
+    hasMore: requireBoolean(
+      record.hasMore,
+      "Hosted device-sync dirty pending response hasMore",
+    ),
+    items: requireArray(
+      record.items,
+      "Hosted device-sync dirty pending response items",
+    ).map((entry, index) => {
+      const parsed = parseHostedExecutionDeviceSyncDirtyStateResponse(entry);
+      if (!parsed) {
+        throw new TypeError(
+          `Hosted device-sync dirty pending response items[${index}] must not be null.`,
+        );
+      }
+      return parsed;
+    }),
+    nextWakeAt: readNullableIsoTimestamp(
+      record.nextWakeAt,
+      "Hosted device-sync dirty pending response nextWakeAt",
+    ),
+    userId: requireString(record.userId, "Hosted device-sync dirty pending response userId"),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncDirtyAckRequest(
+  value: unknown,
+  trustedUserId: string | null = null,
+): HostedExecutionDeviceSyncDirtyAckRequest {
+  const record = requireObject(value, "Hosted device-sync dirty ack request");
+
+  return {
+    connectionId: requireString(record.connectionId, "Hosted device-sync dirty ack request connectionId"),
+    processedRevision: requireBigIntString(
+      record.processedRevision,
+      "Hosted device-sync dirty ack request processedRevision",
+    ),
+    userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncDirtyAckResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncDirtyAckResponse {
+  const record = requireObject(value, "Hosted device-sync dirty ack response");
+
+  return {
+    connectionId: requireString(record.connectionId, "Hosted device-sync dirty ack response connectionId"),
+    dirtyRevision: readNullableBigIntString(
+      record.dirtyRevision,
+      "Hosted device-sync dirty ack response dirtyRevision",
+    ),
+    nextWakeAt: readNullableIsoTimestamp(
+      record.nextWakeAt,
+      "Hosted device-sync dirty ack response nextWakeAt",
+    ),
+    processedRevision: readNullableBigIntString(
+      record.processedRevision,
+      "Hosted device-sync dirty ack response processedRevision",
+    ),
+    recorded: requireBoolean(record.recorded, "Hosted device-sync dirty ack response recorded"),
+    stillDirty: requireBoolean(record.stillDirty, "Hosted device-sync dirty ack response stillDirty"),
+    userId: requireString(record.userId, "Hosted device-sync dirty ack response userId"),
+  };
+}
+
 export function resolveHostedDeviceSyncWakeContext(
   event: HostedExecutionDeviceSyncWakeEventLike,
 ): {
@@ -406,6 +616,20 @@ export function parseHostedExecutionDeviceSyncWakeHint(
 
   const record = requireObject(value, "Hosted execution device-sync.wake hint");
   const next: HostedExecutionDeviceSyncWakeHint = {};
+
+  if (record.dirtyConnectionId !== undefined) {
+    next.dirtyConnectionId = readNullableStringValue(
+      record.dirtyConnectionId,
+      "Hosted execution device-sync.wake hint dirtyConnectionId",
+    );
+  }
+
+  if (record.dirtyRevision !== undefined) {
+    next.dirtyRevision = readNullableBigIntString(
+      record.dirtyRevision,
+      "Hosted execution device-sync.wake hint dirtyRevision",
+    );
+  }
 
   if (record.eventType !== undefined) {
     next.eventType = readNullableStringValue(
@@ -657,6 +881,37 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
     tokenUpdate,
     writeUpdate,
   };
+}
+
+function parseHostedExecutionDeviceSyncDirtyResource(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncDirtyResource {
+  const record = requireObject(value, label);
+
+  return {
+    count: requirePositiveInteger(record.count, `${label}.count`),
+    jobKind: requireString(record.jobKind, `${label}.jobKind`),
+    resource: readNullableStringValue(record.resource, `${label}.resource`),
+    resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
+    sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
+    windowEnd: readNullableIsoTimestamp(record.windowEnd, `${label}.windowEnd`),
+    windowStart: readNullableIsoTimestamp(record.windowStart, `${label}.windowStart`),
+  };
+}
+
+function parseHostedExecutionDeviceSyncDirtyCounters(
+  value: unknown,
+  label: string,
+): Record<string, number> {
+  const record = requireObject(value, label);
+  const counters: Record<string, number> = {};
+
+  for (const [key, rawValue] of Object.entries(record)) {
+    counters[key] = requireNumber(rawValue, `${label}.${key}`);
+  }
+
+  return counters;
 }
 
 function parseHostedExecutionDeviceSyncRuntimeWriteUpdate(
@@ -1224,6 +1479,19 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function requireBigIntString(value: unknown, label: string): string {
+  const raw = requireString(value, label);
+  try {
+    const parsed = BigInt(raw);
+    if (parsed < 0n) {
+      throw new TypeError(`${label} must be a non-negative integer string.`);
+    }
+    return raw;
+  } catch {
+    throw new TypeError(`${label} must be a non-negative integer string.`);
+  }
+}
+
 const ISO_8601_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function readNullableStringValue(value: unknown, label: string): string | null {
@@ -1236,6 +1504,14 @@ function readNullableStringValue(value: unknown, label: string): string | null {
   }
 
   return value;
+}
+
+function readNullableBigIntString(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireBigIntString(value, label);
 }
 
 function sanitizeHostedRuntimeErrorString(

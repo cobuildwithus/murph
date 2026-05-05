@@ -25,6 +25,7 @@ import type {
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
+import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
@@ -34,6 +35,9 @@ import {
 } from "./internal-runtime";
 import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
+import type {
+  HostedDeviceSyncDirtyResource,
+} from "./prisma-store";
 import {
   normalizeNullableString,
   sha256Hex,
@@ -291,47 +295,21 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     });
   }
 
-  const hint = buildHostedWebhookHintSignal({
+  const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
+  await persistHostedDeviceSyncWebhookAccepted({
+    acceptedAt: input.now,
     connectionId: input.account.id,
+    dirtyResources: buildHostedWebhookDirtyResources({
+      jobs: input.webhook.jobs ?? [],
+      provider: input.account.provider,
+    }),
     eventType: input.webhook.eventType,
-    jobs: input.webhook.jobs,
-    occurredAt: input.webhook.occurredAt ?? null,
+    occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
-    resourceCategory: input.webhook.resourceCategory ?? null,
-    traceId,
-  });
-  const wake = buildHostedDeviceSyncWake({
-    connectionId: input.account.id,
-    hint,
-    occurredAt: input.now,
-    provider: input.account.provider,
-    source: "webhook-accepted",
+    resourceCategory,
+    store: input.store,
     traceId,
     userId: ownerId,
-  });
-
-  await persistHostedDeviceSyncWake({
-    wake,
-    store: input.store,
-    persist: async (tx) => {
-      await input.store.createSignal({
-        userId: ownerId,
-        connectionId: input.account.id,
-        provider: input.account.provider,
-        kind: "webhook_hint",
-        occurredAt: input.webhook.occurredAt ?? input.now,
-        traceId,
-        eventType: input.webhook.eventType,
-        resourceCategory: hint.resourceCategory ?? null,
-        createdAt: input.now,
-        tx,
-      });
-    },
-    complete: traceId
-      ? async () => {
-          await input.store.completeWebhookTrace(input.account.provider, traceId);
-        }
-      : undefined,
   });
 }
 
@@ -427,6 +405,70 @@ async function persistHostedDeviceSyncWake(input: {
   await input.complete?.();
 }
 
+async function persistHostedDeviceSyncWebhookAccepted(input: {
+  acceptedAt: string;
+  connectionId: string;
+  dirtyResources: readonly HostedDeviceSyncDirtyResource[];
+  eventType: string;
+  occurredAt: string;
+  provider: string;
+  resourceCategory?: string | null;
+  store: PrismaDeviceSyncControlPlaneStore;
+  traceId: string | null;
+  userId: string;
+}): Promise<void> {
+  let runnerWakeRequested = false;
+
+  await input.store.prisma.$transaction(async (tx) => {
+    await input.store.createSignal({
+      userId: input.userId,
+      connectionId: input.connectionId,
+      provider: input.provider,
+      kind: "webhook_hint",
+      occurredAt: input.occurredAt,
+      traceId: input.traceId,
+      eventType: input.eventType,
+      resourceCategory: input.resourceCategory ?? null,
+      createdAt: input.acceptedAt,
+      tx,
+    });
+    const dirty = await input.store.upsertDirtyConnection({
+      connectionId: input.connectionId,
+      dirtyAt: input.occurredAt,
+      eventType: input.eventType,
+      provider: input.provider,
+      resourceCategory: input.resourceCategory ?? null,
+      resources: input.dirtyResources,
+      traceId: input.traceId,
+      tx,
+      userId: input.userId,
+    });
+    runnerWakeRequested = dirty.shouldRequestWake;
+
+    if (input.traceId) {
+      await input.store.completeWebhookTrace(input.provider, input.traceId, tx);
+    }
+  });
+
+  if (!runnerWakeRequested) {
+    return;
+  }
+
+  const nudge = await nudgeHostedRunnerUserBestEffortResult({
+    context: "hosted-device-sync-dirty-webhook",
+    userId: input.userId,
+  });
+  if (!nudge.accepted) {
+    console.warn("Hosted device-sync dirty runner nudge was not accepted after durable acceptance.", {
+      connectionId: input.connectionId,
+      configured: nudge.configured,
+      errorCode: nudge.errorCode,
+      provider: input.provider,
+      traceIdPresent: input.traceId !== null,
+    });
+  }
+}
+
 function buildHostedDeviceSyncSignalPayload(input: {
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
@@ -445,36 +487,11 @@ function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): stri
       return "connected";
     case "disconnect":
       return "disconnected";
-    case "webhook-accepted":
-      return "webhook_hint";
+    case "scheduled-reconcile":
+      return "reconcile_due";
     default:
       throw new Error(`Unsupported hosted device-sync wake source: ${String(source)}`);
   }
-}
-
-function buildHostedWebhookHintSignal(input: {
-  connectionId: string;
-  eventType: string;
-  jobs?: readonly DeviceSyncJobInput[];
-  traceId?: string | null;
-  occurredAt?: string | null;
-  provider: string;
-  resourceCategory?: string | null;
-}): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
-  return {
-    eventType: input.eventType,
-    jobs: normalizeHostedDeviceSyncJobHints({
-      connectionId: input.connectionId,
-      jobs: input.jobs ?? [],
-      occurredAt: input.occurredAt,
-      provider: input.provider,
-      reason: "webhook_hint",
-      traceId: input.traceId,
-    }),
-    occurredAt: input.occurredAt ?? null,
-    resourceCategory: input.resourceCategory ?? null,
-    traceId: input.traceId ?? null,
-  } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
 }
 
 function normalizeHostedDeviceSyncJobHints(input: {
@@ -505,4 +522,42 @@ function normalizeHostedDeviceSyncJobHints(input: {
       ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
     } satisfies HostedExecutionDeviceSyncJobHint;
   });
+}
+
+function buildHostedWebhookDirtyResources(input: {
+  jobs: readonly DeviceSyncJobInput[];
+  provider: string;
+}): HostedDeviceSyncDirtyResource[] {
+  const resources: HostedDeviceSyncDirtyResource[] = [];
+
+  for (const job of input.jobs) {
+    const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
+    resources.push({
+      count: 1,
+      jobKind: job.kind,
+      resource: readHostedDirtyResourceString(payload.resource) ?? job.kind,
+      resourceCategory: readHostedDirtyResourceString(payload.resourceCategory) ?? job.kind,
+      sourceProviderSlug: readHostedDirtyResourceString(payload.sourceProviderSlug),
+      windowEnd: readHostedDirtyResourceString(payload.windowEnd),
+      windowStart: readHostedDirtyResourceString(payload.windowStart),
+    });
+  }
+
+  if (resources.length === 0) {
+    resources.push({
+      count: 1,
+      jobKind: "reconcile",
+      resource: "reconcile",
+      resourceCategory: "reconcile",
+      sourceProviderSlug: null,
+      windowEnd: null,
+      windowStart: null,
+    });
+  }
+
+  return resources;
+}
+
+function readHostedDirtyResourceString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }

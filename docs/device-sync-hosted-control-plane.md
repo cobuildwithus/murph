@@ -1,12 +1,12 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-05-02
+Last verified against repo layout: 2026-05-05
 
 ## Current split
 
 Murph's hosted device-sync stack is now split this way:
 
-- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, token-audit history, sparse sync signals, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link routes.
+- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/dirty-state/pending/ack routes.
 - `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, or start a provider connect link, but it is not a second durable device-sync control plane.
 - local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
@@ -40,10 +40,10 @@ It does not own canonical health-data import, token authority, or canonical host
 - OAuth start and callback routes
 - public webhook routes
 - provider-account ownership mapping through blind indexes plus opaque connection ids
-- durable Postgres-owned connection summaries, webhook traces, token-audit history, sparse wake signals, and agent-session state
+- durable Postgres-owned connection summaries, webhook traces, token-audit history, sparse wake signals, per-connection dirty aggregates, and agent-session state
 - token export and refresh flows for the local agent
 - disconnect, pairing, and other hosted operational control flows
-- the signed internal runtime snapshot, runtime apply, and connect-target link routes consumed by hosted execution
+- the signed internal runtime snapshot, runtime apply, dirty-state fetch/pending/ack, and connect-target link routes consumed by hosted execution
 
 `apps/web` must not:
 
@@ -83,7 +83,7 @@ The hosted boundary may hold:
 
 - provider client credentials
 - per-user connection metadata and token-audit history in Postgres
-- sparse webhook traces and wake signals
+- sparse webhook traces, wake signals, and dirty connection aggregates
 - execution-time runtime snapshots and runtime updates passed across signed internal callbacks during a hosted job
 
 The hosted boundary must fail closed on auth and never gain canonical vault-write authority.
@@ -108,7 +108,7 @@ Postgres remains required for hosted device sync because Vercel does not provide
 - OAuth state round-trips
 - connection ownership mapping
 - public connection metadata and token-audit history
-- webhook dedupe
+- webhook dedupe and device-sync dirty coalescing
 - sparse wake signals
 - local-agent pairing and session records
 
@@ -119,10 +119,13 @@ Recommended durable tables remain:
 - `device_oauth_session`
 - `device_webhook_trace`
 - `device_sync_signal`
+- `device_sync_dirty_connection`
 - `device_agent_session`
 - optional `device_webhook_subscription`
 
-Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, and the canonical hosted runtime authority consumed by the internal snapshot/apply routes. It should not store canonical health facts.
+Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, dirty resource/window summaries, and the canonical hosted runtime authority consumed by the internal snapshot/apply/dirty-state/pending/ack routes. It should not store canonical health facts.
+
+`device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider payloads, provider tokens, raw samples, or user-visible health facts.
 
 ### Cloudflare execution state
 
@@ -132,6 +135,9 @@ When a hosted job needs device-sync access, Cloudflare must call the signed inte
 
 - fetch the current runtime snapshot
 - apply narrow runtime updates
+- fetch pending dirty device-sync state as a first-class work source
+- fetch a specific dirty device-sync revision when processing an explicit lifecycle wake
+- acknowledge processed dirty revisions after checkpoint-safe execution
 - start a provider connect link
 
 That execution-time access does not make Cloudflare the durable owner of hosted device-sync authority.
@@ -193,9 +199,12 @@ These are authenticated by local-agent credentials, not browser cookies.
 
 - `POST /api/internal/device-sync/runtime/snapshot` on `apps/web`
 - `POST /api/internal/device-sync/runtime/apply` on `apps/web`
+- `POST /api/internal/device-sync/runtime/dirty-state` on `apps/web`
+- `POST /api/internal/device-sync/runtime/dirty-pending` on `apps/web`
+- `POST /api/internal/device-sync/runtime/dirty-ack` on `apps/web`
 - `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link` on `apps/web`
 
-These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution.
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
 
 ## Runtime access strategy
 
@@ -203,11 +212,21 @@ The current hosted runtime strategy is:
 
 1. `apps/web` remains the durable owner of hosted device-sync control facts and runtime authority.
 2. A hosted job running through `apps/cloudflare` requests the current runtime snapshot from the signed internal web route only when execution needs device-sync access.
-3. The hosted job sends narrow runtime updates back through the signed internal web apply route.
-4. Local-agent token export and refresh flows stay on the hosted web boundary.
-5. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
+3. The hosted runner fetches pending dirty device-sync rows from web-owned Postgres as a normal work source; webhook freshness does not depend on immutable per-webhook mailbox payloads.
+4. The hosted job sends narrow runtime updates back through the signed internal web apply route.
+5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Provider jobs that remain queued continue through the local device-sync scheduler.
+6. Local-agent token export and refresh flows stay on the hosted web boundary.
+7. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
 
 This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
+
+## Webhook Dirty Coalescing
+
+Provider webhook traces remain exact and per delivery. Accepted webhook traces write sparse audit signals and upsert `device_sync_dirty_connection`. The dirty row increments `dirty_revision` for every accepted webhook and widens compact resource/window metadata. Webhook freshness does not append hosted mailbox items and does not start Vercel Workflows.
+
+When a connection transitions from clean to dirty, webhook ingress sends a best-effort user-level runner nudge. That nudge contains no work payload; it only tells Cloudflare that the user may have pending durable work. Additional webhooks while already dirty update the aggregate without another ingress nudge. If a post-commit nudge is missed, the dirty row remains pending and the device-sync dirty sweeper can nudge the runner later.
+
+For accepted webhooks, provider trace completion means durable audit and dirty acceptance committed. Internal wake delivery is not allowed to force provider retry after that transaction commits. Existing connection-established and disconnect wakes remain immediate lifecycle commands because they are explicit lifecycle commands, not high-cardinality freshness hints.
 
 ## Provider and connect-target split
 

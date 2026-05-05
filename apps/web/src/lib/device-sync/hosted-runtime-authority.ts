@@ -4,10 +4,16 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
+  parseHostedExecutionDeviceSyncDirtyAckRequest,
+  parseHostedExecutionDeviceSyncDirtyPendingRequest,
+  parseHostedExecutionDeviceSyncDirtyStateRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   type HostedExecutionDeviceSyncRuntimeApplyEntry,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
+  type HostedExecutionDeviceSyncDirtyAckResponse,
+  type HostedExecutionDeviceSyncDirtyPendingResponse,
+  type HostedExecutionDeviceSyncDirtyStateResponse,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
   type HostedExecutionDeviceSyncRuntimeCredentialUpdate,
@@ -25,6 +31,7 @@ import {
 import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import {
   hostedConnectionRecordArgs,
+  type HostedDeviceSyncDirtyConnectionRecord,
   mapHostedConnectionRecord,
   type HostedConnectionRecord,
   type HostedPrismaTransactionClient,
@@ -304,6 +311,100 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     appliedAt,
     updates,
     userId: input.trustedUserId,
+  };
+}
+
+export async function readHostedDeviceSyncDirtyState(input: {
+  request: Request;
+  trustedUserId: string;
+}): Promise<HostedExecutionDeviceSyncDirtyStateResponse | null> {
+  const parsed = parseHostedExecutionDeviceSyncDirtyStateRequest(
+    await input.request.json(),
+    input.trustedUserId,
+  );
+  const requestedRevision = BigInt(parsed.dirtyRevision);
+  const controlPlane = createHostedDeviceSyncControlPlane(input.request);
+  const dirty = await controlPlane.store.getDirtyConnection({
+    connectionId: parsed.connectionId,
+    userId: input.trustedUserId,
+  });
+
+  if (!dirty || dirty.dirtyRevision < requestedRevision || dirty.processedRevision >= dirty.dirtyRevision) {
+    return null;
+  }
+
+  return mapHostedDeviceSyncDirtyStateResponse(dirty, input.trustedUserId);
+}
+
+export async function readHostedDeviceSyncPendingDirtyState(input: {
+  request: Request;
+  trustedUserId: string;
+}): Promise<HostedExecutionDeviceSyncDirtyPendingResponse> {
+  const parsed = parseHostedExecutionDeviceSyncDirtyPendingRequest(
+    await input.request.json(),
+    input.trustedUserId,
+  );
+  const controlPlane = createHostedDeviceSyncControlPlane(input.request);
+  const pending = await controlPlane.store.listPendingDirtyConnectionsForUser({
+    limit: parsed.limit ?? 10,
+    userId: input.trustedUserId,
+  });
+
+  return {
+    hasMore: pending.hasMore,
+    items: pending.items.map((dirty) =>
+      mapHostedDeviceSyncDirtyStateResponse(dirty, input.trustedUserId)
+    ),
+    nextWakeAt: pending.hasMore ? new Date().toISOString() : null,
+    userId: input.trustedUserId,
+  };
+}
+
+export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
+  request: Request;
+  trustedUserId: string;
+}): Promise<HostedExecutionDeviceSyncDirtyAckResponse> {
+  const parsed = parseHostedExecutionDeviceSyncDirtyAckRequest(
+    await input.request.json(),
+    input.trustedUserId,
+  );
+  const controlPlane = createHostedDeviceSyncControlPlane(input.request);
+  const dirty = await controlPlane.store.markDirtyConnectionProcessed({
+    connectionId: parsed.connectionId,
+    processedRevision: BigInt(parsed.processedRevision),
+    userId: input.trustedUserId,
+  });
+
+  return {
+    connectionId: parsed.connectionId,
+    dirtyRevision: dirty?.dirtyRevision.toString() ?? null,
+    nextWakeAt: dirty && dirty.dirtyRevision > dirty.processedRevision
+      ? new Date().toISOString()
+      : null,
+    processedRevision: dirty?.processedRevision.toString() ?? null,
+    recorded: dirty !== null,
+    stillDirty: dirty ? dirty.dirtyRevision > dirty.processedRevision : false,
+    userId: input.trustedUserId,
+  };
+}
+
+function mapHostedDeviceSyncDirtyStateResponse(
+  dirty: HostedDeviceSyncDirtyConnectionRecord,
+  trustedUserId: string,
+): HostedExecutionDeviceSyncDirtyStateResponse {
+  return {
+    connectionId: dirty.connectionId,
+    dirtyRevision: dirty.dirtyRevision.toString(),
+    dirtyResources: Object.values(dirty.dirtyResources),
+    eventCount: dirty.eventCount.toString(),
+    latestDirtyAt: dirty.latestDirtyAt,
+    processedRevision: dirty.processedRevision.toString(),
+    provider: dirty.provider,
+    resourceCategoryCounts: dirty.resourceCategoryCounts,
+    sourceProviderCounts: dirty.sourceProviderCounts,
+    userId: trustedUserId,
+    windowEnd: dirty.windowEnd,
+    windowStart: dirty.windowStart,
   };
 }
 

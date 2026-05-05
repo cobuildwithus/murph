@@ -657,6 +657,56 @@ test("Junction verifies Svix webhooks and maps data events to scalar resource jo
   assert.equal(typeof parsed.jobs[0]?.dedupeKey, "string");
 });
 
+test("Junction webhook jobs dedupe by resource window instead of Svix trace", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const body = {
+    event_type: "daily.data.steps.created",
+    user_id: "junction-user-1",
+    client_user_id: "murph_blinded",
+    data: {
+      id: "steps-1",
+      date: "2026-04-02",
+      resource: "steps",
+      source: {
+        provider: "garmin",
+      },
+    },
+  };
+
+  const firstWebhook = createJunctionSvixWebhook({
+    body,
+    messageId: "msg_steps_first",
+    timestamp: "1775174400",
+  });
+  const secondWebhook = createJunctionSvixWebhook({
+    body,
+    messageId: "msg_steps_second",
+    timestamp: "1775174400",
+  });
+
+  const first = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: firstWebhook.headers,
+    rawBody: firstWebhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const second = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: secondWebhook.headers,
+    rawBody: secondWebhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.notEqual(first.traceId, second.traceId);
+  assert.equal(first.jobs[0]?.kind, "resource");
+  assert.equal(first.jobs[0]?.dedupeKey, second.jobs[0]?.dedupeKey);
+});
+
 test("Junction webhook source-provider extraction covers documented payload shapes", async () => {
   const cases: Array<{
     label: string;

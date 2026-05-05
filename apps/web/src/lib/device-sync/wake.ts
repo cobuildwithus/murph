@@ -9,11 +9,11 @@ import { toJsonRecord } from "./shared";
 export type HostedDeviceSyncWakeSource =
   | "connection-established"
   | "disconnect"
-  | "scheduled-reconcile"
-  | "webhook-accepted";
+  | "scheduled-reconcile";
 
 export function buildHostedDeviceSyncWake(input: {
   connectionId: string;
+  eventId?: string | null;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider: string;
@@ -23,7 +23,7 @@ export function buildHostedDeviceSyncWake(input: {
 }) {
   return buildCanonicalHostedExecutionDeviceSyncWake({
     connectionId: input.connectionId,
-    eventId: buildHostedDeviceSyncWakeEventId(input),
+    eventId: input.eventId ?? buildHostedDeviceSyncWakeEventId(input),
     hint: input.hint,
     occurredAt: input.occurredAt,
     provider: input.provider,
@@ -82,8 +82,6 @@ export function mapHostedDeviceSyncWakeReason(
       return "disconnected";
     case "scheduled-reconcile":
       return "reconcile_due";
-    case "webhook-accepted":
-      return "webhook_hint";
     default:
       throw new Error(`Unsupported hosted device-sync wake source: ${String(source)}`);
   }
@@ -101,6 +99,8 @@ export function mapHostedDeviceSyncWakeReasonFromSignalKind(
       return "webhook_hint";
     case "reauthorization_required":
       return "reauthorization_required";
+    case "reconcile_due":
+      return "reconcile_due";
     default:
       throw new Error(`Unsupported device-sync signal kind for hosted execution: ${signalKind}`);
   }

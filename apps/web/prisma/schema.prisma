@@ -39,6 +39,7 @@ model DeviceConnection {
   signals                    DeviceSyncSignal[]
   sources                    DeviceConnectionSource[]
   tokenAudits                DeviceTokenAudit[]
+  dirtyState                 DeviceSyncDirtyConnection?
 
   @@unique([provider, providerAccountBlindIndex])
   @@index([userId, provider])
@@ -141,6 +142,34 @@ model DeviceSyncSignal {
   @@index([userId, id])
   @@index([connectionId])
   @@map("device_sync_signal")
+}
+
+model DeviceSyncDirtyConnection {
+  connectionId               String           @id @map("connection_id")
+  userId                     String           @map("user_id")
+  provider                   String
+  dirtyRevision              BigInt           @default(0) @map("dirty_revision")
+  processedRevision          BigInt           @default(0) @map("processed_revision")
+  firstDirtyAt               DateTime         @map("first_dirty_at")
+  latestDirtyAt              DateTime         @map("latest_dirty_at")
+  windowStart                DateTime?        @map("window_start")
+  windowEnd                  DateTime?        @map("window_end")
+  eventCount                 BigInt           @default(0) @map("event_count")
+  latestTraceId              String?          @map("latest_trace_id")
+  latestEventType            String?          @map("latest_event_type")
+  latestResourceCategory     String?          @map("latest_resource_category")
+  sourceProviderCountsJson   Json?            @map("source_provider_counts_json")
+  resourceCategoryCountsJson Json?            @map("resource_category_counts_json")
+  dirtyResourcesJson         Json?            @map("dirty_resources_json")
+  createdAt                  DateTime         @default(now()) @map("created_at")
+  updatedAt                  DateTime         @updatedAt @map("updated_at")
+  connection                 DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, provider])
+  @@index([userId, dirtyRevision, processedRevision])
+  @@index([userId, firstDirtyAt, connectionId])
+  @@index([latestDirtyAt])
+  @@map("device_sync_dirty_connection")
 }
 
 model DeviceAgentSession {

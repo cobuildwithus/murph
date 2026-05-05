@@ -17,6 +17,7 @@ import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
 import { PrismaHostedConnectionStore } from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
+import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
@@ -26,11 +27,14 @@ import {
 import type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
+  HostedDeviceSyncDirtyConnectionRecord,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
+  UpsertHostedDeviceSyncDirtyConnectionInput,
+  UpsertHostedDeviceSyncDirtyConnectionResult,
 } from "./prisma-store/types";
 import { PrismaHostedSignalStore } from "./prisma-store/signals";
 import { PrismaHostedTokenAuditStore } from "./prisma-store/token-audits";
@@ -53,12 +57,16 @@ export {
 export type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
+  HostedDeviceSyncDirtyConnectionRecord,
+  HostedDeviceSyncDirtyResource,
   HostedAgentSessionAuthResult,
   HostedAgentSessionAuthStatus,
   HostedAgentSessionRecord,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
+  UpsertHostedDeviceSyncDirtyConnectionInput,
+  UpsertHostedDeviceSyncDirtyConnectionResult,
 } from "./prisma-store/types";
 
 export class PrismaDeviceSyncControlPlaneStore
@@ -69,6 +77,7 @@ export class PrismaDeviceSyncControlPlaneStore
   private readonly connections: PrismaHostedConnectionStore;
   private readonly webhookTraces: PrismaHostedWebhookTraceStore;
   private readonly signals: PrismaHostedSignalStore;
+  private readonly dirtyConnections: PrismaHostedDirtyConnectionStore;
   private readonly sources: PrismaHostedConnectionSourceStore;
   private readonly browserAssertionNonces: PrismaHostedBrowserAssertionNonceStore;
   private readonly agentSessions: PrismaHostedAgentSessionStore;
@@ -91,6 +100,7 @@ export class PrismaDeviceSyncControlPlaneStore
       prisma: this.prisma,
     });
     this.signals = new PrismaHostedSignalStore(this.prisma);
+    this.dirtyConnections = new PrismaHostedDirtyConnectionStore(this.prisma);
     this.sources = new PrismaHostedConnectionSourceStore(this.prisma);
     this.browserAssertionNonces = new PrismaHostedBrowserAssertionNonceStore(this.prisma);
     this.agentSessions = new PrismaHostedAgentSessionStore(this.prisma);
@@ -205,6 +215,44 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
     return this.signals.createSignal(input);
+  }
+
+  async upsertDirtyConnection(
+    input: UpsertHostedDeviceSyncDirtyConnectionInput,
+  ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
+    return this.dirtyConnections.upsertDirtyConnection(input);
+  }
+
+  async getDirtyConnection(input: {
+    connectionId: string;
+    userId: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
+    return this.dirtyConnections.getDirtyConnection(input);
+  }
+
+  async listPendingDirtyConnectionsForUser(input: {
+    limit: number;
+    userId: string;
+    tx?: HostedPrismaTransactionClient;
+  }) {
+    return this.dirtyConnections.listPendingDirtyConnectionsForUser(input);
+  }
+
+  async listDirtyUsersForSweep(input: {
+    limit: number;
+    staleBefore: Date;
+  }) {
+    return this.dirtyConnections.listDirtyUsersForSweep(input);
+  }
+
+  async markDirtyConnectionProcessed(input: {
+    connectionId: string;
+    processedRevision: bigint;
+    userId: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
+    return this.dirtyConnections.markDirtyConnectionProcessed(input);
   }
 
   async createTokenAudit(input: CreateHostedTokenAuditInput): Promise<HostedTokenAuditRecord> {

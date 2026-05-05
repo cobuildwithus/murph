@@ -7,7 +7,7 @@ export function toPrismaJsonObject(value: unknown): Prisma.InputJsonObject {
 }
 
 export function toNullablePrismaJsonValue(
-  value: Record<string, unknown> | null | undefined,
+  value: unknown,
 ): Prisma.InputJsonValue | typeof Prisma.DbNull {
   return value ? toPrismaJsonObject(value) : Prisma.DbNull;
 }

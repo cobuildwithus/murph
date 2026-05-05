@@ -84,6 +84,7 @@ type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
 >[0];
 type HostedAutomationRuntime = Parameters<typeof runHostedAssistantAutomation>[4];
+type HostedTimerRuntime = Parameters<typeof runHostedAssistantRuntimeTimerLane>[0]["runtime"];
 
 const DEVICE_SYNC_CONFIG = {
   providerConfigs: {
@@ -98,8 +99,9 @@ const DEVICE_SYNC_CONFIG = {
 
 function createHostedAutomationRuntime(input: {
   platform?: Partial<HostedAutomationRuntime["platform"]>;
-} = {}): HostedAutomationRuntime {
+} = {}): HostedAutomationRuntime & HostedTimerRuntime {
   return {
+    commitTimeoutMs: 45_000,
     forwardedEnv: {},
     platform: {
       artifactStore: {
@@ -113,6 +115,13 @@ function createHostedAutomationRuntime(input: {
       ...input.platform,
     },
     platformEnv: {},
+    resolvedConfig: {
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    },
   };
 }
 
@@ -682,6 +691,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     assert.deepEqual(result, {
       nextWakeAt: null,
+      postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
     });
@@ -709,6 +719,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     assert.deepEqual(result, {
       nextWakeAt: null,
+      postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
     });
@@ -747,6 +758,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     assert.deepEqual(result, {
       nextWakeAt: null,
+      postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
     });
@@ -771,6 +783,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     assert.deepEqual(result, {
       nextWakeAt: null,
+      postCheckpointRecord: null,
       processedJobs: 0,
       skipped: true,
     });
@@ -812,6 +825,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     assert.deepEqual(result, {
       nextWakeAt: "2026-04-08T02:00:00.000Z",
+      postCheckpointRecord: null,
       processedJobs: 3,
       skipped: false,
     });
@@ -860,6 +874,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     assert.deepEqual(result, {
       nextWakeAt: "2026-04-08T02:00:00.000Z",
+      postCheckpointRecord: null,
       processedJobs: 3,
       skipped: false,
     });
@@ -958,6 +973,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     assert.deepEqual(result, {
       nextWakeAt: "2026-04-08T02:00:00.000Z",
+      postCheckpointRecord: null,
       processedJobs: 1,
       skipped: false,
     });
@@ -1240,6 +1256,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       deviceSyncSkipped: true,
       nextWakeAt: null,
       parserProcessed: 0,
+      postCheckpointRecord: null,
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
@@ -1411,6 +1428,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncSkipped: false,
       nextWakeAt: "2026-04-08T00:30:00.000Z",
       parserProcessed: 0,
+      postCheckpointRecord: null,
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
   });
@@ -1423,6 +1441,7 @@ describe("runHostedNoopSystemWakeLane", () => {
       deviceSyncSkipped: true,
       nextWakeAt: null,
       parserProcessed: 0,
+      postCheckpointRecord: null,
     });
   });
 });

@@ -12,6 +12,8 @@ import {
 import type {
   HostedExecutionDeviceSyncRuntimeCredentialSnapshot as HostedDeviceSyncRuntimeCredentialSnapshot,
   HostedExecutionDeviceSyncRuntimeCredentialUpdate as HostedDeviceSyncRuntimeCredentialUpdate,
+  HostedExecutionDeviceSyncDirtyResource,
+  HostedExecutionDeviceSyncDirtyStateResponse,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as HostedDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
@@ -33,6 +35,12 @@ export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
   localToHostedAccountIds: Map<string, string>;
   observedTokenVersions: Map<string, number | null>;
+  pendingDirtyAck: {
+    connectionId: string;
+    localAccountId: string;
+    nextWakeAt: string | null;
+    processedRevision: string;
+  } | null;
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null;
 }
 
@@ -108,10 +116,19 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   if (input.wake.kind === "device-sync.wake") {
-    applyHostedDeviceSyncWakeHint({
+    state.pendingDirtyAck = await applyHostedDeviceSyncWakeHint({
+      deviceSyncPort: client,
       wake: input.wake,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
+    });
+  }
+  if (!state.pendingDirtyAck) {
+    state.pendingDirtyAck = await applyHostedPendingDirtyDeviceSyncState({
+      deviceSyncPort: client,
+      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+      service: input.service,
+      wake: input.wake,
     });
   }
 
@@ -174,6 +191,7 @@ function createEmptyHostedDeviceSyncRuntimeSyncState(
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
+    pendingDirtyAck: null,
     snapshot,
   };
 }
@@ -184,27 +202,37 @@ function resolveHostedDeviceSyncRuntimeClientForUser(
   return deviceSyncPort ?? null;
 }
 
-function applyHostedDeviceSyncWakeHint(input: {
+async function applyHostedDeviceSyncWakeHint(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
   wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
-}): void {
+}): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
   if (input.wake.kind !== "device-sync.wake") {
-    return;
+    return null;
   }
 
   const wake = resolveHostedDeviceSyncWakeContext(input.wake);
+  const dirtyAck = await applyHostedDirtyDeviceSyncWakeHint({
+    deviceSyncPort: input.deviceSyncPort,
+    hostedToLocalAccountIds: input.hostedToLocalAccountIds,
+    service: input.service,
+    wake: input.wake,
+  });
+  if (dirtyAck) {
+    return dirtyAck;
+  }
   const localAccountId = wake.connectionId ? input.hostedToLocalAccountIds.get(wake.connectionId) ?? null : null;
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   if (!localAccountId) {
-    return;
+    return null;
   }
 
   const account = store.getAccountById(localAccountId);
 
   if (!account) {
-    return;
+    return null;
   }
 
   if (input.wake.reason === "disconnected") {
@@ -215,14 +243,14 @@ function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
       "Hosted device-sync wake marked the connection as disconnected.",
     );
-    return;
+    return null;
   }
 
   if (input.wake.reason === "reauthorization_required") {
     store.patchAccount(localAccountId, {
       status: "reauthorization_required",
     });
-    return;
+    return null;
   }
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
@@ -245,6 +273,167 @@ function applyHostedDeviceSyncWakeHint(input: {
   if (wakePatch) {
     store.patchAccount(localAccountId, wakePatch);
   }
+
+  return null;
+}
+
+async function applyHostedDirtyDeviceSyncWakeHint(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  hostedToLocalAccountIds: Map<string, string>;
+  service: DeviceSyncService;
+  wake: Extract<HostedRuntimeEvent, { kind: "device-sync.wake" }>;
+}): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
+  const hint = input.wake.hint;
+  const dirtyConnectionId = hint?.dirtyConnectionId ?? input.wake.connectionId ?? null;
+  const dirtyRevision = hint?.dirtyRevision ?? null;
+
+  if (!dirtyConnectionId || !dirtyRevision) {
+    return null;
+  }
+
+  if (!input.deviceSyncPort.fetchDirtyState) {
+    throw new Error("Hosted dirty device-sync wake requires a dirty-state runtime port.");
+  }
+
+  const dirtyState = await input.deviceSyncPort.fetchDirtyState({
+    connectionId: dirtyConnectionId,
+    dirtyRevision,
+  });
+  if (!dirtyState) {
+    return null;
+  }
+
+  return applyHostedDirtyDeviceSyncState({
+    dirtyState,
+    hostedToLocalAccountIds: input.hostedToLocalAccountIds,
+    nextWakeAt: null,
+    service: input.service,
+    wake: input.wake,
+  });
+}
+
+async function applyHostedPendingDirtyDeviceSyncState(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  hostedToLocalAccountIds: Map<string, string>;
+  service: DeviceSyncService;
+  wake: HostedRuntimeEvent;
+}): Promise<HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"]> {
+  if (!input.deviceSyncPort.fetchDirtyStates) {
+    return null;
+  }
+
+  const pending = await input.deviceSyncPort.fetchDirtyStates({
+    limit: 1,
+  });
+  const dirtyState = pending.items[0] ?? null;
+  if (!dirtyState) {
+    return null;
+  }
+
+  return applyHostedDirtyDeviceSyncState({
+    dirtyState,
+    hostedToLocalAccountIds: input.hostedToLocalAccountIds,
+    nextWakeAt: pending.nextWakeAt,
+    service: input.service,
+    wake: input.wake,
+  });
+}
+
+function applyHostedDirtyDeviceSyncState(input: {
+  dirtyState: HostedExecutionDeviceSyncDirtyStateResponse;
+  hostedToLocalAccountIds: Map<string, string>;
+  nextWakeAt: string | null;
+  service: DeviceSyncService;
+  wake: HostedRuntimeEvent;
+}): HostedDeviceSyncRuntimeSyncState["pendingDirtyAck"] {
+  const localAccountId = input.hostedToLocalAccountIds.get(input.dirtyState.connectionId) ?? null;
+  if (!localAccountId) {
+    return null;
+  }
+
+  const store = requireHostedRuntimeDeviceSyncStore(input.service);
+  const account = store.getAccountById(localAccountId);
+  if (!account) {
+    return null;
+  }
+
+  for (const job of buildHostedDirtyDeviceSyncJobs(input.dirtyState, input.wake.occurredAt)) {
+    store.enqueueJob({
+      accountId: localAccountId,
+      availableAt: job.availableAt,
+      dedupeKey: job.dedupeKey,
+      kind: job.kind,
+      maxAttempts: job.maxAttempts,
+      payload: job.payload ?? {},
+      priority: job.priority ?? 0,
+      provider: account.provider,
+    });
+  }
+
+  return {
+    connectionId: input.dirtyState.connectionId,
+    localAccountId,
+    nextWakeAt: input.nextWakeAt,
+    processedRevision: input.dirtyState.dirtyRevision,
+  };
+}
+
+function buildHostedDirtyDeviceSyncJobs(
+  dirtyState: HostedExecutionDeviceSyncDirtyStateResponse,
+  occurredAt: string,
+): DeviceSyncJobInput[] {
+  const dirtyResources = dirtyState.dirtyResources.length > 0
+    ? dirtyState.dirtyResources
+    : [{
+        count: 1,
+        jobKind: "reconcile",
+        resource: null,
+        resourceCategory: null,
+        sourceProviderSlug: null,
+        windowEnd: dirtyState.windowEnd,
+        windowStart: dirtyState.windowStart,
+      }];
+
+  return dirtyResources.map((resource) =>
+    hostedDirtyResourceToDeviceSyncJobInput(resource, dirtyState, occurredAt)
+  );
+}
+
+function hostedDirtyResourceToDeviceSyncJobInput(
+  resource: HostedExecutionDeviceSyncDirtyResource,
+  dirtyState: HostedExecutionDeviceSyncDirtyStateResponse,
+  occurredAt: string,
+): DeviceSyncJobInput {
+  const payload: Record<string, unknown> = {
+    windowEnd: resource.windowEnd ?? dirtyState.windowEnd ?? occurredAt,
+    windowStart: resource.windowStart ?? dirtyState.windowStart ?? occurredAt,
+  };
+  if (resource.resource) {
+    payload.resource = resource.resource;
+  }
+  if (resource.resourceCategory) {
+    payload.resourceCategory = resource.resourceCategory;
+  }
+  if (resource.sourceProviderSlug) {
+    payload.sourceProviderSlug = resource.sourceProviderSlug;
+  }
+  const dedupeKey = [
+    "hosted-dirty",
+    dirtyState.provider,
+    resource.jobKind,
+    resource.sourceProviderSlug ?? "provider",
+    resource.resourceCategory ?? "category",
+    resource.resource ?? "resource",
+    payload.windowStart,
+    payload.windowEnd,
+  ].join(":");
+
+  return {
+    kind: resource.jobKind,
+    payload,
+    priority: 60,
+    dedupeKey,
+  };
 }
 
 function buildHostedDeviceSyncWakeAccountPatch(
