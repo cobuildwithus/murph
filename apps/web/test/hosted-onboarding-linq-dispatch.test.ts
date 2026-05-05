@@ -1,4 +1,4 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -87,7 +87,7 @@ const mocks = vi.hoisted(() => {
       startedAtMs: 0,
       step,
     })),
-    readHostedLinqDailyState: vi.fn(async () => null),
+    readHostedLinqDailyState: vi.fn<() => Promise<HostedLinqDailyState | null>>(async () => null),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
@@ -133,14 +133,21 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
-  claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
-  claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
-  incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
-  incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
-  readHostedLinqDailyState: mocks.readHostedLinqDailyState,
-  resolveHostedLinqDayUtc: vi.fn(),
-}));
+vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-daily-state")>(
+    "@/src/lib/hosted-onboarding/linq-daily-state",
+  );
+
+  return {
+    ...actual,
+    claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
+    claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
+    incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
+    incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
+    readHostedLinqDailyState: mocks.readHostedLinqDailyState,
+    resolveHostedLinqDayUtc: vi.fn(),
+  };
+});
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
@@ -2593,9 +2600,9 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
-  it("sends one daily quota reply after the 100th active-member inbound message", async () => {
+  it("sends one daily quota reply after the 150th active-member inbound message", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 101,
+      inboundCount: 151,
     }));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -2645,7 +2652,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: "You have reached Murph's daily text limit of 100 messages. Try again tomorrow.",
+        message: "You have reached Murph's daily text limit of 150 messages. Try again tomorrow.",
         replyToMessageId: "msg_123",
       }),
     );
@@ -2656,7 +2663,7 @@ https://join.example.test/join/code_first_text`);
 
   it("uses the sent quota marker, not a pre-send claim, to suppress repeat quota replies", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 101,
+      inboundCount: 151,
       quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
     const prisma = asPrismaTransactionClient({
@@ -2703,7 +2710,7 @@ https://join.example.test/join/code_first_text`);
 
   it("does not mark the daily quota notice sent when the inline active-member quota reply fails", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 101,
+      inboundCount: 151,
     }));
     mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
     const prisma = asPrismaTransactionClient({
@@ -3170,7 +3177,7 @@ function makeHostedLinqDailyState(input: {
   onboardingLinkSentAt?: Date | null;
   outboundCount?: number;
   quotaReplySentAt?: Date | null;
-} = {}) {
+} = {}): HostedLinqDailyState {
   return {
     createdAt: new Date("2026-03-26T12:00:00.000Z"),
     dayUtc: input.dayUtc ?? new Date("2026-03-26T00:00:00.000Z"),

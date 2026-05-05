@@ -73,13 +73,20 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
-  claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
-  claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
-  incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
-  incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
-  readHostedLinqDailyState: mocks.readHostedLinqDailyState,
-}));
+vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq-daily-state")>(
+    "@/src/lib/hosted-onboarding/linq-daily-state",
+  );
+
+  return {
+    ...actual,
+    claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
+    claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
+    incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
+    incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
+    readHostedLinqDailyState: mocks.readHostedLinqDailyState,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
