@@ -6,6 +6,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeRedactedJson,
+  HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantExecutionContext,
@@ -172,176 +173,31 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "codexResumeFailureRetryable",
 ] as const;
 
-const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEY_SET = new Set<string>(
-  HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS,
-);
-
-const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_BOOLEAN_KEYS = new Set([
-  "codexResumeFailureErrorMessagePresent",
-  "codexResumeFailureResumeMatchesFailureSession",
-  "codexResumeFailureResumeSessionPresent",
-  "codexResumeFailureRetryable",
-  "codexResumeFailureSessionPresent",
-  "codexResumeFailureTurnPresent",
-]);
-const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_KEYS = new Set([
-  "codexResumeFailureErrorMessageLength",
-  "codexResumeFailureEventCount",
-  "codexResumeFailureProviderActionCount",
-]);
-const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = new Set([
-  "codexResumeFailureOutputArrayLengths",
-  "codexResumeFailureOutputStringLengths",
-]);
-const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_VALUES = new Map<
-  string,
-  ReadonlySet<string>
->([
-  ["codexResumeFailureTraceType", new Set(["failure"])],
-  ["codexResumeFailurePhase", new Set(["resume-failed"])],
-  ["codexResumeFailureErrorCode", new Set([
-    "ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED",
-    "ASSISTANT_CODEX_APP_SERVER_FAILED",
-    "ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE",
-    "ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID",
-    "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
-    "ASSISTANT_CODEX_APP_SERVER_TIMEOUT",
-    "ASSISTANT_CODEX_CONNECTION_LOST",
-    "ASSISTANT_CODEX_FAILED",
-    "ASSISTANT_CODEX_HOME_INVALID",
-    "ASSISTANT_CODEX_IMAGE_INVALID",
-    "ASSISTANT_CODEX_INTERRUPTED",
-    "ASSISTANT_CODEX_NOT_FOUND",
-    "ASSISTANT_CODEX_RESUME_STALE",
-    "ASSISTANT_PROVIDER_UNSUPPORTED",
-  ])],
-  ["codexResumeFailureErrorKind", new Set([
-    "codex-failed",
-    "connection-lost",
-    "invalid-input-output",
-    "provider-unsupported",
-    "rpc-failed",
-    "resume-stale",
-    "timeout",
-    "turn-failed",
-    "unknown",
-  ])],
-  ["codexResumeFailureCodexFailureStage", new Set([
-    "connection_lost",
-    "other",
-    "process_exit",
-    "turn_failed",
-    "unknown",
-  ])],
-  ["codexResumeFailureCodexTurnStatus", new Set([
-    "cancelled",
-    "canceled",
-    "completed",
-    "failed",
-    "in_progress",
-    "interrupted",
-    "other",
-    "running",
-    "succeeded",
-    "unknown",
-  ])],
-]);
-const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_ARRAY_VALUES = new Map<
-  string,
-  ReadonlySet<string>
->([
-  ["codexResumeFailureErrorPhrases", new Set([
-    "codex-turn-failed",
-    "connection-lost",
-    "input-output-field",
-    "invalid-input",
-    "rate-limit",
-    "resume-stale",
-    "status-failed",
-    "timeout",
-    "usage-limit",
-  ])],
-  ["codexResumeFailureEventMethods", new Set([
-    "initialize",
-    "rpc.error",
-    "rpc.response",
-    "thread/resume",
-    "thread/start",
-    "turn/completed",
-    "turn/interrupt",
-    "turn/start",
-    "turn/started",
-    "turn/steer",
-  ])],
-  ["codexResumeFailureEventKinds", new Set([
-    "array",
-    "boolean",
-    "cancelled",
-    "canceled",
-    "command.execution",
-    "completed",
-    "connection_lost",
-    "dynamic.tool.call",
-    "error",
-    "failed",
-    "file.change",
-    "function_call",
-    "function_call_output",
-    "image",
-    "in_progress",
-    "input_image",
-    "input_text",
-    "interrupted",
-    "message",
-    "null",
-    "number",
-    "object",
-    "other",
-    "process_exit",
-    "reasoning",
-    "running",
-    "string",
-    "succeeded",
-    "turn_failed",
-    "undefined",
-    "unknown",
-  ])],
-]);
-const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRUCTURAL_ARRAY_KEYS = new Set([
-  "codexResumeFailureEventStatuses",
-  "codexResumeFailureOutputKinds",
-  "codexResumeFailureOutputPartTypes",
-]);
-const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_KEY_SUMMARY_ARRAY_KEYS = new Set([
-  "codexResumeFailureOutputObjectKeys",
-  "codexResumeFailureParamKeys",
-]);
-const HOSTED_RUNTIME_CODEX_DIAGNOSTIC_KEY_BUCKET_VALUES = new Set([
-  "[key]",
-  "[sensitive-key]",
-  "content",
-  "id",
-  "image_url",
-  "kind",
-  "method",
-  "output",
-  "params",
+const HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH = 2048;
+const HOSTED_RUNTIME_BLOCKED_LOG_KEY_PARTS = [
+  "payload",
+  "preview",
+  "prompt",
+  "transcript",
+  "vault",
+] as const;
+const HOSTED_RUNTIME_SECRET_VALUE_KEY_PARTS = [
+  "authorization",
+  "cookie",
+  "password",
+  "secret",
+  "token",
+] as const;
+const HOSTED_RUNTIME_ERROR_DESCRIPTION_KEY_PARTS = [
+  "cause",
+  "detail",
+  "error",
+  "exception",
+  "failure",
+  "message",
+  "reason",
   "status",
-  "text",
-  "type",
-]);
-
-const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_NAMES = new Set([
-  "failureAssistantProviderErrorBodyMessage",
-  "failureAssistantProviderErrorMessage",
-  "failureAssistantProviderErrorStatusText",
-  "codexResumeFailureErrorMessage",
-  "safeErrorMessage",
-]);
-
-const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH = 2048;
-const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_PATTERN =
-  /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
+] as const;
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
@@ -1036,27 +892,19 @@ function buildHostedAssistantAutomationDetailRedactedJson(
     maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, input, key);
   }
 
-  for (const key of Object.keys(input)) {
-    if (!isHostedRuntimeSafeDiagnosticTextKey(key)) {
-      continue;
-    }
-
-    maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, input, key);
-  }
-
   for (const [key, value] of Object.entries(input)) {
     if (key in output) {
       continue;
     }
 
-    if (
-      Object.keys(output).length >= HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS
-      || !isHostedRuntimeRedactedLogKeyAllowed(key)
-      || !isHostedRuntimeRedactedLogValue(key, value)
-    ) {
+    if (Object.keys(output).length >= HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS) {
       continue;
     }
-    output[key] = value;
+
+    const redactedValue = normalizeHostedRuntimeRedactedLogValue(key, value);
+    if (redactedValue !== undefined) {
+      output[key] = redactedValue;
+    }
   }
 
   return {
@@ -1073,7 +921,6 @@ function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
   if (
     key in output
     || Object.keys(output).length >= HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS
-    || !isHostedRuntimeRedactedLogKeyAllowed(key)
   ) {
     return;
   }
@@ -1107,68 +954,56 @@ function readHostedRuntimeRedactedLogString(
     : null;
 }
 
-function isHostedRuntimeRedactedLogKeyAllowed(key: string): boolean {
-  if (isHostedRuntimeSafeDiagnosticTextKey(key)) {
-    return true;
-  }
-  if (HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEY_SET.has(key)) {
-    return true;
-  }
-
-  const normalized = key.toLowerCase();
-  return ![
-    "address",
-    "authorization",
-    "body",
-    "cookie",
-    "email",
-    "header",
-    "message",
-    "path",
-    "payload",
-    "phone",
-    "preview",
-    "prompt",
-    "raw",
-    "secret",
-    "text",
-    "token",
-  ].some((part) => normalized.includes(part));
-}
-
-function isHostedRuntimeRedactedLogValue(
-  key: string,
-  value: unknown,
-): value is HostedRuntimeRedactedJson[string] {
-  if (isHostedRuntimeSafeDiagnosticTextKey(key)) {
-    return isHostedRuntimeSafeDiagnosticTextValue(value);
-  }
-
-  if (key.startsWith("codexResumeFailure")) {
-    return isHostedRuntimeCodexResumeFailureLogValue(key, value);
-  }
-
-  if (Array.isArray(value)) {
-    return value.length <= 16 && value.every(isHostedRuntimeRedactedLogScalar);
-  }
-
-  return isHostedRuntimeRedactedLogScalar(value);
-}
-
 function normalizeHostedRuntimeRedactedLogValue(
   key: string,
   value: unknown,
 ): HostedRuntimeRedactedJson[string] | undefined {
-  if (isHostedRuntimeSafeDiagnosticTextKey(key)) {
-    return redactHostedRuntimeSafeDiagnosticText(value);
+  if (!isHostedRuntimeLogKeyAllowed(key)) {
+    return undefined;
   }
 
-  return isHostedRuntimeRedactedLogValue(key, value) ? value : undefined;
+  if (Array.isArray(value)) {
+    return normalizeHostedRuntimeRedactedLogArray(key, value);
+  }
+
+  return normalizeHostedRuntimeRedactedLogScalar(key, value);
 }
 
-function redactHostedRuntimeSafeDiagnosticText(value: unknown): string | undefined {
+function normalizeHostedRuntimeRedactedLogArray(
+  key: string,
+  value: unknown[],
+): HostedRuntimeRedactedJson[string] | undefined {
+  if (value.length > 16) {
+    return undefined;
+  }
+
+  const output = value.flatMap((entry) => {
+    const normalized = normalizeHostedRuntimeRedactedLogScalar(key, entry);
+    return normalized === undefined ? [] : [normalized];
+  });
+  return output.length > 0 ? output : undefined;
+}
+
+function normalizeHostedRuntimeRedactedLogScalar(
+  key: string,
+  value: unknown,
+): HostedRuntimeRedactedScalar | undefined {
+  if (value === null || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
   if (typeof value !== "string") {
     return undefined;
+  }
+
+  return redactHostedRuntimeLogString(key, value);
+}
+
+function redactHostedRuntimeLogString(key: string, value: string): string | undefined {
+  if (isHostedRuntimeSecretValueKey(key) && !isHostedRuntimeErrorDescriptionKey(key)) {
+    return "[redacted]";
   }
 
   const normalized = sanitizeHostedExecutionStructuredLogText(value);
@@ -1194,133 +1029,35 @@ function redactHostedRuntimeSafeDiagnosticText(value: unknown): string | undefin
     return undefined;
   }
 
-  const bounded = redacted.length <= HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH
+  const bounded = redacted.length <= HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH
     ? redacted
-    : `${redacted.slice(0, HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH - 3).trimEnd()}...`;
+    : `${redacted.slice(0, HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH - 3).trimEnd()}...`;
 
-  return isHostedRuntimeSafeDiagnosticTextValue(bounded) ? bounded : undefined;
+  return isHostedRuntimeRedactedLogStringValue(bounded) ? bounded : undefined;
 }
 
-function isHostedRuntimeSafeDiagnosticTextKey(key: string): boolean {
-  return HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_NAMES.has(key)
-    || HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_PATTERN.test(key);
-}
-
-function isHostedRuntimeCodexResumeFailureLogValue(
-  key: string,
-  value: unknown,
-): value is HostedRuntimeRedactedJson[string] {
-  const allowedStringValues = HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_VALUES.get(key);
-  if (allowedStringValues) {
-    return value === null
-      || (typeof value === "string" && allowedStringValues.has(value));
-  }
-
-  const allowedStringArrayValues =
-    HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_ARRAY_VALUES.get(key)
-    ?? (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRUCTURAL_ARRAY_KEYS.has(key)
-      ? HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_ARRAY_VALUES.get(
-          "codexResumeFailureEventKinds",
-        )
-      : undefined);
-  if (allowedStringArrayValues) {
-    return value === null
-      || isHostedRuntimeAllowedStringArray(value, allowedStringArrayValues);
-  }
-
-  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_KEY_SUMMARY_ARRAY_KEYS.has(key)) {
-    return value === null || isHostedRuntimeKeySummaryArray(value);
-  }
-
-  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS.has(key)) {
-    return value === null || isHostedRuntimeNonnegativeNumberArray(value);
-  }
-
-  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_BOOLEAN_KEYS.has(key)) {
-    return value === null || typeof value === "boolean";
-  }
-
-  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_KEYS.has(key)) {
-    return value === null
-      || (typeof value === "number" && Number.isFinite(value) && value >= 0);
-  }
-
-  return false;
-}
-
-function isHostedRuntimeAllowedStringArray(
-  value: unknown,
-  allowedValues: ReadonlySet<string>,
-): value is string[] {
-  return Array.isArray(value)
-    && value.length <= 16
-    && value.every((entry) =>
-      typeof entry === "string" && allowedValues.has(entry),
-    );
-}
-
-function isHostedRuntimeKeySummaryArray(value: unknown): value is string[] {
-  return Array.isArray(value)
-    && value.length <= 16
-    && value.every((entry) => {
-      if (typeof entry !== "string") {
-        return false;
-      }
-      const tokens = entry.split(",");
-      return tokens.length > 0
-        && tokens.every((token) =>
-          HOSTED_RUNTIME_CODEX_DIAGNOSTIC_KEY_BUCKET_VALUES.has(token),
-        );
-    });
-}
-
-function isHostedRuntimeNonnegativeNumberArray(value: unknown): value is number[] {
-  return Array.isArray(value)
-    && value.length <= 16
-    && value.every((entry) =>
-      typeof entry === "number" && Number.isFinite(entry) && entry >= 0,
-    );
-}
-
-function isHostedRuntimeRedactedLogScalar(
-  value: unknown,
-): value is null | boolean | number | string {
-  if (value === null || typeof value === "boolean") {
-    return true;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value);
-  }
-  if (typeof value !== "string" || value.length > 128) {
-    return false;
-  }
-
-  return !(
-    /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
-    || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
-    || /\+\d[\d().\s-]{7,}\d/u.test(value)
-    || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
-      .test(value)
-    || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
-    || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
-    || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
+function isHostedRuntimeLogKeyAllowed(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return !HOSTED_RUNTIME_BLOCKED_LOG_KEY_PARTS.some((part) =>
+    normalized.includes(part)
   );
 }
 
-function isHostedRuntimeSafeDiagnosticTextValue(value: unknown): value is string {
-  if (
-    typeof value !== "string"
-    || value.length === 0
-    || value.length > HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH
-  ) {
-    return false;
-  }
+function isHostedRuntimeSecretValueKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return HOSTED_RUNTIME_SECRET_VALUE_KEY_PARTS.some((part) => normalized.includes(part));
+}
 
+function isHostedRuntimeErrorDescriptionKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return HOSTED_RUNTIME_ERROR_DESCRIPTION_KEY_PARTS.some((part) =>
+    normalized.includes(part)
+  );
+}
+
+function isHostedRuntimeRedactedLogStringValue(value: string): boolean {
   return !(
-    /\/Users\/|file:\/\/|[A-Za-z]:\\/u.test(value)
-    || /(^|[\s(])\/[^\s)]+/u.test(
-      value.replace(/<HOME_DIR>(?:\/[^\s)]*)?/gu, ""),
-    )
+    /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
     || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
     || /\+\d[\d().\s-]{7,}\d/u.test(value)
     || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu

@@ -501,7 +501,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           safeErrorLength:
             "Codex app-server failed.\ndetails:\n- usage limit reached; try again later\n- workspace: <HOME_DIR>/project".length,
           safeErrorMessage:
-            "Codex app-server failed. details: - usage limit reached; try again later - workspace: <REDACTED_PATH>",
+            "Codex app-server failed.\ndetails:\n- usage limit reached; try again later\n- workspace: <HOME_DIR>/project",
           safeErrorPresent: true,
           type: "input.reply-failed",
         },
@@ -524,7 +524,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         failureRetryable: false,
         safeDetails: "provider usage limit reached (ASSISTANT_CODEX_FAILED)",
         safeErrorMessage:
-          "Codex app-server failed.\ndetails:\n- usage limit reached; try again later\n- workspace: <HOME_DIR>/project",
+          "Codex app-server failed. details: - usage limit reached; try again later - workspace: <REDACTED_PATH>",
         type: "input.reply-failed",
       }),
     }));
@@ -576,8 +576,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         phase: "wake.running",
         redacted: {
           errorCode: "ASSISTANT_CODEX_FAILED",
+          assistantExceptionDetail: "Unhandled provider exception at /tmp/provider",
           failureCodexDiagnosticsPresent: false,
           failureFieldsPresent: true,
+          providerFailureReason: "authorization: Bearer raw-provider-token",
+          providerFailureRawPayloadReason: "raw payload should not persist",
           safeDetails: "assistant provider failed (ASSISTANT_CODEX_FAILED)",
           safeErrorLength: "Codex app-server failed at /tmp/workspace".length,
           safeErrorMessage: "Codex app-server failed at /tmp/workspace",
@@ -593,8 +596,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       errorCode: "ASSISTANT_CODEX_FAILED",
       redactedJson: expect.objectContaining({
         errorCode: "ASSISTANT_CODEX_FAILED",
+        assistantExceptionDetail: "Unhandled provider exception at <REDACTED_PATH>",
         failureCodexDiagnosticsPresent: false,
         failureFieldsPresent: true,
+        providerFailureReason: "authorization [redacted]",
         safeDetails: "assistant provider failed (ASSISTANT_CODEX_FAILED)",
         safeErrorLength: "Codex app-server failed at /tmp/workspace".length,
         safeErrorMessage: "Codex app-server failed at <REDACTED_PATH>",
@@ -602,7 +607,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         type: "input.reply-failed",
       }),
     }));
-
+    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
+      providerFailureRawPayloadReason: expect.anything(),
+    }));
+    expect(JSON.stringify(logRequests)).not.toContain("raw-provider-token");
+    expect(JSON.stringify(logRequests)).not.toContain("raw payload should not persist");
   });
 
   it("writes an outbox delivery summary after committed delivery effects drain", async () => {
