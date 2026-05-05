@@ -385,11 +385,28 @@ describe("hosted deploy automation helpers", () => {
       "Container rollout: \\`${{ inputs.container_rollout }}\\`",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
+      "runs-on: blacksmith-4vcpu-ubuntu-2404",
+      "name: Codex cache-prefix E2E gate",
+      "name: Linq delivery E2E gate",
+      "pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live 2>&1 \\",
+      "pnpm hosted-local e2e linq-delivery 2>&1 \\",
+      "cloudflare-hosted-deploy-codex-cache-prefix-logs",
+      "cloudflare-hosted-deploy-linq-delivery-logs",
+      "- linq-delivery-gate",
+      "name: Start Postgres",
+      "docker run \\",
+      "--name \"${postgres_container}\"",
+      "--publish 5432:5432",
+      "docker exec \"${postgres_container}\" pg_isready -U postgres -d murph_test",
+      "name: Stop Postgres",
       "uses: useblacksmith/setup-docker-builder@v1",
       "uses: useblacksmith/build-push-action@v2",
       "file: Dockerfile.cloudflare-hosted-runner-base",
       "load: true",
       "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
+      "name: Validate generated Worker deploy bundle",
+      "--dry-run",
+      "predeploy-${GITHUB_SHA::12}",
       "name: Run focused Cloudflare checks and smoke runner container image",
       "pnpm --dir apps/cloudflare verify:parallel &",
       "pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base &",
@@ -419,10 +436,20 @@ describe("hosted deploy automation helpers", () => {
     expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
     expect(prepareArtifactsStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
     expect(prepareRunnerBaseImageStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
+    expect(workflow.indexOf("- name: Validate generated Worker deploy bundle")).toBeLessThan(
+      parallelChecksAndSmokeStepIndex,
+    );
     expect(parallelChecksAndSmokeStepIndex).toBeLessThan(deployWorkerStepIndex);
     expect([
       ...workflow.matchAll(/run: pnpm --dir apps\/cloudflare deploy:artifacts/gmu),
     ]).toHaveLength(1);
+    expect([
+      ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
+    ]).toHaveLength(3);
+    expect([
+      ...workflow.matchAll(/docker run \\/gmu),
+    ]).toHaveLength(2);
+    expect(workflow).not.toContain("services:");
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");
     }
