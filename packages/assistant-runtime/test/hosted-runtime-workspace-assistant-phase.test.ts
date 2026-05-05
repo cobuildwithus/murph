@@ -208,11 +208,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("skips timer device-sync work when the mailbox import brought in active input", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
+      reason: "alarm",
     }));
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
         skipDeviceSync: true,
+      }),
+    );
+  });
+
+  it("skips timer device-sync work for webhook nudges even if import accounting is stale", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      reason: "nudge",
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: true,
+      }),
+    );
+  });
+
+  it("keeps timer device-sync work enabled for scheduled wakes without active input", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      reason: "alarm",
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: false,
       }),
     );
   });
@@ -1199,6 +1226,7 @@ describe("hosted runtime log helpers", () => {
 function createPhaseInput(input: {
   importedCount?: number;
   logRequests?: HostedRuntimeLogRequest[];
+  reason?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["reason"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
@@ -1262,7 +1290,7 @@ function createPhaseInput(input: {
     request: {
       attemptId: "attempt_synthetic_phase",
       leaseGeneration: "3",
-      reason: "nudge",
+      reason: input.reason ?? "nudge",
       userId: "member_synthetic_phase",
       workspaceVersion: "8",
     },
