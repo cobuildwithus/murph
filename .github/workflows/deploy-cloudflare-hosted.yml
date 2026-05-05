@@ -389,10 +389,12 @@ jobs:
       STRAVA_BACKFILL_DAYS: ${{ vars.STRAVA_BACKFILL_DAYS }}
       STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
       STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+      STRAVA_WEBHOOK_SIGNING_SECRET: ${{ secrets.STRAVA_WEBHOOK_SIGNING_SECRET }}
       STRAVA_RECONCILE_DAYS: ${{ vars.STRAVA_RECONCILE_DAYS }}
       STRAVA_RECONCILE_INTERVAL_MS: ${{ vars.STRAVA_RECONCILE_INTERVAL_MS }}
       STRAVA_REQUEST_TIMEOUT_MS: ${{ vars.STRAVA_REQUEST_TIMEOUT_MS }}
       STRAVA_SCOPES: ${{ vars.STRAVA_SCOPES }}
+      STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS: ${{ vars.STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS }}
       WHOOP_BACKFILL_DAYS: ${{ vars.WHOOP_BACKFILL_DAYS }}
       WHOOP_BASE_URL: ${{ vars.WHOOP_BASE_URL }}
       WHOOP_RECONCILE_DAYS: ${{ vars.WHOOP_RECONCILE_DAYS }}
@@ -571,7 +573,7 @@ jobs:
             find "${log_dir}" -maxdepth 1 -type f -name 'wrangler-*.log' -print 2>/dev/null \
               | sort \
               | tail -n 1
-          )
+          )"
           if [[ -z "${latest_log}" ]]; then
             echo "No Wrangler log files found."
             exit 0
