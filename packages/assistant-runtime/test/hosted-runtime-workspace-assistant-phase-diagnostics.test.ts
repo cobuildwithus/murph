@@ -232,6 +232,7 @@ function createPhaseInput(input: {
     initialMailboxImport: {
       afterCheckpointEffects: [],
       checkpoint: null,
+      checkpointDeferred: false,
       importResult: {
         blocked: [],
         fetchedCount: 0,

@@ -50,6 +50,7 @@ import {
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
   runHostedWorkspaceUntilIdleOrBudget,
+  type HostedMailboxImportCheckpointResult,
 } from "../src/hosted-runtime.ts";
 import {
   createHostedConversationMailboxImportItem,
@@ -280,6 +281,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               redactedJson: {
                 blockCodes: [],
                 blockedCount: 0,
+                checkpointDeferred: false,
                 checkpointed: true,
                 conversationSeqEnd: "1",
                 conversationSeqStart: "0",
@@ -322,6 +324,136 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           ],
         },
       ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("does not add an import checkpoint when a deferred import is covered by assistant progress", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Deferred Import Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_deferred_import_covered",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import was already provided.");
+        },
+        initialMailboxImport: createDeferredMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_deferred_import_covered",
+        async runAssistantPhase() {
+          return {
+            checkpointReason: "outbox_sending",
+            progressed: true,
+            redactedStatus: {
+              hostedAssistantDeliveryEffectCount: 1,
+            },
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "outbox_sending",
+      ]);
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedAssistantDeliveryEffectCount: 1,
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("checkpoints a deferred mailbox import after an idle assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Deferred Idle Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_deferred_import_idle",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import was already provided.");
+        },
+        initialMailboxImport: createDeferredMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_deferred_import_idle",
+        async runAssistantPhase() {
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+      ]);
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportCheckpointDeferred: true,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1409,6 +1541,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(logRequests[0]?.entries[0]?.redactedJson, {
         blockCodes: ["lane.gap"],
         blockedCount: 1,
+        checkpointDeferred: false,
         checkpointed: true,
         conversationSeqEnd: "0",
         conversationSeqStart: "0",
@@ -1719,6 +1852,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         redactedJson: {
           blockCodes: [],
           blockedCount: 0,
+          checkpointDeferred: false,
           checkpointed: true,
           conversationSeqEnd: "2",
           conversationSeqStart: "1",
@@ -3496,6 +3630,32 @@ function createWorkspaceState(
     userId: TEST_USER_ID,
     version: "0",
     ...overrides,
+  };
+}
+
+function createDeferredMailboxImportResult(): HostedMailboxImportCheckpointResult {
+  const previousState = createEmptyHostedMailboxImportState();
+  const state = {
+    ...createEmptyHostedMailboxImportState(),
+    watermarks: {
+      conversation: "1",
+      system: "0",
+    },
+  };
+
+  return {
+    afterCheckpointEffects: [],
+    checkpoint: null,
+    checkpointDeferred: true,
+    importResult: {
+      blocked: [],
+      fetchedCount: 1,
+      importedCount: 1,
+      state,
+    },
+    previousState,
+    state,
+    stateChanged: true,
   };
 }
 

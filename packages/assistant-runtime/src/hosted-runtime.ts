@@ -59,6 +59,7 @@ import {
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
+  writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
   runHostedWorkspaceAssistantPhase,
@@ -293,6 +294,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   };
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
+  let hotRestoreCacheVaultRoot: string | null = null;
+  const cacheRecordingWorkspacePort: typeof guardedWorkspacePort = {
+    read: () => guardedWorkspacePort.read!(),
+    async checkpoint(request) {
+      const response = await guardedWorkspacePort.checkpoint(request);
+      if (response.checkpointed && hotRestoreCacheVaultRoot) {
+        await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+          snapshotRef: response.workspace.snapshotRef,
+          vaultRoot: hotRestoreCacheVaultRoot,
+        });
+      }
+      return response;
+    },
+  };
   const createLivenessGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput) => {
       assertRuntimeLiveness();
@@ -328,7 +343,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runnerPlatform = {
       ...guardedRuntime.platform,
       mailboxPort: guardedMailboxPort,
-      workspacePort: guardedWorkspacePort,
+      workspacePort: cacheRecordingWorkspacePort,
     };
     const runtimeLogContext = {
       attemptId: input.request.attemptId,
@@ -371,6 +386,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     activeVaultRoot = restored.vaultRoot;
+    hotRestoreCacheVaultRoot = restored.vaultRoot;
     assertRuntimeLiveness();
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
       checkpointRequestBuilder,
@@ -387,6 +403,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importHostedMailboxForWorkspaceRunner({
         checkpointRequestBuilder,
         checkpointReason: "import",
+        deferCheckpoint: shouldDeferInitialMailboxImportCheckpoint(input.request),
         input: baseRunnerInput,
         requestId,
       }),
@@ -477,6 +494,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   } finally {
     await heartbeat.stop();
   }
+}
+
+function shouldDeferInitialMailboxImportCheckpoint(
+  request: HostedAssistantWorkspaceRuntimeJobInput["request"],
+): boolean {
+  return request.reason === "nudge";
 }
 
 function raceHostedRuntimeLiveness<T>(

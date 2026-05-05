@@ -27,6 +27,7 @@ import { describe, test } from "vitest";
 
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
+  writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import type {
   HostedRuntimePlatform,
@@ -234,6 +235,14 @@ describe("hosted workspace restore Codex continuity", () => {
         key: "users/bundles/member-synthetic/base-cache.bundle.json",
         size: baseBundle.byteLength,
       });
+      const secondSnapshotRef = buildHostedExecutionLayeredSnapshotRef({
+        base: baseRef,
+        hot: createBundleRef({
+          hash: secondHotHash,
+          key: `cloudflare-workspace-hot-state/${secondHotHash}.bundle`,
+          size: secondHotSnapshot.bundle.byteLength,
+        }),
+      });
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
         platform,
@@ -258,14 +267,7 @@ describe("hosted workspace restore Codex continuity", () => {
         platform,
         vaultRoot: restoredVaultRoot,
         workspace: createWorkspaceState({
-          snapshotRef: buildHostedExecutionLayeredSnapshotRef({
-            base: baseRef,
-            hot: createBundleRef({
-              hash: secondHotHash,
-              key: `cloudflare-workspace-hot-state/${secondHotHash}.bundle`,
-              size: secondHotSnapshot.bundle.byteLength,
-            }),
-          }),
+          snapshotRef: secondSnapshotRef,
         }),
       });
 
@@ -289,6 +291,43 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.equal(restoreLayerLogs[0]?.redactedJson?.fetchElapsedMs, 0);
       assert.equal(restoreLayerLogs[0]?.redactedJson?.materializeElapsedMs, 0);
       assert.equal(restoreLayerLogs[1]?.redactedJson?.cacheHit, false);
+
+      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+        snapshotRef: secondSnapshotRef,
+        vaultRoot: restoredVaultRoot,
+      });
+      artifactGetCalls.length = 0;
+      logRequests.length = 0;
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: secondSnapshotRef,
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(
+        await readFile(
+          path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"),
+          "utf8",
+        ),
+        "{\"resumeState\":{\"providerSessionId\":\"thread-second\",\"resumeRouteId\":\"route-second\"},\"session\":\"second\"}\n",
+      );
+      const cachedHotLayerLogs = flattenLogEntries(logRequests).filter((entry) =>
+        entry.eventCode === "workspace.restore_layer_finished"
+      );
+      assert.deepEqual(
+        cachedHotLayerLogs.map((entry) => entry.redactedJson?.snapshotLayer),
+        ["base", "hot"],
+      );
+      assert.deepEqual(
+        cachedHotLayerLogs.map((entry) => entry.redactedJson?.cacheHit),
+        [true, true],
+      );
+      assert.equal(cachedHotLayerLogs[1]?.redactedJson?.fetchElapsedMs, 0);
+      assert.equal(cachedHotLayerLogs[1]?.redactedJson?.materializeElapsedMs, 0);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

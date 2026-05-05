@@ -29,6 +29,7 @@ import type {
 } from "./platform.ts";
 
 export interface HostedMailboxImportCheckpointInput {
+  deferCheckpoint?: boolean;
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
   lanes?: readonly HostedMailboxLane[];
@@ -55,6 +56,7 @@ export interface HostedMailboxImportCheckpointRequestInput {
 export interface HostedMailboxImportCheckpointResult {
   afterCheckpointEffects: readonly HostedMailboxPostCheckpointEffect[];
   checkpoint: HostedWorkspaceCheckpointResponse | null;
+  checkpointDeferred: boolean;
   importResult: HostedMailboxImportLoopResult;
   previousState: HostedMailboxImportState;
   state: HostedMailboxImportState;
@@ -126,6 +128,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     return {
       afterCheckpointEffects: [],
       checkpoint: null,
+      checkpointDeferred: false,
       importResult,
       previousState,
       state: importResult.state,
@@ -138,6 +141,22 @@ export async function importHostedMailboxPrefixAndCheckpoint(
       state: importResult.state,
       vaultRoot: input.vaultRoot,
     });
+  }
+
+  if (shouldDeferHostedMailboxImportCheckpoint({
+    deferCheckpoint: input.deferCheckpoint === true,
+    importResult,
+    stateChanged,
+  })) {
+    return {
+      afterCheckpointEffects,
+      checkpoint: null,
+      checkpointDeferred: true,
+      importResult,
+      previousState,
+      state: importResult.state,
+      stateChanged,
+    };
   }
 
   let checkpoint: HostedWorkspaceCheckpointResponse;
@@ -182,11 +201,26 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   return {
     afterCheckpointEffects,
     checkpoint,
+    checkpointDeferred: false,
     importResult,
     previousState,
     state: importResult.state,
     stateChanged,
   };
+}
+
+function shouldDeferHostedMailboxImportCheckpoint(input: {
+  deferCheckpoint: boolean;
+  importResult: HostedMailboxImportLoopResult;
+  stateChanged: boolean;
+}): boolean {
+  return (
+    input.deferCheckpoint
+    && input.stateChanged
+    && input.importResult.importedCount > 0
+    && input.importResult.blocked.length === 0
+    && !input.importResult.nextRetryAt
+  );
 }
 
 export function buildHostedMailboxImportRedactedStatus(

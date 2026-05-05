@@ -1237,6 +1237,7 @@ function createPhaseInput(input: {
     initialMailboxImport: {
       afterCheckpointEffects: [],
       checkpoint: null,
+      checkpointDeferred: false,
       importResult: {
         blocked: [],
         fetchedCount: input.importedCount ?? 0,

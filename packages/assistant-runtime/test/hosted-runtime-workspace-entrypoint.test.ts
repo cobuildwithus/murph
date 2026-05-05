@@ -158,9 +158,9 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "import:mailbox_item_entrypoint_001",
+        "sidecar.ready",
         "snapshot:1",
         "workspace.checkpoint",
-        "sidecar.ready",
       ]);
       assert.deepEqual(imported, [
         {
@@ -186,6 +186,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxBlockedCount: 0,
           hostedMailboxConversationImportedSeq: "1",
           hostedMailboxFetchedCount: 1,
+          hostedMailboxImportCheckpointDeferred: true,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
           hostedMailboxSystemImportedSeq: "0",
@@ -458,19 +459,16 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "import:1",
-        "snapshot:import:1",
-        "workspace.checkpoint",
         "assistant",
         "snapshot:outbox_sending:1",
         "workspace.checkpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
         "outbox_sending",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
+        ["0"],
       );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -1510,11 +1508,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(importedEvents.length, mailboxItemCount);
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
       assert.equal(artifactPutCalls.length, 1);
-      assert.ok(mailboxFetchIndex < snapshotIndex);
+      assert.ok(mailboxFetchIndex < mailboxImportedLogIndex);
+      assert.ok(mailboxImportedLogIndex < sidecarIndex);
+      assert.ok(sidecarIndex < snapshotIndex);
       assert.ok(snapshotIndex < checkpointUploadIndex);
       assert.ok(checkpointUploadIndex < checkpointIndex);
-      assert.ok(checkpointIndex < mailboxImportedLogIndex);
-      assert.ok(mailboxImportedLogIndex < sidecarIndex);
       assert.equal(stageSummary["workspace.read"]?.count, 1);
       assert.equal(stageSummary["artifact.get"]?.count, externalArtifactCount + 1);
       assert.equal(stageSummary["mailbox.fetch"]?.count, 1);
@@ -1528,7 +1526,8 @@ describe("hosted workspace runtime entrypoint", () => {
       }
       assert.equal(mailboxImportedLog.redactedJson?.fetchedCount, mailboxItemCount);
       assert.equal(mailboxImportedLog.redactedJson?.importedCount, mailboxItemCount);
-      assert.equal(mailboxImportedLog.redactedJson?.checkpointed, true);
+      assert.equal(mailboxImportedLog.redactedJson?.checkpointDeferred, true);
+      assert.equal(mailboxImportedLog.redactedJson?.checkpointed, false);
       assert.equal(mailboxImportedLog.redactedJson?.conversationSeqEnd, String(mailboxItemCount));
       if (process.env.HOSTED_PREIMPORT_PROFILE === "1") {
         console.info("hosted pre-import local profile", stageSummary);
@@ -1539,6 +1538,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxBlockedCount: 0,
           hostedMailboxConversationImportedSeq: String(mailboxItemCount),
           hostedMailboxFetchedCount: mailboxItemCount,
+          hostedMailboxImportCheckpointDeferred: true,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
           hostedMailboxSystemImportedSeq: "0",
