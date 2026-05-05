@@ -1,0 +1,309 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  HostedSignupWelcomeEmailError,
+  sendHostedSignupWelcomeEmail,
+  sendHostedSignupWelcomeEmailForMember,
+} from "@/src/lib/hosted-onboarding/signup-welcome-email";
+
+const mocks = vi.hoisted(() => ({
+  getPrisma: vi.fn(),
+  readHostedMemberEmailAuthorization: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
+}));
+
+vi.mock("@/src/lib/prisma", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/prisma")>(
+    "@/src/lib/prisma",
+  );
+
+  return {
+    ...actual,
+    getPrisma: mocks.getPrisma,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-store");
+
+  return {
+    ...actual,
+    readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-routing-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-routing-store");
+
+  return {
+    ...actual,
+    readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+  };
+});
+
+describe("hosted signup welcome email", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue({
+      readonly: true,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+  });
+
+  it("sends the configured founder welcome through Resend with a member idempotency key", async () => {
+    const fetchMock: typeof fetch = async (input, init) => {
+      expect(input).toBe("https://api.resend.com/emails");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toMatchObject({
+        Authorization: "Bearer re_test",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "hosted-signup-welcome/member_123",
+      });
+
+      const payload = JSON.parse(String(init?.body));
+      expect(payload).toEqual({
+        from: "Murph founder <founder@example.com>",
+        subject: "Welcome to Murph",
+        text: expect.stringContaining("I'm Murph founder, the founder of Murph."),
+        to: ["member@example.com"],
+      });
+      expect(payload.text).toContain("- Murph founder");
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    await expect(sendHostedSignupWelcomeEmail({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      recipientEmail: "member@example.com",
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+  });
+
+  it("includes the assigned Murph text route for member welcome sends", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain(
+        "Best thing to do right now is connect your wearable.",
+      );
+      expect(payload.text).toContain(
+        "Shoot Murph a text at +15550100099 to start your first experiment.",
+      );
+      expect(payload.text).not.toContain(
+        "connect your wearable and start your first experiment",
+      );
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550100099",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {
+        readonly: true,
+      },
+    });
+  });
+
+  it("falls back to the Murph Telegram route when the member is linked on Telegram", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain(
+        "Shoot Murph a message on Telegram at @murph_test_bot to start your first experiment.",
+      );
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: "telegram_user_123",
+      telegramUserLookupKey: null,
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+        TELEGRAM_BOT_USERNAME: "murph_test_bot",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+  });
+
+  it("falls back to the Murph email route when no chat route is assigned yet", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain(
+        "Shoot Murph an email at murph@mail.withmurph.ai to start your first experiment.",
+      );
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+  });
+
+  it("skips sending for members without a verified email address", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: null,
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      reason: "no_verified_email",
+      status: "skipped",
+    });
+
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {
+        readonly: true,
+      },
+    });
+    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+  });
+
+  it("skips sending until all sender env config is present", async () => {
+    let called = false;
+    const fetchMock: typeof fetch = async () => {
+      called = true;
+      return new Response(null, { status: 200 });
+    };
+
+    await expect(sendHostedSignupWelcomeEmail({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      recipientEmail: "member@example.com",
+    })).resolves.toEqual({
+      reason: "not_configured",
+      status: "skipped",
+    });
+    expect(called).toBe(false);
+  });
+
+  it("throws only provider status metadata for Resend failures", async () => {
+    const fetchMock: typeof fetch = async () =>
+      new Response(JSON.stringify({ message: "invalid key" }), {
+        status: 401,
+      });
+
+    await expect(sendHostedSignupWelcomeEmail({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      recipientEmail: "member@example.com",
+    })).rejects.toMatchObject({
+      code: "RESEND_SEND_FAILED",
+      providerStatus: 401,
+    } satisfies Partial<HostedSignupWelcomeEmailError>);
+  });
+});
