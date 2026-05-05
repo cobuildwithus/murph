@@ -63,6 +63,21 @@ import {
   TEST_HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
 } from "./hosted-execution-fixtures.ts";
 
+const hostedEmailRoutes = vi.hoisted(() => ({
+  createHostedEmailUserAddress: vi.fn(async () => "reply@example.com"),
+}));
+
+vi.mock("../src/hosted-email/routes.ts", async () => {
+  const actual = await vi.importActual<typeof import("../src/hosted-email/routes.ts")>(
+    "../src/hosted-email/routes.ts",
+  );
+
+  return {
+    ...actual,
+    createHostedEmailUserAddress: hostedEmailRoutes.createHostedEmailUserAddress,
+  };
+});
+
 const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
@@ -722,6 +737,46 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("keeps workspace version enforcement on workspace checkpoints", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-workspace/checkpoint", {
+        body: JSON.stringify({
+          attemptId: "attempt_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          snapshotRef: null,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects mailbox payload decode requests that do not use POST", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -849,7 +904,6 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -857,6 +911,9 @@ describe("handleRunnerOutboundRequest", () => {
   it("decodes mailbox payloads through Worker-owned ingress crypto without returning key material", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture({
       userId: "member_123",
+    });
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
     const body = await createMailboxPayloadDecodeBody();
@@ -866,12 +923,22 @@ describe("handleRunnerOutboundRequest", () => {
         headers: createMailboxPayloadDecodeHeaders(),
         method: "POST",
       }),
-      createRunnerOutboundEnv(fixture.env),
+      createRunnerOutboundEnv({
+        ...fixture.env,
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
 
     expect(response.status).toBe(200);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
     const decoded = await response.json();
     expect(decoded).toEqual({
       status: "decoded",
@@ -1072,9 +1139,87 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("authorizes provider effects by active invocation identity instead of workspace version", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(null, {
+      status: 204,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        body: JSON.stringify({
+          chatId: "linq_chat_123",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        LINQ_API_TOKEN: "linq-token",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("authorizes email sends by active invocation identity instead of workspace version", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const emailSendMock = vi.fn(async () => undefined);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          identityId: "assistant@mail.example.test",
+          message: "hello",
+          target: "assistant@example.com",
+          targetKind: "explicit",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: {
+          send: emailSendMock,
+        },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
+    expect(emailSendMock).toHaveBeenCalledOnce();
   });
 
   it("rejects provider effect requests when the invocation proxy token is missing", async () => {
@@ -1782,27 +1927,22 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("checks artifact write leases for different workspace versions", async () => {
+  it("authorizes artifact PUTs by active invocation identity instead of workspace version", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
-    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
-        getByName() {
-          return {
-            async bindUser(userId: string) {
-              return { userId };
-            },
-            ownsActiveInvocationLease,
-          };
-        },
+        getByName: runner.getByName,
       },
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
     const bytes = new Uint8Array([1, 2, 3]);
     const sha256 = sha256Hex(bytes);
 
-    await handleRunnerOutboundRequest(
+    const firstResponse = await handleRunnerOutboundRequest(
       createArtifactPutRequest({
         bytes,
         sha256,
@@ -1812,7 +1952,7 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
-    await handleRunnerOutboundRequest(
+    const secondResponse = await handleRunnerOutboundRequest(
       createArtifactPutRequest({
         bytes,
         sha256,
@@ -1823,7 +1963,19 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenNthCalledWith(1, {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
+    expect(runner.ownsActiveInvocationLease).toHaveBeenNthCalledWith(2, {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
   });
 
   it("checks artifact write leases again for repeated workspace versions", async () => {
@@ -1958,18 +2110,13 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("writes browser-vault replicas after checking the active invocation lease", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
-    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
-        getByName() {
-          return {
-            async bindUser(userId: string) {
-              return { userId };
-            },
-            ownsActiveInvocationLease,
-          };
-        },
+        getByName: runner.getByName,
       },
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
@@ -1993,11 +2140,10 @@ describe("handleRunnerOutboundRequest", () => {
         sourceBundleHash,
       }),
     });
-    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
@@ -2692,6 +2838,53 @@ function createBrowserVaultReplica(sourceBundleHash: string) {
       dataVersion: "runner-outbound-test",
       sourceBundleHash,
     },
+  };
+}
+
+function createWorkspaceVersionAwareUserRunner(input: {
+  activeWorkspaceVersion?: string;
+  attemptId?: string;
+  leaseGeneration?: string;
+  userId?: string;
+} = {}) {
+  const activeWorkspaceVersion = input.activeWorkspaceVersion ?? "5";
+  const attemptId = input.attemptId ?? "attempt_1";
+  const leaseGeneration = input.leaseGeneration ?? "9";
+  const userId = input.userId ?? "member_123";
+  const bindUser = vi.fn(async (boundUserId: string) => ({ userId: boundUserId }));
+  const ownsActiveInvocationLease = vi.fn(async (lease: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }) => {
+    if (
+      lease.attemptId !== attemptId
+      || lease.leaseGeneration !== leaseGeneration
+      || lease.userId !== userId
+    ) {
+      return false;
+    }
+
+    return lease.workspaceVersion === undefined
+      || lease.workspaceVersion === null
+      || lease.workspaceVersion === activeWorkspaceVersion;
+  });
+  const recordActiveInvocationWorkspaceCheckpoint = vi.fn(async () => ({
+    recorded: true,
+  }));
+
+  return {
+    bindUser,
+    getByName() {
+      return {
+        bindUser,
+        ownsActiveInvocationLease,
+        recordActiveInvocationWorkspaceCheckpoint,
+      };
+    },
+    ownsActiveInvocationLease,
+    recordActiveInvocationWorkspaceCheckpoint,
   };
 }
 
