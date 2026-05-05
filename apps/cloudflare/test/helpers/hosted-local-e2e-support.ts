@@ -527,10 +527,12 @@ export function mergeRequiredEnvProfile(
   requiredProfile: string,
 ): string {
   const profiles = new Set(
-    String(
-      existingProfiles
-      ?? defaultHostedRunnerEnvProfiles.join(","),
-    )
+    [
+      defaultHostedRunnerEnvProfiles.join(","),
+      existingProfiles,
+    ]
+      .filter((entry): entry is string => typeof entry === "string")
+      .join(",")
       .split(",")
       .map((entry) => entry.trim())
       .filter(Boolean),

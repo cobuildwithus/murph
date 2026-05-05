@@ -23,7 +23,6 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
-import type { AssistantRunEvent } from '@murphai/assistant-engine/assistant/automation/shared'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-terminal-logging'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
@@ -45,6 +44,7 @@ import {
 
 const cleanupPaths: string[] = []
 const ASSISTANT_CLI_TIMEOUT_MS = 60_000
+type AssistantRunEvent = Parameters<typeof formatAssistantRunEventForTerminal>[0]
 const assistantMemoryTurnEnvKeys = [
   VAULT_ENV,
   'ASSISTANT_MEMORY_BOUND_VAULT',
