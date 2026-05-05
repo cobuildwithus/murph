@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMemberHomeLinqRoute: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
+  resolveHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   nudgeHostedRunnerUserBestEffort: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
@@ -34,6 +35,10 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
@@ -132,6 +137,16 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       errorCode: null,
       inFlight: false,
       nextAlarmAtPresent: false,
+    });
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 100_000n,
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      remainingUsdMicros: 100_000n,
+      spentUsdMicros: 0n,
     });
     mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
       runId: "workflow_run_123",

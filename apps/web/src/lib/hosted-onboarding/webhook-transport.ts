@@ -31,6 +31,14 @@ export type HostedLinqDailyQuotaPayload = {
   template: "daily_quota";
 };
 
+export type HostedLinqAiUsageQuotaPayload = {
+  chatId: string;
+  message: string;
+  noticeCode: string;
+  replyToMessageId: string | null;
+  template: "ai_usage_quota";
+};
+
 export type HostedLinqInviteMessagePayload = {
   chatId: string;
   inviteId: string;
@@ -39,6 +47,7 @@ export type HostedLinqInviteMessagePayload = {
 };
 
 export type HostedLinqMessagePayload =
+  | HostedLinqAiUsageQuotaPayload
   | HostedLinqConversationHomeRedirectPayload
   | HostedLinqDailyQuotaPayload
   | HostedLinqInviteMessagePayload;
@@ -56,6 +65,14 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "conversation_home_redirect";
+    }
+  | {
+      chatId: string;
+      message: string;
+      noticeCode: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "ai_usage_quota";
     }
   | {
       chatId: string;
@@ -191,6 +208,8 @@ async function buildHostedLinqSideEffectMessage(
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<string> {
   switch (effect.payload.template) {
+    case "ai_usage_quota":
+      return effect.payload.message;
     case "daily_quota":
       return buildHostedDailyQuotaReply();
     case "conversation_home_redirect": {
@@ -312,6 +331,14 @@ function buildHostedWebhookLinqMessagePayload(
   replyToMessageId: string | null,
 ): HostedLinqMessagePayload {
   switch (input.template) {
+    case "ai_usage_quota":
+      return {
+        chatId: input.chatId,
+        message: input.message,
+        noticeCode: input.noticeCode,
+        replyToMessageId,
+        template: input.template,
+      };
     case "conversation_home_redirect":
       return {
         chatId: input.chatId,

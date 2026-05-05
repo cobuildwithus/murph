@@ -38,8 +38,12 @@ import {
 } from "./linq-routing-policy";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
+  resolveHostedAiUsageGate,
+} from "../hosted-execution/usage-allowance";
+import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
+  buildAiUsageQuotaReplyResponse,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
   buildIgnoredLinqWebhookPlan,
@@ -185,6 +189,39 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return buildQuotaReplyResponse({
         chatId: summary.chatId,
         messageId: summary.messageId,
+        sourceEventId: input.event.event_id,
+      });
+    }
+
+    const usageGate = await resolveHostedAiUsageGate({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+
+    if (!usageGate.allowed) {
+      if (!usageGate.userNotice) {
+        return buildIgnoredLinqWebhookPlan("ai-usage-gate-denied");
+      }
+
+      if (dailyState.quotaReplySentAt) {
+        return buildIgnoredLinqWebhookPlan("ai-usage-quota-reached");
+      }
+
+      const claimedQuotaReply = await claimHostedLinqQuotaReplyNotice({
+        memberId: existingMember.id,
+        occurredAt,
+        prisma: input.prisma,
+      });
+
+      if (!claimedQuotaReply) {
+        return buildIgnoredLinqWebhookPlan("ai-usage-quota-reached");
+      }
+
+      return buildAiUsageQuotaReplyResponse({
+        chatId: summary.chatId,
+        message: usageGate.userNotice.message,
+        messageId: summary.messageId,
+        noticeCode: usageGate.userNotice.code,
         sourceEventId: input.event.event_id,
       });
     }
