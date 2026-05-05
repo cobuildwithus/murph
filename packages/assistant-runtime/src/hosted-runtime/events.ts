@@ -1086,6 +1086,7 @@ function readHostedAssistantAutomationPassTimingTrace(
     "automationPassProgressed",
     "automationPassRecoveryProgressed",
     "automationPassStateProgressed",
+    "automationPassStatusRefreshSkipped",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,

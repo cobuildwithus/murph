@@ -73,6 +73,7 @@ Updated: 2026-05-06
 - 2026-05-06 urgent deploy decision: let the manual deploy workflow override runner idle TTL and have `cf:deploy:immediate` use a 12 hour TTL for repeated live iMessage probes while the production latency incident is being debugged.
 - 2026-05-06 provider timing decision: emit metadata-only Codex app-server timing trace stages (`spawn-ready`, initialize, thread start/resume, turn start/completion, shutdown) so live logs can split the remaining assistant pass latency without storing prompts, messages, identifiers, paths, or provider payloads.
 - 2026-05-06 automation timing decision: emit metadata-only assistant automation pass timing stages around diagnostics, maintenance, recovery, scan, cron, status refresh, and outbox summary so the remaining warm-path gap can be isolated without storing prompts, messages, identifiers, paths, or provider payloads.
+- 2026-05-06 status refresh latency decision: hosted queue-only auto-replies should not await status snapshot refresh before fast outbox dispatch; the status snapshot is operator metadata and can be refreshed by non-critical lanes after the user-visible send path is unblocked.
 
 ## Current evidence
 
@@ -88,6 +89,7 @@ Updated: 2026-05-06
 - The latest live iMessage probes after the fast-send deploy proved the `outbox_sending` pre-send checkpoint was gone, but both back-to-back probes still cold-restored the base workspace and Cloudflare observability showed container/DO reset and lifecycle network-loss events around the same window.
 - Those same probes spent roughly 11-12.5s inside the assistant automation pass after restore/import, so the next deploy must preserve warm container state and expose provider-stage timings before another live message is sent.
 - After the warm-retention deploy, live probes restored in roughly 0.3s with base/hot cache hits, but the second warm probe still took roughly 13.8s append-to-send. The Codex app-server trace was roughly 2.1s, while the assistant automation pass was roughly 8.5s, so the remaining bottleneck is inside the automation/send envelope rather than snapshot restore.
+- Code inspection after that probe found two awaited status snapshot refreshes on the hosted queue-only auto-reply path: one in the message turn cleanup and one in the automation pass after scanning. Both occur before the hosted runtime can fast-dispatch queued delivery effects, so they are now skipped only for hosted queue-only automation passes.
 
 ## Verification
 
@@ -122,3 +124,5 @@ Updated: 2026-05-06
   - `pnpm --dir packages/assistant-engine typecheck`
   - `pnpm --dir packages/assistant-runtime typecheck`
   - `git diff --check -- packages/assistant-engine/src/assistant/automation/run-loop.ts packages/assistant-runtime/src/hosted-runtime/events.ts packages/assistant-engine/test/assistant-automation-runtime.test.ts packages/assistant-runtime/test/hosted-runtime-events.test.ts`
+  - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-automation-runtime.test.ts --testNamePattern "timing traces|status refresh on hosted|store-backed input source|no-canonical-write"`
+  - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-local-service-runtime.test.ts --testNamePattern "queue-only mode|successful turn"`

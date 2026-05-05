@@ -4599,6 +4599,35 @@ describe('assistant auto-reply runtime', () => {
     }
   })
 
+  it('skips status refresh on hosted queue-only automation passes', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const onTraceEvent = vi.fn()
+
+    await runLoop.runAssistantAutomationPass({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      onTraceEvent,
+      requestId: 'request-hosted-queue-only',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.refreshAssistantStatusSnapshot).not.toHaveBeenCalled()
+    expect(
+      onTraceEvent.mock.calls
+        .map(([event]) => event.rawEvent)
+        .find((event) => event.automationPassStage === 'status-refresh-finished'),
+    ).toMatchObject({
+      automationPassStatusRefreshSkipped: true,
+    })
+  })
+
   it('skips canonical automation branches for no-canonical-write automation passes', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
