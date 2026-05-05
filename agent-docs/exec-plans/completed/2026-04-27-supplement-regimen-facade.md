@@ -1,8 +1,8 @@
 # Treat supplement as a typed regimen facade
 
-Status: focused_verified_uncommitted
+Status: completed
 Created: 2026-04-27
-Updated: 2026-04-27
+Updated: 2026-05-06
 
 ## Goal
 
@@ -60,3 +60,4 @@ Updated: 2026-04-27
 - Blocked/unrelated:
   - `pnpm --dir packages/cli typecheck` still fails on the existing food auto-log hard-cut row (`autoLogDaily`, `foodAutoLog`, `autoLogDailyTime`).
   - Earlier broad workspace `typecheck`, `test`, and `test:diff` attempts also failed on unrelated scheduled-log/food auto-log work outside this lane.
+Completed: 2026-05-06

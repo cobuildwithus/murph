@@ -1,8 +1,8 @@
 # Add deterministic experiment follow-up due primitive
 
-Status: implementation_verified_locally
+Status: completed
 Created: 2026-04-27
-Updated: 2026-04-27
+Updated: 2026-05-06
 
 ## Goal
 
@@ -75,3 +75,4 @@ Updated: 2026-04-27
 - `pnpm --dir packages/cli gen:config-schema` passed.
 - `pnpm build` passed and refreshed the local `vault-cli` shim target.
 - Direct built CLI proof passed: `experiment followup due daily-sauna-2026-04-27 --kind weekly-digest --date 2026-05-18` returns `skip` / `weekly_digest_not_due` and no top-level `vault` key.
+Completed: 2026-05-06

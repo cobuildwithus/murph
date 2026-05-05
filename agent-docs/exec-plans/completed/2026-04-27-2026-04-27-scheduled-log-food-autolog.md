@@ -1,8 +1,8 @@
 # Make scheduled-log the canonical recurring food auto-log mechanism
 
-Status: implemented; awaiting clean-tree completion
+Status: completed
 Created: 2026-04-27
-Updated: 2026-04-27
+Updated: 2026-05-06
 
 ## Goal
 
@@ -79,3 +79,4 @@ Updated: 2026-04-27
   - `packages/cli/test/document-meal-intervention-coverage.test.ts`
   - `packages/cli/test/workout-command-coverage.test.ts`
   - `packages/cli/test/device-daemon.test.ts`
+Completed: 2026-05-06

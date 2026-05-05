@@ -1,8 +1,8 @@
 # Run collagen supplementation Health Commons research
 
-Status: verified_pending_safe_close
+Status: completed
 Created: 2026-04-25
-Updated: 2026-04-26
+Updated: 2026-05-06
 
 ## Goal
 
@@ -107,3 +107,4 @@ Results:
 - `pnpm --filter @murphai/health-commons typecheck` passed.
 - `pnpm --filter @murphai/health-commons test:vitest` passed after updating the deterministic protocol-order fixture for the new collagen protocol.
 - `git diff --check -- <touched health-commons content/test/planning files>` passed.
+Completed: 2026-05-06
