@@ -572,7 +572,9 @@ function emitAssistantAutoReplyOutcomeEvent(input: {
     inputId: primaryAutoReplyInputId(input.context),
     details: input.outcome.event.details,
     errorCode: input.outcome.event.errorCode,
+    failureContext: input.outcome.event.failureContext,
     safeDetails: input.outcome.event.safeDetails,
+    safeErrorMessage: input.outcome.event.safeErrorMessage,
   })
 }
 
