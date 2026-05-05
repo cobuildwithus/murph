@@ -197,10 +197,16 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
           "status-failed",
         ],
         codexResumeFailureEventMethods: ["turn/completed"],
+        codexResumeFailureEventKinds: ["message", "private"],
         codexResumeFailureEventStatuses: ["failed", "turn_failed"],
         codexResumeFailureOutputArrayLengths: [3],
         codexResumeFailureOutputKinds: ["array", "object"],
+        codexResumeFailureOutputObjectKeys: [
+          "[key],text,type",
+          "privateField,privateName",
+        ],
         codexResumeFailureOutputPartTypes: ["input_text", "process_exit"],
+        codexResumeFailureOutputStringLengths: [48, -1],
         codexResumeFailureParamKeys: ["output,[key]"],
         codexResumeFailurePhase: "resume-failed",
         codexResumeFailureProviderActionCount: 0,
@@ -212,12 +218,9 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
       expect.objectContaining({
         codexResumeFailureErrorPreview: expect.anything(),
-        codexResumeFailureEventKinds: expect.anything(),
-        codexResumeFailureOutputObjectKeys: expect.anything(),
-        codexResumeFailureOutputStringLengths: expect.anything(),
       }),
     );
-    expect(JSON.stringify(logRequests)).not.toContain("private");
+    expect(JSON.stringify(logRequests)).not.toContain("private text should not persist");
     expect(JSON.stringify(logRequests)).not.toContain("test-token-value");
   });
 });
