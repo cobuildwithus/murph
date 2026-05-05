@@ -83,6 +83,10 @@ const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
+const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
+  'murph.assistant-codex-app-server-timing.v1'
+const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
+  'assistant.codex.app_server_timing'
 
 export interface CodexAppServerTurnInput {
   abortSignal?: AbortSignal
@@ -300,6 +304,8 @@ async function runCodexAppServerTurn(
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   let stdinFailure: VaultCliError | null = null
+  const appServerStartedAt = Date.now()
+  let lastTimingAt = appServerStartedAt
 
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
@@ -332,6 +338,33 @@ async function runCodexAppServerTurn(
       })
     } catch {
       // Frozen provider errors should still preserve the original failure.
+    }
+  }
+
+  const emitAppServerTimingTrace = (stage: string) => {
+    if (!input.onTraceEvent) {
+      return
+    }
+
+    const now = Date.now()
+    try {
+      input.onTraceEvent({
+        providerSessionId,
+        rawEvent: {
+          schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
+          type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
+          codexTimingElapsedMs: Math.max(0, now - lastTimingAt),
+          codexTimingProviderActionCount: providerActionCount,
+          codexTimingProviderSessionIdPresent: providerSessionId !== null,
+          codexTimingStage: stage,
+          codexTimingTotalElapsedMs: Math.max(0, now - appServerStartedAt),
+          codexTimingTurnIdPresent: turnId !== null,
+        },
+        updates: [],
+      })
+      lastTimingAt = now
+    } catch {
+      // Timing traces are diagnostic-only and must not block assistant turns.
     }
   }
 
@@ -721,6 +754,7 @@ async function runCodexAppServerTurn(
 
   try {
     await waitForCodexSpawn(child)
+    emitAppServerTimingTrace('spawn-ready')
     await withCodexRpcTimeout(
       sendRequest('initialize', {
         clientInfo: {
@@ -732,8 +766,10 @@ async function runCodexAppServerTurn(
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       'initialize',
     )
+    emitAppServerTimingTrace('initialized')
     sendNotification('initialized', {})
 
+    const threadTimingStage = providerSessionId ? 'thread-resumed' : 'thread-started'
     const threadResult = await withCodexRpcTimeout(
       providerSessionId
         ? sendRequest(
@@ -748,6 +784,7 @@ async function runCodexAppServerTurn(
       providerSessionId ? 'thread/resume' : 'thread/start',
     )
     providerSessionId = extractCodexThreadIdFromResult(threadResult) ?? providerSessionId
+    emitAppServerTimingTrace(threadTimingStage)
     if (!providerSessionId) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_FAILED',
@@ -768,15 +805,18 @@ async function runCodexAppServerTurn(
       'turn/start',
     )
     turnId = extractCodexTurnIdFromResult(turnResult) ?? turnId
+    emitAppServerTimingTrace('turn-started')
     registerLiveTurn()
 
     await turnCompleted
+    emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()
     normalShutdown = true
     await stopCodexAppServerChild({
       child,
       closeStdin: tryCloseCodexStdin,
     })
+    emitAppServerTimingTrace('shutdown')
     if (stdinFailure) {
       throw stdinFailure
     }

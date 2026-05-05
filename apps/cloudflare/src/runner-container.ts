@@ -39,6 +39,8 @@ const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
 const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
 const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
+const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
+const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -124,6 +126,10 @@ interface HostedExecutionContainerSmokeHealthResult {
   status: number;
 }
 
+interface RunnerActivityTimeoutRenewable {
+  renewActivityTimeout(): void;
+}
+
 // Cloudflare rolls Worker code ahead of container instances, so keep the
 // worker/container outbound contract to one stable handler method.
 const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
@@ -144,6 +150,8 @@ export class RunnerContainer extends Container {
   private runnerControlToken: string | null = null;
   private runnerOutboundProxyState: RunnerOutboundProxyState | null = null;
   private installedRunnerOutboundProxyState: RunnerOutboundProxyState | null = null;
+  private activeInvocationCount = 0;
+  private lastRunnerActivityAt = 0;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
@@ -212,6 +220,28 @@ export class RunnerContainer extends Container {
 
   override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
+      const idleTtlMs = readRunnerIdleTtlMs(this.environment);
+      const idleElapsedMs = this.lastRunnerActivityAt > 0
+        ? Math.max(0, Date.now() - this.lastRunnerActivityAt)
+        : null;
+
+      if (this.activeInvocationCount > 0 || (idleElapsedMs !== null && idleElapsedMs < idleTtlMs)) {
+        const activityTimeoutRenewed = this.noteRunnerActivity("activity-expired-stale");
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            activeInvocationCount: this.activeInvocationCount,
+            activityTimeoutRenewed,
+            idleElapsedMs,
+            runnerIdleTtlMs: idleTtlMs,
+          },
+          message: "Hosted execution container activity expiry was stale; keeping warm shell.",
+          phase: "container.ready",
+          userId: this.currentLogContext?.userId,
+        });
+        return;
+      }
+
       await this.stopWarmContainer({ failClosed: false });
     });
   }
@@ -296,6 +326,9 @@ export class RunnerContainer extends Container {
     };
     let completedSuccessfully = false;
     this.currentLogContext = logContext;
+    this.activeInvocationCount += 1;
+    const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
+    this.noteRunnerActivity("invoke-started");
 
     try {
       const startTime = Date.now();
@@ -317,10 +350,12 @@ export class RunnerContainer extends Container {
         userId: routeUserId,
       });
       const runnerControlToken = await this.ensureContainerReady(input);
+      this.noteRunnerActivity("container-ready");
       this.runnerOutboundProxyState = outboundProxyState;
       await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
+      this.noteRunnerActivity("runner-request-starting");
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -350,6 +385,7 @@ export class RunnerContainer extends Container {
         },
         RUNNER_PORT,
       );
+      this.noteRunnerActivity("runner-response-received");
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -387,6 +423,9 @@ export class RunnerContainer extends Container {
           });
         }
       } finally {
+        this.noteRunnerActivity("invoke-finished");
+        stopRunnerActivityRenewal();
+        this.activeInvocationCount = Math.max(0, this.activeInvocationCount - 1);
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
@@ -746,6 +785,49 @@ export class RunnerContainer extends Container {
     this.runnerOutboundProxyState = null;
     this.installedRunnerOutboundProxyState = null;
     await this.destroyIfRunning({ failClosed });
+  }
+
+  private startRunnerActivityRenewal(): () => void {
+    const idleTtlMs = readRunnerIdleTtlMs(this.environment);
+    const intervalMs = Math.max(
+      MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS,
+      Math.min(RUNNER_ACTIVITY_RENEW_INTERVAL_MS, Math.floor(idleTtlMs / 2)),
+    );
+    const interval = setInterval(() => {
+      this.noteRunnerActivity("invoke-heartbeat");
+    }, intervalMs);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }
+
+  private noteRunnerActivity(stage: string): boolean {
+    this.lastRunnerActivityAt = Date.now();
+    const renewActivityTimeout =
+      (this as RunnerContainer & Partial<RunnerActivityTimeoutRenewable>).renewActivityTimeout;
+
+    if (typeof renewActivityTimeout !== "function") {
+      return false;
+    }
+
+    try {
+      renewActivityTimeout.call(this);
+      return true;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          activityStage: stage,
+        },
+        error,
+        level: "warn",
+        message: "Hosted execution container failed to renew activity timeout.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+      return false;
+    }
   }
 
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {

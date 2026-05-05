@@ -419,10 +419,66 @@ describe("RunnerContainer", () => {
     const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
       createContainerDouble();
 
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-06T00:00:00.000Z"));
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest(),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      const firstExecuteCall = containerFetch.mock.calls.find(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+      const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
+
+      expect(destroy).not.toHaveBeenCalled();
+      vi.setSystemTime(new Date("2026-05-06T00:05:01.000Z"));
+      await container.onActivityExpired();
+      expect(destroy).toHaveBeenCalledTimes(1);
+
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_after_alarm"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+      const secondToken = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
+      const outboundTokens = setOutboundByHosts.mock.calls
+        .map(([mapping]) => readRunnerProxyToken(mapping as Record<string, unknown>))
+        .filter((token): token is string => token !== null);
+
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(firstToken).not.toBe(secondToken);
+      expect(outboundTokens).toHaveLength(2);
+      expect(outboundTokens[0]).toBeTruthy();
+      expect(outboundTokens[1]).toBeTruthy();
+      expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a warm shell when a stale activity expiry fires just after work completed", async () => {
+    const renewActivityTimeout = vi.fn();
+    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble();
+    Object.assign(container, {
+      renewActivityTimeout,
+    });
+
     await container.invoke({
       job: {
         kind: "workspace-invocation",
-        request: createRunnerRequest(),
+        request: createRunnerRequest("evt_stale_activity_first"),
       },
       timeoutMs: 60_000,
       userId: "member_123",
@@ -432,14 +488,11 @@ describe("RunnerContainer", () => {
     );
     const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
 
-    expect(destroy).not.toHaveBeenCalled();
     await container.onActivityExpired();
-    expect(destroy).toHaveBeenCalledTimes(1);
-
     await container.invoke({
       job: {
         kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_alarm"),
+        request: createRunnerRequest("evt_stale_activity_second"),
       },
       timeoutMs: 60_000,
       userId: "member_123",
@@ -448,17 +501,78 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/workspace-invocation")
     );
     const secondToken = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
-    const outboundTokens = setOutboundByHosts.mock.calls
-      .map(([mapping]) => readRunnerProxyToken(mapping as Record<string, unknown>))
-      .filter((token): token is string => token !== null);
 
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(firstToken).not.toBe(secondToken);
-    expect(outboundTokens).toHaveLength(2);
-    expect(outboundTokens[0]).toBeTruthy();
-    expect(outboundTokens[1]).toBeTruthy();
-    expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(secondToken).toBe(firstToken);
+    expect(renewActivityTimeout).toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        message: "Hosted execution container activity expiry was stale; keeping warm shell.",
+        phase: "container.ready",
+      }),
+    );
+  });
+
+  it("renews the activity timeout during long runner invocations", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const renewActivityTimeout = vi.fn();
+      let resolveInvocation!: () => void;
+      let markRunnerRequestStarted!: () => void;
+      const invocationReady = new Promise<void>((resolve) => {
+        resolveInvocation = resolve;
+      });
+      const runnerRequestStarted = new Promise<void>((resolve) => {
+        markRunnerRequestStarted = resolve;
+      });
+      const { container } = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          markRunnerRequestStarted();
+          await invocationReady;
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+      Object.assign(container, {
+        renewActivityTimeout,
+      });
+
+      const invokePromise = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_activity_renew"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      await runnerRequestStarted;
+      await vi.advanceTimersByTimeAsync(1_250);
+      resolveInvocation();
+
+      await expect(invokePromise).resolves.toEqual(createRunnerResult());
+      expect(renewActivityTimeout.mock.calls.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not reuse a successful shell when outbound proxy expiration fails", async () => {
@@ -529,6 +643,7 @@ describe("RunnerContainer", () => {
 
     vi.useFakeTimers();
     try {
+      vi.setSystemTime(new Date(Date.now() + 301_000));
       const cleanupPromise = container.onActivityExpired();
       await vi.advanceTimersByTimeAsync(5_500);
       await expect(cleanupPromise).resolves.toBeUndefined();
