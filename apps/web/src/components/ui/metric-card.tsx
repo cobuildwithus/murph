@@ -6,7 +6,7 @@ const deltaVariants = cva("ml-2 text-sm font-semibold", {
   variants: {
     direction: {
       up: "text-primary",
-      down: "text-primary",
+      down: "text-amber-600",
       neutral: "text-muted-foreground",
     },
   },
@@ -44,7 +44,7 @@ export function MetricCard({
   return (
     <div
       className={cn(
-        "flex flex-1 flex-col gap-2 rounded-xl border border-border bg-card p-5",
+        "flex flex-1 flex-col gap-2 rounded-xl bg-muted/20 p-5",
         className
       )}
     >
@@ -62,7 +62,7 @@ export function MetricCard({
       </div>
       {(baseline || expected) && (
         <span className="text-xs text-muted-foreground">
-          {baseline && `was ${baseline}`}
+          {baseline}
           {baseline && expected && " · "}
           {expected && `expected ${expected}`}
         </span>
