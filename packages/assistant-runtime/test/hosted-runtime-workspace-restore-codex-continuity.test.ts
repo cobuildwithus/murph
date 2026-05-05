@@ -173,6 +173,127 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
+  test("skips unchanged base snapshot restore when warm local roots already contain it", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-base-cache-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
+      const sourceBaseOperatorHomeRoot = path.join(workspaceRoot, "base-operator-home");
+      await mkdir(sourceBaseVaultRoot, { recursive: true });
+      await mkdir(path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", "sessions"), {
+        recursive: true,
+      });
+      await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
+      await writeFile(
+        path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"),
+        "{\"codex\":\"old\"}\n",
+        "utf8",
+      );
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+          {
+            root: sourceBaseOperatorHomeRoot,
+            rootKey: "operator-home",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+
+      const firstHotSnapshot = await createHotStateSnapshot({
+        sessionName: "first",
+        threadId: "thread-first",
+        workspaceRoot,
+      });
+      const secondHotSnapshot = await createHotStateSnapshot({
+        sessionName: "second",
+        threadId: "thread-second",
+        workspaceRoot,
+      });
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const firstHotHash = sha256HostedBundleHex(firstHotSnapshot.bundle);
+      const secondHotHash = sha256HostedBundleHex(secondHotSnapshot.bundle);
+      const artifactGetCalls: string[] = [];
+      const logRequests: HostedRuntimeLogRequest[] = [];
+      const platform = createRestorePlatform({
+        artifactBytesByHash: new Map([
+          [baseHash, baseBundle],
+          [firstHotHash, firstHotSnapshot.bundle],
+          [secondHotHash, secondHotSnapshot.bundle],
+        ]),
+        artifactGetCalls,
+        logRequests,
+      });
+      const baseRef = createBundleRef({
+        hash: baseHash,
+        key: "users/bundles/member-synthetic/base-cache.bundle.json",
+        size: baseBundle.byteLength,
+      });
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+            base: baseRef,
+            hot: createBundleRef({
+              hash: firstHotHash,
+              key: `cloudflare-workspace-hot-state/${firstHotHash}.bundle`,
+              size: firstHotSnapshot.bundle.byteLength,
+            }),
+          }),
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, [baseHash, firstHotHash]);
+      artifactGetCalls.length = 0;
+      logRequests.length = 0;
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+            base: baseRef,
+            hot: createBundleRef({
+              hash: secondHotHash,
+              key: `cloudflare-workspace-hot-state/${secondHotHash}.bundle`,
+              size: secondHotSnapshot.bundle.byteLength,
+            }),
+          }),
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      assert.equal(await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"), "base note\n");
+      assert.equal(
+        await readFile(
+          path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"),
+          "utf8",
+        ),
+        "{\"resumeState\":{\"providerSessionId\":\"thread-second\",\"resumeRouteId\":\"route-second\"},\"session\":\"second\"}\n",
+      );
+      const restoreLayerLogs = flattenLogEntries(logRequests).filter((entry) =>
+        entry.eventCode === "workspace.restore_layer_finished"
+      );
+      assert.deepEqual(
+        restoreLayerLogs.map((entry) => entry.redactedJson?.snapshotLayer),
+        ["base", "hot"],
+      );
+      assert.equal(restoreLayerLogs[0]?.redactedJson?.cacheHit, true);
+      assert.equal(restoreLayerLogs[0]?.redactedJson?.fetchElapsedMs, 0);
+      assert.equal(restoreLayerLogs[0]?.redactedJson?.materializeElapsedMs, 0);
+      assert.equal(restoreLayerLogs[1]?.redactedJson?.cacheHit, false);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   test("repairs incomplete legacy base Codex resume state during restore", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-base-"));
 
@@ -366,6 +487,30 @@ function flattenLogEntries(
   requests: readonly HostedRuntimeLogRequest[],
 ): HostedRuntimeLogRequest["entries"] {
   return requests.flatMap((request) => request.entries);
+}
+
+async function createHotStateSnapshot(input: {
+  sessionName: string;
+  threadId: string;
+  workspaceRoot: string;
+}): ReturnType<typeof snapshotHostedAssistantRuntimeHotState> {
+  const sourceHotVaultRoot = path.join(input.workspaceRoot, `hot-vault-${input.sessionName}`);
+  const hotAssistantRoot = resolveAssistantStatePaths(sourceHotVaultRoot).assistantStateRoot;
+  await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
+  await writeFile(
+    path.join(hotAssistantRoot, "sessions", "session-latest.json"),
+    JSON.stringify({
+      resumeState: {
+        providerSessionId: input.threadId,
+        resumeRouteId: input.threadId.replace("thread-", "route-"),
+      },
+      session: input.sessionName,
+    }) + "\n",
+    "utf8",
+  );
+  return await snapshotHostedAssistantRuntimeHotState({
+    vaultRoot: sourceHotVaultRoot,
+  });
 }
 
 function createCodexSessionRecord(input: {

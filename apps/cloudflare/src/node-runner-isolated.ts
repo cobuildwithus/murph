@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,10 @@ export interface HostedExecutionIsolatedRunnerInput {
 }
 
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
+const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
+const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
+
+const hostedRunnerWarmLauncherRoots = new Map<string, string>();
 
 export function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
@@ -54,14 +59,15 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-  const launcherRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-launch-"));
+  const warmRoot = await resolveHostedRunnerWarmLauncherRoot(input.job);
+  let invocationSucceeded = false;
 
   try {
     if (options?.signal?.aborted) {
       throw options.signal.reason ?? new Error("Hosted runner job aborted before child launch.");
     }
 
-    const launcherDirectories = await createHostedRunnerChildLauncherDirectories(launcherRoot);
+    const launcherDirectories = await createHostedRunnerChildLauncherDirectories(warmRoot);
     const childEntry = resolveNodeRunnerChildEntry();
     const isTypeScriptChild = childEntry.endsWith(".ts");
     const child = spawn(
@@ -70,7 +76,7 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
         ? ["--import", resolveHostedRunnerTsxImportSpecifier(), childEntry]
         : [childEntry],
       {
-        cwd: launcherRoot,
+        cwd: warmRoot,
         detached: process.platform !== "win32",
         env: createHostedRunnerChildProcessEnv({
           forwardedEnv: buildHostedRunnerChildRuntimeEnv({
@@ -139,14 +145,26 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
       }
 
       const result = childResult.result;
-      return assertHostedExecutionRunnerJobResult(result, input.job);
+      const asserted = assertHostedExecutionRunnerJobResult(result, input.job);
+      invocationSucceeded = true;
+      return asserted;
     } finally {
       options?.signal?.removeEventListener("abort", abortHandler);
       terminateChildProcess(child.pid);
     }
   } finally {
-    await rm(launcherRoot, { force: true, recursive: true });
+    if (!invocationSucceeded) {
+      await evictHostedRunnerWarmLauncherRoot(input.job, warmRoot);
+    }
   }
+}
+
+export async function clearHostedRunnerWarmLauncherRootsForTests(): Promise<void> {
+  const roots = [...new Set(hostedRunnerWarmLauncherRoots.values())];
+  hostedRunnerWarmLauncherRoots.clear();
+  await Promise.all(
+    roots.map((root) => rm(root, { force: true, recursive: true })),
+  );
 }
 
 export function formatHostedExecutionChildResult(
@@ -163,6 +181,44 @@ function resolveNodeRunnerChildEntry(): string {
   }
 
   return fileURLToPath(new URL("./node-runner-child.ts", import.meta.url));
+}
+
+async function resolveHostedRunnerWarmLauncherRoot(
+  job: HostedExecutionWorkspaceInvocationJobInput,
+): Promise<string> {
+  const workspaceId = createHostedRunnerWarmWorkspaceId(job.request.userId);
+  const cached = hostedRunnerWarmLauncherRoots.get(workspaceId);
+  if (cached) {
+    await mkdir(cached, { mode: 0o700, recursive: true });
+    return cached;
+  }
+
+  const root = path.join(
+    tmpdir(),
+    HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY,
+    workspaceId,
+  );
+  await mkdir(root, { mode: 0o700, recursive: true });
+  hostedRunnerWarmLauncherRoots.set(workspaceId, root);
+  return root;
+}
+
+async function evictHostedRunnerWarmLauncherRoot(
+  job: HostedExecutionWorkspaceInvocationJobInput,
+  root: string,
+): Promise<void> {
+  const workspaceId = createHostedRunnerWarmWorkspaceId(job.request.userId);
+  if (hostedRunnerWarmLauncherRoots.get(workspaceId) === root) {
+    hostedRunnerWarmLauncherRoots.delete(workspaceId);
+  }
+  await rm(root, { force: true, recursive: true });
+}
+
+function createHostedRunnerWarmWorkspaceId(userId: string): string {
+  return createHash("sha256")
+    .update(userId)
+    .digest("hex")
+    .slice(0, HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH);
 }
 
 function terminateChildProcess(pid: number | undefined): void {

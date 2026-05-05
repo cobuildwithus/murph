@@ -12,9 +12,12 @@ vi.mock("node:child_process", () => ({
 }));
 
 describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
-  afterEach(() => {
+  afterEach(async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+    await module.clearHostedRunnerWarmLauncherRootsForTests();
     spawnMock.mockReset();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   function createWorkspaceJob(eventId: string): HostedExecutionWorkspaceInvocationJobInput {
@@ -72,6 +75,42 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
 
     expect(result.status).toBe("idle");
     expect(processKillSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
+  });
+
+  it("reuses the same redacted warm launcher root for successful invocations by the same user", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+    const cwdValues: string[] = [];
+
+    spawnMock.mockImplementation((_command, _args, options) => {
+      cwdValues.push(String(options?.cwd ?? ""));
+      return createSuccessfulChildProcess(module);
+    });
+
+    await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_warm_first"),
+    });
+    await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_warm_second"),
+    });
+    await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: {
+        ...createWorkspaceJob("evt_warm_other_user"),
+        request: {
+          ...createWorkspaceJob("evt_warm_other_user").request,
+          userId: "member_456",
+        },
+      },
+    });
+
+    expect(cwdValues).toHaveLength(3);
+    expect(cwdValues[0]).toContain("hosted-runner-workspaces");
+    expect(cwdValues[1]).toBe(cwdValues[0]);
+    expect(cwdValues[2]).not.toBe(cwdValues[0]);
+    expect(cwdValues[0]).not.toContain("member_123");
+    expect(cwdValues[2]).not.toContain("member_456");
   });
 
   it("passes only the normalized runtime env into the isolated child env", async () => {
@@ -330,6 +369,35 @@ function createRunnerResult() {
     },
     status: "idle" as const,
   };
+}
+
+function createSuccessfulChildProcess(
+  module: typeof import("../src/node-runner-isolated.ts"),
+) {
+  const child = new EventEmitter() as EventEmitter & {
+    kill: ReturnType<typeof vi.fn>;
+    pid: number;
+    stderr: PassThrough;
+    stdin: PassThrough;
+    stdout: PassThrough;
+  };
+  child.kill = vi.fn();
+  child.pid = 42_424;
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+
+  queueMicrotask(() => {
+    child.stdout.end(module.formatHostedExecutionChildResult({
+      ok: true,
+      result: createRunnerResult(),
+    }));
+    child.emit("close", 0);
+  });
+
+  return child;
 }
 
 function formatLegacyChildResult(result: unknown): string {

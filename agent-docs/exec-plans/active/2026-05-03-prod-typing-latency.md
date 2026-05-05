@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-05-03
-Updated: 2026-05-03
+Updated: 2026-05-06
 
 ## Goal
 
@@ -56,6 +56,16 @@ Updated: 2026-05-03
 
 - Treat the likely bottleneck as the handoff before runner execution until code or production evidence proves otherwise.
 - Prefer direct nudge with pointer Workflow fallback over adding any second queue/dispatch owner, if the current active-member path can support it safely.
+- 2026-05-05 live evidence: webhook append and runner nudge are sub-2s, provider send is fast, and the dominant delay is inside hosted execution before mailbox import/assistant start. Current evidence points at runner container readiness/checkpoint/artifact-upload pressure rather than a 44 MB snapshot fetch alone.
+- 2026-05-05 deploy evidence: the live Worker/container image rolled to the new version, but container smoke needed repeated retries with transient "not listening" lifecycle events before the expected runner bundle was observed.
+- 2026-05-06 root cause: isolated runner invocations used a fresh temp launcher root and deleted it after each successful child process, so warm containers still cold-restored the unchanged base snapshot on every wake.
+- 2026-05-06 implementation: preserve a per-user hashed warm launcher root for successful isolated invocations and cache the restored base snapshot marker outside vault/operator-home roots so unchanged bases skip fetch/repair/materialize on warm follow-up invocations.
+
+## Current evidence
+
+- Fresh iMessage probe after the deploy appended the conversation item immediately and marked it read quickly, but runtime logs showed the message landed during prior checkpoint activity and waited for a later restore/import pass.
+- Restore-stage logs for the later pass showed base restore dominating: multi-second fetch/repair and roughly 15s materialization for an unchanged base snapshot, followed by a much smaller hot-state restore.
+- Cloudflare observability repeatedly reported Worker memory-limit failures on artifact object PUTs during checkpoint/upload windows; still worth a follow-up, but the immediate 40-50s gap is explained by repeated cold base restore plus queued checkpoint/import ordering.
 
 ## Verification
 
@@ -65,3 +75,8 @@ Updated: 2026-05-03
 - Expected outcomes:
   - Tests prove nudge/typing/logging behavior and fallback semantics.
   - TypeScript accepts the touched surfaces.
+- 2026-05-06 local verification:
+  - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/node-runner-isolated.test.ts`
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-workspace-restore-codex-continuity.test.ts`
+  - `pnpm --dir apps/cloudflare typecheck`
+  - `pnpm --dir packages/assistant-runtime typecheck`
