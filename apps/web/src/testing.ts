@@ -5,12 +5,18 @@ export {
 } from "./lib/hosted-onboarding/hosted-member-test-seed";
 
 import { createHostedWebSmokeEnvironment } from "../next-artifacts";
+import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
+import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 const prismaModuleSpecifier = new URL("./lib/prisma.ts", import.meta.url).href;
 const hostedMailboxStoreModuleSpecifier = new URL(
   "./lib/hosted-mailbox/store.ts",
+  import.meta.url,
+).href;
+const hostedWorkspaceStoreModuleSpecifier = new URL(
+  "./lib/hosted-workspace/store.ts",
   import.meta.url,
 ).href;
 
@@ -35,6 +41,39 @@ interface HostedMailboxAppendForTestStoreModule {
       id: string;
       laneSeq: bigint | number | string;
     };
+  }>;
+}
+
+interface HostedWorkspaceSeedForTestPrismaClient {
+  $disconnect(): Promise<void>;
+}
+
+interface HostedWorkspaceSeedForTestPrismaModule {
+  getPrisma(): HostedWorkspaceSeedForTestPrismaClient;
+}
+
+interface HostedWorkspaceSeedForTestStoreModule {
+  checkpointHostedWorkspace(input: {
+    browserVaultReplicaRef: HostedBrowserVaultReplicaRef;
+    expectedVersion: string;
+    nextWakeAt?: string | null;
+    nextWakeReason?: string | null;
+    prisma: HostedWorkspaceSeedForTestPrismaClient;
+    reason: "import";
+    redactedStatusJson?: Record<string, unknown> | null;
+    snapshotRef: HostedExecutionSnapshotRef;
+    userId: string;
+  }): Promise<{
+    status: "updated" | "conflict";
+    workspace: {
+      version: string;
+    } | null;
+  }>;
+  ensureHostedWorkspace(input: {
+    prisma: HostedWorkspaceSeedForTestPrismaClient;
+    userId: string;
+  }): Promise<{
+    version: string;
   }>;
 }
 
@@ -78,6 +117,49 @@ export async function appendHostedExecutionWakeForTest(input: {
   }
 }
 
+export async function seedHostedWorkspaceCheckpointForTest(input: {
+  browserVaultReplicaRef: HostedBrowserVaultReplicaRef;
+  environment?: NodeJS.ProcessEnv;
+  nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
+  redactedStatusJson?: Record<string, unknown> | null;
+  snapshotRef: HostedExecutionSnapshotRef;
+  userId: string;
+}): Promise<{
+  status: "updated" | "conflict";
+  version: string;
+}> {
+  const modules = await loadHostedWorkspaceSeedForTestModules(
+    applyHostedMailboxAppendForTestEnvironment(input.environment),
+  );
+  const prisma = modules.getPrisma();
+
+  try {
+    const workspace = await modules.ensureHostedWorkspace({
+      prisma,
+      userId: input.userId,
+    });
+    const checkpoint = await modules.checkpointHostedWorkspace({
+      browserVaultReplicaRef: input.browserVaultReplicaRef,
+      expectedVersion: workspace.version,
+      nextWakeAt: input.nextWakeAt ?? null,
+      nextWakeReason: input.nextWakeReason ?? null,
+      prisma,
+      reason: "import",
+      redactedStatusJson: input.redactedStatusJson ?? null,
+      snapshotRef: input.snapshotRef,
+      userId: input.userId,
+    });
+
+    return {
+      status: checkpoint.status,
+      version: checkpoint.workspace?.version ?? workspace.version,
+    };
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 function applyHostedMailboxAppendForTestEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -104,6 +186,29 @@ async function loadHostedMailboxAppendForTestModules(
 
   return {
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
+    getPrisma: typedPrismaModule.getPrisma,
+  };
+}
+
+async function loadHostedWorkspaceSeedForTestModules(
+  environment: NodeJS.ProcessEnv,
+): Promise<HostedWorkspaceSeedForTestPrismaModule & HostedWorkspaceSeedForTestStoreModule> {
+  const [prismaModule, hostedWorkspaceStoreModule] = await Promise.all([
+    import(prismaModuleSpecifier),
+    import(hostedWorkspaceStoreModuleSpecifier),
+  ]);
+
+  if (environment.DATABASE_URL) {
+    process.env.DATABASE_URL = environment.DATABASE_URL;
+  }
+
+  const typedPrismaModule = prismaModule as HostedWorkspaceSeedForTestPrismaModule;
+  const typedHostedWorkspaceStoreModule =
+    hostedWorkspaceStoreModule as HostedWorkspaceSeedForTestStoreModule;
+
+  return {
+    checkpointHostedWorkspace: typedHostedWorkspaceStoreModule.checkpointHostedWorkspace,
+    ensureHostedWorkspace: typedHostedWorkspaceStoreModule.ensureHostedWorkspace,
     getPrisma: typedPrismaModule.getPrisma,
   };
 }
