@@ -168,6 +168,34 @@ describe('assistant local PDF evidence guidance', () => {
   })
 })
 
+describe('assistant consumption lookup guidance', () => {
+  it('uses a concise decision rule for identifiable consumed products', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'For foods, drinks, menu items, supplements, pills, powders, and other consumed products',
+    )
+    expect(prompt).toContain(
+      'use web lookup before writing when the item is identifiable',
+    )
+    expect(prompt).toContain(
+      'local context or attachments do not provide key facts',
+    )
+    expect(prompt).toContain(
+      'Prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
+    )
+    expect(prompt).toContain(
+      'serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings',
+    )
+    expect(prompt).toContain(
+      'If the item is generic, the user asks you to just note it, or evidence is unavailable',
+    )
+    expect(prompt).toContain(
+      'log what is known, mark estimates and confidence, and do not imply a lookup happened',
+    )
+  })
+})
+
 describe('assistant user-facing wording guidance', () => {
   it('keeps Health Commons provenance behind first-person assistant wording', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
@@ -248,7 +276,7 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '9df7a06c05b367c2ec360e8b5f414ec27cb9fbcaa453c0cf1d8183afc0c39587',
+      '8cdb6d84eb63dfb40c61341557c71884e1fa2b10d27be8ab8e9740d2a24776f0',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
