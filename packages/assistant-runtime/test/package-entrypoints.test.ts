@@ -16,6 +16,7 @@ import {
   parseHostedEmailSendRequest,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
   HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-assistant-env-constants";
@@ -112,6 +113,7 @@ test("package manifest declares hosted assistant env and hosted runtime subpaths
   assert.ok(Array.isArray(HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured));
   assert.ok(HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES.includes("LINQ_WEBHOOK_SECRET"));
   assert.ok(HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES.includes("OPENAI_API_KEY"));
+  assert.ok(HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES.includes("JUNCTION_API_KEY"));
   assert.ok((HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES as readonly string[]).includes("HOSTED_WEB_BASE_URL"));
   assert.ok(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES.includes("TELEGRAM_BOT_TOKEN"));
   assert.equal(typeof readHostedAssistantApiKeyEnvName, "function");

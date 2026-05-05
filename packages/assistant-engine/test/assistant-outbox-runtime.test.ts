@@ -651,6 +651,7 @@ describe('assistant outbox runtime', () => {
     })
 
     expect(sendLinq).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: '+15550001',
       fromPhoneNumber: '+15550000',
       idempotencyKey: 'idem-linq-first-contact',
       message: 'welcome',

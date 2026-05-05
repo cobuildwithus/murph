@@ -461,9 +461,15 @@ export async function runHostedDeviceSyncPass(
   processedJobs: number;
   skipped: boolean;
 }> {
+  const platformEnv = options.platformEnv ?? {};
+  await writeHostedLegacyDeviceSyncPlatformEnvLog({
+    deviceSyncConfig,
+    platform: options.runtimeLogPlatform ?? null,
+    platformEnv,
+  });
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
-    platformEnv: options.platformEnv ?? {},
+    platformEnv,
     vaultRoot,
   });
 
@@ -700,6 +706,36 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
       platform: input.platform,
     });
   }
+}
+
+async function writeHostedLegacyDeviceSyncPlatformEnvLog(input: {
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  platformEnv: Readonly<Record<string, string>>;
+}): Promise<void> {
+  if (!input.platform?.logPort || !input.deviceSyncConfig?.providerConfigs.junction) {
+    return;
+  }
+
+  const legacyPlatformEnvKeyCount = Object.keys(input.platformEnv).length;
+  const junctionPlatformEnvPresent = hasHostedRuntimeJunctionPlatformEnv(input.platformEnv);
+  if (legacyPlatformEnvKeyCount === 0 || !junctionPlatformEnvPresent) {
+    return;
+  }
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "device-sync",
+      eventCode: "device-sync.legacy_platform_env_present",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        junctionPlatformEnvPresent,
+        legacyPlatformEnvKeyCount,
+      },
+    },
+    platform: input.platform,
+  });
 }
 
 type HostedDeviceSyncRuntimeService = NonNullable<ReturnType<typeof createHostedDeviceSyncRuntime>>;

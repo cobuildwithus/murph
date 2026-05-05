@@ -5,8 +5,6 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
-  HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-  HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
@@ -56,10 +54,6 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH
     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     || path === HOSTED_RUNTIME_LOG_PATH
-    // TODO(hosted-platform-env-contraction): remove raw crypto proxy reachability
-    // once Telegram/device-sync no longer rely on runtime `platformEnv` fallback.
-    || path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH
-    || path === HOSTED_RUNTIME_CRYPTO_ROOT_PATH
     || path === HOSTED_RUNTIME_MAILBOX_FETCH_PATH
     || path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
     || path === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH

@@ -504,6 +504,7 @@ describe('channel helper seams', () => {
       },
     )
     expect(sendLinq).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       idempotencyKey: 'idem-linq',
       message: 'linq hello',

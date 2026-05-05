@@ -866,6 +866,87 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("logs redacted legacy Junction platform env usage when consumed", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+    const platformEnv = {
+      JUNCTION_API_KEY: "junction-api-key",
+      JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    };
+    const junctionConfig = {
+      apiKey: "junction-api-key",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+    };
+
+    mocks.readConfiguredJunctionDeviceSyncProviderConfig.mockReturnValue(junctionConfig);
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["junction"]);
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => ["junction"],
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => null,
+      runSchedulerOnce,
+    });
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_junction_platform_env_log",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        platformEnv,
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              return {
+                loggedCount: request.entries.length,
+              };
+            },
+          },
+        },
+      },
+    );
+
+    assert.equal(logRequests.length, 1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    assert.equal(entry.component, "device-sync");
+    assert.equal(entry.eventCode, "device-sync.legacy_platform_env_present");
+    assert.equal(entry.level, "info");
+    assert.equal(entry.phase, "invoke");
+    assert.deepEqual(entry.redactedJson, {
+      junctionPlatformEnvPresent: true,
+      legacyPlatformEnvKeyCount: 4,
+    });
+    assert.equal(JSON.stringify(entry).includes("junction-api-key"), false);
+    assert.equal(JSON.stringify(entry).includes("junction-client-user-id-secret"), false);
+  });
+
   it("skips device sync when the hosted runtime resolved config disables device sync", async () => {
     const result = await runHostedDeviceSyncPass(
       {
