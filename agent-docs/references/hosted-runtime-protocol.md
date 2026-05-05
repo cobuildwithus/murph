@@ -208,15 +208,20 @@ payloads, locks, pid/socket files, global cache/tmp, and rebuildable
 projections. Hot checkpoints snapshot a much narrower explicit assistant
 runtime continuity subset under `vault/.runtime/operations/assistant/**` for
 user-visible checkpoint boundaries such as mailbox import and outbox state.
-Restore applies the base bundle first, clears the hot-state include paths, then
-restores the latest hot bundle so files deleted by a hot checkpoint cannot
-resurrect from the base image. If no base snapshot exists, the runner may fall
-back to a full checkpoint so non-hot workspace content is not lost. Hot
-checkpoints also carry forward the browser-vault replica ref for the current
-base snapshot explicitly; if that continuity is missing or stale, the runner
-uses a full checkpoint instead. `system_mailbox_receipt` remains full because
-activation can mutate canonical vault bootstrap state that must be present for
-later conversation wakes.
+When hosted Codex native resume is active, that live assistant state also
+includes filtered operator-home `.codex-hosted/**`; a checkpoint must not make
+a Codex provider resume handle durable while dropping the matching local Codex
+state. Restore applies the base bundle first, clears the hot-state include
+paths, clears operator-home `.codex-hosted` only when the hot bundle contains
+that root, then restores the latest hot bundle so files deleted by a hot
+checkpoint cannot resurrect from the base image. If no base snapshot exists, or
+if live-state continuity is incomplete, the runner may fall back to a full
+checkpoint so non-hot workspace content is not lost. Hot checkpoints also carry
+forward the browser-vault replica ref for the current base snapshot explicitly;
+if that continuity is missing or stale, the runner uses a full checkpoint
+instead. `system_mailbox_receipt` remains full because activation can mutate
+canonical vault bootstrap state that must be present for later conversation
+wakes.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint

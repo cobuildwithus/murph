@@ -12,7 +12,9 @@ import {
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
+  assertHostedWorkspaceSnapshotProviderContinuityComplete,
   clearHostedAssistantRuntimeHotState,
+  hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
@@ -64,7 +66,15 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   }
 
   if (baseSnapshotRef) {
+    const baseBundle = await readHostedWorkspaceRuntimeBundle({
+      platform: input.platform,
+      ref: baseSnapshotRef,
+    });
+    assertHostedWorkspaceSnapshotProviderContinuityComplete({
+      bundle: baseBundle,
+    });
     await restoreHostedWorkspaceRuntimeBundle({
+      bundle: baseBundle,
       platform: input.platform,
       ref: baseSnapshotRef,
       restored,
@@ -72,10 +82,23 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   }
 
   if (hotSnapshotRef) {
+    const hotBundle = await readHostedWorkspaceRuntimeBundle({
+      platform: input.platform,
+      ref: hotSnapshotRef,
+    });
+    assertHostedWorkspaceSnapshotProviderContinuityComplete({
+      bundle: hotBundle,
+    });
     await clearHostedAssistantRuntimeHotState({
+      operatorHomeRoot: hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+        bundle: hotBundle,
+      })
+        ? restored.operatorHomeRoot
+        : null,
       vaultRoot: restored.vaultRoot,
     });
     await restoreHostedWorkspaceRuntimeBundle({
+      bundle: hotBundle,
       platform: input.platform,
       ref: hotSnapshotRef,
       restored,
@@ -89,14 +112,15 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 }
 
 async function restoreHostedWorkspaceRuntimeBundle(input: {
+  bundle?: Uint8Array | ArrayBuffer | null;
   platform: HostedRuntimePlatform;
   ref: HostedExecutionBundleRef;
   restored: HostedRestoredExecutionContext;
 }): Promise<void> {
-  const bundle = await input.platform.artifactStore.get(input.ref.hash);
-  if (!bundle) {
-    throw new HostedWorkspaceRuntimeSnapshotRestoreError(input.ref.hash);
-  }
+  const bundle = input.bundle ?? await readHostedWorkspaceRuntimeBundle({
+    platform: input.platform,
+    ref: input.ref,
+  });
 
   await restoreHostedBundleRoots({
     artifactResolver: createHostedArtifactResolver({
@@ -110,6 +134,18 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
     },
     shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
   });
+}
+
+async function readHostedWorkspaceRuntimeBundle(input: {
+  platform: HostedRuntimePlatform;
+  ref: HostedExecutionBundleRef;
+}): Promise<Uint8Array | ArrayBuffer> {
+  const bundle = await input.platform.artifactStore.get(input.ref.hash);
+  if (!bundle) {
+    throw new HostedWorkspaceRuntimeSnapshotRestoreError(input.ref.hash);
+  }
+
+  return bundle;
 }
 
 function shouldRestoreHostedAssistantInputEvidenceArtifact(input: {

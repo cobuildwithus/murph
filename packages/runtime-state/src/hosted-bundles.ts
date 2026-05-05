@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import path from "node:path";
-import { lstat, mkdir, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -82,6 +82,7 @@ export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifac
 export interface HostedAssistantRuntimeHotStateSnapshot {
   bundle: Uint8Array;
   bundleBytes: number;
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   fileCount: number;
   inlineBytes: number;
 }
@@ -100,6 +101,21 @@ export class HostedAssistantRuntimeHotStateBudgetExceededError extends Error {
   ) {
     super("Hosted assistant runtime hot-state snapshot exceeded its budget.");
     this.name = "HostedAssistantRuntimeHotStateBudgetExceededError";
+  }
+}
+
+export class HostedWorkspaceSnapshotContinuityIncompleteError extends Error {
+  constructor(readonly reason: "codex_home_missing") {
+    super("Hosted workspace snapshot is missing required provider continuity state.");
+    this.name = "HostedWorkspaceSnapshotContinuityIncompleteError";
+  }
+}
+
+export class HostedAssistantRuntimeHotStateIncompleteError
+  extends HostedWorkspaceSnapshotContinuityIncompleteError {
+  constructor(reason: "codex_home_missing") {
+    super(reason);
+    this.name = "HostedAssistantRuntimeHotStateIncompleteError";
   }
 }
 
@@ -182,6 +198,9 @@ export async function snapshotHostedExecutionContext(input: {
   if (vaultBundle === null) {
     throw new Error(`Hosted vault bundle could not be created for ${vaultRoot}.`);
   }
+  assertHostedWorkspaceSnapshotProviderContinuityComplete({
+    bundle: vaultBundle,
+  });
 
   return {
     bundle: vaultBundle,
@@ -190,10 +209,23 @@ export async function snapshotHostedExecutionContext(input: {
 }
 
 export async function snapshotHostedAssistantRuntimeHotState(input: {
+  codexHomeSnapshotHashSecret?: string | null;
+  operatorHomeRoot?: string | null;
   vaultRoot: string;
 }): Promise<HostedAssistantRuntimeHotStateSnapshot> {
   const vaultRoot = path.resolve(input.vaultRoot);
+  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  const includeCodexProviderContinuity = await hostedAssistantRuntimeHotStateHasProviderResumeState({
+    vaultRoot,
+  });
+  const codexHomeSnapshotRoot = includeCodexProviderContinuity ? operatorHomeRoot : null;
+  const codexHomeSnapshotDiagnostics = codexHomeSnapshotRoot
+    ? await collectHostedCodexHomeSnapshotDiagnostics({
+        hashSecret: input.codexHomeSnapshotHashSecret ?? null,
+        operatorHomeRoot: codexHomeSnapshotRoot,
+      })
+    : null;
   await ensureAssistantStateDirectory(assistantStateRoot);
   await assertHostedAssistantRuntimeHotStatePreBundleBudget({ vaultRoot });
 
@@ -207,6 +239,18 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
           return shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath);
         },
       },
+      ...(codexHomeSnapshotRoot
+        ? [
+            {
+              optional: true,
+              root: codexHomeSnapshotRoot,
+              rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
+              shouldIncludeRelativePath(relativePath: string) {
+                return shouldIncludeHostedAssistantRuntimeHotStateOperatorHomeRelativePath(relativePath);
+              },
+            },
+          ]
+        : []),
     ],
   });
 
@@ -219,27 +263,82 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
     ...metrics,
     bundleBytes: bundle.byteLength,
   });
+  assertHostedWorkspaceSnapshotProviderContinuityComplete({
+    bundle,
+    createError: (reason) => new HostedAssistantRuntimeHotStateIncompleteError(reason),
+  });
   return {
     bundle,
     bundleBytes: bundle.byteLength,
+    codexHomeSnapshotDiagnostics,
     fileCount: metrics.fileCount,
     inlineBytes: metrics.inlineBytes,
   };
 }
 
 export async function clearHostedAssistantRuntimeHotState(input: {
+  operatorHomeRoot?: string | null;
   vaultRoot: string;
 }): Promise<void> {
   const vaultRoot = path.resolve(input.vaultRoot);
+  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
 
-  await Promise.all(HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS.map((relativePath) =>
-    rm(path.join(vaultRoot, relativePath), {
-      force: true,
-      recursive: true,
-    })
-  ));
+  await Promise.all([
+    ...HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS.map((relativePath) =>
+      rm(path.join(vaultRoot, relativePath), {
+        force: true,
+        recursive: true,
+      })
+    ),
+    ...(operatorHomeRoot
+      ? [
+          rm(path.join(operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH), {
+            force: true,
+            recursive: true,
+          }),
+        ]
+      : []),
+  ]);
   await ensureAssistantStateDirectory(assistantStateRoot);
+}
+
+export function hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity(input: {
+  bundle?: Uint8Array | ArrayBuffer | null;
+}): boolean {
+  if (!input.bundle) {
+    return false;
+  }
+
+  const archive = parseHostedBundleArchive(input.bundle);
+  if (archive.kind !== "vault") {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
+    );
+  }
+
+  return hostedWorkspaceSnapshotIncludesCodexSessionState({
+    bundle: input.bundle,
+  });
+}
+
+export function hostedAssistantRuntimeHotStateIncludesCodexHome(input: {
+  bundle?: Uint8Array | ArrayBuffer | null;
+}): boolean {
+  return hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity(input);
+}
+
+export function assertHostedWorkspaceSnapshotProviderContinuityComplete(input: {
+  bundle: Uint8Array | ArrayBuffer;
+  createError?: (reason: "codex_home_missing") => Error;
+}): void {
+  if (
+    hostedWorkspaceSnapshotContainsProviderResumeState(input)
+    && !hostedWorkspaceSnapshotIncludesCodexSessionState(input)
+  ) {
+    throw input.createError?.("codex_home_missing")
+      ?? new HostedWorkspaceSnapshotContinuityIncompleteError("codex_home_missing");
+  }
 }
 
 export async function restoreHostedExecutionContext(input: {
@@ -323,6 +422,54 @@ async function assertHostedAssistantRuntimeHotStatePreBundleBudget(input: {
     fileCount: metrics.fileCount,
     inlineBytes: metrics.inlineBytes,
   });
+}
+
+async function hostedAssistantRuntimeHotStateHasProviderResumeState(input: {
+  vaultRoot: string;
+}): Promise<boolean> {
+  const sessionsRoot = path.join(
+    input.vaultRoot,
+    ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH,
+    "sessions",
+  );
+
+  async function visit(directoryPath: string): Promise<boolean> {
+    let entries;
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+
+    for (const entry of entries) {
+      const absolutePath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        if (await visit(absolutePath)) {
+          return true;
+        }
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      let text;
+      try {
+        text = await readFile(absolutePath, "utf8");
+      } catch {
+        return true;
+      }
+
+      if (assistantSessionTextContainsProviderResumeState(text)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  return await visit(sessionsRoot);
 }
 
 async function collectHostedAssistantRuntimeHotStateBudgetMetrics(input: {
@@ -426,6 +573,19 @@ function shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath: s
   );
 }
 
+function shouldIncludeHostedAssistantRuntimeHotStateOperatorHomeRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+  if (!hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH)) {
+    return false;
+  }
+
+  return shouldIncludeHostedCodexHomeRelativePath(
+    normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
+      ? ""
+      : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length),
+  );
+}
+
 function measureHostedAssistantRuntimeHotStateBundle(bundle: Uint8Array): {
   fileCount: number;
   inlineBytes: number;
@@ -474,6 +634,85 @@ function assertHostedAssistantRuntimeHotStateBudget(input: {
       input.bundleBytes,
     );
   }
+}
+
+function hostedWorkspaceSnapshotContainsProviderResumeState(input: {
+  bundle: Uint8Array | ArrayBuffer;
+}): boolean {
+  const archive = parseHostedBundleArchive(input.bundle);
+  if (archive.kind !== "vault") {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
+    );
+  }
+
+  return archive.files.some((file) => {
+    if (
+      file.root !== "vault"
+      || isHostedBundleArtifactEntry(file)
+      || !hasWorkspaceSnapshotPathPrefix(
+        normalizeWorkspaceSnapshotRelativePath(file.path),
+        `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
+      )
+    ) {
+      return false;
+    }
+
+    const text = Buffer.from(file.contentsBase64, "base64").toString("utf8");
+    return assistantSessionTextContainsProviderResumeState(text);
+  });
+}
+
+function assistantSessionTextContainsProviderResumeState(text: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return true;
+  }
+
+  return (
+    recordStringProperty(parsed, "providerSessionId") !== null
+    || recordStringProperty(recordProperty(parsed, "resumeState"), "providerSessionId") !== null
+  );
+}
+
+function hostedWorkspaceSnapshotIncludesCodexSessionState(input: {
+  bundle: Uint8Array | ArrayBuffer;
+}): boolean {
+  const archive = parseHostedBundleArchive(input.bundle);
+  if (archive.kind !== "vault") {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
+    );
+  }
+
+  return archive.files.some((file) =>
+    file.root === WORKSPACE_OPERATOR_HOME_ROOT
+    && hasWorkspaceSnapshotPathPrefix(
+      normalizeWorkspaceSnapshotRelativePath(file.path),
+      `${HOSTED_CODEX_HOME_RELATIVE_PATH}/sessions`,
+    )
+  );
+}
+
+function recordProperty(value: unknown, propertyName: string): unknown {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return value[propertyName];
+}
+
+function recordStringProperty(value: unknown, propertyName: string): string | null {
+  const propertyValue = recordProperty(value, propertyName);
+  return typeof propertyValue === "string" && propertyValue.trim().length > 0
+    ? propertyValue
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function shouldIncludeWorkspaceSnapshotRuntimeRelativePath(relativePath: string): boolean {
