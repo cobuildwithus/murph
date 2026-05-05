@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
+  sendLinqMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
@@ -41,6 +42,7 @@ vi.mock("@murphai/assistant-engine", () => ({
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
+  sendLinqMessage: mocks.sendLinqMessage,
   sendTelegramMessage: mocks.sendTelegramMessage,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
@@ -627,6 +629,115 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         deliveryStatus: "sent",
         retryable: false,
+      }),
+    ]);
+  });
+
+  it("prefers effectsPort.sendTelegram for hosted Telegram deliveries", async () => {
+    const effect = createEffect();
+    const sendTelegram = vi.fn(async () => ({
+      providerMessageId: "provider_effect_123",
+      target: "chat_123",
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: "chat_123",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendTelegram,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(sendTelegram).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_123",
+      message: "hello from hosted",
+      replyToMessageId: null,
+      target: "chat_123",
+    });
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "telegram",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("injects effectsPort.sendLinq for hosted Linq deliveries", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const sendLinq = vi.fn(async () => ({
+      providerMessageId: "linq_message_123",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendLinq,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(sendLinq).toHaveBeenCalledWith({
+      fromPhoneNumber: null,
+      idempotencyKey: "assistant-outbox:intent_123",
+      message: "hello from hosted",
+      replyToMessageId: null,
+      target: "linq_chat_123",
+      targetKind: "thread",
+    });
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
       }),
     ]);
   });

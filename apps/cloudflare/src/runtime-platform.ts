@@ -5,6 +5,7 @@ import {
   readHostedRunnerCommitTimeoutMs,
   type RuntimeLivenessTouchResult,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
+  type HostedRuntimeEffectsPort,
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -32,8 +33,26 @@ import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "./runner-email-route.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
+  HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
+  HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
+  HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_CHAT_ACTION_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
+  parseHostedRunnerLinqSendResponse,
+  parseHostedRunnerProviderEffectErrorResponse,
+  parseHostedRunnerTelegramDownloadFileResponse,
+  parseHostedRunnerTelegramGetFileResponse,
+  parseHostedRunnerTelegramSendResponse,
+} from "./runner-effects-contract.ts";
+import {
   HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
 } from "./runner-outbound/heartbeat.ts";
+import {
+  writeRunnerActiveInvocationLeaseHeaders,
+} from "./runner-outbound/active-lease.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
@@ -174,6 +193,13 @@ export function buildHostedExecutionRuntimePlatform(input: {
     inFlightArtifactUploads.set(artifact.sha256, upload);
     await upload;
   };
+  const providerEffectsPort = input.internalWorkerProxyToken && input.workspaceCheckpointBridge
+    ? createCloudflareRunnerProviderEffectsPort({
+        fetchImpl,
+        timeoutMs,
+        workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+      })
+    : {};
   return {
     artifactStore: {
       async get(sha256) {
@@ -240,6 +266,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     effectsPort: {
+      ...providerEffectsPort,
       async readRawEmailMessage(rawMessageKey) {
         const response = await fetchHostedResponse({
           description: "Hosted raw email read",
@@ -340,16 +367,115 @@ function buildHostedExecutionRunnerEmailMessagePath(rawMessageKey: string): stri
   return `/messages/${encodeURIComponent(rawMessageKey)}`;
 }
 
+function createCloudflareRunnerProviderEffectsPort(input: {
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}): Partial<HostedRuntimeEffectsPort> {
+  const post = async (requestInput: {
+    body: unknown;
+    description: string;
+    path: string;
+  }) => await fetchHostedProviderEffectJson({
+    body: requestInput.body,
+    description: requestInput.description,
+    fetchImpl: input.fetchImpl,
+    headers: await requireHostedRuntimeActiveLeaseHeaders(
+      input.workspaceCheckpointBridge,
+      requestInput.description,
+    ),
+    timeoutMs: input.timeoutMs,
+    url: new URL(
+      requestInput.path,
+      `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+    ),
+  });
+
+  return {
+    async deleteLinqMessages(request) {
+      await post({
+        body: request,
+        description: "Hosted Linq message cleanup",
+        path: HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
+      });
+    },
+    async downloadTelegramFile(request) {
+      const payload = await post({
+        body: request,
+        description: "Hosted Telegram file download",
+        path: HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
+      });
+      return parseHostedRunnerTelegramDownloadFileResponse(payload).file;
+    },
+    async getTelegramFile(request) {
+      const payload = await post({
+        body: request,
+        description: "Hosted Telegram file lookup",
+        path: HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
+      });
+      return parseHostedRunnerTelegramGetFileResponse(payload).file;
+    },
+    async markLinqRead(request) {
+      await post({
+        body: request,
+        description: "Hosted Linq mark-read",
+        path: HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
+      });
+    },
+    async sendLinq(request) {
+      const payload = await post({
+        body: request,
+        description: "Hosted Linq send",
+        path: HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
+      });
+      return parseHostedRunnerLinqSendResponse(payload);
+    },
+    async sendLinqChatAction(request) {
+      await post({
+        body: request,
+        description: "Hosted Linq chat action",
+        path: HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
+      });
+    },
+    async sendTelegram(request) {
+      const payload = await post({
+        body: request,
+        description: "Hosted Telegram send",
+        path: HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
+      });
+      return parseHostedRunnerTelegramSendResponse(payload);
+    },
+    async sendTelegramChatAction(request) {
+      await post({
+        body: request,
+        description: "Hosted Telegram chat action",
+        path: HOSTED_EXECUTION_RUNNER_TELEGRAM_CHAT_ACTION_PATH,
+      });
+    },
+  };
+}
+
 async function createHostedRuntimeActiveLeaseHeaders(
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority,
 ): Promise<Headers> {
   const headers = new Headers();
   const lease = await workspaceCheckpointBridge.readCurrentLease();
   if (lease) {
-    headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
-    headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
-    headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
+    writeRunnerActiveInvocationLeaseHeaders(headers, lease);
   }
+  return headers;
+}
+
+async function requireHostedRuntimeActiveLeaseHeaders(
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority,
+  description: string,
+): Promise<Headers> {
+  const headers = new Headers();
+  const lease = await workspaceCheckpointBridge.readCurrentLease();
+  if (!lease) {
+    throw new Error(`${description} requires an active hosted runtime invocation lease.`);
+  }
+  writeRunnerActiveInvocationLeaseHeaders(headers, lease);
   return headers;
 }
 
@@ -1128,6 +1254,106 @@ async function fetchHostedJson(input: {
     return JSON.parse(text);
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
+  }
+}
+
+async function fetchHostedProviderEffectJson(input: {
+  body: unknown;
+  description: string;
+  fetchImpl: typeof fetch;
+  headers: Headers;
+  timeoutMs: number;
+  url: URL;
+}): Promise<unknown> {
+  const response = await fetchHostedResponse({
+    description: input.description,
+    fetchImpl: input.fetchImpl,
+    init: {
+      body: JSON.stringify(input.body),
+      headers: mergeHostedRuntimeJsonHeaders(input.headers),
+      method: "POST",
+    },
+    timeoutMs: input.timeoutMs,
+    url: input.url,
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw createHostedProviderEffectError({
+      description: input.description,
+      payload: parseJsonObjectOrNull(text),
+      status: response.status,
+    });
+  }
+
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
+  }
+}
+
+function createHostedProviderEffectError(input: {
+  description: string;
+  payload: unknown;
+  status: number;
+}): Error {
+  const providerError = parseHostedRunnerProviderEffectErrorResponse(input.payload);
+  const error = new Error(
+    providerError?.error
+      ? `${input.description} failed with HTTP ${input.status}. ${providerError.error}`
+      : `${input.description} failed with HTTP ${input.status}.`,
+  ) as Error & {
+    cleanupMessages?: unknown;
+    cleanupTargetAliases?: unknown;
+    code?: string;
+    context?: unknown;
+    providerMessageId?: string | null;
+    providerMessageIds?: unknown;
+    status: number;
+    statusCode: number;
+    target?: string;
+  };
+  error.status = input.status;
+  error.statusCode = input.status;
+  if (providerError?.code) {
+    error.code = providerError.code;
+  }
+  if (providerError?.context) {
+    error.context = providerError.context;
+  }
+  if (providerError?.providerMessageIds) {
+    error.providerMessageIds = providerError.providerMessageIds;
+  }
+  if (providerError?.providerMessageId !== undefined) {
+    error.providerMessageId = providerError.providerMessageId;
+  } else if (providerError?.providerMessageIds) {
+    error.providerMessageId = providerError.providerMessageIds.at(-1) ?? null;
+  }
+  if (providerError?.cleanupMessages) {
+    error.cleanupMessages = providerError.cleanupMessages;
+  }
+  if (providerError?.cleanupTargetAliases) {
+    error.cleanupTargetAliases = providerError.cleanupTargetAliases;
+  }
+  if (providerError?.target) {
+    error.target = providerError.target;
+  }
+  return error;
+}
+
+function parseJsonObjectOrNull(text: string): unknown {
+  if (!text.trim()) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 }
 

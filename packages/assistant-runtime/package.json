@@ -31,6 +31,11 @@
       "import": "./dist/hosted-runtime-contracts.js",
       "default": "./dist/hosted-runtime-contracts.js"
     },
+    "./hosted-provider-effects": {
+      "types": "./dist/hosted-provider-effects.d.ts",
+      "import": "./dist/hosted-provider-effects.js",
+      "default": "./dist/hosted-provider-effects.js"
+    },
     "./hosted-email": {
       "types": "./dist/hosted-email.d.ts",
       "import": "./dist/hosted-email.js",

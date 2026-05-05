@@ -2,6 +2,9 @@ import {
   type TelegramAttachmentDownloadDriver,
 } from "@murphai/inboxd/connectors/hosted-conversation";
 import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
+import type {
+  HostedRuntimeEffectsPort,
+} from "../platform.ts";
 
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
@@ -45,6 +48,35 @@ export function createHostedTelegramAttachmentDownloadDriver(
       const url = new URL(`${apiBaseUrl}/bot${token}/getFile`);
       url.searchParams.set("file_id", fileId);
       return readHostedTelegramApiResult<TelegramFile>(url, signal);
+    },
+  };
+}
+
+export function createHostedTelegramEffectsAttachmentDownloadDriver(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "downloadTelegramFile" | "getTelegramFile"> | null;
+}): TelegramAttachmentDownloadDriver | null {
+  const getTelegramFile = input.effectsPort?.getTelegramFile;
+  const downloadTelegramFile = input.effectsPort?.downloadTelegramFile;
+  if (!getTelegramFile || !downloadTelegramFile) {
+    return null;
+  }
+
+  return {
+    downloadFile: async (filePath) => {
+      const file = await downloadTelegramFile({ filePath });
+      if (!file) {
+        throw new Error("Hosted Telegram effects attachment download returned no file.");
+      }
+
+      return decodeBase64ToBytes(file.bytesBase64);
+    },
+    getFile: async (fileId) => {
+      const file = await getTelegramFile({ fileId });
+      if (!file) {
+        throw new Error("Hosted Telegram effects attachment lookup returned no file.");
+      }
+
+      return file;
     },
   };
 }
@@ -105,4 +137,17 @@ async function readHostedTelegramApiResult<T>(url: URL, signal?: AbortSignal): P
 
 function stripLeadingSlash(value: string): string {
   return value.replace(/^\/+/u, "");
+}
+
+function decodeBase64ToBytes(value: string): Uint8Array {
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(value, "base64"));
+  }
+
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }

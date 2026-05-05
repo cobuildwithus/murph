@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   createConfiguredParserRegistry: vi.fn(),
   createHostedLinqAttachmentDownloadDriver: vi.fn(),
   createHostedTelegramAttachmentDownloadDriver: vi.fn(),
+  createHostedTelegramEffectsAttachmentDownloadDriver: vi.fn(),
   createInboxParserService: vi.fn(),
   createInboxPipeline: vi.fn(),
   createParsedInboxPipeline: vi.fn(),
@@ -55,6 +56,8 @@ vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
 
 vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
   createHostedTelegramAttachmentDownloadDriver: mocks.createHostedTelegramAttachmentDownloadDriver,
+  createHostedTelegramEffectsAttachmentDownloadDriver:
+    mocks.createHostedTelegramEffectsAttachmentDownloadDriver,
 }));
 
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
@@ -133,6 +136,7 @@ function createParseJobRecord(
 }
 
 beforeEach(() => {
+  mocks.createHostedTelegramEffectsAttachmentDownloadDriver.mockReturnValue(null);
   mocks.markLinqChatRead.mockResolvedValue(undefined);
   mocks.openInboxRuntime.mockResolvedValue({
     close: vi.fn(),
@@ -338,6 +342,45 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       nextWakeAt: null,
       parserProcessed: 2,
     });
+  });
+
+  it("prefers effects-backed Telegram attachment driver when available", async () => {
+    const effectsDriver = {
+      downloadFile: vi.fn(),
+      getFile: vi.fn(),
+    };
+    const telegramCapture = { source: "telegram" };
+    mocks.createHostedTelegramEffectsAttachmentDownloadDriver.mockReturnValueOnce(effectsDriver);
+    mocks.normalizeHostedTelegramConversationCapture.mockResolvedValueOnce(telegramCapture);
+
+    const wake = buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "evt_telegram",
+      occurredAt: "2026-04-08T00:01:00.000Z",
+      telegramMessage: {
+        messageId: "123",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello",
+        threadId: "chat_123",
+      },
+      userId: "member_123",
+    });
+
+    const runtime = createRuntime();
+    await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime,
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake,
+    });
+
+    expect(mocks.createHostedTelegramEffectsAttachmentDownloadDriver).toHaveBeenCalledWith({
+      effectsPort: runtime.platform.effectsPort,
+    });
+    expect(mocks.createHostedTelegramAttachmentDownloadDriver).not.toHaveBeenCalled();
+    expect(mocks.normalizeHostedTelegramConversationCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        downloadDriver: effectsDriver,
+      }),
+    );
   });
 
   it("closes the inbox runtime when plain pipeline creation fails before a pipeline exists", async () => {

@@ -2,6 +2,9 @@ import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-e
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "../runner-email-route.ts";
+import {
+  isHostedRunnerProviderEffectPath,
+} from "../runner-effects-contract.ts";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "../json.ts";
@@ -21,6 +24,9 @@ import {
   resolveRunnerOutboundUserCryptoContext,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
+import {
+  handleRunnerProviderEffectsRequest,
+} from "./provider-effects.ts";
 
 export async function handleRunnerResultsRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
@@ -39,6 +45,15 @@ export async function handleRunnerResultsRequest(input: {
       bucket: input.bucket,
       env: input.env,
       environment: input.environment,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
+
+  if (isHostedRunnerProviderEffectPath(input.url.pathname)) {
+    return handleRunnerProviderEffectsRequest({
+      env: input.env,
+      pathname: input.url.pathname,
       request: input.request,
       userId: input.userId,
     });

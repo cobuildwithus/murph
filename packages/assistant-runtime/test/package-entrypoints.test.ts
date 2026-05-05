@@ -93,7 +93,7 @@ test("hosted-runtime-contracts subpath stays wired to the worker-safe hosted run
   assert.equal(projectHostedRuntimeToChildEnv, projectHostedRuntimeToChildEnvDirect);
 });
 
-test("package manifest declares the hosted assistant env, hosted runtime contracts, and hosted email subpaths", async () => {
+test("package manifest declares hosted assistant env and hosted runtime subpaths", async () => {
   const manifest = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
@@ -103,6 +103,7 @@ test("package manifest declares the hosted assistant env, hosted runtime contrac
   assert.ok(manifest.exports);
   assert.ok("./hosted-assistant-env" in manifest.exports);
   assert.ok("./hosted-assistant-env-constants" in manifest.exports);
+  assert.ok("./hosted-provider-effects" in manifest.exports);
   assert.ok("./hosted-runtime-contracts" in manifest.exports);
   assert.ok("./hosted-email" in manifest.exports);
   assert.ok(Array.isArray(HOSTED_ASSISTANT_CONFIG_ENV_NAMES));

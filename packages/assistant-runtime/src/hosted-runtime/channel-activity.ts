@@ -14,6 +14,9 @@ import {
 import {
   markLinqChatRead,
 } from "@murphai/operator-config/linq-runtime";
+import type {
+  HostedRuntimeEffectsPort,
+} from "./platform.ts";
 
 const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
@@ -62,35 +65,55 @@ export function buildHostedTelegramChannelEnv(input: {
 }
 
 export function createHostedAssistantChannelTypingDependencies(input: {
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "sendLinqChatAction" | "sendTelegramChatAction"
+  > | null;
   forwardedEnv: Readonly<Record<string, string>>;
   platformEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   userEnv: Readonly<Record<string, string>>;
 }): AssistantChannelTypingDependencies {
-  const linqEnv = buildHostedLinqChannelEnv({
-    forwardedEnv: input.forwardedEnv,
-    userEnv: input.userEnv,
-  }) as NodeJS.ProcessEnv;
-  const telegramEnv = buildHostedTelegramChannelEnv({
-    forwardedEnv: input.forwardedEnv,
-    platformEnv: input.platformEnv,
-  }) as NodeJS.ProcessEnv;
-
   return {
-    startLinqTyping: async (request) =>
-      startLinqTypingIndicator(request, {
-        env: linqEnv,
+    startLinqTyping: async (request) => {
+      if (input.effectsPort?.sendLinqChatAction) {
+        await input.effectsPort.sendLinqChatAction({
+          action: "typing",
+          target: request.target,
+        });
+        return;
+      }
+
+      return startLinqTypingIndicator(request, {
+        env: buildHostedLinqChannelEnv({
+          forwardedEnv: input.forwardedEnv,
+          userEnv: input.userEnv,
+        }) as NodeJS.ProcessEnv,
         signal: input.signal,
-      }),
-    startTelegramTyping: async (request) =>
-      startTelegramTypingIndicator(request, {
-        env: telegramEnv,
+      });
+    },
+    startTelegramTyping: async (request) => {
+      if (input.effectsPort?.sendTelegramChatAction) {
+        await input.effectsPort.sendTelegramChatAction({
+          action: "typing",
+          target: request.target,
+        });
+        return;
+      }
+
+      return startTelegramTypingIndicator(request, {
+        env: buildHostedTelegramChannelEnv({
+          forwardedEnv: input.forwardedEnv,
+          platformEnv: input.platformEnv,
+        }) as NodeJS.ProcessEnv,
         signal: input.signal,
-      }),
+      });
+    },
   };
 }
 
 export async function markHostedConversationReadBestEffort(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "markLinqRead"> | null;
   forwardedEnv: Readonly<Record<string, string>>;
   userEnv: Readonly<Record<string, string>>;
   wake: HostedExecutionConversationMessageWake;
@@ -105,18 +128,23 @@ export async function markHostedConversationReadBestEffort(input: {
     return;
   }
 
-  const linqEnv = buildHostedLinqChannelEnv({
-    forwardedEnv: input.forwardedEnv,
-    userEnv: input.userEnv,
-  });
-
   try {
+    if (input.effectsPort?.markLinqRead) {
+      await input.effectsPort.markLinqRead({
+        chatId: linqMessage.chatId,
+      });
+      return;
+    }
+
     await markLinqChatRead(
       {
         chatId: linqMessage.chatId,
       },
       {
-        env: linqEnv as NodeJS.ProcessEnv,
+        env: buildHostedLinqChannelEnv({
+          forwardedEnv: input.forwardedEnv,
+          userEnv: input.userEnv,
+        }) as NodeJS.ProcessEnv,
         signal: input.signal,
       },
     );

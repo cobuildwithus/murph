@@ -120,6 +120,45 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
   }
 });
 
+test("hosted provider cleanup prefers effectsPort.deleteLinqMessages", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    await recordHostedProviderCleanupBeforeCommit({
+      linqMessageIds: ["linq_inbound_1"],
+      checkpoint,
+      vaultRoot,
+    });
+    const deleteLinqMessages = vi.fn(async () => undefined);
+
+    const result = await drainHostedProviderCleanupAfterCommit({
+      assistantDeliveryOutcomes: [],
+      effectsPort: {
+        deleteLinqMessages,
+      },
+      env: {
+        LINQ_API_TOKEN: "legacy-token",
+      },
+      checkpoint,
+      vaultRoot,
+      wake,
+    });
+
+    assert.deepEqual(result, {
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+    expect(deleteLinqMessages).toHaveBeenCalledWith({
+      messageIds: ["linq_inbound_1"],
+    });
+    expect(mocks.deleteHostedLinqMessages).not.toHaveBeenCalled();
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup keeps runtime retry state when Linq deletion fails", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));

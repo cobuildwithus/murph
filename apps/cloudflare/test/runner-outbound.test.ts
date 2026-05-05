@@ -42,6 +42,15 @@ import {
 import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
+import {
+  HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
+  HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
+  HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
+  HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
+} from "../src/runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import type {
   WorkerBindUserRunnerStubLike,
@@ -961,6 +970,425 @@ describe("handleRunnerOutboundRequest", () => {
       retryable: false,
       status: "blocked",
     });
+  });
+
+  it("rejects provider effect requests without active lease headers", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        body: JSON.stringify({
+          chatId: "linq_chat_123",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider effect requests for stale active leases", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        body: JSON.stringify({
+          chatId: "linq_chat_123",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider effect requests when the invocation proxy token is missing", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        body: JSON.stringify({
+          chatId: "linq_chat_123",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        },
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed provider effect request JSON", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        body: "{not-json",
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Malformed provider effect request.",
+    });
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-POST provider effect requests", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(405);
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends Telegram through Worker-owned provider env without returning token material", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(JSON.stringify({
+      ok: true,
+      result: {
+        message_id: 123,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH}`, {
+        body: JSON.stringify({
+          message: "hello",
+          target: "12345",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toEqual({
+      cleanupMessages: [{ messageId: "123", target: "12345" }],
+      providerMessageId: "123",
+      target: "12345",
+    });
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("telegram-token");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const telegramRequest = fetchMock.mock.calls[0]?.[0];
+    expect(String(telegramRequest)).toBe("https://api.telegram.org/bottelegram-token/sendMessage");
+  });
+
+  it("looks up Telegram files through Worker-owned provider env", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(JSON.stringify({
+      ok: true,
+      result: {
+        file_id: "telegram_file_123",
+        file_path: "photos/file.jpg",
+        file_size: 1234,
+        file_unique_id: "telegram_unique_123",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH}`, {
+        body: JSON.stringify({
+          fileId: "telegram_file_123",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      file: {
+        file_id: "telegram_file_123",
+        file_path: "photos/file.jpg",
+        file_size: 1234,
+        file_unique_id: "telegram_unique_123",
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const telegramRequest = fetchMock.mock.calls[0]?.[0];
+    expect(String(telegramRequest)).toBe(
+      "https://api.telegram.org/bottelegram-token/getFile?file_id=telegram_file_123",
+    );
+  });
+
+  it("downloads Telegram files as bounded normalized file responses", async () => {
+    const bytes = Uint8Array.from([1, 2, 3]);
+    const fetchMock = vi.fn(async () => new Response(bytes, {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH}`, {
+        body: JSON.stringify({
+          filePath: "photos/cat.jpg",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      file: {
+        bytesBase64: "AQID",
+        contentType: null,
+        fileName: "cat.jpg",
+        sha256: "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+      },
+    });
+  });
+
+  it("sends Linq messages through Worker-owned provider env without returning token material", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(JSON.stringify({
+      chat_id: "linq_chat_123",
+      message: {
+        id: "linq_message_123",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH}`, {
+        body: JSON.stringify({
+          message: "hello",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        LINQ_API_TOKEN: "linq-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toEqual({
+      providerMessageId: "linq_message_123",
+      providerThreadId: null,
+      target: "linq_chat_123",
+    });
+    expect(JSON.stringify(payload)).not.toContain("linq-token");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe("https://api.linqapp.com/api/partner/v3/chats/linq_chat_123/messages");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("routes Linq lightweight effects without echoing provider tokens", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, {
+      status: 204,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createRunnerOutboundEnv({
+      LINQ_API_TOKEN: "linq-token",
+    });
+
+    const chatActionResponse = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH}`, {
+        body: JSON.stringify({
+          action: "typing",
+          target: "linq_chat_123",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+    const markReadResponse = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        body: JSON.stringify({
+          chatId: "linq_chat_123",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+    const deleteResponse = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH}`, {
+        body: JSON.stringify({
+          messageIds: ["linq_message_123"],
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(chatActionResponse.status).toBe(200);
+    expect(markReadResponse.status).toBe(200);
+    expect(deleteResponse.status).toBe(200);
+    const chatActionPayload = await chatActionResponse.json();
+    const markReadPayload = await markReadResponse.json();
+    const deletePayload = await deleteResponse.json();
+    expect(chatActionPayload).toEqual({ ok: true });
+    expect(markReadPayload).toEqual({ ok: true });
+    expect(deletePayload).toEqual({ ok: true });
+    expect(JSON.stringify([chatActionPayload, markReadPayload, deletePayload])).not.toContain("linq-token");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("proxies the hosted workspace read route through web-control GET", async () => {
