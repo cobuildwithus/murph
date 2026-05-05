@@ -55,7 +55,10 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(result.codexHome, path.join(operatorHomeRoot, ".codex-hosted"));
   assert.equal(result.codexConfigPath, path.join(operatorHomeRoot, ".codex-hosted", "config.toml"));
   assert.equal(result.runtimeEnv.CODEX_HOME, result.codexHome);
-  assert.equal(result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV], "openai");
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "hosted-openai",
+  );
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "medium");
@@ -64,14 +67,16 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
 
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.doesNotMatch(config, /^model = /mu);
-  assert.match(config, /model_provider = "openai"/u);
+  assert.match(config, /model_provider = "hosted-openai"/u);
   assert.match(config, /model_reasoning_effort = "medium"/u);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
-  assert.doesNotMatch(config, /base_url = "https:\/\/api\.openai\.com\/v1"/u);
-  assert.doesNotMatch(config, /env_key = "OPENAI_API_KEY"/u);
-  assert.doesNotMatch(config, /wire_api = "responses"/u);
+  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
+  assert.match(config, /base_url = "https:\/\/api\.openai\.com\/v1"/u);
+  assert.match(config, /env_key = "OPENAI_API_KEY"/u);
+  assert.match(config, /wire_api = "responses"/u);
+  assert.match(config, /requires_openai_auth = false/u);
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "none"/u);
   assert.match(config, /include_only = \[/u);
@@ -173,6 +178,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /\[model_providers\."openai-local-test"\]/u);
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
+  assert.match(config, /requires_openai_auth = false/u);
   assert.match(config, /request_max_retries = 0/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
@@ -635,6 +641,13 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'model_reasoning_effort = "medium"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
+      "",
+      '[model_providers."openai"]',
+      'name = "OpenAI"',
+      'base_url = "https://api.openai.com/v1"',
+      'env_key = "OPENAI_API_KEY"',
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
       "# runner paths change on each wake and break provider prefix caching.",

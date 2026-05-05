@@ -1,8 +1,8 @@
 # Switch hosted assistant model provider to OpenAI
 
-Status: handoff
+Status: completed
 Created: 2026-05-05
-Updated: 2026-05-05
+Updated: 2026-05-06
 
 ## Goal
 
@@ -61,6 +61,7 @@ Updated: 2026-05-05
 - Keep Codex shell credential isolation: `OPENAI_API_KEY` is present for the Codex process/provider config, not added to the shell `include_only` allowlist.
 - Treat `OPENAI_API_KEY` as platform-owned hosted runner env, not member-supplied runner secret material. Users cannot override it through runner secrets, even with a custom allowlist.
 - Require `HOSTED_ASSISTANT_PROVIDER=openai` at Cloudflare runner env and deploy-preflight boundaries, not only at Codex config generation time.
+- Map hosted direct OpenAI to a custom Codex provider id, `hosted-openai`, so Codex uses `env_key = "OPENAI_API_KEY"` with `requires_openai_auth = false` instead of the built-in `openai` auth-store provider.
 
 ## Verification
 
@@ -74,8 +75,14 @@ Updated: 2026-05-05
   - `git diff --check`
   - diff privacy scan
   - GitHub production environment check: `HOSTED_ASSISTANT_PROVIDER=openai`, `HOSTED_ASSISTANT_MODEL=gpt-5.5`, `OPENAI_API_KEY` secret exists
+  - `pnpm exec vitest run packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts packages/assistant-runtime/test/hosted-runtime-codex-local-provider-target.test.ts packages/assistant-runtime/test/hosted-runtime-codex-self-brick-e2e.test.ts --no-coverage`
+  - `pnpm --filter @murphai/assistant-runtime typecheck`
+  - `git diff --check -- packages/assistant-runtime/src/hosted-runtime/codex-config.ts packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts packages/assistant-runtime/test/hosted-runtime-codex-local-provider-target.test.ts packages/assistant-runtime/test/hosted-runtime-codex-self-brick-e2e.test.ts`
+- Current unrelated blocker:
+  - `pnpm --dir packages/assistant-runtime test:coverage` is red in dirty-tree tests outside this scoped provider mapping: `hosted-runtime-environment.test.ts` expects a WHOOP device-sync object without undefined optional fields, and `hosted-runtime-workspace-assistant-phase.test.ts` has two stale runtime-log summary assertions.
 - Required reviews:
   - Task-finish review found stale `node-runner-child` and invalid-output fallback tests; both were updated and rerun.
   - Security/privacy review found three credential-boundary gaps; fixes added `OPENAI_API_KEY` to hosted Codex process env projection, blocked user runner-secret overrides for model credentials, and enforced provider selection at runner/deploy boundaries.
 - Commit status:
-  - Scoped commit blocked by unrelated dirty/overlapping worktree edits in hosted runner and other app/content files.
+  - Closing with a scoped commit containing only this provider-id fix, its focused assistant-runtime tests, and this plan closure.
+Completed: 2026-05-06
