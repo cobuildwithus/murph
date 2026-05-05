@@ -9,6 +9,16 @@ interface SpawnResult {
   stdout?: string;
 }
 
+type SpawnForTest = (
+  command: string,
+  args: string[],
+  options: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    stdio?: unknown;
+  },
+) => ReturnType<typeof createSpawnResultChild>;
+
 function createSpawnResultChild(result: SpawnResult) {
   const child = new EventEmitter() as EventEmitter & {
     kill: (signal?: NodeJS.Signals | number) => boolean;
@@ -37,7 +47,7 @@ function createSpawnResultChild(result: SpawnResult) {
 }
 
 async function importRuntimeWithSpawnSequence(sequence: SpawnResult[]) {
-  const spawn = vi.fn(() => {
+  const spawn = vi.fn<SpawnForTest>(() => {
     const next = sequence.shift();
     if (!next) {
       throw new Error("Missing mocked spawn result.");
@@ -87,6 +97,32 @@ describe("cleanupHostedRunnerContainers", () => {
     })).resolves.toBeUndefined();
 
     expect(spawn).toHaveBeenCalledTimes(3);
+  });
+
+  it("scopes cleanup to the local runner build id label when one is configured", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      env: {
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "e2e-suite-build",
+      },
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    const args = spawn.mock.calls[0]?.[1] as string[] | undefined;
+    expect(args).toEqual([
+      "ps",
+      "-aq",
+      "--filter",
+      "name=workerd-murph-hosted-RunnerContainer-",
+      "--filter",
+      expect.stringMatching(
+        /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
+      ),
+    ]);
   });
 
   it("still fails when docker rm leaves matching runner containers behind", async () => {

@@ -8,6 +8,7 @@ import process from "node:process";
 import { PassThrough } from "node:stream";
 
 import {
+  HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   HEALTH_POLL_INTERVAL_MS,
   HEALTH_REQUEST_TIMEOUT_MS,
   HEALTH_TIMEOUT_MS,
@@ -16,6 +17,7 @@ import {
   repoRoot,
   webDir,
 } from "./constants.ts";
+import { buildHostedRunnerLocalBuildId } from "./environment.ts";
 import type {
   BufferedNamedChildProcess,
   HostedLocalChildProcessName,
@@ -46,6 +48,7 @@ interface BoundedCommandResult {
 }
 
 const HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-RunnerContainer-";
+const HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL = "murph.hosted.local-build-id";
 const HOSTED_WORKER_REUSE_HEALTH_MAX_BYTES = 16 * 1024;
 const HOSTED_WORKER_REUSE_HEALTH_TIMEOUT_MS = 2_000;
 const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
@@ -772,12 +775,19 @@ async function listHostedRunnerContainerIds(input: {
   containerIds: string[];
   result: BoundedCommandResult;
 }> {
+  const localBuildId = resolveHostedRunnerCleanupLocalBuildId(input.env);
   const result = await runBoundedCommand({
     args: [
       "ps",
       "-aq",
       "--filter",
       `name=${HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX}`,
+      ...(localBuildId
+        ? [
+          "--filter",
+          `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${localBuildId}`,
+        ]
+        : []),
     ],
     command: "docker",
     cwd: input.cwd,
@@ -792,6 +802,11 @@ async function listHostedRunnerContainerIds(input: {
       .filter((value) => value.length > 0),
     result,
   };
+}
+
+function resolveHostedRunnerCleanupLocalBuildId(env: NodeJS.ProcessEnv | undefined): string | null {
+  const rawValue = env?.[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim();
+  return rawValue ? buildHostedRunnerLocalBuildId(rawValue) : null;
 }
 
 async function waitForHostedRunnerContainersToDisappear(input: {
