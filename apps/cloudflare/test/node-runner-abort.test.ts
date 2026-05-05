@@ -19,6 +19,7 @@ describe("runHostedWorkspaceInvocation abort forwarding", () => {
         vi.stubEnv(key, value);
       }
     }
+    vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
     runHostedAssistantRuntimeJobIsolated.mockResolvedValue({
       nextWakeAt: null,
       redactedStatus: {

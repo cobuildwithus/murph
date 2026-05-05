@@ -1,10 +1,10 @@
 {
-  "id": "experiment-plan",
-  "command": "vault-cli experiment plan --vault <path> --input @file.json [--request-id <id>]",
+  "id": "commons-get",
+  "command": "vault-cli commons get <key-or-slug>",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
   ],
-  "goldenOutput": "fixtures/golden-outputs/experiment-create",
+  "goldenOutput": "fixtures/golden-outputs/show",
   "purpose": "Documents the frozen command surface entry for release fixture coverage."
 }

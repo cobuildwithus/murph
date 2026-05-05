@@ -234,21 +234,36 @@ function readSerializableJunctionConfig(
   const parsedEnvironment = parseJunctionEnvironment(environment);
   const parsedRegion = parseJunctionRegion(region);
   assertJunctionApiKeyMatchesProfile(apiKey, parsedEnvironment, parsedRegion);
+  const config: SerializableConfiguredDeviceSyncProviderConfigByKey["junction"] = {
+    environment: parsedEnvironment,
+    region: parsedRegion,
+  };
+  const providerFilter = parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS);
+  const summaryResources = parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS);
+  const timeseriesResources = parseCsvEnv(env, JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS);
+  const summaryBackfillDays = parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS);
+  const timeseriesBackfillDays = parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS);
+  const reconcileDays = parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS);
+  const reconcileIntervalMs = parseIntegerEnv(env, JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS);
+  const requestTimeoutMs = parseIntegerEnv(env, JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS);
+  const webhookTimestampToleranceMs = parseIntegerEnv(
+    env,
+    JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
+  );
+  if (providerFilter !== undefined) config.providerFilter = providerFilter;
+  if (summaryResources !== undefined) config.summaryResources = summaryResources;
+  if (timeseriesResources !== undefined) config.timeseriesResources = timeseriesResources;
+  if (summaryBackfillDays !== undefined) config.summaryBackfillDays = summaryBackfillDays;
+  if (timeseriesBackfillDays !== undefined) config.timeseriesBackfillDays = timeseriesBackfillDays;
+  if (reconcileDays !== undefined) config.reconcileDays = reconcileDays;
+  if (reconcileIntervalMs !== undefined) config.reconcileIntervalMs = reconcileIntervalMs;
+  if (requestTimeoutMs !== undefined) config.requestTimeoutMs = requestTimeoutMs;
+  if (webhookTimestampToleranceMs !== undefined) {
+    config.webhookTimestampToleranceMs = webhookTimestampToleranceMs;
+  }
 
   return {
-    junction: {
-      environment: parsedEnvironment,
-      region: parsedRegion,
-      providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
-      summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
-      timeseriesResources: parseCsvEnv(env, JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS),
-      summaryBackfillDays: parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS),
-      timeseriesBackfillDays: parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS),
-      webhookTimestampToleranceMs: parseIntegerEnv(env, JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-    },
+    junction: config,
   };
 }
 
@@ -266,20 +281,33 @@ function readSerializableOuraConfig(
     return {};
   }
 
-  return {
-    oura: {
-      clientId: credentials.clientId,
-      clientSecret: credentials.clientSecret,
-      authBaseUrl: optionalEnv(env, OURA_AUTH_BASE_URL_ENV_KEYS),
-      apiBaseUrl: optionalEnv(env, OURA_API_BASE_URL_ENV_KEYS),
-      scopes: parseCsvEnv(env, OURA_SCOPES_ENV_KEYS),
-      backfillDays: parseIntegerEnv(env, OURA_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, OURA_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      webhookTimestampToleranceMs: parseIntegerEnv(env, OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
-    },
+  const config: SerializableConfiguredDeviceSyncProviderConfigByKey["oura"] = {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
   };
+  const authBaseUrl = optionalEnv(env, OURA_AUTH_BASE_URL_ENV_KEYS);
+  const apiBaseUrl = optionalEnv(env, OURA_API_BASE_URL_ENV_KEYS);
+  const scopes = parseCsvEnv(env, OURA_SCOPES_ENV_KEYS);
+  const backfillDays = parseIntegerEnv(env, OURA_BACKFILL_DAYS_ENV_KEYS);
+  const reconcileDays = parseIntegerEnv(env, OURA_RECONCILE_DAYS_ENV_KEYS);
+  const reconcileIntervalMs = parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS);
+  const webhookTimestampToleranceMs = parseIntegerEnv(
+    env,
+    OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
+  );
+  const requestTimeoutMs = parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS);
+  if (authBaseUrl !== undefined) config.authBaseUrl = authBaseUrl;
+  if (apiBaseUrl !== undefined) config.apiBaseUrl = apiBaseUrl;
+  if (scopes !== undefined) config.scopes = scopes;
+  if (backfillDays !== undefined) config.backfillDays = backfillDays;
+  if (reconcileDays !== undefined) config.reconcileDays = reconcileDays;
+  if (reconcileIntervalMs !== undefined) config.reconcileIntervalMs = reconcileIntervalMs;
+  if (webhookTimestampToleranceMs !== undefined) {
+    config.webhookTimestampToleranceMs = webhookTimestampToleranceMs;
+  }
+  if (requestTimeoutMs !== undefined) config.requestTimeoutMs = requestTimeoutMs;
+
+  return { oura: config };
 }
 
 function readSerializableWhoopConfig(
@@ -296,19 +324,31 @@ function readSerializableWhoopConfig(
     return {};
   }
 
-  return {
-    whoop: {
-      clientId: credentials.clientId,
-      clientSecret: credentials.clientSecret,
-      baseUrl: optionalEnv(env, WHOOP_BASE_URL_ENV_KEYS),
-      scopes: parseCsvEnv(env, WHOOP_SCOPES_ENV_KEYS),
-      backfillDays: parseIntegerEnv(env, WHOOP_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, WHOOP_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      webhookTimestampToleranceMs: parseIntegerEnv(env, WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS),
-    },
+  const config: SerializableConfiguredDeviceSyncProviderConfigByKey["whoop"] = {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
   };
+  const baseUrl = optionalEnv(env, WHOOP_BASE_URL_ENV_KEYS);
+  const scopes = parseCsvEnv(env, WHOOP_SCOPES_ENV_KEYS);
+  const backfillDays = parseIntegerEnv(env, WHOOP_BACKFILL_DAYS_ENV_KEYS);
+  const reconcileDays = parseIntegerEnv(env, WHOOP_RECONCILE_DAYS_ENV_KEYS);
+  const reconcileIntervalMs = parseIntegerEnv(env, WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS);
+  const webhookTimestampToleranceMs = parseIntegerEnv(
+    env,
+    WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
+  );
+  const requestTimeoutMs = parseIntegerEnv(env, WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS);
+  if (baseUrl !== undefined) config.baseUrl = baseUrl;
+  if (scopes !== undefined) config.scopes = scopes;
+  if (backfillDays !== undefined) config.backfillDays = backfillDays;
+  if (reconcileDays !== undefined) config.reconcileDays = reconcileDays;
+  if (reconcileIntervalMs !== undefined) config.reconcileIntervalMs = reconcileIntervalMs;
+  if (webhookTimestampToleranceMs !== undefined) {
+    config.webhookTimestampToleranceMs = webhookTimestampToleranceMs;
+  }
+  if (requestTimeoutMs !== undefined) config.requestTimeoutMs = requestTimeoutMs;
+
+  return { whoop: config };
 }
 
 function readSerializableStravaConfig(
@@ -325,19 +365,26 @@ function readSerializableStravaConfig(
     return {};
   }
 
-  return {
-    strava: {
-      clientId: credentials.clientId,
-      clientSecret: credentials.clientSecret,
-      authBaseUrl: optionalEnv(env, STRAVA_AUTH_BASE_URL_ENV_KEYS),
-      apiBaseUrl: optionalEnv(env, STRAVA_API_BASE_URL_ENV_KEYS),
-      scopes: parseCsvEnv(env, STRAVA_SCOPES_ENV_KEYS),
-      backfillDays: parseIntegerEnv(env, STRAVA_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS),
-    },
+  const config: SerializableConfiguredDeviceSyncProviderConfigByKey["strava"] = {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
   };
+  const authBaseUrl = optionalEnv(env, STRAVA_AUTH_BASE_URL_ENV_KEYS);
+  const apiBaseUrl = optionalEnv(env, STRAVA_API_BASE_URL_ENV_KEYS);
+  const scopes = parseCsvEnv(env, STRAVA_SCOPES_ENV_KEYS);
+  const backfillDays = parseIntegerEnv(env, STRAVA_BACKFILL_DAYS_ENV_KEYS);
+  const reconcileDays = parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS);
+  const reconcileIntervalMs = parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS);
+  const requestTimeoutMs = parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS);
+  if (authBaseUrl !== undefined) config.authBaseUrl = authBaseUrl;
+  if (apiBaseUrl !== undefined) config.apiBaseUrl = apiBaseUrl;
+  if (scopes !== undefined) config.scopes = scopes;
+  if (backfillDays !== undefined) config.backfillDays = backfillDays;
+  if (reconcileDays !== undefined) config.reconcileDays = reconcileDays;
+  if (reconcileIntervalMs !== undefined) config.reconcileIntervalMs = reconcileIntervalMs;
+  if (requestTimeoutMs !== undefined) config.requestTimeoutMs = requestTimeoutMs;
+
+  return { strava: config };
 }
 
 function hasSerializableProviderConfigs(

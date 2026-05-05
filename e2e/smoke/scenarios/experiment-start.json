@@ -1,6 +1,6 @@
 {
   "id": "experiment-start",
-  "command": "vault-cli experiment start --vault <path> --input @file.json [--request-id <id>]",
+  "command": "vault-cli experiment start <slug> --vault <path> [--protocol-key protocol_variant:<key>] [--test-plan-id <id>] [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--intervention-start <date>] [--intervention-end <date>] [--baseline-start <date>] [--baseline-end <date>] [--baseline-days <n>] [--intervention-days <n>] [--schedule-kind dailyLocal|cron] [--schedule-local-time <HH:MM>] [--schedule-cron <expr>] [--schedule-time-zone <zone>] [--dose <text>] [--session-field <id> ...] [--primary-biomarker-key biomarker:<key>] [--secondary-biomarker-key biomarker:<key> ...] [--dry-run] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

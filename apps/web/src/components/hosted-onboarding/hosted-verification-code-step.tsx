@@ -74,7 +74,7 @@ export function HostedVerificationCodeStep({
               <InputOTPSlot
                 key={index}
                 index={index}
-                className={`${size === "compact" ? "h-12 text-lg" : "h-14 text-xl"} aspect-square min-w-0 max-w-14 flex-1 rounded-lg border bg-card`}
+                className={`${size === "compact" ? "h-12 max-w-12 text-lg" : "h-16 max-w-16 text-xl"} aspect-square min-w-0 flex-1 rounded-lg border bg-card`}
               />
             ))}
           </InputOTPGroup>
