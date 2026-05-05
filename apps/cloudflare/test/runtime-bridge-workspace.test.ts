@@ -973,6 +973,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           rootKeyId,
         });
       },
+      requireMailboxPayloadDecoder: false,
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
@@ -1070,6 +1071,28 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
       payloadSource: "sidecar",
     });
+    expect(readEncryptionEnvironment).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when mailbox decoding is required but no decoder is provided", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    const readEncryptionEnvironment = vi.fn(() => {
+      throw new Error("legacy decrypt should not be constructed");
+    });
+
+    expect(() => createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({ putArtifact: async () => {} }),
+      readEncryptionEnvironment,
+      requireMailboxPayloadDecoder: true,
+      request: createBridgeRequest("member_bridge_decoder_required"),
+      runtime: {
+        platformEnv: {
+          HOSTED_RUNTIME_CRYPTO_CONTEXT_PRIVATE_JWK: "legacy-jwk",
+        },
+      },
+      vaultRoot,
+    })).toThrow("Hosted mailbox payload decoder is required for this invocation.");
     expect(readEncryptionEnvironment).not.toHaveBeenCalled();
   });
 

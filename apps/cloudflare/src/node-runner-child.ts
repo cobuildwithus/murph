@@ -194,6 +194,7 @@ async function runWorkspaceChildJob(input: {
     createHostedWorkspaceRuntimeBridgeJobOptions({
       ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
       platform,
+      requireMailboxPayloadDecoder: Boolean(input.internalWorkerProxyToken),
       request: input.job.request,
       runtime: input.job.runtime ?? {},
       vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
