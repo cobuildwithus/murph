@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import path from "node:path";
-import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm } from "node:fs/promises";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -253,19 +253,15 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
   const vaultRoot = path.resolve(input.vaultRoot);
   const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
-  const includeCodexProviderContinuity = await hostedAssistantRuntimeHotStateHasProviderResumeState({
-    vaultRoot,
-  });
-  const codexHomeSnapshotRoot = includeCodexProviderContinuity ? operatorHomeRoot : null;
-  const codexHomeSnapshotDiagnostics = codexHomeSnapshotRoot
+  const codexHomeSnapshotDiagnostics = operatorHomeRoot
     ? await collectHostedCodexHomeSnapshotDiagnostics({
         hashSecret: input.codexHomeSnapshotHashSecret ?? null,
-        operatorHomeRoot: codexHomeSnapshotRoot,
+        operatorHomeRoot,
       })
     : null;
   await ensureAssistantStateDirectory(assistantStateRoot);
   await assertHostedAssistantRuntimeHotStatePreBundleBudget({
-    operatorHomeRoot: codexHomeSnapshotRoot,
+    operatorHomeRoot,
     vaultRoot,
   });
 
@@ -279,11 +275,11 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
           return shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath);
         },
       },
-      ...(codexHomeSnapshotRoot
+      ...(operatorHomeRoot
         ? [
             {
               optional: true,
-              root: codexHomeSnapshotRoot,
+              root: operatorHomeRoot,
               rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
               shouldIncludeRelativePath(relativePath: string) {
                 return shouldIncludeHostedAssistantRuntimeHotStateOperatorHomeRelativePath(relativePath);
@@ -382,7 +378,7 @@ export function analyzeHostedWorkspaceSnapshotProviderContinuity(input: {
     const normalizedPath = normalizeWorkspaceSnapshotRelativePath(file.path);
     if (
       file.root === WORKSPACE_OPERATOR_HOME_ROOT
-      && isHostedCodexProviderContinuityRelativePath(normalizedPath)
+      && isHostedCodexHomeSnapshotRelativePath(normalizedPath)
     ) {
       hasCodexProviderContinuity = true;
     }
@@ -503,54 +499,6 @@ async function assertHostedAssistantRuntimeHotStatePreBundleBudget(input: {
     fileCount: metrics.fileCount,
     inlineBytes: metrics.inlineBytes,
   });
-}
-
-async function hostedAssistantRuntimeHotStateHasProviderResumeState(input: {
-  vaultRoot: string;
-}): Promise<boolean> {
-  const sessionsRoot = path.join(
-    input.vaultRoot,
-    ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH,
-    "sessions",
-  );
-
-  async function visit(directoryPath: string): Promise<boolean> {
-    let entries;
-    try {
-      entries = await readdir(directoryPath, { withFileTypes: true });
-    } catch {
-      return false;
-    }
-
-    for (const entry of entries) {
-      const absolutePath = path.join(directoryPath, entry.name);
-      if (entry.isDirectory()) {
-        if (await visit(absolutePath)) {
-          return true;
-        }
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      let text;
-      try {
-        text = await readFile(absolutePath, "utf8");
-      } catch {
-        return true;
-      }
-
-      if (assistantSessionTextContainsProviderResumeState(text)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  return await visit(sessionsRoot);
 }
 
 async function collectHostedAssistantRuntimeHotStateBudgetMetrics(input: {
@@ -747,18 +695,9 @@ function assistantSessionTextContainsProviderResumeState(text: string): boolean 
   );
 }
 
-function isHostedCodexProviderContinuityRelativePath(relativePath: string): boolean {
+function isHostedCodexHomeSnapshotRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
-  return (
-    hasWorkspaceSnapshotPathPrefix(
-      normalizedRelativePath,
-      `${HOSTED_CODEX_HOME_RELATIVE_PATH}/sessions`,
-    )
-    || hasWorkspaceSnapshotPathPrefix(
-      normalizedRelativePath,
-      `${HOSTED_CODEX_HOME_RELATIVE_PATH}/rollouts`,
-    )
-  );
+  return hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH);
 }
 
 function recordProperty(value: unknown, propertyName: string): unknown {
@@ -1060,14 +999,14 @@ function classifyHostedCodexHomeRelativePath(relativePath: string): HostedCodexH
     };
   }
 
-  if (isHostedCodexHomeRootHistoryPath(normalizedRelativePath)) {
+  const basename = path.posix.basename(normalizedRelativePath).toLowerCase();
+  if (isHostedCodexHomeHistoryBasename(basename)) {
     return {
       exclusionClass: "root-history",
       include: false,
     };
   }
 
-  const basename = path.posix.basename(normalizedRelativePath).toLowerCase();
   if (isHostedCodexHomeSensitiveBasename(basename)) {
     return {
       exclusionClass: "sensitive-basename",
@@ -1179,10 +1118,19 @@ function normalizeHostedCodexHomeSnapshotHashSecret(
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
-function isHostedCodexHomeRootHistoryPath(relativePath: string): boolean {
-  return relativePath === "history.json"
-    || relativePath === "history.jsonl"
-    || relativePath === "history.jsonl.db";
+function isHostedCodexHomeHistoryBasename(basename: string): boolean {
+  return basename === "history"
+    || basename === "history.json"
+    || basename === "history.jsonl"
+    || basename === "history.jsonl.db"
+    || basename === "history.jsonl.db-shm"
+    || basename === "history.jsonl.db-wal"
+    || basename.endsWith(".history")
+    || basename.endsWith(".history.json")
+    || basename.endsWith(".history.jsonl")
+    || basename.endsWith(".history.jsonl.db")
+    || basename.endsWith(".history.jsonl.db-shm")
+    || basename.endsWith(".history.jsonl.db-wal");
 }
 
 function isHostedCodexHomeSensitiveBasename(basename: string): boolean {

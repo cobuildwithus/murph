@@ -927,6 +927,8 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1", "state.json"), "{\"rollout\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "{\"thread\":\"thread_1\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl"), "{\"turn\":\"kept\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl.db-wal"), "history wal\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.history.jsonl.db-shm"), "history shm\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "{\"thread\":\"thread_1\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "state", "lookup.json"), "{\"lookup\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "threads", "thread_1", "state.json"), "{\"thread\":\"kept\"}\n");
@@ -1086,8 +1088,18 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       },
       { expected: "{\"thread\":\"thread_1\"}\n", path: ".codex-hosted/session_index.jsonl", root: "operator-home" },
       {
-        expected: "{\"turn\":\"kept\"}\n",
+        expected: null,
         path: ".codex-hosted/sessions/thread_1/history.jsonl",
+        root: "operator-home",
+      },
+      {
+        expected: null,
+        path: ".codex-hosted/sessions/thread_1/history.jsonl.db-wal",
+        root: "operator-home",
+      },
+      {
+        expected: null,
+        path: ".codex-hosted/sessions/thread_1/turn.history.jsonl.db-shm",
         root: "operator-home",
       },
       {
@@ -1322,9 +1334,14 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "utf8"),
       "{\"thread\":\"thread_1\"}\n",
     );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl"), "utf8"),
-      "{\"turn\":\"kept\"}\n",
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl.db-wal"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.history.jsonl.db-shm"), "utf8"),
     );
     assert.equal(
       await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "utf8"),
@@ -1782,7 +1799,7 @@ test("hosted assistant hot-state snapshots preflight Codex home budget", async (
   }
 });
 
-test("hosted assistant hot-state snapshots omit Codex home without provider resume state", async () => {
+test("hosted assistant hot-state snapshots include safe Codex home without provider resume state", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-unused-"));
 
   try {
@@ -1809,7 +1826,7 @@ test("hosted assistant hot-state snapshots omit Codex home without provider resu
 
     assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
       bundle: snapshot.bundle,
-    }), false);
+    }), true);
     assert.equal(
       readHostedBundleTextFile({
         bytes: snapshot.bundle,
@@ -1817,7 +1834,7 @@ test("hosted assistant hot-state snapshots omit Codex home without provider resu
         path: ".codex-hosted/sessions/stale.jsonl",
         root: "operator-home",
       }),
-      null,
+      "{\"thread\":\"stale\"}\n",
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -1898,7 +1915,7 @@ test("hosted assistant hot-state snapshots reject dangling Codex resume state", 
   }
 });
 
-test("hosted assistant hot-state snapshots reject config-only Codex home continuity", async () => {
+test("hosted assistant hot-state snapshots accept config-only Codex home continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-config-only-"));
 
   try {
@@ -1923,19 +1940,29 @@ test("hosted assistant hot-state snapshots reject config-only Codex home continu
       "utf8",
     );
 
-    await assert.rejects(
-      snapshotHostedAssistantRuntimeHotState({
-        operatorHomeRoot,
-        vaultRoot,
+    const snapshot = await snapshotHostedAssistantRuntimeHotState({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: snapshot.bundle,
+    }), true);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/config.toml",
+        root: "operator-home",
       }),
-      HostedAssistantRuntimeHotStateIncompleteError,
+      "model = \"gpt-test\"\n",
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
-test("hosted full snapshots reject dangling Codex resume state", async () => {
+test("hosted full snapshots accept config-only Codex home continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-full-codex-missing-"));
 
   try {
@@ -1955,12 +1982,22 @@ test("hosted full snapshots reject dangling Codex resume state", async () => {
       "utf8",
     );
 
-    await assert.rejects(
-      snapshotHostedExecutionContext({
-        operatorHomeRoot,
-        vaultRoot,
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: snapshot.bundle,
+    }), true);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/config.toml",
+        root: "operator-home",
       }),
-      HostedWorkspaceSnapshotContinuityIncompleteError,
+      "model = \"gpt-test\"\n",
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
