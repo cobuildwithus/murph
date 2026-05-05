@@ -135,12 +135,17 @@ export type HostedWorkspaceArtifactResolver = (
   input: HostedBundleArtifactRestoreInput,
 ) => Promise<Uint8Array | ArrayBuffer>;
 
+export type HostedWorkspaceSnapshotProviderContinuityPolicy =
+  | "enforce"
+  | "ignore-for-fixture";
+
 export async function snapshotHostedExecutionContext(input: {
   artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
   codexHomeSnapshotHashSecret?: string | null;
   materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot?: string | null;
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
+  providerContinuityPolicy?: HostedWorkspaceSnapshotProviderContinuityPolicy;
   vaultRoot: string;
 }): Promise<{
   bundle: Uint8Array;
@@ -210,9 +215,11 @@ export async function snapshotHostedExecutionContext(input: {
   if (vaultBundle === null) {
     throw new Error(`Hosted vault bundle could not be created for ${vaultRoot}.`);
   }
-  assertHostedWorkspaceSnapshotProviderContinuityComplete({
-    bundle: vaultBundle,
-  });
+  if ((input.providerContinuityPolicy ?? "enforce") === "enforce") {
+    assertHostedWorkspaceSnapshotProviderContinuityComplete({
+      bundle: vaultBundle,
+    });
+  }
 
   return {
     bundle: vaultBundle,

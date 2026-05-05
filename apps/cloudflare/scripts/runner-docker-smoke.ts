@@ -26,6 +26,7 @@ const SMOKE_BUNDLE_DIR = path.join(appDir, ".deploy", "runner-smoke-bundle");
 async function main(): Promise<void> {
   try {
     const snapshot = await snapshotHostedExecutionContext({
+      providerContinuityPolicy: "ignore-for-fixture",
       vaultRoot: FIXTURE_VAULT_ROOT,
     });
     const bundle = encodeHostedBundleBase64(snapshot.bundle);

@@ -1966,6 +1966,50 @@ test("hosted full snapshots reject dangling Codex resume state", async () => {
   }
 });
 
+test("hosted full snapshots require explicit fixture policy to ignore dangling Codex resume state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-fixture-continuity-policy-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: "thread-test",
+          resumeRouteId: "route-test",
+        },
+      }),
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedExecutionContext({
+        vaultRoot,
+      }),
+      HostedWorkspaceSnapshotContinuityIncompleteError,
+    );
+
+    const snapshot = await snapshotHostedExecutionContext({
+      providerContinuityPolicy: "ignore-for-fixture",
+      vaultRoot,
+    });
+
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/sessions/session.json",
+        root: "vault",
+      }),
+      "{\"resumeState\":{\"providerSessionId\":\"thread-test\",\"resumeRouteId\":\"route-test\"}}",
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted Codex home diagnostics omit relative-path hashes without a hash secret", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-"));
 
