@@ -1274,6 +1274,8 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it('replays active-turn history only on stale native-resume fallback', async () => {
+    const traceEvents: AssistantProviderTraceEvent[] = []
+
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(
         new VaultCliError(
@@ -1306,6 +1308,9 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
       resumeProviderSessionId: 'stale-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
@@ -1333,6 +1338,20 @@ describe('Codex assistant registry helpers', () => {
     }
     expect(attempt.result.providerContinuation).toEqual({
       kind: 'thread-start',
+    })
+    expect(traceEvents).toHaveLength(1)
+    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_RESUME_STALE',
+      codexResumeFailureErrorKind: 'resume-stale',
+      codexResumeFailureEventCount: null,
+      codexResumeFailurePhase: 'resume-failed',
+      codexResumeFailureProviderActionCount: null,
+      codexResumeFailureResumeMatchesFailureSession: null,
+      codexResumeFailureResumeSessionPresent: true,
+      codexResumeFailureSessionPresent: false,
+      codexResumeFailureTraceType: 'failure',
+      codexResumeFailureTurnPresent: false,
+      providerTraceKind: 'codex.resume_failure',
     })
   })
 
@@ -1550,6 +1569,119 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.providerSessionId).toBe(
       'fresh-thread-after-provider-action-invalid-output',
     )
+  })
+
+  it('records resumed Codex turn failure diagnostics without raw strings', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server turn failed. status failed. retry limit reached after resumed turn',
+      {
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+        retryable: false,
+      },
+    )
+    const traceEvents: AssistantProviderTraceEvent[] = []
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(expectedError)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: [
+        {
+          method: 'turn/started',
+          params: {
+            turn: {
+              status: 'in_progress',
+            },
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            output: [
+              {
+                text: 'private tool text should not be logged',
+                type: 'input_text',
+              },
+              {
+                image_url: 'https://example.invalid/private.png',
+                type: 'input_image',
+              },
+              {
+                type: 'process_exit',
+              },
+            ],
+            turn: {
+              status: 'failed',
+            },
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            output: {
+              privateField: 'private value',
+              text: 'private output text should not be logged',
+              type: 'result',
+            },
+          },
+        },
+      ],
+      providerActionCount: 0,
+      providerSessionId: 'resume-thread',
+      providerTurnId: 'turn-failed',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resumeProviderSessionId: 'resume-thread',
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) {
+      throw new Error('expected failed provider attempt')
+    }
+    expect(attempt.error).toBe(expectedError)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(traceEvents).toHaveLength(1)
+    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+      codexResumeFailureCodexFailureStage: 'turn_failed',
+      codexResumeFailureCodexTurnStatus: 'failed',
+      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
+      codexResumeFailureErrorKind: 'turn-failed',
+      codexResumeFailureErrorMessageLength: expectedError.message.length,
+      codexResumeFailureErrorMessagePresent: true,
+      codexResumeFailureErrorPhrases: ['codex-turn-failed', 'status-failed'],
+      codexResumeFailureEventCount: 3,
+      codexResumeFailureEventMethods: ['turn/started', 'turn/completed'],
+      codexResumeFailureEventStatuses: ['in_progress', 'failed'],
+      codexResumeFailureOutputArrayLengths: [3],
+      codexResumeFailureOutputKinds: ['array', 'object'],
+      codexResumeFailureOutputObjectKeys: ['[key],text,type'],
+      codexResumeFailureOutputPartTypes: ['input_text', 'input_image', 'process_exit'],
+      codexResumeFailureParamKeys: ['[key]', 'output,[key]', 'output'],
+      codexResumeFailurePhase: 'resume-failed',
+      codexResumeFailureProviderActionCount: 0,
+      codexResumeFailureResumeMatchesFailureSession: true,
+      codexResumeFailureResumeSessionPresent: true,
+      codexResumeFailureRetryable: false,
+      codexResumeFailureSessionPresent: true,
+      codexResumeFailureTraceType: 'failure',
+      codexResumeFailureTurnPresent: true,
+      providerTraceKind: 'codex.resume_failure',
+      schema: 'murph.assistant-codex-resume-failure-diagnostics.v1',
+      type: 'assistant.codex.resume_failure',
+    })
+    expect(JSON.stringify(traceEvents)).not.toContain('private tool text')
+    expect(JSON.stringify(traceEvents)).not.toContain('private output text')
+    expect(JSON.stringify(traceEvents)).not.toContain('privateField')
+    expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
 
   it('records invalid resumed output diagnostics when fresh-thread fallback fails', async () => {

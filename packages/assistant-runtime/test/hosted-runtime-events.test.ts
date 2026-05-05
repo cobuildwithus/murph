@@ -275,6 +275,149 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
+  it("captures hosted Codex resume-failure diagnostics without raw identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_resume_failure",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {},
+      event: {
+        providerSessionId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-resume-failure-diagnostics.v1",
+          type: "assistant.codex.resume_failure",
+          providerTraceKind: "codex.resume_failure",
+          codexResumeFailureTraceType: "failure",
+          codexResumeFailurePhase: "resume-failed",
+          codexResumeFailureCodexFailureStage: "turn_failed",
+          codexResumeFailureCodexTurnStatus: "failed",
+          codexResumeFailureErrorCode: "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
+          codexResumeFailureErrorKind: "rpc-failed",
+          codexResumeFailureErrorMessageLength: 251,
+          codexResumeFailureErrorMessagePresent: true,
+          codexResumeFailureErrorPhrases: [
+            "codex-turn-failed",
+            "status-failed",
+            "raw private value",
+          ],
+          codexResumeFailureResumeSessionPresent: true,
+          codexResumeFailureSessionPresent: true,
+          codexResumeFailureTurnPresent: true,
+          codexResumeFailureResumeMatchesFailureSession: true,
+          codexResumeFailureProviderActionCount: 0,
+          codexResumeFailureEventCount: 2,
+          codexResumeFailureEventMethods: [
+            "rpc.error",
+            "turn/completed",
+            "private method",
+          ],
+          codexResumeFailureEventStatuses: [
+            "failed",
+            "turn_failed",
+            "private symptom",
+          ],
+          codexResumeFailureEventKinds: ["message", "process_exit", "private"],
+          codexResumeFailureOutputKinds: ["array", "object", "private value"],
+          codexResumeFailureOutputArrayLengths: [3],
+          codexResumeFailureOutputPartTypes: [
+            "input_text",
+            "process_exit",
+            "https://example.invalid/raw-part-type",
+          ],
+          codexResumeFailureOutputObjectKeys: [
+            "[key],text,type",
+            "privateField,privateName",
+          ],
+          codexResumeFailureOutputStringLengths: [48],
+          codexResumeFailureParamKeys: [
+            "[key]",
+            "output,[key]",
+            "output,privateField",
+          ],
+          codexResumeFailureRetryable: false,
+          codexResumeFailureErrorPreview: "raw private text should not persist",
+          providerSessionId: "raw-provider-session-id",
+        },
+        updates: [],
+      },
+      wake,
+    });
+
+    expect(entry).toEqual(
+      expect.objectContaining({
+        component: "runtime.provider",
+        eventId: "evt_codex_resume_failure",
+        level: "info",
+        message: "Hosted assistant Codex resume-failure diagnostics captured.",
+        phase: "wake.running",
+        redacted: expect.objectContaining({
+          codexResumeFailureCodexFailureStage: "turn_failed",
+          codexResumeFailureCodexTurnStatus: "failed",
+          codexResumeFailureErrorCode: "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
+          codexResumeFailureErrorKind: "rpc-failed",
+          codexResumeFailureErrorMessageLength: 251,
+          codexResumeFailureErrorMessagePresent: true,
+          codexResumeFailureErrorPhrases: [
+            "codex-turn-failed",
+            "status-failed",
+          ],
+          codexResumeFailureEventCount: 2,
+          codexResumeFailureEventKinds: ["message", "process_exit"],
+          codexResumeFailureEventMethods: ["rpc.error", "turn/completed"],
+          codexResumeFailureEventStatuses: ["failed", "turn_failed"],
+          codexResumeFailureOutputArrayLengths: [3],
+          codexResumeFailureOutputKinds: ["array", "object"],
+          codexResumeFailureOutputObjectKeys: ["[key],text,type"],
+          codexResumeFailureOutputPartTypes: ["input_text", "process_exit"],
+          codexResumeFailureOutputStringLengths: [48],
+          codexResumeFailureParamKeys: ["[key]", "output,[key]"],
+          codexResumeFailurePhase: "resume-failed",
+          codexResumeFailureProviderActionCount: 0,
+          codexResumeFailureResumeMatchesFailureSession: true,
+          codexResumeFailureResumeSessionPresent: true,
+          codexResumeFailureRetryable: false,
+          codexResumeFailureSessionPresent: true,
+          codexResumeFailureTraceType: "failure",
+          codexResumeFailureTurnPresent: true,
+          providerTraceKind: "codex.resume_failure",
+          schema: "murph.assistant-codex-resume-failure-diagnostics.v1",
+        }),
+      }),
+    );
+    expect(entry?.redacted).not.toHaveProperty("providerSessionId");
+    expect(entry?.redacted).not.toHaveProperty("codexResumeFailureErrorPreview");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("privateField");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("privateName");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("example.invalid");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("private");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime.provider",
+        message: "Hosted assistant Codex resume-failure diagnostics captured.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+  });
+
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",

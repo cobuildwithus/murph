@@ -49,6 +49,10 @@ const ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
   "assistant.codex.invalid_output_resume_failure";
 const ASSISTANT_CODEX_INVALID_OUTPUT_FALLBACK_TRACE_TYPE =
   "assistant.codex.invalid_output_resume_fallback";
+const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA =
+  "murph.assistant-codex-resume-failure-diagnostics.v1";
+const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_TYPE =
+  "assistant.codex.resume_failure";
 const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -68,10 +72,17 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_RESULT_VALUES = new Set([
   "succeeded",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES = new Set([
+  "ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED",
   "ASSISTANT_CODEX_APP_SERVER_FAILED",
   "ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE",
+  "ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID",
+  "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
+  "ASSISTANT_CODEX_APP_SERVER_TIMEOUT",
   "ASSISTANT_CODEX_CONNECTION_LOST",
   "ASSISTANT_CODEX_FAILED",
+  "ASSISTANT_CODEX_HOME_INVALID",
+  "ASSISTANT_CODEX_IMAGE_INVALID",
+  "ASSISTANT_CODEX_INTERRUPTED",
   "ASSISTANT_CODEX_NOT_FOUND",
   "ASSISTANT_CODEX_RESUME_STALE",
   "ASSISTANT_PROVIDER_UNSUPPORTED",
@@ -80,8 +91,35 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_KIND_VALUES = new Set([
   "invalid-input-output",
   "invalid-output",
 ]);
+const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_PHASE_VALUES = new Set([
+  "resume-failed",
+]);
+const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_KIND_VALUES = new Set([
+  "codex-failed",
+  "connection-lost",
+  "invalid-input-output",
+  "provider-unsupported",
+  "rpc-failed",
+  "resume-stale",
+  "timeout",
+  "turn-failed",
+  "unknown",
+]);
+const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES = new Set([
+  "codex-turn-failed",
+  "connection-lost",
+  "input-output-field",
+  "invalid-input",
+  "rate-limit",
+  "resume-stale",
+  "status-failed",
+  "timeout",
+  "usage-limit",
+]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
+  "rpc.error",
+  "rpc.response",
   "thread/resume",
   "thread/start",
   "turn/completed",
@@ -97,6 +135,7 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES = new Set([
   "canceled",
   "command.execution",
   "completed",
+  "connection_lost",
   "dynamic.tool.call",
   "error",
   "failed",
@@ -113,10 +152,12 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES = new Set([
   "number",
   "object",
   "other",
+  "process_exit",
   "reasoning",
   "running",
   "string",
   "succeeded",
+  "turn_failed",
   "undefined",
   "unknown",
 ]);
@@ -157,6 +198,23 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_KEYS = [
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_ARRAY_KEYS = [
   "codexInvalidOutputFailureOutputArrayLengths",
   "codexInvalidOutputFailureOutputStringLengths",
+] as const;
+const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_BOOLEAN_KEYS = [
+  "codexResumeFailureErrorMessagePresent",
+  "codexResumeFailureResumeMatchesFailureSession",
+  "codexResumeFailureResumeSessionPresent",
+  "codexResumeFailureRetryable",
+  "codexResumeFailureSessionPresent",
+  "codexResumeFailureTurnPresent",
+] as const;
+const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS = [
+  "codexResumeFailureErrorMessageLength",
+  "codexResumeFailureEventCount",
+  "codexResumeFailureProviderActionCount",
+] as const;
+const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
+  "codexResumeFailureOutputArrayLengths",
+  "codexResumeFailureOutputStringLengths",
 ] as const;
 
 export async function executeHostedMailboxEvent(input: {
@@ -494,6 +552,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     };
   }
 
+  const resumeFailureDiagnostic =
+    readHostedAssistantCodexResumeFailureDiagnosticTrace(event);
+  if (resumeFailureDiagnostic) {
+    return {
+      details: resumeFailureDiagnostic,
+      message: "Hosted assistant Codex resume-failure diagnostics captured.",
+    };
+  }
+
   return null;
 }
 
@@ -689,6 +756,143 @@ function readHostedAssistantCodexInvalidOutputDiagnosticTrace(
     );
   }
   for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_ARRAY_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNumberArray(record, key),
+    );
+  }
+
+  return details;
+}
+
+function readHostedAssistantCodexResumeFailureDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA
+    || type !== ASSISTANT_CODEX_RESUME_FAILURE_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    codexResumeFailureTraceType: "failure",
+    providerTraceKind: "codex.resume_failure",
+    schema: ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA,
+  };
+
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailurePhase",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailurePhase",
+      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_PHASE_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureErrorCode",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureErrorCode",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureErrorKind",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureErrorKind",
+      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_KIND_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureCodexFailureStage",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureCodexFailureStage",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureCodexTurnStatus",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexResumeFailureCodexTurnStatus",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
+    ),
+  );
+  for (const key of HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_BOOLEAN_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureEventMethods",
+    readHostedAssistantProviderDiagnosticAllowedStringArray(
+      record,
+      "codexResumeFailureEventMethods",
+      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexResumeFailureErrorPhrases",
+    readHostedAssistantProviderDiagnosticAllowedStringArray(
+      record,
+      "codexResumeFailureErrorPhrases",
+      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES,
+    ),
+  );
+  for (const key of [
+    "codexResumeFailureEventKinds",
+    "codexResumeFailureEventStatuses",
+    "codexResumeFailureOutputKinds",
+    "codexResumeFailureOutputPartTypes",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticAllowedStringArray(
+        record,
+        key,
+        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_STRUCTURAL_TOKEN_VALUES,
+      ),
+    );
+  }
+  for (const key of [
+    "codexResumeFailureOutputObjectKeys",
+    "codexResumeFailureParamKeys",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticKeySummaryArray(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,
       key,

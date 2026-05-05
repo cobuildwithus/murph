@@ -143,7 +143,191 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "codexInvalidOutputFallbackErrorCode",
   "codexInvalidOutputFallbackErrorMessagePresent",
   "codexInvalidOutputFallbackErrorMessageLength",
+  "codexResumeFailureTraceType",
+  "codexResumeFailurePhase",
+  "codexResumeFailureCodexFailureStage",
+  "codexResumeFailureCodexTurnStatus",
+  "codexResumeFailureErrorCode",
+  "codexResumeFailureErrorKind",
+  "codexResumeFailureErrorMessageLength",
+  "codexResumeFailureErrorMessagePresent",
+  "codexResumeFailureErrorPhrases",
+  "codexResumeFailureResumeSessionPresent",
+  "codexResumeFailureSessionPresent",
+  "codexResumeFailureTurnPresent",
+  "codexResumeFailureResumeMatchesFailureSession",
+  "codexResumeFailureProviderActionCount",
+  "codexResumeFailureEventCount",
+  "codexResumeFailureEventMethods",
+  "codexResumeFailureEventStatuses",
+  "codexResumeFailureEventKinds",
+  "codexResumeFailureParamKeys",
+  "codexResumeFailureOutputKinds",
+  "codexResumeFailureOutputArrayLengths",
+  "codexResumeFailureOutputPartTypes",
+  "codexResumeFailureOutputObjectKeys",
+  "codexResumeFailureOutputStringLengths",
+  "codexResumeFailureRetryable",
 ] as const;
+
+const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEY_SET = new Set<string>(
+  HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS,
+);
+
+const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_BOOLEAN_KEYS = new Set([
+  "codexResumeFailureErrorMessagePresent",
+  "codexResumeFailureResumeMatchesFailureSession",
+  "codexResumeFailureResumeSessionPresent",
+  "codexResumeFailureRetryable",
+  "codexResumeFailureSessionPresent",
+  "codexResumeFailureTurnPresent",
+]);
+const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_KEYS = new Set([
+  "codexResumeFailureErrorMessageLength",
+  "codexResumeFailureEventCount",
+  "codexResumeFailureProviderActionCount",
+]);
+const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = new Set([
+  "codexResumeFailureOutputArrayLengths",
+  "codexResumeFailureOutputStringLengths",
+]);
+const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_VALUES = new Map<
+  string,
+  ReadonlySet<string>
+>([
+  ["codexResumeFailureTraceType", new Set(["failure"])],
+  ["codexResumeFailurePhase", new Set(["resume-failed"])],
+  ["codexResumeFailureErrorCode", new Set([
+    "ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED",
+    "ASSISTANT_CODEX_APP_SERVER_FAILED",
+    "ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE",
+    "ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID",
+    "ASSISTANT_CODEX_APP_SERVER_RPC_FAILED",
+    "ASSISTANT_CODEX_APP_SERVER_TIMEOUT",
+    "ASSISTANT_CODEX_CONNECTION_LOST",
+    "ASSISTANT_CODEX_FAILED",
+    "ASSISTANT_CODEX_HOME_INVALID",
+    "ASSISTANT_CODEX_IMAGE_INVALID",
+    "ASSISTANT_CODEX_INTERRUPTED",
+    "ASSISTANT_CODEX_NOT_FOUND",
+    "ASSISTANT_CODEX_RESUME_STALE",
+    "ASSISTANT_PROVIDER_UNSUPPORTED",
+  ])],
+  ["codexResumeFailureErrorKind", new Set([
+    "codex-failed",
+    "connection-lost",
+    "invalid-input-output",
+    "provider-unsupported",
+    "rpc-failed",
+    "resume-stale",
+    "timeout",
+    "turn-failed",
+    "unknown",
+  ])],
+  ["codexResumeFailureCodexFailureStage", new Set([
+    "connection_lost",
+    "other",
+    "process_exit",
+    "turn_failed",
+    "unknown",
+  ])],
+  ["codexResumeFailureCodexTurnStatus", new Set([
+    "cancelled",
+    "canceled",
+    "completed",
+    "failed",
+    "in_progress",
+    "interrupted",
+    "other",
+    "running",
+    "succeeded",
+    "unknown",
+  ])],
+]);
+const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_ARRAY_VALUES = new Map<
+  string,
+  ReadonlySet<string>
+>([
+  ["codexResumeFailureErrorPhrases", new Set([
+    "codex-turn-failed",
+    "connection-lost",
+    "input-output-field",
+    "invalid-input",
+    "rate-limit",
+    "resume-stale",
+    "status-failed",
+    "timeout",
+    "usage-limit",
+  ])],
+  ["codexResumeFailureEventMethods", new Set([
+    "initialize",
+    "rpc.error",
+    "rpc.response",
+    "thread/resume",
+    "thread/start",
+    "turn/completed",
+    "turn/interrupt",
+    "turn/start",
+    "turn/started",
+    "turn/steer",
+  ])],
+  ["codexResumeFailureEventKinds", new Set([
+    "array",
+    "boolean",
+    "cancelled",
+    "canceled",
+    "command.execution",
+    "completed",
+    "connection_lost",
+    "dynamic.tool.call",
+    "error",
+    "failed",
+    "file.change",
+    "function_call",
+    "function_call_output",
+    "image",
+    "in_progress",
+    "input_image",
+    "input_text",
+    "interrupted",
+    "message",
+    "null",
+    "number",
+    "object",
+    "other",
+    "process_exit",
+    "reasoning",
+    "running",
+    "string",
+    "succeeded",
+    "turn_failed",
+    "undefined",
+    "unknown",
+  ])],
+]);
+const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRUCTURAL_ARRAY_KEYS = new Set([
+  "codexResumeFailureEventStatuses",
+  "codexResumeFailureOutputKinds",
+  "codexResumeFailureOutputPartTypes",
+]);
+const HOSTED_RUNTIME_CODEX_RESUME_FAILURE_KEY_SUMMARY_ARRAY_KEYS = new Set([
+  "codexResumeFailureOutputObjectKeys",
+  "codexResumeFailureParamKeys",
+]);
+const HOSTED_RUNTIME_CODEX_DIAGNOSTIC_KEY_BUCKET_VALUES = new Set([
+  "[key]",
+  "[sensitive-key]",
+  "content",
+  "id",
+  "image_url",
+  "kind",
+  "method",
+  "output",
+  "params",
+  "status",
+  "text",
+  "type",
+]);
 
 const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS = new Set([
   "failureAssistantProviderErrorBodyMessage",
@@ -913,6 +1097,9 @@ function isHostedRuntimeRedactedLogKeyAllowed(key: string): boolean {
   if (HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS.has(key)) {
     return true;
   }
+  if (HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEY_SET.has(key)) {
+    return true;
+  }
 
   const normalized = key.toLowerCase();
   return ![
@@ -926,6 +1113,7 @@ function isHostedRuntimeRedactedLogKeyAllowed(key: string): boolean {
     "path",
     "payload",
     "phone",
+    "preview",
     "prompt",
     "raw",
     "secret",
@@ -938,6 +1126,10 @@ function isHostedRuntimeRedactedLogValue(
   key: string,
   value: unknown,
 ): value is HostedRuntimeRedactedJson[string] {
+  if (key.startsWith("codexResumeFailure")) {
+    return isHostedRuntimeCodexResumeFailureLogValue(key, value);
+  }
+
   if (HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS.has(key)) {
     return isHostedRuntimeSafeDiagnosticTextValue(value);
   }
@@ -947,6 +1139,82 @@ function isHostedRuntimeRedactedLogValue(
   }
 
   return isHostedRuntimeRedactedLogScalar(value);
+}
+
+function isHostedRuntimeCodexResumeFailureLogValue(
+  key: string,
+  value: unknown,
+): value is HostedRuntimeRedactedJson[string] {
+  const allowedStringValues = HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_VALUES.get(key);
+  if (allowedStringValues) {
+    return value === null
+      || (typeof value === "string" && allowedStringValues.has(value));
+  }
+
+  const allowedStringArrayValues =
+    HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_ARRAY_VALUES.get(key)
+    ?? (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRUCTURAL_ARRAY_KEYS.has(key)
+      ? HOSTED_RUNTIME_CODEX_RESUME_FAILURE_STRING_ARRAY_VALUES.get(
+          "codexResumeFailureEventKinds",
+        )
+      : undefined);
+  if (allowedStringArrayValues) {
+    return value === null
+      || isHostedRuntimeAllowedStringArray(value, allowedStringArrayValues);
+  }
+
+  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_KEY_SUMMARY_ARRAY_KEYS.has(key)) {
+    return value === null || isHostedRuntimeKeySummaryArray(value);
+  }
+
+  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS.has(key)) {
+    return value === null || isHostedRuntimeNonnegativeNumberArray(value);
+  }
+
+  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_BOOLEAN_KEYS.has(key)) {
+    return value === null || typeof value === "boolean";
+  }
+
+  if (HOSTED_RUNTIME_CODEX_RESUME_FAILURE_NUMBER_KEYS.has(key)) {
+    return value === null
+      || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+  }
+
+  return false;
+}
+
+function isHostedRuntimeAllowedStringArray(
+  value: unknown,
+  allowedValues: ReadonlySet<string>,
+): value is string[] {
+  return Array.isArray(value)
+    && value.length <= 16
+    && value.every((entry) =>
+      typeof entry === "string" && allowedValues.has(entry),
+    );
+}
+
+function isHostedRuntimeKeySummaryArray(value: unknown): value is string[] {
+  return Array.isArray(value)
+    && value.length <= 16
+    && value.every((entry) => {
+      if (typeof entry !== "string") {
+        return false;
+      }
+      const tokens = entry.split(",");
+      return tokens.length > 0
+        && tokens.every((token) =>
+          HOSTED_RUNTIME_CODEX_DIAGNOSTIC_KEY_BUCKET_VALUES.has(token),
+        );
+    });
+}
+
+function isHostedRuntimeNonnegativeNumberArray(value: unknown): value is number[] {
+  return Array.isArray(value)
+    && value.length <= 16
+    && value.every((entry) =>
+      typeof entry === "number" && Number.isFinite(entry) && entry >= 0,
+    );
 }
 
 function isHostedRuntimeRedactedLogScalar(
