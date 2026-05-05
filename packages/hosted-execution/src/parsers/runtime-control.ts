@@ -97,12 +97,14 @@ const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
   "text",
   "token",
 ] as const;
-const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEYS = new Set([
+const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "failureAssistantProviderErrorBodyMessage",
   "failureAssistantProviderErrorMessage",
   "failureAssistantProviderErrorStatusText",
   "safeErrorMessage",
 ]);
+const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
 const SAFE_REDACTED_METADATA_KEY_SUFFIXES = [
   "Bytes",
   "Code",
@@ -1169,7 +1171,7 @@ function parseHostedRuntimeRedactedScalar(
 }
 
 function assertAllowedRedactedKey(key: string, label: string): void {
-  if (SAFE_DIAGNOSTIC_TEXT_REDACTED_KEYS.has(key)) {
+  if (isSafeDiagnosticTextRedactedKey(key)) {
     return;
   }
 
@@ -1183,6 +1185,11 @@ function assertAllowedRedactedKey(key: string, label: string): void {
       throw new TypeError(`${label} is not allowed in hosted runtime redacted JSON.`);
     }
   }
+}
+
+function isSafeDiagnosticTextRedactedKey(key: string): boolean {
+  return SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES.has(key)
+    || SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN.test(key);
 }
 
 function isSafeRedactedMetadataKey(key: string): boolean {

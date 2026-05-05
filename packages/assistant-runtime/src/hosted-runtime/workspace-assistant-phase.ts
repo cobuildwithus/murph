@@ -149,6 +149,7 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "codexResumeFailureCodexTurnStatus",
   "codexResumeFailureErrorCode",
   "codexResumeFailureErrorKind",
+  "codexResumeFailureErrorMessage",
   "codexResumeFailureErrorMessageLength",
   "codexResumeFailureErrorMessagePresent",
   "codexResumeFailureErrorPhrases",
@@ -329,14 +330,17 @@ const HOSTED_RUNTIME_CODEX_DIAGNOSTIC_KEY_BUCKET_VALUES = new Set([
   "type",
 ]);
 
-const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS = new Set([
+const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_NAMES = new Set([
   "failureAssistantProviderErrorBodyMessage",
   "failureAssistantProviderErrorMessage",
   "failureAssistantProviderErrorStatusText",
+  "codexResumeFailureErrorMessage",
   "safeErrorMessage",
 ]);
 
-const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH = 4096;
+const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_MAX_LENGTH = 2048;
+const HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
@@ -1031,6 +1035,14 @@ function buildHostedAssistantAutomationDetailRedactedJson(
     maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, input, key);
   }
 
+  for (const key of Object.keys(input)) {
+    if (!isHostedRuntimeSafeDiagnosticTextKey(key)) {
+      continue;
+    }
+
+    maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, input, key);
+  }
+
   for (const [key, value] of Object.entries(input)) {
     if (key in output) {
       continue;
@@ -1094,7 +1106,7 @@ function readHostedRuntimeRedactedLogString(
 }
 
 function isHostedRuntimeRedactedLogKeyAllowed(key: string): boolean {
-  if (HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS.has(key)) {
+  if (isHostedRuntimeSafeDiagnosticTextKey(key)) {
     return true;
   }
   if (HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEY_SET.has(key)) {
@@ -1126,12 +1138,12 @@ function isHostedRuntimeRedactedLogValue(
   key: string,
   value: unknown,
 ): value is HostedRuntimeRedactedJson[string] {
-  if (key.startsWith("codexResumeFailure")) {
-    return isHostedRuntimeCodexResumeFailureLogValue(key, value);
+  if (isHostedRuntimeSafeDiagnosticTextKey(key)) {
+    return isHostedRuntimeSafeDiagnosticTextValue(value);
   }
 
-  if (HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEYS.has(key)) {
-    return isHostedRuntimeSafeDiagnosticTextValue(value);
+  if (key.startsWith("codexResumeFailure")) {
+    return isHostedRuntimeCodexResumeFailureLogValue(key, value);
   }
 
   if (Array.isArray(value)) {
@@ -1139,6 +1151,11 @@ function isHostedRuntimeRedactedLogValue(
   }
 
   return isHostedRuntimeRedactedLogScalar(value);
+}
+
+function isHostedRuntimeSafeDiagnosticTextKey(key: string): boolean {
+  return HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_NAMES.has(key)
+    || HOSTED_RUNTIME_SAFE_DIAGNOSTIC_TEXT_KEY_PATTERN.test(key);
 }
 
 function isHostedRuntimeCodexResumeFailureLogValue(

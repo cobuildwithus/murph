@@ -1655,6 +1655,7 @@ describe('Codex assistant registry helpers', () => {
       codexResumeFailureCodexTurnStatus: 'failed',
       codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
       codexResumeFailureErrorKind: 'turn-failed',
+      codexResumeFailureErrorMessage: expectedError.message,
       codexResumeFailureErrorMessageLength: expectedError.message.length,
       codexResumeFailureErrorMessagePresent: true,
       codexResumeFailureErrorPhrases: ['codex-turn-failed', 'status-failed'],
@@ -1693,7 +1694,7 @@ describe('Codex assistant registry helpers', () => {
         retryable: false,
       },
       message:
-        'Codex app-server turn failed. status failed. raw provider body should not be logged',
+        'Codex app-server turn failed. status failed. Authorization: Bearer raw-token-value at /tmp/provider-tests',
     }
     const traceEvents: AssistantProviderTraceEvent[] = []
 
@@ -1740,6 +1741,8 @@ describe('Codex assistant registry helpers', () => {
       codexResumeFailureCodexTurnStatus: 'failed',
       codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
       codexResumeFailureErrorKind: 'turn-failed',
+      codexResumeFailureErrorMessage:
+        'Codex app-server turn failed. status failed. Authorization: [REDACTED] [REDACTED] at [path]',
       codexResumeFailureErrorMessageLength: expectedError.message.length,
       codexResumeFailureErrorMessagePresent: true,
       codexResumeFailureErrorPhrases: ['codex-turn-failed', 'status-failed'],
@@ -1758,7 +1761,8 @@ describe('Codex assistant registry helpers', () => {
       schema: 'murph.assistant-codex-resume-failure-diagnostics.v1',
       type: 'assistant.codex.resume_failure',
     })
-    expect(JSON.stringify(traceEvents)).not.toContain('raw provider body')
+    expect(JSON.stringify(traceEvents)).not.toContain('raw-token-value')
+    expect(JSON.stringify(traceEvents)).not.toContain('/tmp/provider-tests')
   })
 
   it('records invalid resumed output diagnostics when fresh-thread fallback fails', async () => {

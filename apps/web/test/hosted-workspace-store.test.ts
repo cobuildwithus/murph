@@ -547,6 +547,8 @@ describe("hosted runtime log store", () => {
       level: "warn",
       phase: "invoke",
       redacted: {
+        assistantNotificationErrorMessage: "Hosted assistant notification failed.",
+        customProviderErrorDetail: "Provider rejected the request after resume.",
         failureAssistantProviderErrorMessage: "provider rejected the request",
         safeErrorMessage: "Codex app-server failed before producing a reply.",
       },
@@ -555,6 +557,8 @@ describe("hosted runtime log store", () => {
     });
 
     expect(result.redactedJson).toEqual({
+      assistantNotificationErrorMessage: "Hosted assistant notification failed.",
+      customProviderErrorDetail: "Provider rejected the request after resume.",
       failureAssistantProviderErrorMessage: "provider rejected the request",
       safeErrorMessage: "Codex app-server failed before producing a reply.",
     });

@@ -144,6 +144,8 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
           codexResumeFailureCodexTurnStatus: "failed",
           codexResumeFailureErrorCode: "ASSISTANT_CODEX_FAILED",
           codexResumeFailureErrorKind: "turn-failed",
+          codexResumeFailureErrorMessage:
+            "Codex app-server turn failed. status failed. provider rejected request.",
           codexResumeFailureErrorMessageLength: 251,
           codexResumeFailureErrorMessagePresent: true,
           codexResumeFailureErrorPhrases: [
@@ -186,6 +188,8 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
       redactedJson: expect.objectContaining({
         codexResumeFailureErrorCode: "ASSISTANT_CODEX_FAILED",
         codexResumeFailureErrorKind: "turn-failed",
+        codexResumeFailureErrorMessage:
+          "Codex app-server turn failed. status failed. provider rejected request.",
         codexResumeFailureErrorMessageLength: 251,
         codexResumeFailureErrorMessagePresent: true,
         codexResumeFailureErrorPhrases: [
