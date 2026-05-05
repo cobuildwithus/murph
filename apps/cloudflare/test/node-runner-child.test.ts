@@ -1,6 +1,15 @@
 import path from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -25,11 +34,22 @@ import {
 import {
   runHostedExecutionChild,
 } from "../src/node-runner-child.ts";
+import {
+  HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
+} from "../src/runtime-mailbox-payload-decode-contract.ts";
 
-afterEach(() => {
+const cleanupPaths: string[] = [];
+
+afterEach(async () => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+  await Promise.all(cleanupPaths.splice(0).map((target) =>
+    rm(target, {
+      force: true,
+      recursive: true,
+    })
+  ));
 });
 
 describe("runHostedExecutionChild", () => {
@@ -216,6 +236,92 @@ describe("runHostedExecutionChild", () => {
     expect(debugOutput).not.toContain("fixture-gateway-code");
   });
 
+  it("uses proxy mailbox decoding in the child when no local proxy base URL is present", async () => {
+    const launcherRoot = await mkdtemp(path.join(tmpdir(), "murph-node-runner-child-decode-"));
+    cleanupPaths.push(launcherRoot);
+    vi.spyOn(process, "cwd").mockReturnValue(launcherRoot);
+    const stdout = { write: vi.fn() };
+    const setExitCode = vi.fn();
+    const importItem = createSystemMailboxImportItem("u_workspace_decode");
+    const fetchMock = vi.fn(async (
+      requestInfo: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const requestObject = requestInfo instanceof Request
+        ? requestInfo
+        : new Request(requestInfo, init);
+      expect(requestObject.url).toBe(
+        `http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
+      );
+      expect(requestObject.headers.get(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(
+        "bridge-token",
+      );
+      expect(requestObject.headers.get("x-hosted-runtime-attempt-id")).toBe(
+        "attempt_workspace_child_decode",
+      );
+      expect(requestObject.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+      expect(requestObject.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+
+      return new Response(JSON.stringify({
+        status: "decoded",
+        wake: createSystemMailboxWake(importItem.item),
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const runWorkspaceInProcess = vi.fn(async (
+      _input: HostedAssistantWorkspaceRuntimeJobInput,
+      options: HostedWorkspaceRuntimeJobOptions,
+    ) => {
+      await expect(options.importItem(importItem)).resolves.toEqual({
+        reasonCode: "system_mailbox.queued",
+        status: "imported",
+      });
+
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        internalWorkerProxyToken: "bridge-token",
+        localInternalProxyBaseUrl: null,
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_child_decode",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace_decode",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            platformEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      stdout,
+    });
+
+    expect(setExitCode).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(readChildResult(stdout.write.mock.calls[0]?.[0])).toEqual({
+      ok: true,
+      result: {
+        nextWakeAt: null,
+        status: "idle",
+      },
+    });
+  });
+
   it("rejects deprecated Codex app-server bridge env in the child runtime config", async () => {
     const stdout = { write: vi.fn() };
     const setExitCode = vi.fn();
@@ -348,4 +454,59 @@ function readChildResult(chunk: unknown) {
   }
 
   return parseHostedRuntimeChildResult(chunk);
+}
+
+function createSystemMailboxImportItem(userId: string) {
+  const item = {
+    createdAt: "2026-05-01T00:00:00.000Z",
+    dedupeKey: "event:node-runner-child-decode",
+    expiresAt: null,
+    id: "mailbox_item_node_runner_child_decode",
+    kind: "member.channels.updated" as const,
+    lane: "system" as const,
+    laneSeq: "1",
+    occurredAt: "2026-05-01T00:00:00.000Z",
+    payloadBytes: 64,
+    payloadInlineCiphertext: null,
+    payloadRef: "hosted-mailbox-payload:mailbox_item_node_runner_child_decode",
+    payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    userId,
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "opaque-child-mailbox-ciphertext",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      requestId: "request_node_runner_child_decode",
+      source: "sidecar" as const,
+      status: "resolved" as const,
+    },
+    route: {
+      action: "apply-member-channels-update" as const,
+      advanceProgress: true as const,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route" as const,
+    },
+  };
+}
+
+function createSystemMailboxWake(item: ReturnType<typeof createSystemMailboxImportItem>["item"]) {
+  return {
+    eventId: item.dedupeKey,
+    kind: item.kind,
+    memberChannels: {
+      email: true,
+      linq: false,
+      telegram: false,
+    },
+    occurredAt: item.occurredAt,
+    userId: item.userId,
+  };
 }

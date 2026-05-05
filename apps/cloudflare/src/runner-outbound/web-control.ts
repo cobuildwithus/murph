@@ -9,6 +9,12 @@ import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
+} from "../runtime-mailbox-payload-decode-contract.ts";
+import {
+  handleRunnerMailboxPayloadDecodeRequest,
+} from "./mailbox-payload-decode.ts";
+import {
   isAllowedHostedRunnerWebControlRequest,
 } from "./shared-web-control-policy.ts";
 import {
@@ -30,6 +36,15 @@ export async function handleRunnerWebControlRequest(input: {
 }): Promise<Response> {
   if (input.request.method !== "GET" && input.request.method !== "POST") {
     return methodNotAllowed();
+  }
+
+  if (input.url.pathname === HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH) {
+    return await handleRunnerMailboxPayloadDecodeRequest({
+      env: input.env,
+      environment: input.environment,
+      request: input.request,
+      userId: input.userId,
+    });
   }
 
   if (!isAllowedHostedRunnerWebControlRequest({

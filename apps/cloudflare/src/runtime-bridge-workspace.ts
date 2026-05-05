@@ -42,6 +42,10 @@ import {
   snapshotHostedRuntimeBridgeWorkspaceBundle,
   type HostedRuntimeBridgeCheckpointLease,
 } from "./runtime-bridge-checkpoint.ts";
+import type {
+  HostedMailboxPayloadDecodeInput,
+  HostedMailboxPayloadDecodeResult,
+} from "./runtime-mailbox-payload-decode-contract.ts";
 import {
   decryptHostedMailboxPayloadCiphertext,
   createHostedMailboxEncryptionEnvironmentFromIngressRootResolver,
@@ -70,7 +74,17 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 >;
 
+export type HostedWorkspaceMailboxPayloadDecodeInput = HostedMailboxPayloadDecodeInput;
+export type HostedWorkspaceMailboxPayloadDecodeResult = HostedMailboxPayloadDecodeResult;
+
+export interface HostedWorkspaceMailboxPayloadDecoder {
+  decode(
+    input: HostedWorkspaceMailboxPayloadDecodeInput,
+  ): Promise<HostedWorkspaceMailboxPayloadDecodeResult>;
+}
+
 export interface HostedWorkspaceRuntimeBridgeOptionsInput {
+  decodeMailboxPayload?: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
   readEncryptionEnvironment?: (
@@ -91,12 +105,15 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
   const readCurrentLease = input.readCurrentLease
     ?? (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.request));
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, input.platform);
-  const readEncryptionEnvironment = input.readEncryptionEnvironment
-    ?? createHostedMailboxEncryptionEnvironmentReader({
-      runtime,
-      webControlAllowHttpHosts: input.webControlAllowHttpHosts,
-      webControlBaseUrl: input.webControlBaseUrl ?? null,
-      webControlFetch: input.webControlFetch,
+  const decodeMailboxPayload = input.decodeMailboxPayload
+    ?? createLegacyHostedMailboxPayloadDecoder({
+      readEncryptionEnvironment: input.readEncryptionEnvironment
+        ?? createHostedMailboxEncryptionEnvironmentReader({
+          runtime,
+          webControlAllowHttpHosts: input.webControlAllowHttpHosts,
+          webControlBaseUrl: input.webControlBaseUrl ?? null,
+          webControlFetch: input.webControlFetch,
+        }),
     });
 
   return {
@@ -127,7 +144,7 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
       });
     },
     importItem: createHostedWorkspaceBridgeMailboxImporter({
-      readEncryptionEnvironment,
+      decodeMailboxPayload,
       runtime,
       vaultRoot,
     }),
@@ -157,6 +174,39 @@ function createHostedMailboxEncryptionEnvironmentReader(input: {
     });
     environmentsByUserId.set(userId, created);
     return created;
+  };
+}
+
+function createLegacyHostedMailboxPayloadDecoder(input: {
+  readEncryptionEnvironment: (
+    input: { userId: string },
+  ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
+}): HostedWorkspaceMailboxPayloadDecoder {
+  return {
+    async decode(decodeInput) {
+      const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
+        ciphertext: decodeInput.payloadCiphertext,
+        environment: await input.readEncryptionEnvironment({
+          userId: decodeInput.itemRef.userId,
+        }),
+        metadata: {
+          dedupeKey: decodeInput.itemRef.dedupeKey,
+          itemId: decodeInput.itemRef.id,
+          kind: decodeInput.itemRef.kind,
+          lane: decodeInput.itemRef.lane,
+          laneSeq: decodeInput.itemRef.laneSeq,
+          occurredAt: decodeInput.itemRef.occurredAt,
+          payloadSchema: decodeInput.payloadSchema,
+          payloadStorage: decodeInput.payloadSource === "inline" ? "inline" : "sidecar",
+          userId: decodeInput.itemRef.userId,
+        },
+      });
+
+      return {
+        status: "decoded",
+        wake: parseHostedExecutionWake(decodedPayload),
+      };
+    },
   };
 }
 
@@ -556,49 +606,49 @@ async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
   }
 }
 
-async function writeHostedCheckpointHotStateFallbackLog(input: {
+async function writeHostedCheckpointHotStateFallbackLog(params: {
   error: HostedAssistantRuntimeHotStateBudgetExceededError | HostedAssistantRuntimeHotStateIncompleteError;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
 }): Promise<void> {
   console.warn("Hosted checkpoint hot-state fallback triggered.", {
-    errorName: input.error.name,
+    errorName: params.error.name,
   });
-  if (!input.platform.logPort) {
+  if (!params.platform.logPort) {
     return;
   }
 
   const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointReason: input.request.reason,
-    errorName: input.error.name,
+    checkpointReason: params.request.reason,
+    errorName: params.error.name,
     fallbackReason:
-      input.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
+      params.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
         ? "budget_exceeded"
         : "continuity_incomplete",
-    ...(input.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
+    ...(params.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
       ? {
-          budgetActual: input.error.actual,
-          budgetClass: input.error.budget,
-          budgetLimit: input.error.limit,
+          budgetActual: params.error.actual,
+          budgetClass: params.error.budget,
+          budgetLimit: params.error.limit,
         }
       : {
-          continuityReason: input.error.reason,
+          continuityReason: params.error.reason,
         }),
   };
 
   try {
-    await input.platform.logPort.write({
+    await params.platform.logPort.write({
       entries: [
         {
           at: new Date().toISOString(),
-          attemptId: input.request.attemptId,
+          attemptId: params.request.attemptId,
           component: "workspace",
           eventCode: "checkpoint.hot_state_fallback",
-          leaseGeneration: input.request.leaseGeneration,
+          leaseGeneration: params.request.leaseGeneration,
           level: "warn",
           phase: "checkpoint",
           redactedJson,
-          workspaceVersion: input.request.expectedWorkspaceVersion,
+          workspaceVersion: params.request.expectedWorkspaceVersion,
         },
       ],
     });
@@ -609,35 +659,35 @@ async function writeHostedCheckpointHotStateFallbackLog(input: {
   }
 }
 
-async function writeHostedCheckpointFullFallbackContinuityFailedLog(input: {
+async function writeHostedCheckpointFullFallbackContinuityFailedLog(params: {
   error: HostedWorkspaceSnapshotContinuityIncompleteError;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
 }): Promise<void> {
   console.warn("Hosted checkpoint full fallback continuity failed.", {
-    continuityReason: input.error.reason,
+    continuityReason: params.error.reason,
   });
-  if (!input.platform.logPort) {
+  if (!params.platform.logPort) {
     return;
   }
 
   try {
-    await input.platform.logPort.write({
+    await params.platform.logPort.write({
       entries: [
         {
           at: new Date().toISOString(),
-          attemptId: input.request.attemptId,
+          attemptId: params.request.attemptId,
           component: "workspace",
           eventCode: "checkpoint.codex_continuity_missing_after_full_fallback",
-          leaseGeneration: input.request.leaseGeneration,
+          leaseGeneration: params.request.leaseGeneration,
           level: "error",
           phase: "checkpoint",
           redactedJson: {
-            checkpointReason: input.request.reason,
-            continuityReason: input.error.reason,
-            errorName: input.error.name,
+            checkpointReason: params.request.reason,
+            continuityReason: params.error.reason,
+            errorName: params.error.name,
           },
-          workspaceVersion: input.request.expectedWorkspaceVersion,
+          workspaceVersion: params.request.expectedWorkspaceVersion,
         },
       ],
     });
@@ -838,9 +888,7 @@ async function readHostedMailboxEncryptionEnvironmentFromRuntime(input: {
 }
 
 function createHostedWorkspaceBridgeMailboxImporter(input: {
-  readEncryptionEnvironment: (
-    input: { userId: string },
-  ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
+  decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
   runtime: {
     forwardedEnv: Readonly<Record<string, string>>;
     platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -852,25 +900,19 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
     const importConversationItem = createHostedConversationMailboxImportItem({
       decodePayload: {
         decode: async (decodeInput) => {
-          const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
-            ciphertext: decodeInput.payloadCiphertext,
-            environment: await input.readEncryptionEnvironment({
-              userId: decodeInput.itemRef.userId,
-            }),
-            metadata: {
-              dedupeKey: decodeInput.itemRef.dedupeKey,
-              itemId: decodeInput.itemRef.id,
-              kind: decodeInput.itemRef.kind,
-              lane: decodeInput.itemRef.lane,
-              laneSeq: decodeInput.itemRef.laneSeq,
-              occurredAt: decodeInput.itemRef.occurredAt,
-              payloadSchema: decodeInput.payloadSchema,
-              payloadStorage: decodeInput.payloadSource === "inline" ? "inline" : "sidecar",
-              userId: decodeInput.itemRef.userId,
-            },
+          const decoded = await input.decodeMailboxPayload.decode({
+            itemRef: decodeInput.itemRef,
+            payloadCiphertext: decodeInput.payloadCiphertext,
+            payloadRequestId: decodeInput.payloadRequestId,
+            payloadSchema: decodeInput.payloadSchema,
+            payloadSource: decodeInput.payloadSource,
           });
-          const wake = parseHostedExecutionWake(decodedPayload);
-          if (wake.kind !== "conversation.message") {
+
+          if (decoded.status === "blocked") {
+            return decoded;
+          }
+
+          if (decoded.wake.kind !== "conversation.message") {
             return {
               reasonCode: "payload.decode_mismatch",
               retryable: false,
@@ -880,7 +922,7 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
 
           return {
             status: "decoded",
-            wake,
+            wake: decoded.wake,
           };
         },
       },
@@ -905,9 +947,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   importConversationItem: (item: HostedWorkspaceRuntimeBridgeImportItemInput) =>
     ReturnType<HostedWorkspaceRuntimeBridgeImportItem>;
   item: HostedWorkspaceRuntimeBridgeImportItemInput;
-  readEncryptionEnvironment: (
-    input: { userId: string },
-  ) => HostedMailboxEncryptionEnvironment | Promise<HostedMailboxEncryptionEnvironment>;
+  decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
   runtime: {
     forwardedEnv: Readonly<Record<string, string>>;
     platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -932,24 +972,27 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     };
   }
 
-  const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
-    ciphertext: input.item.payload.payloadCiphertext,
-    environment: await input.readEncryptionEnvironment({
-      userId: input.item.item.userId,
-    }),
-    metadata: {
+  const decoded = await input.decodeMailboxPayload.decode({
+    itemRef: {
       dedupeKey: input.item.item.dedupeKey,
-      itemId: input.item.item.id,
+      id: input.item.item.id,
       kind: input.item.item.kind,
       lane: input.item.item.lane,
       laneSeq: input.item.item.laneSeq,
       occurredAt: input.item.item.occurredAt,
-      payloadSchema: input.item.payload.payloadSchema,
-      payloadStorage: input.item.payload.source === "inline" ? "inline" : "sidecar",
       userId: input.item.item.userId,
     },
+    payloadCiphertext: input.item.payload.payloadCiphertext,
+    payloadRequestId: input.item.payload.requestId,
+    payloadSchema: input.item.payload.payloadSchema,
+    payloadSource: input.item.payload.source,
   });
-  const wake = parseHostedExecutionWake(decodedPayload);
+
+  if (decoded.status === "blocked") {
+    return decoded;
+  }
+
+  const wake = decoded.wake;
 
   if (!decodedSystemWakeMatchesMailboxItem(wake, input.item)) {
     return {

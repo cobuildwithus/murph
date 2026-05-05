@@ -5,6 +5,9 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "@murphai/assistant-runtime";
 import {
+  readHostedRunnerCommitTimeoutMs,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -20,6 +23,9 @@ import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "./runtime-bridge-workspace.js";
+import {
+  createCloudflareHostedMailboxPayloadDecoder,
+} from "./runtime-bridge-mailbox-payload-decode.js";
 import {
   formatHostedExecutionRunnerChildResult,
   parseHostedExecutionRunnerJobInput,
@@ -167,18 +173,26 @@ async function runWorkspaceChildJob(input: {
       },
     },
   });
-  const webControlFetch = input.internalWorkerProxyToken && input.localInternalProxyBaseUrl
+  const webControlFetch = input.internalWorkerProxyToken
     ? createCloudflareHostedRuntimeFetch(
         boundUserId,
         input.internalWorkerProxyToken,
-        input.localInternalProxyBaseUrl,
+        input.localInternalProxyBaseUrl ?? null,
         fetch,
       )
+    : undefined;
+  const decodeMailboxPayload = webControlFetch
+    ? createCloudflareHostedMailboxPayloadDecoder({
+      fetchImpl: webControlFetch,
+      readCurrentLease: () => currentLease,
+      timeoutMs: readHostedRunnerCommitTimeoutMs(input.job.runtime?.commitTimeoutMs ?? null),
+    })
     : undefined;
 
   return await input.runWorkspaceInProcess(
     input.job,
     createHostedWorkspaceRuntimeBridgeJobOptions({
+      ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
       platform,
       request: input.job.request,
       runtime: input.job.runtime ?? {},

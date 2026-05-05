@@ -4,13 +4,21 @@ import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachHostedDomainRootEnvelopeSignature,
+  buildHostedSecureBoxAad,
   buildHostedDomainRootEnvelopeSigningPayload,
   buildHostedDomainRootWrapContext,
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  sealHostedSecureBox,
+  serializeHostedSecureBoxEnvelope,
   wrapHostedDomainRootKeyWithP256Ecdh,
   type HostedDomainRootKeyEnvelopeBodyV1,
   type HostedDomainRootKeyEnvelopeV1,
 } from "@murphai/runtime-state";
+import {
+  buildHostedMailboxPayloadScope,
+  buildHostedMailboxPayloadSecureBoxAad,
+  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
@@ -31,6 +39,9 @@ import {
   isAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
+import {
+  HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
+} from "../src/runtime-mailbox-payload-decode-contract.ts";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import type {
   WorkerBindUserRunnerStubLike,
@@ -670,6 +681,286 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Unauthorized",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects mailbox payload decode requests that do not use POST", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv(),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(405);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects mailbox payload decode requests when the invocation proxy token is missing", async () => {
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        method: "POST",
+      }),
+      createRunnerOutboundEnv(),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
+  it("rejects mailbox payload decode requests for the wrong user", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify((await createMailboxPayloadDecodeBody({
+          itemUserId: "member_other",
+          wakeUserId: "member_other",
+        })).request),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+  });
+
+  it("rejects mailbox payload decode requests without active lease headers", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify((await createMailboxPayloadDecodeBody()).request),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+  });
+
+  it("rejects mailbox payload decode requests for stale active leases", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify((await createMailboxPayloadDecodeBody()).request),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("decodes mailbox payloads through Worker-owned ingress crypto without returning key material", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture({
+      userId: "member_123",
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const body = await createMailboxPayloadDecodeBody();
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify(body.request),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv(fixture.env),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    const decoded = await response.json();
+    expect(decoded).toEqual({
+      status: "decoded",
+      wake: body.expectedWake,
+    });
+    const serialized = JSON.stringify(decoded);
+    expect(serialized).not.toContain(body.request.payloadCiphertext);
+    expect(serialized).not.toContain("udrk:ingress:test-root");
+    expect(serialized).not.toContain("PRIVATE_JWK");
+    expect(serialized).not.toContain("fixture-callback");
+    expect(serialized).not.toContain("rootKey");
+  });
+
+  it("returns a narrow HTTP error when mailbox payload decode fails", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture({
+      userId: "member_123",
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const body = await createMailboxPayloadDecodeBody();
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify({
+          ...body.request,
+          payloadCiphertext: "not-a-hosted-secure-box",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv(fixture.env),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(502);
+    const errorBody = await response.json();
+    expect(errorBody).toEqual({
+      error: "Mailbox payload decode failed.",
+    });
+    const serialized = JSON.stringify(errorBody);
+    expect(serialized).not.toContain("not-a-hosted-secure-box");
+    expect(serialized).not.toContain("rootKey");
+    expect(serialized).not.toContain("PRIVATE_JWK");
+  });
+
+  it("returns a narrow HTTP error when mailbox payload parsing fails", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture({
+      userId: "member_123",
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const body = await createMailboxPayloadDecodeBody();
+    const itemRef = body.request.itemRef;
+    const metadata = {
+      dedupeKey: itemRef.dedupeKey,
+      itemId: itemRef.id,
+      kind: itemRef.kind,
+      lane: itemRef.lane,
+      laneSeq: itemRef.laneSeq,
+      occurredAt: itemRef.occurredAt,
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      payloadStorage: "inline" as const,
+      userId: itemRef.userId,
+    };
+    const scope = buildHostedMailboxPayloadScope(metadata.payloadStorage);
+    const malformedPayloadCiphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
+      aad: buildHostedSecureBoxAad({
+        ...buildHostedMailboxPayloadSecureBoxAad(metadata),
+        domain: "ingress",
+        lane: "mailbox-payload",
+        scope,
+        userId: itemRef.userId,
+      }),
+      domain: "ingress",
+      lane: "mailbox-payload",
+      plaintext: new TextEncoder().encode("{\"kind\":\"member.channels.updated\"}"),
+      rootKey: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+      rootKeyId: "udrk:ingress:test-root",
+      scope,
+    }));
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify({
+          ...body.request,
+          payloadCiphertext: malformedPayloadCiphertext,
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv(fixture.env),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(502);
+    const errorBody = await response.json();
+    expect(errorBody).toEqual({
+      error: "Mailbox payload decode failed.",
+    });
+    const serialized = JSON.stringify(errorBody);
+    expect(serialized).not.toContain(malformedPayloadCiphertext);
+    expect(serialized).not.toContain("rootKey");
+    expect(serialized).not.toContain("PRIVATE_JWK");
+  });
+
+  it("blocks decoded mailbox payloads whose wake user does not match the route user", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture({
+      userId: "member_123",
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify((await createMailboxPayloadDecodeBody({
+          wakeUserId: "member_other",
+        })).request),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv(fixture.env),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    });
   });
 
   it("proxies the hosted workspace read route through web-control GET", async () => {
@@ -1693,6 +1984,84 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
   return {
     [RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
     ...headers,
+  };
+}
+
+function createMailboxPayloadDecodeHeaders(headers: Record<string, string> = {}) {
+  return createRunnerProxyHeaders({
+    "content-type": "application/json; charset=utf-8",
+    "x-hosted-runtime-attempt-id": "attempt_1",
+    "x-hosted-runtime-lease-generation": "9",
+    "x-hosted-runtime-workspace-version": "4",
+    ...headers,
+  });
+}
+
+async function createMailboxPayloadDecodeBody(input: {
+  itemUserId?: string;
+  wakeUserId?: string;
+} = {}) {
+  const itemUserId = input.itemUserId ?? "member_123";
+  const wakeUserId = input.wakeUserId ?? itemUserId;
+  const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const rootKeyId = "udrk:ingress:test-root";
+  const itemRef = {
+    dedupeKey: "event:mailbox-decode-route",
+    id: "mailbox_item_decode_route",
+    kind: "member.channels.updated",
+    lane: "system",
+    laneSeq: "1",
+    occurredAt: "2026-05-01T00:00:00.000Z",
+    userId: itemUserId,
+  };
+  const expectedWake = {
+    eventId: itemRef.dedupeKey,
+    kind: itemRef.kind,
+    memberChannels: {
+      email: true,
+      linq: false,
+      telegram: false,
+    },
+    occurredAt: itemRef.occurredAt,
+    userId: wakeUserId,
+  };
+  const metadata = {
+    dedupeKey: itemRef.dedupeKey,
+    itemId: itemRef.id,
+    kind: itemRef.kind,
+    lane: itemRef.lane,
+    laneSeq: itemRef.laneSeq,
+    occurredAt: itemRef.occurredAt,
+    payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+    payloadStorage: "inline" as const,
+    userId: itemRef.userId,
+  };
+  const scope = buildHostedMailboxPayloadScope(metadata.payloadStorage);
+  const payloadCiphertext = serializeHostedSecureBoxEnvelope(await sealHostedSecureBox({
+    aad: buildHostedSecureBoxAad({
+      ...buildHostedMailboxPayloadSecureBoxAad(metadata),
+      domain: "ingress",
+      lane: "mailbox-payload",
+      scope,
+      userId: itemRef.userId,
+    }),
+    domain: "ingress",
+    lane: "mailbox-payload",
+    plaintext: new TextEncoder().encode(JSON.stringify(expectedWake)),
+    rootKey,
+    rootKeyId,
+    scope,
+  }));
+
+  return {
+    expectedWake,
+    request: {
+      itemRef,
+      payloadCiphertext,
+      payloadRequestId: "request_decode_route",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      payloadSource: "inline" as const,
+    },
   };
 }
 

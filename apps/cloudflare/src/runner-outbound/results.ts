@@ -13,10 +13,12 @@ import {
 } from "../hosted-email.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
+  requireRunnerActiveInvocationLease,
+  RunnerActiveInvocationLeaseError,
+} from "./active-lease.ts";
+import {
   decodeRouteParam,
-  requireRunnerOutboundUserStubMethod,
   resolveRunnerOutboundUserCryptoContext,
-  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 
@@ -145,24 +147,16 @@ async function requestOwnsActiveInvocationLease(input: {
   request: Request;
   userId: string;
 }): Promise<boolean> {
-  const attemptId = input.request.headers.get("x-hosted-runtime-attempt-id");
-  const leaseGeneration = input.request.headers.get("x-hosted-runtime-lease-generation");
-  const workspaceVersion = input.request.headers.get("x-hosted-runtime-workspace-version");
-  if (!attemptId || !leaseGeneration || !workspaceVersion) {
-    return false;
-  }
+  try {
+    await requireRunnerActiveInvocationLease(input);
+    return true;
+  } catch (error) {
+    if (error instanceof RunnerActiveInvocationLeaseError) {
+      return false;
+    }
 
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
-    stub,
-    "ownsActiveInvocationLease",
-  );
-  return await ownsActiveInvocationLease({
-    attemptId,
-    leaseGeneration,
-    userId: input.userId,
-    workspaceVersion,
-  });
+    throw error;
+  }
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
