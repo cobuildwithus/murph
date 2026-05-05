@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -101,6 +101,15 @@ export function assertHostedWebDevRequiredEnv(
   assertHostedWebDatabaseUrlConfigured(environment);
 }
 
+export function loadHostedWebDevLocalEnv(packageDir: string): void {
+  for (const envFile of [".env.local", ".env"]) {
+    const envPath = path.join(packageDir, envFile);
+    if (existsSync(envPath)) {
+      process.loadEnvFile(envPath);
+    }
+  }
+}
+
 export function resolveHostedWebDevRuntimePaths(
   packageDir: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -124,6 +133,7 @@ async function main(): Promise<void> {
   const nextBinPath = path.join(packageDir, "node_modules/next/dist/bin/next");
   const runtimePaths = resolveHostedWebDevRuntimePaths(packageDir, process.env);
 
+  loadHostedWebDevLocalEnv(packageDir);
   assertHostedWebDevRequiredEnv(process.env);
   process.chdir(packageDir);
   const releaseLock = await acquireHostedWebDevServerLock(
