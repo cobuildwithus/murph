@@ -243,6 +243,13 @@ export class HostedWorkspaceRuntimeLivenessRejectedError extends Error {
   }
 }
 
+class HostedIdleShutdownCheckpointInputAvailableError extends Error {
+  constructor() {
+    super("Hosted idle-shutdown checkpoint stopped because input became available.");
+    this.name = "HostedIdleShutdownCheckpointInputAvailableError";
+  }
+}
+
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -276,7 +283,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       throw new HostedWorkspaceRuntimeLivenessRejectedError(livenessRejectedReason);
     }
     if (isIdleShutdownCheckpoint && idleShutdownInputAvailable) {
-      throw new Error("Hosted idle-shutdown checkpoint stopped because input became available.");
+      throw new HostedIdleShutdownCheckpointInputAvailableError();
     }
   };
   const heartbeat = startRuntimeLivenessHeartbeat({
@@ -289,7 +296,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (isIdleShutdownCheckpoint) {
         idleShutdownInputAvailable = true;
         idleShutdownInputNextWakeAt = result.nextAlarmAt ?? null;
-        livenessAbortController.abort();
+        livenessAbortController.abort(new HostedIdleShutdownCheckpointInputAvailableError());
         return undefined;
       }
 
@@ -313,16 +320,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let hotRestoreCacheVaultRoot: string | null = null;
+  const recordHotRestoreCache = async (
+    response: Awaited<ReturnType<NonNullable<typeof workspacePort>["checkpoint"]>>,
+  ) => {
+    if (response.checkpointed && hotRestoreCacheVaultRoot) {
+      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+        snapshotRef: response.workspace.snapshotRef,
+        vaultRoot: hotRestoreCacheVaultRoot,
+      });
+    }
+  };
   const cacheRecordingWorkspacePort: typeof guardedWorkspacePort = {
     read: () => guardedWorkspacePort.read!(),
     async checkpoint(request) {
       const response = await guardedWorkspacePort.checkpoint(request);
-      if (response.checkpointed && hotRestoreCacheVaultRoot) {
-        await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-          snapshotRef: response.workspace.snapshotRef,
-          vaultRoot: hotRestoreCacheVaultRoot,
-        });
-      }
+      await recordHotRestoreCache(response);
+      return response;
+    },
+  };
+  const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
+    read: () => workspacePort.read!(),
+    async checkpoint(request) {
+      const response = await workspacePort.checkpoint(request);
+      await recordHotRestoreCache(response);
       return response;
     },
   };
@@ -436,8 +456,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
         livenessAbortSignal: livenessAbortController.signal,
+        readLivenessScheduledResult: () => idleShutdownInputAvailable
+          ? {
+              ...(idleShutdownInputNextWakeAt === undefined
+                ? {}
+                : { nextWakeAt: idleShutdownInputNextWakeAt }),
+              status: "scheduled",
+            }
+          : null,
         redactedStatus: workspaceRead.workspace?.redactedStatus ?? null,
-        workspacePort: cacheRecordingWorkspacePort,
+        workspacePort: idleShutdownCheckpointWorkspacePort,
       });
     }
 
@@ -554,7 +582,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
     };
   } catch (error) {
-    if (isIdleShutdownCheckpoint && idleShutdownInputAvailable) {
+    if (error instanceof HostedIdleShutdownCheckpointInputAvailableError) {
       return {
         ...(idleShutdownInputNextWakeAt === undefined
           ? {}
@@ -574,6 +602,7 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
   livenessAbortSignal: AbortSignal;
+  readLivenessScheduledResult: () => HostedWorkspaceInvocationResult | null;
   redactedStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
   workspacePort: HostedRuntimePlatform["workspacePort"];
 }): Promise<HostedWorkspaceInvocationResult> {
@@ -592,11 +621,32 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
     input.livenessAbortSignal,
   );
   input.assertRuntimeLiveness();
-  const checkpoint = await raceHostedRuntimeLiveness(
-    input.workspacePort.checkpoint(checkpointRequest),
-    input.livenessAbortSignal,
-  );
-  input.assertRuntimeLiveness();
+  const checkpointPromise = input.workspacePort.checkpoint(checkpointRequest);
+  let checkpoint: Awaited<typeof checkpointPromise>;
+  let livenessInterrupted = false;
+  try {
+    checkpoint = await raceHostedRuntimeLiveness(
+      checkpointPromise,
+      input.livenessAbortSignal,
+    );
+  } catch (error) {
+    const scheduled = input.readLivenessScheduledResult();
+    if (!scheduled) {
+      throw error;
+    }
+    livenessInterrupted = true;
+    try {
+      checkpoint = await checkpointPromise;
+    } catch {
+      return scheduled;
+    }
+    if (!checkpoint.checkpointed) {
+      return scheduled;
+    }
+  }
+  if (!livenessInterrupted) {
+    input.assertRuntimeLiveness();
+  }
   if (checkpoint.workspace.userId !== input.expectedUserId) {
     throw new HostedMailboxImportCheckpointUserMismatchError({
       actualUserId: checkpoint.workspace.userId,
@@ -608,6 +658,7 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
   }
 
   return {
+    idleShutdownCheckpointed: true,
     ...(checkpoint.workspace.redactedStatus
       ? { redactedStatus: checkpoint.workspace.redactedStatus }
       : {}),

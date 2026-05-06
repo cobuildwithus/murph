@@ -464,13 +464,316 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "scheduled",
       });
       assert.equal(checkpointRequests.length, 0);
-      assert.deepEqual(events, [
+      assert.deepEqual(events.slice(0, 3), [
         "heartbeat:1",
         "workspace.read",
         "heartbeat:2",
-        "snapshot.start",
-        "heartbeat:3",
       ]);
+      assert.ok(events.includes("heartbeat:3"));
+      assert.equal(events.includes("workspace.checkpoint"), false);
+      assert.equal(events.includes("snapshot.finish"), false);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("treats idle-shutdown checkpoint as committed when liveness reports input while checkpoint is in flight", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let checkpointStarted!: () => void;
+    let releaseCheckpoint!: () => void;
+    const checkpointStartedPromise = new Promise<void>((resolve) => {
+      checkpointStarted = resolve;
+    });
+    const releaseCheckpointPromise = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    let checkpointInFlight = false;
+    let pendingReported = false;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        if (checkpointInFlight && !pendingReported) {
+          pendingReported = true;
+          events.push("heartbeat:pending");
+          return {
+            inputAvailable: true,
+            nextAlarmAt: "2026-04-27T00:00:45.000Z",
+            ok: true,
+            pendingNudge: true,
+          };
+        }
+        events.push("heartbeat:ok");
+        return { ok: true };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_checkpoint_race",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown-race.bundle.json",
+                size: 256,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessPort,
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push("workspace.checkpoint.start");
+                checkpointRequests.push(request);
+                checkpointInFlight = true;
+                checkpointStarted();
+                await releaseCheckpointPromise;
+                events.push("workspace.checkpoint.finish");
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      await checkpointStartedPromise;
+      await vi.waitFor(() => expect(pendingReported).toBe(true));
+      releaseCheckpoint();
+      await expect(resultPromise).resolves.toEqual({
+        status: "idle",
+      });
+      assert.equal(checkpointRequests.length, 1);
+      assert.ok(events.includes("heartbeat:pending"));
+      assert.ok(events.includes("workspace.checkpoint.finish"));
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("returns scheduled when an in-flight idle-shutdown checkpoint resolves uncommitted after liveness reports input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let checkpointStarted!: () => void;
+    let releaseCheckpoint!: () => void;
+    const checkpointStartedPromise = new Promise<void>((resolve) => {
+      checkpointStarted = resolve;
+    });
+    const releaseCheckpointPromise = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    let checkpointInFlight = false;
+    let pendingReported = false;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        if (checkpointInFlight && !pendingReported) {
+          pendingReported = true;
+          events.push("heartbeat:pending");
+          return {
+            inputAvailable: true,
+            nextAlarmAt: "2026-04-27T00:00:45.000Z",
+            ok: true,
+            pendingNudge: true,
+          };
+        }
+        events.push("heartbeat:ok");
+        return { ok: true };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_checkpoint_race_uncommitted",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown-race-uncommitted.bundle.json",
+                size: 256,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessPort,
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push("workspace.checkpoint.start");
+                checkpointRequests.push(request);
+                checkpointInFlight = true;
+                checkpointStarted();
+                await releaseCheckpointPromise;
+                events.push("workspace.checkpoint.finish");
+                return {
+                  checkpointed: false,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      await checkpointStartedPromise;
+      await vi.waitFor(() => expect(pendingReported).toBe(true));
+      releaseCheckpoint();
+      await expect(resultPromise).resolves.toEqual({
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      });
+      assert.equal(checkpointRequests.length, 1);
+      assert.ok(events.includes("heartbeat:pending"));
+      assert.ok(events.includes("workspace.checkpoint.finish"));
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fails closed when an in-flight idle-shutdown checkpoint commits for another user after liveness reports input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    let checkpointStarted!: () => void;
+    let releaseCheckpoint!: () => void;
+    const checkpointStartedPromise = new Promise<void>((resolve) => {
+      checkpointStarted = resolve;
+    });
+    const releaseCheckpointPromise = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    let checkpointInFlight = false;
+    let pendingReported = false;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        if (checkpointInFlight && !pendingReported) {
+          pendingReported = true;
+          return {
+            inputAvailable: true,
+            nextAlarmAt: "2026-04-27T00:00:45.000Z",
+            ok: true,
+            pendingNudge: true,
+          };
+        }
+        return { ok: true };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_checkpoint_wrong_user",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown-wrong-user.bundle.json",
+                size: 256,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessPort,
+            workspacePort: {
+              async read() {
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                checkpointInFlight = true;
+                checkpointStarted();
+                await releaseCheckpointPromise;
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    userId: "member_synthetic_other",
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      await checkpointStartedPromise;
+      await vi.waitFor(() => expect(pendingReported).toBe(true));
+      releaseCheckpoint();
+      await expect(resultPromise).rejects.toThrow(
+        "Hosted mailbox import checkpoint returned an unexpected user.",
+      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
