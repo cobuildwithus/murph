@@ -223,6 +223,12 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.idleShutdownCheckpointSafetyMarginMs).toBe(0);
   });
 
+  it("enables idle-shutdown checkpoints by default in worker env", () => {
+    const environment = readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv());
+
+    expect(environment.idleShutdownCheckpointsEnabled).toBe(true);
+  });
+
   it("reads optional runner-secret allowlist extensions", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY,CUSTOM_API_KEY",
