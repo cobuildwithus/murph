@@ -299,6 +299,59 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
+  test("treats Stripe empty-string metadata updates as unset trial metadata fields", async () => {
+    const staleMetadata: Record<string, string> = {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      trialDurationDays: "7",
+      trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialUsageLimitUsdMicros: "2500000",
+    };
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_usage", "price_edge_usage"],
+      ],
+      metadata: staleMetadata,
+      status: "active",
+    }));
+    mocks.stripe.subscriptions.update.mockImplementationOnce(async (_id, params) =>
+      makeSubscription({
+        customer: "cus_123",
+        items: [
+          ["si_recurring", "price_edge_recurring"],
+          ["si_usage", "price_edge_usage"],
+        ],
+        metadata: applyStripeMetadataUpdate(staleMetadata, params.metadata ?? {}),
+        status: "active",
+      })
+    );
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_edge_monthly",
+      status: "upgraded",
+    });
+
+    const [appliedSubscription] = mocks.applyStripeSubscriptionUpdated.mock.calls[0] as [
+      Stripe.Subscription,
+      unknown,
+      unknown,
+    ];
+    expect(appliedSubscription.metadata).toEqual({
+      billingPlanCode: "launch_edge_monthly",
+      checkoutOffer: "standard",
+      memberId: "member_123",
+    });
+    expect(Object.hasOwn(appliedSubscription.metadata, "trialDurationDays")).toBe(false);
+    expect(Object.hasOwn(appliedSubscription.metadata, "trialPolicyVersion")).toBe(false);
+    expect(Object.hasOwn(appliedSubscription.metadata, "trialUsageLimitUsdMicros")).toBe(false);
+  });
+
   test("rejects Pulse Trial upgrades before mutating Stripe", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
       currentBillingPhase: "trial",
