@@ -13,6 +13,8 @@ import {
 const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
 const DEFAULT_HOSTED_CODEX_PATH =
   "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS_ENV =
+  "HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS";
 
 export async function maybeInstallHostedE2ECodexAppServerStub(input: {
   codexHome: string;
@@ -30,6 +32,8 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
     source: buildHostedE2ECodexAppServerStubSource({
       assistantProviderBaseUrl,
       turnDelayMs: readHostedE2ECodexAppServerStubTurnDelayMs(input.runtimeEnv),
+      useUuidThreads:
+        input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS_ENV] === "1",
     }),
   });
 }
@@ -37,8 +41,10 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
 export function buildHostedE2ECodexAppServerStubSource(input: {
   assistantProviderBaseUrl: string;
   turnDelayMs?: number | null;
+  useUuidThreads?: boolean | null;
 }): string {
   const turnDelayMs = input.turnDelayMs ?? 25;
+  const useUuidThreads = input.useUuidThreads === true;
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
@@ -46,7 +52,8 @@ const readline = require("node:readline");
 
 const assistantProviderBaseUrl = ${JSON.stringify(input.assistantProviderBaseUrl)};
 const turnDelayMs = ${JSON.stringify(turnDelayMs)};
-const useUuidThreads = process.env.HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS === "1";
+const useUuidThreads = ${JSON.stringify(useUuidThreads)};
+const processThreadPrefix = String(process.pid % 1000000).padStart(6, "0");
 let threadCounter = 0;
 let turnCounter = 0;
 let activeTurn = null;
@@ -72,7 +79,7 @@ function readCodexHome() {
 }
 
 function buildUuidThreadId(counter) {
-  return "00000000-0000-4000-8000-" + String(counter).padStart(12, "0");
+  return "00000000-0000-4000-8000-" + processThreadPrefix + String(counter).padStart(6, "0");
 }
 
 function buildRolloutRelativePath(threadId) {

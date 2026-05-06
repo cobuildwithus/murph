@@ -68,7 +68,7 @@ const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
   Omit<AssistantProviderTurnThreadScopeProfile, 'nativeResumePolicy'>
 > = {
   promptProfile: 'notification-decision',
-  threadScope: 'isolated-thread',
+  threadScope: 'session-thread',
   toolProfile: 'notification-turn',
 }
 
@@ -230,10 +230,23 @@ export async function sendAssistantNotificationLocal(
 
         if (decision.kind === 'skip') {
           assertAssistantNotificationSkipAllowed(responsePolicy)
+          const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptText: null,
+            input: messageInput,
+            plan: sharedPlan,
+            persistUserPromptToTranscript: false,
+            providerResult,
+            providerResumeStateAction: providerResult.providerSessionId
+              ? 'persist-from-provider-turn'
+              : 'preserve-existing',
+            session: providerResult.session,
+            turnCreatedAt,
+            turnId,
+          })
           return {
             decision,
             response: null,
-            session: providerResult.session,
+            session: savedSession,
           }
         }
 
@@ -262,7 +275,9 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           persistUserPromptToTranscript: false,
           providerResult,
-          providerResumeStateAction: 'preserve-existing',
+          providerResumeStateAction: providerResult.providerSessionId
+            ? 'persist-from-provider-turn'
+            : 'preserve-existing',
           session: providerResult.session,
           turnCreatedAt,
           turnId,

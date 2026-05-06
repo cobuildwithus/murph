@@ -191,16 +191,21 @@ export function resolveAssistantProviderThreadScope(input: {
   turnTrigger?: AssistantTurnTrigger | null
 }): AssistantProviderThreadScope {
   if (
-    input.profile?.promptProfile === 'notification-decision' ||
-    input.turnTrigger === 'automation-cron'
+    input.profile?.threadScope === 'isolated-thread' ||
+    input.profile?.nativeResumePolicy === 'disabled'
   ) {
     return 'isolated-thread'
   }
 
-  if (
-    input.profile?.threadScope === 'isolated-thread' ||
-    input.profile?.nativeResumePolicy === 'disabled'
-  ) {
+  if (input.profile?.threadScope === 'session-thread') {
+    return 'session-thread'
+  }
+
+  if (input.turnTrigger === 'automation-cron') {
+    return 'isolated-thread'
+  }
+
+  if (input.profile?.promptProfile === 'notification-decision') {
     return 'isolated-thread'
   }
 

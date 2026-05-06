@@ -43,10 +43,12 @@ interface AssistantCodexModelProviderRegistration {
 
 export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID = 'vercel-ai-gateway'
 export const OPENAI_CODEX_MODEL_PROVIDER_ID = 'openai'
+export const HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID = 'hosted-openai'
 export const VENICE_CODEX_MODEL_PROVIDER_ID = 'venice'
 
 export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   'ollama',
   'lmstudio',
 ] as const

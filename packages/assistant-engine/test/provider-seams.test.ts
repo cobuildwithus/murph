@@ -8,6 +8,9 @@ import {
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  normalizeAssistantProviderConfig,
+} from '@murphai/operator-config/assistant/provider-config'
+import {
   type AssistantProviderProgressEvent,
   createAssistantProviderToolProgressEvent,
   mergeAssistantProviderActivityLabels,
@@ -42,7 +45,10 @@ import {
   writeAssistantSessionProviderSessionId,
   writeAssistantSessionThreadInstructionsFingerprint,
 } from '../src/assistant/provider-state.ts'
-import type { CodexThreadIdentity } from '../src/assistant/provider-route.ts'
+import {
+  buildCodexThreadIdentity,
+  type CodexThreadIdentity,
+} from '../src/assistant/provider-route.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
@@ -67,6 +73,40 @@ afterEach(async () => {
 })
 
 describe('assistant provider seam helpers', () => {
+  it('stabilizes hosted Codex homes without dropping explicit local Codex home identity', () => {
+    const firstHostedRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: '/tmp/runner-a/home/.codex-hosted',
+        model: 'gpt-synthetic',
+        modelProvider: 'hosted-openai',
+      }),
+    )
+    const secondHostedRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: '/tmp/runner-b/home/.codex-hosted',
+        model: 'gpt-synthetic',
+        modelProvider: 'hosted-openai',
+      }),
+    )
+    const firstLocalRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: '/tmp/local-codex-home-a',
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+    const secondLocalRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        codexHome: '/tmp/local-codex-home-b',
+        model: 'gpt-synthetic',
+        modelProvider: 'openai',
+      }),
+    )
+
+    expect(secondHostedRoute.routeId).toBe(firstHostedRoute.routeId)
+    expect(secondLocalRoute.routeId).not.toBe(firstLocalRoute.routeId)
+  })
+
   it('matches resume bindings only when the stored route id matches exactly', () => {
     const previousResumeState = {
       providerSessionId: 'provider_session_alpha',
