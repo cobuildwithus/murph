@@ -622,19 +622,25 @@ jobs:
 
       - name: Publish deployment summary
         shell: bash
+        env:
+          DEPLOY_SUMMARY_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
+          DEPLOY_SUMMARY_ENVIRONMENT: ${{ inputs.environment }}
+          DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC: ${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}
+          DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || 'environment default' }}
+          DEPLOY_SUMMARY_SMOKE_USER_ID: ${{ inputs.smoke_user_id || 'not-set' }}
         run: |
           {
-            echo "## Cloudflare hosted execution deploy"
-            echo
-            echo "- Environment: \`${{ inputs.environment }}\`"
-            echo "- Deploy strategy: \`direct\`"
-            echo "- Container rollout: \`${{ inputs.container_rollout }}\`"
-            echo "- Runner idle TTL override: \`${{ inputs.runner_idle_ttl_ms || 'environment default' }}\`"
-            echo "- Worker name: \`${CF_WORKER_NAME}\`"
-            echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
-            echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"
-            echo "- Container max instances: \`${CF_CONTAINER_MAX_INSTANCES}\`"
-            echo "- Native container image: base prepared from \`Dockerfile.cloudflare-hosted-runner-base\`; app layer built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
-            echo "- Deployed versions: \`${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}\`"
-            echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"
+            printf '%s\n' "## Cloudflare hosted execution deploy"
+            printf '\n'
+            printf -- '- Environment: `%s`\n' "${DEPLOY_SUMMARY_ENVIRONMENT}"
+            printf -- '- Deploy strategy: `%s`\n' "direct"
+            printf -- '- Container rollout: `%s`\n' "${DEPLOY_SUMMARY_CONTAINER_ROLLOUT}"
+            printf -- '- Runner idle TTL override: `%s`\n' "${DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS}"
+            printf -- '- Worker name: `%s`\n' "${CF_WORKER_NAME}"
+            printf -- '- Worker URL: `%s`\n' "${CF_PUBLIC_BASE_URL:-not-set}"
+            printf -- '- Container instance type: `%s`\n' "${CF_CONTAINER_INSTANCE_TYPE}"
+            printf -- '- Container max instances: `%s`\n' "${CF_CONTAINER_MAX_INSTANCES}"
+            printf '%s\n' "- Native container image: base prepared from \`Dockerfile.cloudflare-hosted-runner-base\`; app layer built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
+            printf -- '- Deployed versions: `%s`\n' "${DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC}"
+            printf -- '- Smoke user id: `%s`\n' "${DEPLOY_SUMMARY_SMOKE_USER_ID}"
           } >> "$GITHUB_STEP_SUMMARY"
