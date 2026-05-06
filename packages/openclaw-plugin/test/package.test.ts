@@ -26,6 +26,9 @@ describe("@murphai/openclaw-plugin", () => {
     expect(skill).toContain("Use OpenClaw's built-in `exec` tool to run `vault-cli` commands.");
     expect(skill).toContain("Do not create or manage a second Murph assistant runtime inside OpenClaw.");
     expect(skill).toContain("`vault-cli <command path> --schema --format json`");
+    expect(skill).toContain("--from-protocol <key-or-route>");
+    expect(skill).toContain("--custom");
+    expect(skill).not.toContain("experiment start <slug> --protocol-key");
     expect(skill).toContain('`vault-cli search query "<query>"`');
     expect(skill).toContain("Do not read raw revision hashes, field names, or test-plan ids aloud");
     expect(skill).toContain("Ask at most two questions per response");

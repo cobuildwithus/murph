@@ -155,7 +155,7 @@ test('experiment start schema exposes typed fields while protocol import-json ke
       required?: string[]
     }
     options: {
-      properties: Record<string, unknown>
+      properties: Record<string, { description?: string }>
       required?: string[]
     }
     output: {
@@ -172,6 +172,18 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   assert.equal('protocolKey' in experimentStartSchema.options.properties, false)
   assert.equal('fromProtocol' in experimentStartSchema.options.properties, true)
   assert.equal('custom' in experimentStartSchema.options.properties, true)
+  assert.match(
+    experimentStartSchema.options.properties.fromProtocol.description ?? '',
+    /Choose this instead of --custom/u,
+  )
+  assert.match(
+    experimentStartSchema.options.properties.custom.description ?? '',
+    /Choose this instead of --from-protocol/u,
+  )
+  assert.match(
+    experimentStartSchema.options.properties.testPlanId.description ?? '',
+    /Only valid with --from-protocol/u,
+  )
   assert.equal('interventionStart' in experimentStartSchema.options.properties, true)
   assert.equal('dryRun' in experimentStartSchema.options.properties, true)
   assert.equal('input' in protocolImportJsonSchema.options.properties, true)
