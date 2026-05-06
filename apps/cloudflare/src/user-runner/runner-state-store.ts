@@ -249,7 +249,6 @@ export class RunnerStateStore {
   } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     meta.pending_nudge = 1;
-    meta.retry_failure_count = 0;
     meta.next_wake_at = resolveRunnerNextWakeAt({
       preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
     });
