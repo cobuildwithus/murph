@@ -374,6 +374,10 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     enabledChannels: input.enabledChannels,
     group: context,
     onEvent: input.onEvent,
+    receiptFallbackEnabled: shouldUseAssistantAutoReplyReceiptFallback({
+      deliveryDispatchMode: input.deliveryDispatchMode,
+      executionContext: input.executionContext,
+    }),
     requestId: input.requestId,
     signal: input.signal,
     vault: input.vault,
@@ -830,6 +834,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   enabledChannels: readonly string[]
   group: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
+  receiptFallbackEnabled: boolean
   requestId: string | null
   signal?: AbortSignal
   vault: string
@@ -907,26 +912,30 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return { kind: 'ignore' }
   }
   const primaryReplyInput = createAssistantAutoReplyPrimaryInput(primaryInput)
-  const receipts = await listAssistantTurnReceipts(
-    input.vault,
-    ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
-  )
-  const handledReceipt = resolveAssistantAutoReplyHandledTurnReceipt(
-    receipts,
-    input.group.inputIds,
-    input.group.optionalInboxCaptureIds,
-  )
-  if (handledReceipt) {
-    await backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot({
-      captureIds: input.group.optionalInboxCaptureIds,
-      context: input.group,
-      snapshot: handledReceipt,
-      vault: input.vault,
-    })
-    return createAdvancingSkipDecision('assistant reply already handled', {
-      checkpointRequired: true,
-      terminalSuppression: false,
-    })
+  const receipts = input.receiptFallbackEnabled
+    ? await listAssistantTurnReceipts(
+        input.vault,
+        ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
+      )
+    : []
+  if (input.receiptFallbackEnabled) {
+    const handledReceipt = resolveAssistantAutoReplyHandledTurnReceipt(
+      receipts,
+      input.group.inputIds,
+      input.group.optionalInboxCaptureIds,
+    )
+    if (handledReceipt) {
+      await backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot({
+        captureIds: input.group.optionalInboxCaptureIds,
+        context: input.group,
+        snapshot: handledReceipt,
+        vault: input.vault,
+      })
+      return createAdvancingSkipDecision('assistant reply already handled', {
+        checkpointRequired: true,
+        terminalSuppression: false,
+      })
+    }
   }
 
   const channelAdapter = getAssistantChannelAdapter(primaryReplyInput.source)
@@ -1150,6 +1159,16 @@ async function executeAssistantAutoReply(input: {
 }
 
 function shouldUseAssistantAutoReplyActiveTurnInputHooks(input: {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
+}): boolean {
+  return !(
+    input.executionContext?.hosted != null &&
+    input.deliveryDispatchMode === 'queue-only'
+  )
+}
+
+function shouldUseAssistantAutoReplyReceiptFallback(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
 }): boolean {

@@ -4570,6 +4570,7 @@ describe('assistant auto-reply runtime', () => {
       'diagnostic-recorded',
       'runtime-maintenance-finished',
       'outbox-drain-finished',
+      'input-refresh-finished',
       'state-read',
       'recovery-finished',
       'scan-finished',
@@ -4597,6 +4598,56 @@ describe('assistant auto-reply runtime', () => {
       expect(JSON.stringify(event.rawEvent)).not.toContain('/tmp/')
       expect(JSON.stringify(event.rawEvent)).not.toContain('request-timing')
     }
+  })
+
+  it('refreshes assistant input before recovery and scan', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const inputSource: AssistantInputSource = {
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: true,
+        reason: 'ingested_input' as const,
+      })),
+    }
+    const onTraceEvent = vi.fn()
+
+    await runLoop.runAssistantAutomationPass({
+      inputSource,
+      onTraceEvent,
+      requestId: 'request-input-refresh',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(inputSource.refresh).toHaveBeenCalledWith({
+      phase: 'input_available',
+      signal: undefined,
+    })
+    expect(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
+      .toBeLessThan(
+        runLoopMocks.recoverAssistantAutoReplies.mock.invocationCallOrder[0]!,
+      )
+    expect(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
+      .toBeLessThan(
+        runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
+      )
+    expect(
+      onTraceEvent.mock.calls
+        .map(([event]) => event.rawEvent)
+        .find((event) => event.automationPassStage === 'input-refresh-finished'),
+    ).toMatchObject({
+      automationPassInputRefreshProgressed: true,
+      automationPassInputRefreshSkipped: false,
+      automationPassInputRefreshSourceUnavailable: false,
+    })
   })
 
   it('skips status refresh on hosted queue-only automation passes', async () => {
@@ -5992,6 +6043,7 @@ describe('assistant auto-reply runtime', () => {
     expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(inputSource.refresh).not.toHaveBeenCalled()
     expect(inputSource.listNewConversationInputs).not.toHaveBeenCalled()
+    expect(replyMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
