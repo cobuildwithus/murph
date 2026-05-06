@@ -2,7 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
 } from "@murphai/hosted-execution/runtime-control";
-import type { AssistantUsageRecord } from "@murphai/runtime-state/node/assistant-usage";
+import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it, vi } from "vitest";
 
 import {

@@ -47,7 +47,7 @@ export async function readOptionalJsonObject(
   return requireJsonObject(JSON.parse(payload));
 }
 
-async function readRequestBodyText(
+export async function readRequestBodyText(
   request: Request,
   options: JsonBodyReadOptions,
 ): Promise<string> {

@@ -690,6 +690,70 @@ describe("RunnerContainer", () => {
     );
   });
 
+  it("does not probe or invoke a surviving shell after losing the in-memory control token", async () => {
+    let status: "running" | "stopped" = "running";
+    let freshShellStarted = false;
+    let freshControlToken: string | null = null;
+
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const startAndWaitForPorts = vi.fn(async (options: {
+      startOptions?: {
+        envVars?: Record<string, string>;
+      };
+    }) => {
+      expect(status).toBe("stopped");
+      freshControlToken = options.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN ?? null;
+      expect(freshControlToken).toMatch(/^[0-9a-f-]{36}$/u);
+      status = "running";
+      freshShellStarted = true;
+    });
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (!freshShellStarted) {
+        throw new Error("Stale warm shell must not receive health checks or invocation requests.");
+      }
+      expect(url).toBe("http://container/internal/workspace-invocation");
+      expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${freshControlToken}`);
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+      startAndWaitForPorts,
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_do_memory_lost_control_token"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy.mock.invocationCallOrder[0]).toBeLessThan(
+      startAndWaitForPorts.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(startAndWaitForPorts.mock.invocationCallOrder[0]).toBeLessThan(
+      containerFetch.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(containerFetch).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the remaining caller timeout budget when a warm-shell health check fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));

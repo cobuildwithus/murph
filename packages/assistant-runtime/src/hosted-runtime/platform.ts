@@ -9,10 +9,15 @@ import type {
   HostedMailboxPayloadFetchResponse,
   HostedRuntimeLogRequest,
   HostedRuntimeLogResponse,
+  HostedRuntimeIssueExportResponse,
+  HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
@@ -197,8 +202,8 @@ export interface HostedRuntimeDeviceSyncPort {
   >;
 }
 
-export interface HostedRuntimeUsageExportPort {
-  recordUsage(usage: readonly object[]): Promise<HostedRuntimeUsageRecordResponse>;
+export interface HostedRuntimeUsageRecordPort {
+  recordUsage(record: AssistantUsageRecord): Promise<HostedRuntimeUsageRecordResponse>;
 }
 
 export interface HostedRuntimeIssueExportPort {
@@ -252,80 +257,14 @@ export interface HostedRuntimePlatform {
   refreshMailboxForActiveTurnInput?: HostedRuntimeActiveTurnInputMailboxRefresh | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
-  usageExportPort?: HostedRuntimeUsageExportPort | null;
+  usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
 }
 
-export interface HostedRuntimeUsageRecordResponse {
-  recorded: number;
-  usageIds: string[];
-}
+export type HostedRuntimeIssueRecordResponse = HostedRuntimeIssueExportResponse;
+export type HostedRuntimeUsageRecordResponse = HostedExecutionRuntimeUsageRecordResponse;
 
-export interface HostedRuntimeIssueRecordResponse {
-  issueIds: string[];
-  recorded: number;
-}
-
-export function parseHostedRuntimeUsageRecordResponse(
-  value: unknown,
-): HostedRuntimeUsageRecordResponse {
-  const response = parseHostedRuntimeRecordResponse(value, "usageIds");
-  return {
-    recorded: response.recorded,
-    usageIds: response.ids,
-  };
-}
-
-function parseHostedRuntimeRecordResponse(
-  value: unknown,
-  idsFieldName: "issueIds" | "usageIds",
-): { ids: string[]; recorded: number } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime record response must be an object.");
-  }
-
-  const recorded = (value as { recorded?: unknown }).recorded;
-  const ids = (value as Record<string, unknown>)[idsFieldName];
-
-  if (typeof recorded !== "number" || !Number.isSafeInteger(recorded) || recorded < 0) {
-    throw new TypeError("Hosted runtime record response.recorded must be a non-negative integer.");
-  }
-
-  if (!Array.isArray(ids)) {
-    throw new TypeError(`Hosted runtime record response.${idsFieldName} must be a string array of non-empty values.`);
-  }
-
-  const normalizedIds: string[] = []
-  for (const entry of ids) {
-    if (typeof entry !== "string") {
-      throw new TypeError(`Hosted runtime record response.${idsFieldName} must be a string array of non-empty values.`);
-    }
-    const trimmedEntry = entry.trim()
-    if (trimmedEntry.length === 0) {
-      throw new TypeError(`Hosted runtime record response.${idsFieldName} must be a string array of non-empty values.`);
-    }
-    normalizedIds.push(trimmedEntry)
-  }
-
-  if (recorded !== normalizedIds.length) {
-    throw new TypeError(
-      `Hosted runtime record response.recorded must equal ${idsFieldName}.length.`,
-    );
-  }
-
-  return {
-    ids: normalizedIds,
-    recorded,
-  };
-}
-
-
-export function parseHostedRuntimeIssueRecordResponse(
-  value: unknown,
-): HostedRuntimeIssueRecordResponse {
-  const response = parseHostedRuntimeRecordResponse(value, "issueIds");
-  return {
-    issueIds: response.ids,
-    recorded: response.recorded,
-  };
-}
+export {
+  parseHostedRuntimeIssueExportResponse as parseHostedRuntimeIssueRecordResponse,
+  parseHostedRuntimeUsageRecordResponse,
+} from "@murphai/hosted-execution/parsers";

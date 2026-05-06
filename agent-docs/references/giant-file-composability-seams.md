@@ -6,22 +6,20 @@ Murph is still greenfield, so the bias here is to cut cleaner module seams befor
 
 ## Implemented in this patch
 
-### 1. Split hosted pending-usage dirty-user tracking from per-user usage record storage
+### 1. Removed hosted pending-usage Cloudflare storage
 
-**Seam:** `apps/cloudflare/src/usage-store.ts`, `apps/cloudflare/src/usage-store/dirty-users.ts`, `apps/cloudflare/src/worker-routes/internal-user.ts`
+**Seam:** historical `apps/cloudflare/src/usage-store.ts`, `apps/cloudflare/src/usage-store/dirty-users.ts`, and worker-route pending-usage storage paths
 
-`apps/cloudflare/src/usage-store.ts` was carrying two different storage concerns:
+Historical note: Cloudflare previously carried two hosted pending-usage storage concerns:
 
-- per-user pending usage record append/read/delete (`createHostedPendingUsageStore`, `readStoredHostedPendingUsageRecordByUsageId`, `writeStoredHostedPendingUsageRecord`)
+- per-user hosted usage record append/read/delete
 - cross-user dirty-marker persistence and scanning (`createHostedPendingUsageDirtyUserStore`, `writeHostedPendingUsageDirtyUser`, `deleteHostedPendingUsageDirtyUser`, `parseStoredHostedPendingUsageDirtyUser`)
 
-Those paths share the same bucket and crypto primitives, but they do not share the same responsibility boundary. One owns user-scoped usage records; the other owns scheduler-facing dirty-user markers.
+Those paths shared the same bucket and crypto primitives, but they did not share the same responsibility boundary. One owned user-scoped usage records; the other owned scheduler-facing dirty-user markers.
 
-This patch moves the dirty-marker symbols into `apps/cloudflare/src/usage-store/dirty-users.ts` and updates the worker route to depend on that module directly.
+Hosted assistant usage is now recorded directly into the web-owned usage ledger through the hosted-execution callback contract. The normal path no longer has Cloudflare-owned pending usage record storage or dirty-user marker storage.
 
-**Why this is simpler:** changes to dirty-user listing or marker retention no longer widen the per-user usage record file. The remaining `usage-store.ts` keeps one narrower owner role: persisted usage records plus the record-side read/delete lifecycle.
-
-**Follow-up path:** if the per-user record file grows again, the next safe cut is the record codec/object-key cluster (`parseStoredHostedPendingUsageRecord`, `pendingUsageRecordObjectKey`, `pendingUsageRecordObjectPrefix`) into a record-owned submodule without reintroducing a generic storage helper layer.
+**Why this is simpler:** there is no Cloudflare usage storage owner to split or preserve. Idempotency lives in the web ledger by `usageId`, and the runner only invokes a narrow best-effort recording port.
 
 ## Current targeted review findings
 

@@ -412,6 +412,9 @@ printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
         `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$@" > .fake-tools/committer.args
+if [[ -f agent-docs/exec-plans/active/COORDINATION_LEDGER.md ]]; then
+  cp agent-docs/exec-plans/active/COORDINATION_LEDGER.md .fake-tools/committer-ledger.md
+fi
 `,
         true,
       )
@@ -423,6 +426,7 @@ printf '%s\\n' "$@" > .fake-tools/committer.args
 | Agent | Scope | Plan | Files | Symbols | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | Codex | Harness | \`agent-docs/exec-plans/active/2026-04-24-harness.md\` | \`docs/touched.md\` | finish-task harness | in_progress | Harness row |
+| Codex | Stable | \`agent-docs/exec-plans/active/stable.md\` | \`docs/stable.md\` | stable row | active | Existing row |
 `,
       )
       writeHarnessFile(
@@ -459,6 +463,18 @@ Updated: 2026-04-24
       }
 
       writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n\nAfter\n')
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
+        `# Coordination Ledger
+
+| Agent | Scope | Plan | Files | Symbols | Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Codex | Harness | \`agent-docs/exec-plans/active/2026-04-24-harness.md\` | \`docs/touched.md\` | finish-task harness | in_progress | Harness row |
+| Codex | Stable | \`agent-docs/exec-plans/active/stable.md\` | \`docs/stable.md\` | stable row | active | Existing row |
+| Codex | Unrelated | \`agent-docs/exec-plans/active/unrelated.md\` | \`docs/unrelated.md\` | unrelated row | active | Concurrent dirty row |
+`,
+      )
 
       const result = spawnSync(
         'bash',
@@ -490,6 +506,12 @@ Updated: 2026-04-24
       expect(
         readFileSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/COORDINATION_LEDGER.md'), 'utf8'),
       ).not.toContain('agent-docs/exec-plans/active/2026-04-24-harness.md')
+      expect(
+        readFileSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/COORDINATION_LEDGER.md'), 'utf8'),
+      ).toContain('agent-docs/exec-plans/active/unrelated.md')
+      expect(result.stdout).toContain(
+        'finish-task: commit includes only this task\'s ledger-row removal',
+      )
 
       const closeArgs = readFileSync(
         path.join(harnessRoot, '.fake-tools', 'close-exec-plan.args'),
@@ -513,9 +535,17 @@ Updated: 2026-04-24
           'close harness plan',
           'agent-docs/exec-plans/active/2026-04-24-harness.md',
           'agent-docs/exec-plans/completed/2026-04-24-harness.md',
+          'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
           'docs/touched.md',
         ]),
       )
+      const committedLedger = readFileSync(
+        path.join(harnessRoot, '.fake-tools', 'committer-ledger.md'),
+        'utf8',
+      )
+      expect(committedLedger).not.toContain('agent-docs/exec-plans/active/2026-04-24-harness.md')
+      expect(committedLedger).not.toContain('agent-docs/exec-plans/active/unrelated.md')
+      expect(committedLedger).toContain('agent-docs/exec-plans/active/stable.md')
     } finally {
       rmSync(harnessRoot, { recursive: true, force: true })
     }

@@ -111,6 +111,9 @@ export async function handleHostedEmailIngress(
     headerFrom: resolvedHeaderFrom,
     to: message.to,
     webCallbackSigning: environment.webCallbackSigning,
+    ...(environment.hostedWebAllowHttpHosts
+      ? { webControlAllowHttpHosts: environment.hostedWebAllowHttpHosts }
+      : {}),
     webControlBaseUrl: environment.hostedWebBaseUrl,
   });
 
@@ -168,6 +171,9 @@ export async function handleHostedEmailIngress(
   const promptProjection = buildHostedEmailPromptProjection(parsedMessage);
 
   const appendResult = await appendHostedEmailIngressWakeInWeb({
+    ...(environment.hostedWebAllowHttpHosts
+      ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
+      : {}),
     baseUrl: environment.hostedWebBaseUrl,
     body: {
       ...promptProjection,
@@ -236,6 +242,9 @@ export async function handleHostedEmailIngress(
     to: message.to,
     userId: route.userId,
     webControl: {
+      ...(environment.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: environment.hostedWebAllowHttpHosts }
+        : {}),
       baseUrl: environment.hostedWebBaseUrl,
       callbackSigning: environment.webCallbackSigning,
       mailboxItemId: appendResult.item.id,
@@ -268,6 +277,7 @@ async function startHostedEmailRunnerNudgeWorkflow(input: {
   to: string;
   userId: string;
   webControl: {
+    allowHttpHosts?: readonly string[];
     baseUrl: string;
     callbackSigning: ReturnType<typeof readHostedExecutionEnvironment>["webCallbackSigning"];
     mailboxItemId: string;
@@ -276,6 +286,9 @@ async function startHostedEmailRunnerNudgeWorkflow(input: {
 }): Promise<void> {
   try {
     await startHostedEmailIngressNudgeWorkflowInWeb({
+      ...(input.webControl.allowHttpHosts
+        ? { allowHttpHosts: input.webControl.allowHttpHosts }
+        : {}),
       baseUrl: input.webControl.baseUrl,
       boundUserId: input.userId,
       callbackSigning: input.webControl.callbackSigning,

@@ -254,6 +254,15 @@ export async function runHostedWorkspaceAssistantPhase(
         deviceConnectProviders,
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         memberId: input.request.userId,
+        ...(input.runtime.platform.usageRecordPort
+          ? {
+              usageRecorder: {
+                recordUsage: async (record) => {
+                  await input.runtime.platform.usageRecordPort?.recordUsage(record);
+                },
+              },
+            }
+          : {}),
         userEnvKeys: Object.keys(input.runtime.userEnv),
       },
     },
@@ -508,6 +517,8 @@ export async function runHostedWorkspaceAssistantPhase(
       },
       signal: input.signal ?? undefined,
       skipDeviceSync,
+      skipInitialMailboxRefresh:
+        input.initialMailboxImport.importResult.importedCount > 0,
       vaultRoot: input.restored.vaultRoot,
       wake,
     });
@@ -865,11 +876,20 @@ function resolveSkippedDeviceSyncWakeAt(input: {
     return null;
   }
 
-  if (!consumedScheduledWorkspaceWake(input.input)) {
+  const wakeTime = Date.parse(existingWakeAt);
+  if (!Number.isFinite(wakeTime)) {
     return existingWakeAt;
   }
 
-  return new Date(Date.now() + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString();
+  if (wakeTime > Date.now()) {
+    return existingWakeAt;
+  }
+
+  if (input.input.request.reason === "alarm") {
+    return new Date(Date.now() + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString();
+  }
+
+  return null;
 }
 
 async function writeHostedSystemMailboxRuntimeLog(input: {

@@ -29,8 +29,6 @@ export interface AssistantStatePaths {
   statusPath: string;
   transcriptsDirectory: string;
   turnsDirectory: string;
-  usageDirectory: string;
-  usagePendingDirectory: string;
 }
 
 export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePaths {
@@ -44,7 +42,6 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   const turnsDirectory = path.join(rootPath, "receipts");
   const secretsDirectory = path.join(rootPath, "secrets");
   const sessionSecretsDirectory = path.join(secretsDirectory, "sessions");
-  const usageDirectory = path.join(rootPath, "usage");
 
   return {
     absoluteVaultRoot,
@@ -73,7 +70,5 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     statusPath: path.join(rootPath, "status.json"),
     transcriptsDirectory: path.join(rootPath, "transcripts"),
     turnsDirectory,
-    usageDirectory,
-    usagePendingDirectory: path.join(usageDirectory, "pending"),
   };
 }

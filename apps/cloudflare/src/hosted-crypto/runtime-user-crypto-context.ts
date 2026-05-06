@@ -242,6 +242,9 @@ async function buildHostedUserCryptoContextFromResponse(input: {
       let resolved;
       try {
         resolved = await fetchHostedWorkerRuntimeRootByRootKeyId({
+          ...(input.environment.hostedWebAllowHttpHosts
+            ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
+            : {}),
           baseUrl: input.environment.hostedWebBaseUrl,
           callbackSigning: input.environment.webCallbackSigning,
           cryptoEnv: input.hostedCryptoEnv,
@@ -305,6 +308,9 @@ async function loadHostedRuntimeCryptoContextEnvelope(input: {
   }
 
   const response = await fetchHostedExecutionWebControlPlaneResponse({
+    ...(input.environment.hostedWebAllowHttpHosts
+      ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
+      : {}),
     baseUrl: input.environment.hostedWebBaseUrl,
     boundUserId: input.userId,
     callbackSigning: input.environment.webCallbackSigning,

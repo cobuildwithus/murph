@@ -22,6 +22,7 @@ import {
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+  HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -679,6 +680,36 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("rejects oversized allowlisted hosted web-control bodies before proxying", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
+        body: JSON.stringify({
+          usage: {
+            payload: "x".repeat((256 * 1024) + 1),
+          },
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Request body too large.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("proxies workspace checkpoints after live lease validation", async () => {
     const bindUser = vi.fn(async (userId: string) => ({ userId }));

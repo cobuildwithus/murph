@@ -6,7 +6,7 @@ import {
   parseAssistantUsageRecord,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
-} from "@murphai/runtime-state/node/assistant-usage";
+} from "@murphai/hosted-execution/assistant-usage";
 
 import {
   HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
@@ -17,9 +17,8 @@ import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member
 import { getPrisma } from "../prisma";
 import { accountHostedAiUsageForAllowanceTx } from "./usage-allowance";
 
-export interface ImportHostedAiUsageResult {
+export interface RecordHostedAiUsageResult {
   recordedIds: string[];
-  records: AssistantUsageRecord[];
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
@@ -511,31 +510,26 @@ async function updateHostedAiUsageStripeMeterState(input: {
   };
 }
 
-export async function importHostedAiUsageRecords(input: {
+export async function recordHostedAiUsageRecords(input: {
   accountAllowance?: boolean;
   aiUsageBillingMode?: HostedAiUsageBillingMode;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
-}): Promise<ImportHostedAiUsageResult> {
+}): Promise<RecordHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
   const aiUsageBillingMode = input.aiUsageBillingMode ?? readHostedAiUsageBillingMode();
-  const records = dedupeHostedAiUsageRecords(parseHostedAiUsageImportRecords(input.usage));
+  const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
   const recordedIds: string[] = [];
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    await runHostedAiUsageImportTransaction(prisma, async (tx) => {
+    await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       const storedRecord = await tx.hostedAiUsage.upsert({
         where: {
           id: record.usageId,
         },
-        create: buildHostedAiUsageCreateData(
-          record,
-          memberId,
-          "murph",
-          aiUsageBillingMode,
-        ),
+        create: buildHostedAiUsageCreateData(record, memberId, aiUsageBillingMode),
         update: {},
         select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
       });
@@ -559,11 +553,10 @@ export async function importHostedAiUsageRecords(input: {
 
   return {
     recordedIds,
-    records,
   };
 }
 
-async function runHostedAiUsageImportTransaction<T>(
+async function runHostedAiUsageRecordTransaction<T>(
   prisma: HostedAiUsageClient,
   run: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
@@ -643,7 +636,7 @@ function dedupeHostedAiUsageRecords(
 
     if (existing && !sameAssistantUsageRecord(existing, record)) {
       throw new TypeError(
-        "Hosted AI usage import contains conflicting records for one usage id.",
+        "Hosted AI usage recording contains conflicting records for one usage id.",
       );
     }
 
@@ -653,13 +646,13 @@ function dedupeHostedAiUsageRecords(
   return [...recordsByUsageId.values()];
 }
 
-function parseHostedAiUsageImportRecords(
+function parseHostedAiUsageRecords(
   usage: readonly unknown[],
 ): AssistantUsageRecord[] {
   try {
     return usage.map((entry) => parseAssistantUsageRecord(entry));
   } catch {
-    throw new TypeError("Hosted AI usage import contains an invalid usage record.");
+    throw new TypeError("Hosted AI usage recording contains an invalid usage record.");
   }
 }
 
@@ -692,7 +685,6 @@ function stringifyHostedAiUsageRecordForComparison(
 function buildHostedAiUsageCreateData(
   record: AssistantUsageRecord,
   memberId: string,
-  stripeMeterSource: AssistantUsageRecord["stripeMeterSource"],
   aiUsageBillingMode: HostedAiUsageBillingMode,
 ): Prisma.HostedAiUsageUncheckedCreateInput {
   return {
@@ -723,7 +715,7 @@ function buildHostedAiUsageCreateData(
     gatewayTagsJson: record.gatewayTags,
     reportingUserId: record.reportingUserId,
     surface: record.surface,
-    stripeMeterSource,
+    stripeMeterSource: record.stripeMeterSource,
     triggerKind: record.triggerKind,
     inputTokens: record.inputTokens,
     outputTokens: record.outputTokens,
@@ -995,7 +987,7 @@ function requireHostedAiUsageMemberId(
 ): string {
   if (!record.memberId) {
     throw new TypeError(
-      "Hosted AI usage is missing memberId and cannot be imported into the hosted usage ledger.",
+      "Hosted AI usage is missing memberId and cannot be recorded into the hosted usage ledger.",
     );
   }
 

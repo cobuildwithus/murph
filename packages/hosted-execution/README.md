@@ -6,7 +6,8 @@ Cloudflare execution worker.
 ## Scope
 
 - own shared hosted execution contract types for the greenfield mailbox,
-  workspace checkpoint, redacted runtime log, and runner nudge/status seams
+  workspace checkpoint, redacted runtime log, hosted usage record, and runner
+  nudge/status seams
 - define hosted execution auth header names and request-canonicalization helpers
 - normalize the shared hosted execution env variables that are deployment-vendor neutral
 - build stable internal route paths for hosted runtime mailbox, workspace,
@@ -20,6 +21,8 @@ New hosted runtime code should import mailbox, workspace checkpoint, runtime log
 runner nudge/status, and workspace invocation contracts from
 `@murphai/hosted-execution/runtime-control`. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
+Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
+record contract, parser, id helper, and credential-source helper.
 
 Run/cursor/drain contracts and parsers are not part of the active package
 surface. Historical completed plans and migration notes may still mention them
@@ -31,8 +34,8 @@ as deleted state.
 - the shared control/status path layout stays stable between callers and the worker
 - vendor-neutral env naming stays canonical so hosted web and Cloudflare do not drift
 - this package owns only the shared hosted-execution transport seam: mailbox,
-  workspace checkpoint, runtime log/status codecs, route builders, auth header
-  names, and canonicalization helpers
+  workspace checkpoint, runtime log/status codecs, hosted usage record codecs,
+  route builders, auth header names, and canonicalization helpers
 - deployment topology stays app-local: shared packages must not own worker hostnames, callback base-url defaults, or proxy-vs-server inference
 - app-local auth adapters still own deployment-specific bearer token acquisition plus callback signing and verification
 - operator-facing hosted public-origin fallback and Cloudflare callback-key config stay app-local and are intentionally documented in `apps/web/README.md`, not here

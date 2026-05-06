@@ -19,6 +19,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
@@ -217,6 +218,7 @@ test("hosted Codex runtime config installs a local E2E app-server stub when conf
       HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         "http://host.docker.internal:4123/v1",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "1234",
       NODE_ENV: "test",
       OPENAI_API_KEY: "secret-openai-key",
     },
@@ -232,6 +234,7 @@ test("hosted Codex runtime config installs a local E2E app-server stub when conf
   assert.match(shimSource, /^#!\/usr\/bin\/env node/u);
   assert.match(shimSource, /hosted-e2e-codex-shim/u);
   assert.match(shimSource, /http:\/\/host\.docker\.internal:4123\/v1/u);
+  assert.match(shimSource, /const turnDelayMs = 1234;/u);
   const shimMode = (await stat(shimPath)).mode & 0o777;
   assert.equal(shimMode, 0o700);
 });
@@ -675,6 +678,24 @@ test("hosted runtime launch env policy forwards the test-only model provider bas
       OPENAI_API_KEY: "openai-key",
     })[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
     "http://127.0.0.1:4111/v1",
+  );
+});
+
+test("hosted runtime launch env policy forwards the E2E Codex turn delay probe control", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV]: "6000",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV],
+    "6000",
   );
 });
 

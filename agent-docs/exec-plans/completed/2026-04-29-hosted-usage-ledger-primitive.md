@@ -1,5 +1,10 @@
 # Greenfield Hosted Usage Ledger Primitive
 
+Completed/superseded note, 2026-05-06: this plan described the former local
+pending-usage export lifecycle. Hosted usage now records directly to the
+web-owned usage ledger from the normalized provider-result boundary; see
+`agent-docs/exec-plans/active/2026-05-06-hosted-usage-direct-recording.md`.
+
 ## Goal
 
 Design the cleanest long-term hosted assistant usage primitive with the fewest moving parts.

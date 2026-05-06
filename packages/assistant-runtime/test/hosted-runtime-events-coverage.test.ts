@@ -71,7 +71,7 @@ function createRuntime() {
       },
       deviceSyncPort: null,
       effectsPort: createHostedRuntimeEffectsPortStub(),
-      usageExportPort: null,
+      usageRecordPort: null,
     },
     platformEnv: {},
     resolvedConfig: createHostedRuntimeResolvedConfig(),

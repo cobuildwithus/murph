@@ -129,7 +129,7 @@ describe("hosted Linq audio conversation ingestion", () => {
             },
             deviceSyncPort: null,
             effectsPort: createHostedRuntimeEffectsPortStub(),
-            usageExportPort: null,
+            usageRecordPort: null,
           },
           platformEnv: {},
         },

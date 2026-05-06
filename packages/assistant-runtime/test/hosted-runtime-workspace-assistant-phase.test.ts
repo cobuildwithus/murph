@@ -4,6 +4,10 @@ import type {
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  ASSISTANT_USAGE_SCHEMA,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -85,6 +89,9 @@ import {
 
 type RuntimeDeviceSyncPort = NonNullable<
   HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]
+>;
+type RuntimeUsageRecordPort = NonNullable<
+  HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["usageRecordPort"]
 >;
 type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
@@ -205,6 +212,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("installs a direct hosted usage recorder from the runtime platform", async () => {
+    const recordedUsageIds: string[] = [];
+    const usageRecordPort: RuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        recordedUsageIds.push(record.usageId);
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ runtimeUsageRecordPort: usageRecordPort }));
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    expect(hydratedContext?.hosted?.usageRecorder).toEqual({
+      recordUsage: expect.any(Function),
+    });
+
+    await hydratedContext?.hosted?.usageRecorder?.recordUsage(createAssistantUsageRecord());
+
+    expect(recordedUsageIds).toEqual(["turn_direct_usage.attempt-1"]);
+  });
+
   it("skips timer device-sync work when the mailbox import brought in active input", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
@@ -246,28 +277,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("preserves an existing workspace wake when active input skips device-sync work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
     const nextWakeAt = "2026-04-27T00:05:00.000Z";
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      reason: "nudge",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt,
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
-    }));
+    try {
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        reason: "nudge",
+        workspace: {
+          checkpointedAt: "2026-04-27T00:00:00.000Z",
+          createdAt: "2026-04-27T00:00:00.000Z",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-04-27T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
 
-    expect(result).toEqual(expect.objectContaining({
-      nextWakeAt,
-      progressed: true,
-    }));
+      expect(result).toEqual(expect.objectContaining({
+        nextWakeAt,
+        progressed: true,
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("schedules a near follow-up wake when active input consumes a due alarm and skips device sync", async () => {
@@ -1326,6 +1363,7 @@ function createPhaseInput(input: {
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
   runtimeLivenessPort?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["runtimeLivenessPort"];
+  runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
   workspace?: HostedWorkspaceRuntimeAssistantPhaseInput["workspace"];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
@@ -1411,6 +1449,7 @@ function createPhaseInput(input: {
         },
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
+        ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
       },
       platformEnv: {},
       resolvedConfig: {
@@ -1424,6 +1463,45 @@ function createPhaseInput(input: {
     },
     runtimeEnv: {},
     workspace: input.workspace ?? null,
+  };
+}
+
+function createAssistantUsageRecord(): AssistantUsageRecord {
+  return {
+    apiKeyEnv: null,
+    attemptCount: 1,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: null,
+    gatewayTags: [],
+    inputTokens: 10,
+    memberId: "member_synthetic_phase",
+    occurredAt: "2026-04-29T00:00:00.000Z",
+    outputTokens: 5,
+    provider: "codex-cli",
+    providerName: "OpenAI",
+    providerRequestId: null,
+    providerRequestOutcome: "succeeded",
+    providerRequestOrdinal: 0,
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: "gpt-5.5",
+    routeId: "primary",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: "gpt-5.5",
+    sessionId: "asst_direct_usage",
+    stripeMeterSource: "murph",
+    surface: null,
+    totalTokens: 15,
+    triggerKind: null,
+    turnId: "turn_direct_usage",
+    usageId: "turn_direct_usage.attempt-1",
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "codex-usage-v1",
   };
 }
 

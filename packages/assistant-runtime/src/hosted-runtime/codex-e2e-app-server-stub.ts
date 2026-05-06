@@ -7,6 +7,7 @@ import {
 
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
 } from "./launch-spec.ts";
 
 const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
@@ -26,20 +27,25 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
   await installHostedE2ECodexShim({
     codexHome: input.codexHome,
     runtimeEnv: input.runtimeEnv,
-    source: buildHostedE2ECodexAppServerStubSource(assistantProviderBaseUrl),
+    source: buildHostedE2ECodexAppServerStubSource({
+      assistantProviderBaseUrl,
+      turnDelayMs: readHostedE2ECodexAppServerStubTurnDelayMs(input.runtimeEnv),
+    }),
   });
 }
 
-export function buildHostedE2ECodexAppServerStubSource(
-  assistantProviderBaseUrl: string,
-): string {
+export function buildHostedE2ECodexAppServerStubSource(input: {
+  assistantProviderBaseUrl: string;
+  turnDelayMs?: number | null;
+}): string {
+  const turnDelayMs = input.turnDelayMs ?? 25;
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
 
-const assistantProviderBaseUrl = ${JSON.stringify(assistantProviderBaseUrl)};
-const turnDelayMs = 25;
+const assistantProviderBaseUrl = ${JSON.stringify(input.assistantProviderBaseUrl)};
+const turnDelayMs = ${JSON.stringify(turnDelayMs)};
 let threadCounter = 0;
 let turnCounter = 0;
 let activeTurn = null;
@@ -359,6 +365,26 @@ rl.on("line", (line) => {
   });
 });
 `;
+}
+
+function readHostedE2ECodexAppServerStubTurnDelayMs(
+  runtimeEnv: Record<string, string>,
+): number | null {
+  const rawValue =
+    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV];
+  if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
+    return null;
+  }
+
+  const value = Number(rawValue.trim());
+  if (!Number.isSafeInteger(value) || value < 0 || value > 60_000) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV} must be an integer from 0 to 60000.`,
+    );
+  }
+
+  return value;
 }
 
 async function installHostedE2ECodexShim(input: {

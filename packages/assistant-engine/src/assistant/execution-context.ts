@@ -1,6 +1,7 @@
 import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
+import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { normalizeNullableString } from './shared.js'
 
@@ -26,6 +27,10 @@ export interface AssistantHostedDeviceConnectRequest {
   provider: string
 }
 
+export interface AssistantUsageRecorder {
+  recordUsage(record: AssistantUsageRecord): Promise<void>
+}
+
 export interface AssistantHostedExecutionContext {
   channelTypingDependencies?: AssistantChannelTypingDependencies
   defaultTarget?: AssistantModelTarget | null
@@ -34,6 +39,7 @@ export interface AssistantHostedExecutionContext {
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
   memberId: string
+  usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
 
@@ -53,6 +59,7 @@ export function normalizeAssistantExecutionContext(
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
     hosted?.deviceConnectProviders,
   )
+  const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
     return {
       hosted: null,
@@ -81,12 +88,25 @@ export function normalizeAssistantExecutionContext(
             deviceConnectProviders,
           }
         : {}),
+      ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
       userEnvKeys:
         hosted?.userEnvKeys
           .map((key) => normalizeNullableString(key))
           .filter((key): key is string => key !== null) ?? [],
     },
+  }
+}
+
+function normalizeAssistantUsageRecorder(
+  input: AssistantHostedExecutionContext['usageRecorder'] | undefined,
+): AssistantUsageRecorder | undefined {
+  if (!input || typeof input.recordUsage !== 'function') {
+    return undefined
+  }
+
+  return {
+    recordUsage: input.recordUsage,
   }
 }
 

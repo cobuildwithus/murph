@@ -1965,7 +1965,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      assert.deepEqual(events, ["workspace.read", "mailbox.fetch"]);
+      assert.deepEqual(events, ["workspace.read", "mailbox.fetch", "mailbox.fetch"]);
       assert.deepEqual(result, {
         nextWakeAt,
         redactedStatus: {
@@ -2027,6 +2027,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(events, [
         "workspace.read",
+        "mailbox.fetch",
         "mailbox.fetch",
         "snapshot:maintenance:0",
         "workspace.checkpoint",

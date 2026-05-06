@@ -34,7 +34,6 @@ const seamMocks = vi.hoisted(() => ({
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
   resolveAssistantUsageCredentialSource: vi.fn(),
-  writePendingAssistantUsageRecord: vi.fn(),
 }));
 
 vi.mock("../src/assistant/local-service.js", () => ({
@@ -74,13 +73,20 @@ vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
     typeof import("@murphai/runtime-state/node")
   >();
 
+  return actual;
+});
+
+vi.mock("@murphai/hosted-execution/assistant-usage", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/hosted-execution/assistant-usage")
+  >();
+
   return {
     ...actual,
     ASSISTANT_USAGE_SCHEMA: "murph.assistant-usage.v1",
     createAssistantUsageId: seamMocks.createAssistantUsageId,
     resolveAssistantUsageCredentialSource:
       seamMocks.resolveAssistantUsageCredentialSource,
-    writePendingAssistantUsageRecord: seamMocks.writePendingAssistantUsageRecord,
   };
 });
 
@@ -123,7 +129,7 @@ import {
   resolveAssistantTurnRoute,
   resolveAssistantTurnRouteForMessage,
 } from "../src/assistant/service-turn-routes.ts";
-import { persistPendingAssistantUsageEvent } from "../src/assistant/service-usage.ts";
+import { recordAssistantUsageEvent } from "../src/assistant/service-usage.ts";
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
 import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
 
@@ -184,10 +190,7 @@ beforeEach(() => {
   seamMocks.resolveAssistantSession.mockReset();
   seamMocks.resolveAssistantUsageCredentialSource
     .mockReset()
-    .mockReturnValue("hosted-user-env");
-  seamMocks.writePendingAssistantUsageRecord
-    .mockReset()
-    .mockResolvedValue(undefined);
+    .mockReturnValue("member");
 
   runtimeState = createRuntimeStateStub();
   seamMocks.createAssistantRuntimeStateService
@@ -411,9 +414,11 @@ describe("assistant service turn route", () => {
 
 });
 
-describe("assistant pending usage seam", () => {
-  it("skips persistence when usage data or a hosted member id is missing", async () => {
-    await persistPendingAssistantUsageEvent({
+describe("assistant usage recording seam", () => {
+  it("skips recording when usage data, a hosted member id, or a recorder is missing", async () => {
+    const recordUsage = vi.fn(async () => undefined);
+
+    await recordAssistantUsageEvent({
       executionContext: {
         hosted: {
           memberId: "member-1",
@@ -425,32 +430,44 @@ describe("assistant pending usage seam", () => {
         usage: null,
       },
       turnId: "turn-1",
-      vault: "/vault",
     });
 
-    await persistPendingAssistantUsageEvent({
+    await recordAssistantUsageEvent({
       executionContext: {
         hosted: {
           memberId: "   ",
+          usageRecorder: { recordUsage },
           userEnvKeys: [],
         },
       },
       providerResult: createProviderResult(),
       turnId: "turn-2",
-      vault: "/vault",
     });
 
-    expect(seamMocks.writePendingAssistantUsageRecord).not.toHaveBeenCalled();
+    await recordAssistantUsageEvent({
+      executionContext: {
+        hosted: {
+          memberId: "member-1",
+          userEnvKeys: [],
+        },
+      },
+      providerResult: createProviderResult(),
+      turnId: "turn-3",
+    });
+
+    expect(recordUsage).not.toHaveBeenCalled();
   });
 
-  it("persists hosted pending usage with normalized provider metadata", async () => {
+  it("records hosted usage with normalized provider metadata", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T10:00:00.000Z"));
+    const recordUsage = vi.fn(async () => undefined);
 
-    await persistPendingAssistantUsageEvent({
+    await recordAssistantUsageEvent({
       executionContext: {
         hosted: {
           memberId: " member-42 ",
+          usageRecorder: { recordUsage },
           userEnvKeys: [" CODEX_API_KEY ", "", "CUSTOM_KEY"],
         },
       },
@@ -483,7 +500,6 @@ describe("assistant pending usage seam", () => {
         },
       }),
       turnId: "turn-usage",
-      vault: "/vault",
     });
 
     expect(seamMocks.createAssistantUsageId).toHaveBeenCalledWith({
@@ -499,15 +515,13 @@ describe("assistant pending usage seam", () => {
       provider: "codex-cli",
       userEnvKeys: [" CODEX_API_KEY ", "", "CUSTOM_KEY"],
     });
-    expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenCalledWith({
-      vault: "/vault",
-      record: {
+    expect(recordUsage).toHaveBeenCalledWith({
         apiKeyEnv: "RUNTIME_KEY",
         attemptCount: 3,
         baseUrl: "https://usage.example.test/v1",
         cacheWriteTokens: 5,
         cachedInputTokens: 7,
-        credentialSource: "hosted-user-env",
+        credentialSource: "member",
         featureKey: null,
         gatewayTags: [],
         inputTokens: 11,
@@ -540,18 +554,19 @@ describe("assistant pending usage seam", () => {
         usageId: "turn-usage:0:3",
         usageExtractionSourcePath: "params.usage",
         usageExtractionVersion: "codex-usage-v1",
-      },
     });
   });
 
   it("uses Codex provider options without legacy credential headers for fallback hosted usage attribution", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T10:02:00.000Z"));
+    const recordUsage = vi.fn(async () => undefined);
 
-    await persistPendingAssistantUsageEvent({
+    await recordAssistantUsageEvent({
       executionContext: {
         hosted: {
           memberId: "member-42",
+          usageRecorder: { recordUsage },
           userEnvKeys: [],
         },
       },
@@ -559,7 +574,6 @@ describe("assistant pending usage seam", () => {
         providerOptions: createProviderOptions(),
       }),
       turnId: "turn-usage-header-fallback",
-      vault: "/vault",
     });
 
     expect(
@@ -570,24 +584,25 @@ describe("assistant pending usage seam", () => {
       provider: "codex-cli",
       userEnvKeys: [],
     });
-    expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenCalledWith({
-      vault: "/vault",
-      record: expect.objectContaining({
-        credentialSource: "hosted-user-env",
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialSource: "member",
         occurredAt: "2026-04-08T10:02:00.000Z",
         turnId: "turn-usage-header-fallback",
       }),
-    });
+    );
   });
 
-  it("persists failure usage with the provider request outcome", async () => {
+  it("records failure usage with the provider request outcome", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T10:03:00.000Z"));
+    const recordUsage = vi.fn(async () => undefined);
 
-    await persistPendingAssistantUsageEvent({
+    await recordAssistantUsageEvent({
       executionContext: {
         hosted: {
           memberId: "member-42",
+          usageRecorder: { recordUsage },
           userEnvKeys: [],
         },
       },
@@ -600,29 +615,29 @@ describe("assistant pending usage seam", () => {
         },
       }),
       turnId: "turn-failed-usage",
-      vault: "/vault",
     });
 
-    expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenCalledWith({
-      vault: "/vault",
-      record: expect.objectContaining({
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
         inputTokens: 21,
         outputTokens: 0,
         providerRequestOutcome: "failed",
         totalTokens: 21,
         turnId: "turn-failed-usage",
       }),
-    });
+    );
   });
 
   it("falls back to provider options when usage-level provider metadata is absent", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T10:05:00.000Z"));
+    const recordUsage = vi.fn(async () => undefined);
 
-    await persistPendingAssistantUsageEvent({
+    await recordAssistantUsageEvent({
       executionContext: {
         hosted: {
           memberId: "member-43",
+          usageRecorder: { recordUsage },
           userEnvKeys: [],
         },
       },
@@ -648,13 +663,10 @@ describe("assistant pending usage seam", () => {
         },
       }),
       turnId: "turn-usage-fallback",
-      vault: "/vault",
     });
 
-    expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenLastCalledWith(
-      {
-        vault: "/vault",
-        record: expect.objectContaining({
+    expect(recordUsage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
           apiKeyEnv: null,
           baseUrl: null,
           memberId: "member-43",
@@ -662,8 +674,62 @@ describe("assistant pending usage seam", () => {
           providerName: null,
           requestedModel: "gpt-5.5-fallback",
         }),
-      }
     );
+  });
+
+  it("does not wait for best-effort hosted usage recording", async () => {
+    let finishRecording: () => void = () => undefined;
+    const recording = new Promise<void>((resolve) => {
+      finishRecording = resolve;
+    });
+    const recordUsage = vi.fn(() => recording);
+
+    await expect(
+      recordAssistantUsageEvent({
+        executionContext: {
+          hosted: {
+            memberId: "member-42",
+            usageRecorder: { recordUsage },
+            userEnvKeys: [],
+          },
+        },
+        providerResult: createProviderResult(),
+        turnId: "turn-usage-latency",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(recordUsage).toHaveBeenCalledOnce();
+    finishRecording();
+    await recording;
+  });
+
+  it("leaves assistant turns non-fatal when direct usage recording fails", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const recordUsage = vi.fn(async () => {
+      throw new Error("usage backend unavailable");
+    });
+
+    await expect(
+      recordAssistantUsageEvent({
+        executionContext: {
+          hosted: {
+            memberId: "member-42",
+            usageRecorder: { recordUsage },
+            userEnvKeys: [],
+          },
+        },
+        providerResult: createProviderResult(),
+        turnId: "turn-usage-warning",
+      }),
+    ).resolves.toBeUndefined();
+
+    await Promise.resolve();
+
+    expect(warning).toHaveBeenCalledWith(
+      "Assistant usage recording failed; continuing without retry.",
+      { errorName: "Error" },
+    );
+    warning.mockRestore();
   });
 });
 

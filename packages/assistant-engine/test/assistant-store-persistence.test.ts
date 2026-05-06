@@ -69,8 +69,6 @@ describe('assistant store persistence seams', () => {
     await assertDirectoryExists(paths.stateDirectory)
     await assertDirectoryExists(paths.secretsDirectory)
     await assertDirectoryExists(paths.sessionSecretsDirectory)
-    await assertDirectoryExists(paths.usageDirectory)
-    await assertDirectoryExists(paths.usagePendingDirectory)
 
     await expect(
       inspectAssistantSessionStorage({

@@ -41,6 +41,7 @@ const TEST_NOW = "2026-05-04T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_checkpoint_baseline";
 const BASELINE_ARTIFACT_COUNT = 100;
 const BASELINE_ASSISTANT_MESSAGE_COUNT = 300;
+const BASELINE_ASSISTANT_MESSAGES_IN_HOT_SNAPSHOT = 100;
 const BASELINE_TRANSCRIPT_RELATIVE_PATH =
   ".runtime/operations/assistant/transcripts/session_checkpoint_baseline.jsonl";
 const OVER_BUDGET_CODEX_HOME_BYTES = 17 * 1024 * 1024;
@@ -207,7 +208,7 @@ describe("hosted runtime checkpoint baseline", () => {
     expect(metrics).toMatchObject({
       artifactPutCalls: 1,
       assistantMessageCount: BASELINE_ASSISTANT_MESSAGE_COUNT,
-      assistantMessagesInSnapshotBundle: BASELINE_ASSISTANT_MESSAGE_COUNT,
+      assistantMessagesInSnapshotBundle: BASELINE_ASSISTANT_MESSAGES_IN_HOT_SNAPSHOT,
       bridgeLeaseReadCalls: 2,
       bundlePutCalls: 1,
       checkpointDiagnosticLogWrites: 0,
@@ -222,6 +223,7 @@ describe("hosted runtime checkpoint baseline", () => {
     expect(metrics.artifactPutBytes).toBeGreaterThan(0);
     expect(Number.isFinite(metrics.checkpointElapsedMs)).toBe(true);
     expect(bundledTranscriptText).toContain("Synthetic checkpoint baseline assistant message 300");
+    expect(bundledTranscriptText).not.toContain("Synthetic checkpoint baseline assistant message 200");
     expect(checkpointRequests[0]?.reason).toBe("import");
     expect(restoredBaseSnapshotRef).toEqual(existingBaseSnapshotRef);
     expect(hotSnapshotRef).toEqual(expect.objectContaining({

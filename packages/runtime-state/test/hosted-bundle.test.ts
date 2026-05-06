@@ -537,7 +537,7 @@ test("hosted artifact materialization makes assistant runtime artifact files pri
   const previousUmask = process.umask(0o000);
 
   try {
-    const assistantArtifactPath = ".runtime/operations/assistant/usage/pending/usage_123.json";
+    const assistantArtifactPath = ".runtime/operations/assistant/issues/pending/issue_123.json";
 
     await materializeHostedExecutionArtifacts({
       artifactResolver: async () => Uint8Array.from(Buffer.from("{\"usage\":true}\n")),
@@ -551,10 +551,10 @@ test("hosted artifact materialization makes assistant runtime artifact files pri
       ".runtime",
       "operations",
       "assistant",
-      "usage",
+      "issues",
       "pending",
     );
-    const artifactPath = path.join(pendingDirectory, "usage_123.json");
+    const artifactPath = path.join(pendingDirectory, "issue_123.json");
 
     assert.equal((await lstat(pendingDirectory)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
     assert.equal((await lstat(artifactPath)).mode & 0o777, ASSISTANT_STATE_FILE_MODE);
@@ -1032,11 +1032,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "vault",
       },
       {
-        expected: "{\"usage\":true}\n",
-        path: ".runtime/operations/assistant/usage/pending/usage_1.json",
-        root: "vault",
-      },
-      {
         expected:
           "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
         path: ".runtime/operations/assistant/indexes.json",
@@ -1266,9 +1261,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "receipts", "turn_1.json"), "utf8"),
       "{\"receipt\":\"saved\"}\n",
     );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "usage", "pending", "usage_1.json"), "utf8"),
-      "{\"usage\":true}\n",
+    await assert.rejects(
+      () => readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "usage", "pending", "usage_1.json"), "utf8"),
+      /ENOENT/u,
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "state", "onboarding", "first-contact", "bootstrap.json"), "utf8"),

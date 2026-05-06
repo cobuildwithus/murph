@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ASSISTANT_USAGE_SCHEMA,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -47,6 +51,43 @@ function requireFetchCallArgs(
 function requireFetchRequest(call: readonly unknown[] | undefined, label: string): Request {
   const { init, input } = requireFetchCallArgs(call, label);
   return input instanceof Request ? input : new Request(input, init);
+}
+
+function createAssistantUsageRecord(): AssistantUsageRecord {
+  return {
+    apiKeyEnv: null,
+    attemptCount: 1,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: null,
+    gatewayTags: [],
+    inputTokens: 1,
+    memberId: "member_123",
+    occurredAt: "2026-04-08T10:00:00.000Z",
+    outputTokens: 2,
+    provider: "codex-cli",
+    providerName: null,
+    providerRequestId: null,
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: "gpt-5.5",
+    routeId: "route_usage",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: null,
+    sessionId: "session_usage",
+    stripeMeterSource: "murph",
+    surface: null,
+    totalTokens: 3,
+    triggerKind: null,
+    turnId: "turn_usage",
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "test",
+    usageId: "turn_usage.attempt-1",
+  };
 }
 
 function createBrowserVaultReplicaRef(sourceBundleHash: string) {
@@ -338,6 +379,76 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-nonce")).toMatch(/^[a-f0-9]{32}$/u);
     expect(headers.get("x-hosted-execution-timestamp")).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("records hosted usage through the signed web callback seam", async () => {
+    const usageRecord = createAssistantUsageRecord();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.json()).resolves.toEqual({
+        usage: usageRecord,
+      });
+
+      return new Response(JSON.stringify({
+        recorded: true,
+        usageId: "turn_usage.attempt-1",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(
+      platform.usageRecordPort!.recordUsage(usageRecord),
+    ).resolves.toEqual({
+      recorded: true,
+      usageId: "turn_usage.attempt-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "usage fetch");
+    expect(String(url)).toBe("https://web.example.test/api/internal/hosted-execution/usage/record");
+    expect(init?.method).toBe("POST");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("wraps invalid hosted usage recording responses", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      recorded: 2,
+      usageId: "turn_usage.attempt-1",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(
+      platform.usageRecordPort!.recordUsage(createAssistantUsageRecord()),
+    ).rejects.toThrow("Hosted usage recording returned invalid JSON.");
   });
 
   it("fetches pending hosted device-sync dirty state through the signed web callback seam", async () => {

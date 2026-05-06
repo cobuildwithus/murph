@@ -57,6 +57,7 @@ interface HostedEmailRouteCallbackContext {
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
 }
 
@@ -78,6 +79,7 @@ export async function createHostedEmailUserAddress(input: {
   fetchImpl?: typeof fetch;
   userId: string;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
 }): Promise<string> {
   if (!input.config.domain || !input.config.signingSecret || !input.config.fromAddress) {
@@ -94,6 +96,7 @@ export async function createHostedEmailUserAddress(input: {
   let response: Response;
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(input.webControlAllowHttpHosts ? { allowHttpHosts: input.webControlAllowHttpHosts } : {}),
       baseUrl: input.webControlBaseUrl,
       body: JSON.stringify({
         aliasKey,
@@ -259,6 +262,9 @@ async function resolveHostedEmailRouteUserId(input: {
   let response: Response;
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(input.context.webControlAllowHttpHosts
+        ? { allowHttpHosts: input.context.webControlAllowHttpHosts }
+        : {}),
       baseUrl: input.context.webControlBaseUrl,
       body: JSON.stringify({
         ...(input.aliasKey ? { aliasKey: input.aliasKey } : {}),

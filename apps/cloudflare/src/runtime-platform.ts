@@ -23,8 +23,10 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+  HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -80,8 +82,6 @@ import {
 } from "./local-loopback-proxy.ts";
 import {
   assertAllowedHostedRunnerWebControlRequest,
-  HOSTED_WEB_ISSUE_RECORD_PATH,
-  HOSTED_WEB_USAGE_RECORD_PATH,
   readHostedRunnerWebControlRoute,
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
@@ -315,7 +315,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
                 boundUserId: input.boundUserId,
                 description: "Hosted assistant runtime issue export",
                 fetchImpl,
-                path: HOSTED_WEB_ISSUE_RECORD_PATH,
+                path: HOSTED_RUNTIME_ISSUE_RECORD_PATH,
                 timeoutMs,
                 transport: hostedWebControlTransport,
               });
@@ -329,16 +329,16 @@ export function buildHostedExecutionRuntimePlatform(input: {
               }
             },
           },
-          usageExportPort: {
-            async recordUsage(usage) {
+          usageRecordPort: {
+            async recordUsage(record) {
               const payload = await fetchHostedWebControlPlaneJson({
                 body: {
-                  usage,
+                  usage: record,
                 },
                 boundUserId: input.boundUserId,
-                description: "Hosted usage export",
+                description: "Hosted usage recording",
                 fetchImpl,
-                path: HOSTED_WEB_USAGE_RECORD_PATH,
+                path: HOSTED_RUNTIME_USAGE_RECORD_PATH,
                 timeoutMs,
                 transport: hostedWebControlTransport,
               });
@@ -346,7 +346,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
               try {
                 return parseHostedRuntimeUsageRecordResponse(payload);
               } catch (error) {
-                throw new Error("Hosted usage export returned invalid JSON.", {
+                throw new Error("Hosted usage recording returned invalid JSON.", {
                   cause: error,
                 });
               }

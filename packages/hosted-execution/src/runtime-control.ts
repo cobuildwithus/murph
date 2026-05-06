@@ -8,8 +8,10 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   AssistantRuntimeIssueRecord,
-  AssistantUsageRecord,
 } from "@murphai/runtime-state/node";
+import type {
+  AssistantUsageRecord,
+} from "./assistant-usage.ts";
 import type {
   HostedBrowserVaultReplicaCursorRef,
 } from "./contracts.ts";
@@ -288,13 +290,13 @@ export type HostedRuntimeDeviceSyncBridgeEnvelope =
   | HostedRuntimeDeviceSyncSnapshotBridgeEnvelope
   | HostedRuntimeDeviceSyncApplyBridgeEnvelope;
 
-export interface HostedRuntimeUsageExportRequest {
-  usage: AssistantUsageRecord[];
+export interface HostedRuntimeUsageRecordRequest {
+  usage: AssistantUsageRecord;
 }
 
-export interface HostedRuntimeUsageExportResponse {
-  recorded: number;
-  usageIds: string[];
+export interface HostedRuntimeUsageRecordResponse {
+  recorded: boolean;
+  usageId: string;
 }
 
 export interface HostedRuntimeIssueExportRequest {
@@ -419,7 +421,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.idle",
   "runner.lease_superseded",
   "runner.started",
-  "runtime.usage_export_finished",
   "workspace.codex_home_snapshot",
   "workspace.legacy_codex_resume_repaired",
 ] as const;

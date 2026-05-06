@@ -1,5 +1,11 @@
 import { type readHostedExecutionEnvironment } from "../env.ts";
-import { methodNotAllowed, notFound, unauthorized } from "../json.ts";
+import {
+  jsonError,
+  methodNotAllowed,
+  notFound,
+  readRequestBodyText,
+  unauthorized,
+} from "../json.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import {
   parseHostedWorkspaceCheckpointRequest,
@@ -25,6 +31,8 @@ import {
 import {
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
+
+const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
 
 export async function handleRunnerWebControlRequest(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -73,9 +81,17 @@ export async function handleRunnerWebControlRequest(input: {
     }
   }
 
-  const body = input.request.method === "POST"
-    ? await readOptionalHostedRunnerWebControlBody(input.request)
-    : undefined;
+  let body: string | undefined;
+  try {
+    body = input.request.method === "POST"
+      ? await readOptionalHostedRunnerWebControlBody(input.request)
+      : undefined;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return jsonError("Request body too large.", 413);
+    }
+    throw error;
+  }
   const checkpointRequest = isCheckpointRequest
     ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
     : null;
@@ -92,6 +108,9 @@ export async function handleRunnerWebControlRequest(input: {
   }
 
   const response = await fetchHostedExecutionWebControlPlaneResponse({
+    ...(input.environment.hostedWebAllowHttpHosts
+      ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
+      : {}),
     baseUrl: input.environment.hostedWebBaseUrl,
     body,
     boundUserId: input.userId,
@@ -113,6 +132,8 @@ export async function handleRunnerWebControlRequest(input: {
 }
 
 async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {
-  const bodyText = await request.text();
+  const bodyText = await readRequestBodyText(request, {
+    limitBytes: HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES,
+  });
   return bodyText.length > 0 ? bodyText : undefined;
 }

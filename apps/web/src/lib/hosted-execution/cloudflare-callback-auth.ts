@@ -7,6 +7,7 @@ import {
 } from "@murphai/hosted-execution/auth";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { readRawBodyBuffer } from "../http";
 import { getPrisma } from "../prisma";
 import {
   PrismaHostedCallbackRequestNonceStore,
@@ -47,13 +48,26 @@ export async function requireHostedCloudflareCallbackRequest(
   request: Request,
   options: {
     maxTimestampSkewMs?: number;
+    maxBodyBytes?: number;
     nonceStore?: HostedCallbackRequestNonceStore;
     nowMs?: number;
+    payloadText?: string;
   } = {},
 ): Promise<string> {
   const verification = requireHostedCloudflareCallbackVerificationEnvironment(process.env);
   const userId = requireHostedExecutionUserId(request);
-  const payload = await request.clone().text();
+  const payload = options.payloadText ?? (options.maxBodyBytes === undefined
+    ? await request.clone().text()
+    : (await readRawBodyBuffer(request.clone(), {
+        limitBytes: options.maxBodyBytes,
+      })).toString("utf8"));
+  if (
+    options.payloadText !== undefined
+    && options.maxBodyBytes !== undefined
+    && new TextEncoder().encode(options.payloadText).byteLength > options.maxBodyBytes
+  ) {
+    throw new RangeError(`Request body exceeded ${options.maxBodyBytes} bytes.`);
+  }
   const url = new URL(request.url);
   const { keyId, nonce, signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
   const normalizedNonce = normalizeOptionalString(nonce);

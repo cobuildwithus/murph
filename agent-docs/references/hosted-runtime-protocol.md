@@ -262,7 +262,7 @@ assistant progress, and any stricter lockstep contract needs an explicit
 capability/version rollout plan before it can be required in production.
 The same runner-side liveness rule applies to auxiliary lanes: browser-vault
 publishing, hot-checkpoint current-ref reads, inbox projection and parser
-enrichment, provider cleanup and read acknowledgement, usage export, telemetry,
+enrichment, provider cleanup and read acknowledgement, usage record, telemetry,
 log export, post-checkpoint system-mailbox acknowledgement, billing/customer
 decoration, and device-connect context enrichment may record degraded status,
 request a later wake, or force a full checkpoint. They must not prevent mailbox

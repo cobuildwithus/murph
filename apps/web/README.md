@@ -230,8 +230,8 @@ Hosted AI usage metering:
 - Missing or unsupported `HOSTED_AI_USAGE_BILLING_MODE` values fail closed to `disabled`.
 - `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter` re-enables the classic hosted-web Stripe meter fallback and requires `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` plus `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME`.
 - `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices when you use `stripe_meter`.
-- `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending usage rows each cron drain attempts.
-- Hosted AI included-allowance gating is app-owned: web prices imported `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
+- `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending Stripe meter rows each cron drain attempts.
+- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
 - Pulse Trial uses the same allowance system with a phase-aware 2.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
@@ -241,7 +241,7 @@ Hosted runner cleanup:
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
-While usage billing is disabled, imported rows keep
+While usage billing is disabled, recorded rows keep
 `stripeMeterStatus=skipped` so they cannot be backbilled later. The hosted-web
 Stripe drain owns `stripeMeterSource=murph` when `stripe_meter` is enabled.
 

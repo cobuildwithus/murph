@@ -132,6 +132,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   skipDeviceSync?: boolean;
+  skipInitialMailboxRefresh?: boolean;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const startedAt = Date.now();
@@ -178,6 +179,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.wake,
         input.runtime,
         input.preferredInputIds ?? [],
+        input.skipInitialMailboxRefresh === true,
         input.signal,
       )
     : {
@@ -224,6 +226,7 @@ export async function runHostedAssistantAutomation(
   wake: HostedRuntimeEvent,
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
   preferredInputIds: readonly string[] = [],
+  skipInitialMailboxRefresh = false,
   signal?: AbortSignal,
 ): Promise<{
   nextWakeAt: string | null;
@@ -246,6 +249,7 @@ export async function runHostedAssistantAutomation(
     preferredInputIds,
     requestId,
     runtime,
+    skipInitialMailboxRefresh,
     vaultRoot,
     wake,
   });

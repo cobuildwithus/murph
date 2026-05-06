@@ -4,7 +4,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import {
   claimHostedAiUsageStripeMetering,
   HostedAiUsageStripeMeterClaimLostError,
-  importHostedAiUsageRecords,
+  recordHostedAiUsageRecords,
   listHostedAiUsagePendingStripeMetering,
   markHostedAiUsageStripeMeteringDisabled,
   markHostedAiUsageStripeProgress,
@@ -61,7 +61,7 @@ const BASE_USAGE_RECORD = {
   usageExtractionVersion: "codex-usage-v1",
 } as const;
 
-describe("importHostedAiUsageRecords", () => {
+describe("recordHostedAiUsageRecords", () => {
   it("persists sanitized usage metadata without provider debug fields", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const findUnique = vi.fn(async () => ({
@@ -82,7 +82,7 @@ describe("importHostedAiUsageRecords", () => {
       },
     };
 
-    const result = await importHostedAiUsageRecords({
+    const result = await recordHostedAiUsageRecords({
       aiUsageBillingMode: "disabled",
       prisma: prisma as never,
       trustedUserId: "member_123",
@@ -146,7 +146,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -179,7 +179,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -219,7 +219,7 @@ describe("importHostedAiUsageRecords", () => {
     process.env.HOSTED_AI_USAGE_BILLING_MODE = "usage_allowance";
     try {
       await expect(
-        importHostedAiUsageRecords({
+        recordHostedAiUsageRecords({
           prisma: prisma as never,
           trustedUserId: "member_123",
           usage: [BASE_USAGE_RECORD],
@@ -257,7 +257,7 @@ describe("importHostedAiUsageRecords", () => {
       },
     };
 
-    const result = await importHostedAiUsageRecords({
+    const result = await recordHostedAiUsageRecords({
       aiUsageBillingMode: "disabled",
       prisma: prisma as never,
       trustedUserId: "member_123",
@@ -279,7 +279,7 @@ describe("importHostedAiUsageRecords", () => {
       },
     };
 
-    const result = await importHostedAiUsageRecords({
+    const result = await recordHostedAiUsageRecords({
       aiUsageBillingMode: "disabled",
       prisma: prisma as never,
       trustedUserId: "member_123",
@@ -312,7 +312,7 @@ describe("importHostedAiUsageRecords", () => {
       usageId: "turn_123.request-1.attempt-1",
     };
 
-    const result = await importHostedAiUsageRecords({
+    const result = await recordHostedAiUsageRecords({
       aiUsageBillingMode: "disabled",
       prisma: prisma as never,
       trustedUserId: "member_123",
@@ -353,7 +353,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -366,7 +366,7 @@ describe("importHostedAiUsageRecords", () => {
         ],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage import contains conflicting records for one usage id.",
+      "Hosted AI usage recording contains conflicting records for one usage id.",
     );
   });
 
@@ -382,7 +382,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -394,7 +394,7 @@ describe("importHostedAiUsageRecords", () => {
         ],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage import contains an invalid usage record.",
+      "Hosted AI usage recording contains an invalid usage record.",
     );
 
     expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
@@ -414,7 +414,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -439,7 +439,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -474,7 +474,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -509,7 +509,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -534,7 +534,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -556,7 +556,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -596,7 +596,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await expect(
-      importHostedAiUsageRecords({
+      recordHostedAiUsageRecords({
         aiUsageBillingMode: "stripe_meter",
         prisma: prisma as never,
         trustedUserId: "member_123",
@@ -608,7 +608,7 @@ describe("importHostedAiUsageRecords", () => {
         ],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage import contains an invalid usage record.",
+      "Hosted AI usage recording contains an invalid usage record.",
     );
 
     expect(findUnique).not.toHaveBeenCalled();

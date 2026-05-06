@@ -27,10 +27,6 @@
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
     },
-    "./node/assistant-usage": {
-      "types": "./dist/node/assistant-usage.d.ts",
-      "default": "./dist/node/assistant-usage.js"
-    },
     "./node/assistant-runtime-issues": {
       "types": "./dist/node/assistant-runtime-issues.d.ts",
       "default": "./dist/node/assistant-runtime-issues.js"

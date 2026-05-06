@@ -57,8 +57,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-04-09 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
-| `agent-docs/exec-plans/active/` | In-flight execution plans for current work. | Active work coordination | Medium | 2026-04-02 |
-| `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` | Active-work ledger for concurrent repo tasks. | Concurrency coordination | High | 2026-04-06 |
+| `agent-docs/exec-plans/active/` | In-flight execution plans for current work. | Active work coordination | Medium | 2026-05-05 |
+| `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` | Active-work ledger for concurrent repo tasks. | Concurrency coordination | High | 2026-05-05 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow. | Workflow prompt library | Low | 2026-04-23 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |

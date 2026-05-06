@@ -39,7 +39,7 @@ export type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
-  HostedRuntimeUsageExportPort,
+  HostedRuntimeUsageRecordPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";

@@ -5,7 +5,7 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   parseAssistantUsageRecord,
-} from "@murphai/runtime-state/node/assistant-usage";
+} from "../assistant-usage.ts";
 import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
@@ -53,8 +53,8 @@ import {
   type HostedRuntimeWebStatusResponse,
   type HostedRuntimeSideInputUnavailable,
   type HostedRuntimeSideInputUnavailableCode,
-  type HostedRuntimeUsageExportRequest,
-  type HostedRuntimeUsageExportResponse,
+  type HostedRuntimeUsageRecordRequest,
+  type HostedRuntimeUsageRecordResponse,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
@@ -392,25 +392,24 @@ export function parseHostedRuntimeDeviceSyncBridgeEnvelope(
   }
 }
 
-export function parseHostedRuntimeUsageExportRequest(
+export function parseHostedRuntimeUsageRecordRequest(
   value: unknown,
-): HostedRuntimeUsageExportRequest {
-  const record = requireObject(value, "Hosted runtime usage export request");
+): HostedRuntimeUsageRecordRequest {
+  const record = requireObject(value, "Hosted runtime usage record request");
 
   return {
-    usage: requireArray(record.usage, "Hosted runtime usage export request usage")
-      .map((entry) => parseAssistantUsageRecord(entry)),
+    usage: parseAssistantUsageRecord(record.usage),
   };
 }
 
-export function parseHostedRuntimeUsageExportResponse(
+export function parseHostedRuntimeUsageRecordResponse(
   value: unknown,
-): HostedRuntimeUsageExportResponse {
-  const response = parseHostedRuntimeRecordExportResponse(value, "usageIds");
+): HostedRuntimeUsageRecordResponse {
+  const record = requireObject(value, "Hosted runtime usage record response");
 
   return {
-    recorded: response.recorded,
-    usageIds: response.ids,
+    recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
+    usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
   };
 }
 
@@ -1058,7 +1057,7 @@ function assertPayloadOrUnavailable(
 
 function parseHostedRuntimeRecordExportResponse(
   value: unknown,
-  idsFieldName: "issueIds" | "usageIds",
+  idsFieldName: "issueIds",
 ): { ids: string[]; recorded: number } {
   const record = requireObject(value, "Hosted runtime record export response");
   const ids = requireArray(

@@ -168,7 +168,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       persistedBeforeOutbound.push('persist')
       return savedSession
     }),
-    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
@@ -207,7 +207,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
-    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
@@ -409,7 +409,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
-    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
@@ -447,7 +447,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
-    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
@@ -540,7 +540,7 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
-    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
@@ -578,7 +578,7 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
-    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
@@ -613,7 +613,7 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     response: null,
     session: providerSession,
   })
-  expect(mocks.persistPendingAssistantUsageEvent).toHaveBeenCalledTimes(1)
+  expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 })
@@ -639,7 +639,7 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
           providerTurn: providerResult,
         }
       }),
-      persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+      recordAssistantUsageEvent: vi.fn(async () => undefined),
       resolveAssistantOperatorDefaults: vi.fn(async () => ({
         timezone: 'Australia/Sydney',
       })),
@@ -688,7 +688,7 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
       executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
     }))
     vi.doMock('../src/assistant/service-usage.js', () => ({
-      persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+      recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
     }))
     vi.doMock('../src/assistant/service-turn-routes.js', () => ({
       resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -785,7 +785,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
-    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
@@ -823,7 +823,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
-    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
@@ -1035,7 +1035,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
-    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
@@ -1073,7 +1073,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
-    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,

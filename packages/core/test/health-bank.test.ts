@@ -657,6 +657,41 @@ test("providers and recipes use first-class markdown registry reads without chan
   );
 });
 
+test("provider upserts serialize registry selection for concurrent slug creates", async () => {
+  const vaultRoot = await makeTempDirectory("murph-provider-concurrent-upsert");
+  await initializeVault({ vaultRoot });
+
+  const [firstProvider, secondProvider] = await Promise.all([
+    upsertProvider({
+      vaultRoot,
+      title: "Labcorp",
+      slug: "labcorp",
+      status: "active",
+      note: "First concurrent create.",
+    }),
+    upsertProvider({
+      vaultRoot,
+      title: "Labcorp",
+      slug: "labcorp",
+      status: "active",
+      note: "Second concurrent create.",
+    }),
+  ]);
+
+  const listedProviders = await listProviders(vaultRoot);
+
+  assert.equal(listedProviders.length, 1);
+  assert.equal(firstProvider.providerId, secondProvider.providerId);
+  assert.equal(firstProvider.relativePath, "bank/providers/labcorp.md");
+  assert.equal(secondProvider.relativePath, "bank/providers/labcorp.md");
+  assert.deepEqual(
+    [firstProvider.created, secondProvider.created].sort(),
+    [false, true],
+  );
+  assert.equal(listedProviders[0]?.providerId, firstProvider.providerId);
+  assert.equal(listedProviders[0]?.slug, "labcorp");
+});
+
 test("recipes normalize repeated related links and clear them on update", async () => {
   const vaultRoot = await makeTempDirectory("murph-recipe-link-normalization");
   await initializeVault({ vaultRoot });
@@ -1591,6 +1626,70 @@ test("workout formats use first-class markdown registry reads for repeated sessi
       error.code === "VAULT_WORKOUT_FORMAT_MISSING" &&
       error.message === "Workout format was not found.",
   );
+});
+
+test("workout format upserts merge concurrent partial updates with the latest record", async () => {
+  const vaultRoot = await makeTempDirectory("murph-workout-format-concurrent-upsert");
+  await initializeVault({ vaultRoot });
+
+  const createdFormat = await upsertWorkoutFormat({
+    vaultRoot,
+    workoutFormatId: "wfmt_01JNYB6M9A6W4K2N8P3Q7R5S5A",
+    title: "Concurrent Lift",
+    slug: "concurrent-lift",
+    status: "active",
+    summary: "Base session.",
+    activityType: "strength training",
+    durationMinutes: 40,
+    template: {
+      routineNote: "Keep the base routine intact.",
+      exercises: [],
+    },
+    tags: ["base"],
+    note: "Original note.",
+  });
+
+  await Promise.all([
+    upsertWorkoutFormat({
+      vaultRoot,
+      workoutFormatId: createdFormat.record.workoutFormatId,
+      durationMinutes: 55,
+    }),
+    upsertWorkoutFormat({
+      vaultRoot,
+      workoutFormatId: createdFormat.record.workoutFormatId,
+      distanceKm: 5,
+    }),
+    upsertWorkoutFormat({
+      vaultRoot,
+      workoutFormatId: createdFormat.record.workoutFormatId,
+      tags: ["base", "concurrent"],
+    }),
+    upsertWorkoutFormat({
+      vaultRoot,
+      workoutFormatId: createdFormat.record.workoutFormatId,
+      note: "Concurrent note.",
+    }),
+    upsertWorkoutFormat({
+      vaultRoot,
+      workoutFormatId: createdFormat.record.workoutFormatId,
+      templateText: "Concurrent workout text.",
+    }),
+  ]);
+
+  const persisted = await readWorkoutFormat({
+    vaultRoot,
+    workoutFormatId: createdFormat.record.workoutFormatId,
+  });
+
+  assert.equal(persisted.title, "Concurrent Lift");
+  assert.equal(persisted.activityType, "strength-training");
+  assert.equal(persisted.durationMinutes, 55);
+  assert.equal(persisted.distanceKm, 5);
+  assert.deepEqual(persisted.tags, ["base", "concurrent"]);
+  assert.equal(persisted.note, "Concurrent note.");
+  assert.equal(persisted.templateText, "Concurrent workout text.");
+  assert.equal(persisted.template?.routineNote, "Keep the base routine intact.");
 });
 
 test("workout formats require first-class ids and fields", async () => {

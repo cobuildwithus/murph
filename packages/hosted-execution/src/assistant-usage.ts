@@ -1,22 +1,28 @@
-import { readdir, readFile, rm } from "node:fs/promises";
-import path from "node:path";
-
-import {
-  ensureAssistantStateDir,
-  writeAssistantStateJson,
-} from "./assistant-state-fs.ts";
-import {
-  resolveAssistantStatePaths,
-  type AssistantStatePaths,
-} from "./assistant-state.ts";
-import {
-  createVersionedJsonStateEnvelope,
-  parseVersionedJsonStateEnvelope,
-} from "./versioned-json-state.ts";
-
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
-const ASSISTANT_USAGE_FILE_SCHEMA_VERSION = 1;
-const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>();
+const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>(["OPENAI_API_KEY"]);
+const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
+  "cacheWriteTokens",
+  "cache_write_tokens",
+  "cachedInputTokens",
+  "cached_input_tokens",
+  "completionTokens",
+  "completion_tokens",
+  "inputTokens",
+  "input_tokens",
+  "outputTokens",
+  "output_tokens",
+  "promptTokens",
+  "prompt_tokens",
+  "reasoningTokens",
+  "reasoning_tokens",
+  "reasoningOutputTokens",
+  "totalTokens",
+  "total_tokens",
+]);
+const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string>>([
+  ["input_tokens_details", new Set(["cached_tokens"])],
+  ["output_tokens_details", new Set(["reasoning_tokens"])],
+]);
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
 export type AssistantProviderRequestOutcome =
@@ -63,11 +69,6 @@ export interface AssistantUsageRecord {
   usageExtractionVersion: string;
 }
 
-export interface PendingAssistantUsageRecordParseFailure {
-  error: unknown;
-  fileName: string;
-}
-
 export function createAssistantUsageId(input: {
   attemptCount: number;
   providerRequestOrdinal?: number;
@@ -83,100 +84,6 @@ export function createAssistantUsageId(input: {
   return providerRequestOrdinal === 0
     ? `${turnId}.attempt-${attemptCount}`
     : `${turnId}.request-${providerRequestOrdinal}.attempt-${attemptCount}`;
-}
-
-export function resolvePendingAssistantUsagePath(
-  paths: AssistantStatePaths,
-  usageId: string,
-): string {
-  return path.join(
-    paths.usagePendingDirectory,
-    encodePendingAssistantUsageFileName(normalizeRequiredString(usageId, "usageId")),
-  );
-}
-
-export async function writePendingAssistantUsageRecord(input: {
-  paths?: AssistantStatePaths;
-  record: AssistantUsageRecord;
-  vault?: string;
-}): Promise<void> {
-  const paths = resolveAssistantUsagePaths(input.vault, input.paths);
-  const record = parseAssistantUsageRecord(input.record);
-  await ensureAssistantStateDir(paths.usagePendingDirectory);
-  await writeAssistantStateJson(
-    resolvePendingAssistantUsagePath(paths, record.usageId),
-    createVersionedJsonStateEnvelope({
-      schema: ASSISTANT_USAGE_SCHEMA,
-      schemaVersion: ASSISTANT_USAGE_FILE_SCHEMA_VERSION,
-      value: record,
-    }),
-  );
-}
-
-export async function listPendingAssistantUsageRecords(input: {
-  onInvalidRecord?: ((failure: PendingAssistantUsageRecordParseFailure) => void) | null;
-  paths?: AssistantStatePaths;
-  skipInvalidRecords?: boolean;
-  vault?: string;
-}): Promise<AssistantUsageRecord[]> {
-  const paths = resolveAssistantUsagePaths(input.vault, input.paths);
-  const onInvalidRecord = input.onInvalidRecord ?? null;
-  const skipInvalidRecords = input.skipInvalidRecords ?? false;
-
-  try {
-    const entries = await readdir(paths.usagePendingDirectory, {
-      withFileTypes: true,
-    });
-    const records: AssistantUsageRecord[] = [];
-
-    for (const entry of entries) {
-      if (!entry.isFile() || !isCanonicalPendingAssistantUsageFileName(entry.name)) {
-        continue;
-      }
-
-      try {
-        const raw = await readFile(path.join(paths.usagePendingDirectory, entry.name), "utf8");
-        records.push(parsePendingAssistantUsageFile(JSON.parse(raw)));
-      } catch (error) {
-        if (!skipInvalidRecords) {
-          throw error;
-        }
-
-        onInvalidRecord?.({
-          error,
-          fileName: entry.name,
-        });
-      }
-    }
-
-    return records.sort((left, right) => {
-      const occurredAtOrder = left.occurredAt.localeCompare(right.occurredAt);
-
-      if (occurredAtOrder !== 0) {
-        return occurredAtOrder;
-      }
-
-      return left.usageId.localeCompare(right.usageId);
-    });
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return [];
-    }
-
-    throw error;
-  }
-}
-
-export async function deletePendingAssistantUsageRecord(input: {
-  paths?: AssistantStatePaths;
-  usageId: string;
-  vault?: string;
-}): Promise<void> {
-  const paths = resolveAssistantUsagePaths(input.vault, input.paths);
-
-  await rm(resolvePendingAssistantUsagePath(paths, input.usageId), {
-    force: true,
-  });
 }
 
 export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord {
@@ -219,7 +126,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
           ),
         }),
     ...(record.providerRequestOrdinal === undefined ? {} : { providerRequestOrdinal }),
-    rawUsageJson: normalizeOptionalJsonRecord(record.rawUsageJson, "rawUsageJson"),
+    rawUsageJson: normalizeOptionalRawUsageJsonRecord(record.rawUsageJson, "rawUsageJson"),
     rawUsageJsonHash: normalizeOptionalString(record.rawUsageJsonHash, "rawUsageJsonHash"),
     reasoningTokens: normalizeOptionalInteger(record.reasoningTokens, "reasoningTokens"),
     reportingUserId: normalizeOptionalString(record.reportingUserId, "reportingUserId"),
@@ -261,7 +168,7 @@ export function resolveAssistantUsageCredentialSource(input: {
 
   if (!input.apiKeyEnv) {
     if (input.provider === "codex-cli" && hasHostedMemberAiCredential(userEnvKeys, effectiveEnv)) {
-      return "unknown";
+      return "member";
     }
 
     return "platform";
@@ -276,38 +183,6 @@ export function resolveAssistantUsageCredentialSource(input: {
   }
 
   return hasNonEmptyAssistantEnvValue(effectiveEnv, input.apiKeyEnv) ? "member" : "platform";
-}
-
-function resolveAssistantUsagePaths(
-  vault: string | undefined,
-  paths: AssistantStatePaths | undefined,
-): AssistantStatePaths {
-  if (paths) {
-    return paths;
-  }
-
-  if (!vault) {
-    throw new TypeError("vault or paths is required when resolving assistant usage state.");
-  }
-
-  return resolveAssistantStatePaths(vault);
-}
-
-function encodePendingAssistantUsageFileName(usageId: string): string {
-  return `${Buffer.from(usageId, "utf8").toString("base64url")}.json`;
-}
-
-function isCanonicalPendingAssistantUsageFileName(fileName: string): boolean {
-  return /^[A-Za-z0-9_-]+\.json$/u.test(fileName);
-}
-
-function parsePendingAssistantUsageFile(value: unknown): AssistantUsageRecord {
-  return parseVersionedJsonStateEnvelope(value, {
-    label: "pending assistant usage record",
-    parseValue: parseAssistantUsageRecord,
-    schema: ASSISTANT_USAGE_SCHEMA,
-    schemaVersion: ASSISTANT_USAGE_FILE_SCHEMA_VERSION,
-  });
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -455,6 +330,58 @@ function normalizeOptionalJsonRecord(
   return normalized as Record<string, unknown>;
 }
 
+function normalizeOptionalRawUsageJsonRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> | null {
+  const record = normalizeOptionalJsonRecord(value, label);
+
+  if (record === null) {
+    return null;
+  }
+
+  const normalized: Record<string, unknown> = {};
+
+  for (const [key, entry] of Object.entries(record)) {
+    if (ASSISTANT_USAGE_RAW_TOKEN_KEYS.has(key)) {
+      if (!isNonNegativeInteger(entry)) {
+        throw new TypeError(`${label}.${key} must be a non-negative integer.`);
+      }
+      normalized[key] = entry;
+      continue;
+    }
+
+    const allowedDetailKeys = ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS.get(key);
+    if (allowedDetailKeys) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new TypeError(`${label}.${key} must be a token detail object.`);
+      }
+
+      const normalizedDetails: Record<string, number> = {};
+      for (const [detailKey, detailEntry] of Object.entries(entry)) {
+        if (!allowedDetailKeys.has(detailKey)) {
+          throw new TypeError(`${label}.${key}.${detailKey} is not allowed.`);
+        }
+        if (!isNonNegativeInteger(detailEntry)) {
+          throw new TypeError(`${label}.${key}.${detailKey} must be a non-negative integer.`);
+        }
+        normalizedDetails[detailKey] = detailEntry;
+      }
+
+      normalized[key] = normalizedDetails;
+      continue;
+    }
+
+    throw new TypeError(`${label}.${key} is not allowed.`);
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function normalizeRequiredInteger(value: unknown, label: string): number {
   const normalized = normalizeOptionalInteger(value, label);
 
@@ -501,15 +428,6 @@ function normalizeOptionalInteger(value: unknown, label: string): number | null 
 const SENSITIVE_HEADER_NAME_PATTERN =
   /(?:^|[-_])(?:authorization|cookie|token|secret|api[-_]?key|session[-_]?key)(?:$|[-_])/iu;
 const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/iu;
-
-function isMissingFileError(error: unknown): boolean {
-  return Boolean(
-    error
-      && typeof error === "object"
-      && "code" in error
-      && error.code === "ENOENT",
-  );
-}
 
 function hasCredentialLikeAssistantHeaders(
   headers: Readonly<Record<string, string>> | null | undefined,
