@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server } from "node:http";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
@@ -9,6 +10,12 @@ import {
   type HostedRuntimePlatform,
   type HostedRuntimeWorkspacePort,
 } from "@murphai/assistant-runtime";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+} from "@murphai/hosted-execution";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   type HostedMailboxFetchRequest,
@@ -45,6 +52,11 @@ const BASELINE_ASSISTANT_MESSAGES_IN_HOT_SNAPSHOT = 100;
 const BASELINE_TRANSCRIPT_RELATIVE_PATH =
   ".runtime/operations/assistant/transcripts/session_checkpoint_baseline.jsonl";
 const OVER_BUDGET_CODEX_HOME_BYTES = 17 * 1024 * 1024;
+const CODEX_ROLLOUT_E2E_USER_ID = "member_synthetic_codex_rollout_e2e";
+const CODEX_ROLLOUT_E2E_THREAD_ID_PATTERN =
+  /^00000000-0000-4000-8000-[0-9]{12}$/u;
+const CODEX_ROLLOUT_E2E_PATH_PATTERN =
+  /^sessions\/2026\/05\/06\/rollout-2026-05-06T01-02-03-00000000-0000-4000-8000-[0-9]{12}\.jsonl$/u;
 const BASELINE_RUNTIME = {
   forwardedEnv: {
     HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
@@ -378,6 +390,246 @@ describe("hosted runtime checkpoint baseline", () => {
       })}\n`);
     }
   });
+
+  it("restores active Codex rollout continuity after local workspace teardown and resumes by thread id", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-codex-rollout-e2e-"));
+    const initialVaultRoot = path.join(workspaceRoot, "vault-initial");
+    const initialOperatorHomeRoot = `${initialVaultRoot}-operator-home`;
+    const restoredVaultRoot = path.join(workspaceRoot, "vault-restored");
+    const restoredOperatorHomeRoot = `${restoredVaultRoot}-operator-home`;
+    cleanupPaths.push(workspaceRoot);
+    await mkdir(initialVaultRoot, { recursive: true });
+    await writeSyntheticVaultMetadata(initialVaultRoot);
+    const responsesServer = await startCodexRolloutResponsesServer({
+      responseTexts: [
+        buildAssistantNotificationDecisionResponse("first rollout checkpoint reply"),
+        buildAssistantNotificationDecisionResponse("second rollout checkpoint reply"),
+      ],
+    });
+    const artifactPutCalls: BaselineArtifactPutCall[] = [];
+    const artifactPutBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeLogRequests: HostedRuntimeLogRequest[] = [];
+    const decodedWakes = new Map<string, ReturnType<typeof createCodexRolloutNotificationWake>>();
+    let workspace = createWorkspaceState({
+      checkpointedAt: null,
+      createdAt: TEST_NOW,
+      snapshotRef: null,
+      userId: CODEX_ROLLOUT_E2E_USER_ID,
+      version: "0",
+    });
+    const mailboxItems: HostedMailboxItem[] = [];
+    const platform = createBaselinePlatform({
+      artifactPutCalls,
+      artifactPutBytesByHash,
+      mailboxPort: createBaselineMailboxPort({
+        fetchRequests,
+        items: mailboxItems,
+        userId: CODEX_ROLLOUT_E2E_USER_ID,
+      }),
+      runtimeLogRequests,
+      workspacePort: {
+        async read() {
+          return {
+            fetchedAt: TEST_NOW,
+            workspace,
+          };
+        },
+        async checkpoint(request): Promise<HostedWorkspaceCheckpointResponse> {
+          checkpointRequests.push(request);
+          workspace = createWorkspaceState({
+            browserVaultReplicaRef: request.browserVaultReplicaRef ?? null,
+            checkpointedAt: TEST_NOW,
+            redactedStatus: request.redactedStatus ?? null,
+            snapshotRef: request.snapshotRef,
+            userId: CODEX_ROLLOUT_E2E_USER_ID,
+            version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+          });
+          return {
+            checkpointed: true,
+            workspace,
+          };
+        },
+      },
+    });
+    const runtime = {
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_LOG_FINGERPRINT_SECRET: "synthetic-rollout-log-secret",
+        HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: responsesServer.baseUrl,
+        LINQ_API_BASE_URL: responsesServer.linqBaseUrl,
+        LINQ_API_TOKEN: "linq-rollout-e2e-token",
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "test-openai-key",
+        PATH: process.env.PATH ?? "",
+      },
+    };
+
+    try {
+      const firstWake = createCodexRolloutNotificationWake({
+        eventId: "assistant.notification.requested:codex-rollout:first",
+        instructions: "Send the first checkpoint continuity note.",
+        text: "first rollout checkpoint reply",
+      });
+      mailboxItems.push(createMailboxItem({
+        dedupeKey: firstWake.eventId,
+        id: "mailbox_item_codex_rollout_001",
+        kind: "assistant.notification.requested",
+        lane: "system",
+        laneSeq: "1",
+        payloadInlineCiphertext: "ciphertext_codex_rollout_001",
+        userId: CODEX_ROLLOUT_E2E_USER_ID,
+      }));
+      decodedWakes.set("ciphertext_codex_rollout_001", firstWake);
+
+      const firstResult = await runCodexRolloutWorkspaceInvocation({
+        attemptId: "attempt_codex_rollout_001",
+        decodedWakes,
+        platform,
+        runtime,
+        vaultRoot: initialVaultRoot,
+        workspaceVersion: "0",
+      });
+
+      expect(firstResult.status).toBe("scheduled");
+      expect(firstResult.nextWakeAt).toEqual(expect.any(String));
+      expect(firstResult.redactedStatus).toMatchObject({
+        hostedMailboxImportedCount: 1,
+        hostedOutboxDeliverySent: 1,
+      });
+      expect(responsesServer.requests).toHaveLength(1);
+      const firstSession = await readOnlyCodexSession(initialVaultRoot);
+      expect(firstSession.providerSessionId).toMatch(CODEX_ROLLOUT_E2E_THREAD_ID_PATTERN);
+      expect(firstSession.codexRolloutRelativePath).toMatch(CODEX_ROLLOUT_E2E_PATH_PATTERN);
+      expect(firstSession.codexRolloutRelativePath).toContain(firstSession.providerSessionId);
+      expect(await readFile(
+        path.join(initialOperatorHomeRoot, ".codex-hosted", firstSession.codexRolloutRelativePath),
+        "utf8",
+      )).toContain("first rollout checkpoint reply");
+      const checkpointCountAfterFirstRun = checkpointRequests.length;
+      expect(checkpointCountAfterFirstRun).toBeGreaterThan(0);
+
+      await rm(initialVaultRoot, { force: true, recursive: true });
+      await rm(initialOperatorHomeRoot, { force: true, recursive: true });
+
+      const secondWake = createCodexRolloutNotificationWake({
+        eventId: "assistant.notification.requested:codex-rollout:second",
+        instructions: "Send the second checkpoint continuity note.",
+        text: "second rollout checkpoint reply",
+      });
+      mailboxItems.push(createMailboxItem({
+        dedupeKey: secondWake.eventId,
+        id: "mailbox_item_codex_rollout_002",
+        kind: "assistant.notification.requested",
+        lane: "system",
+        laneSeq: "2",
+        payloadInlineCiphertext: "ciphertext_codex_rollout_002",
+        userId: CODEX_ROLLOUT_E2E_USER_ID,
+      }));
+      decodedWakes.set("ciphertext_codex_rollout_002", secondWake);
+
+      const secondResult = await runCodexRolloutWorkspaceInvocation({
+        attemptId: "attempt_codex_rollout_002",
+        decodedWakes,
+        platform,
+        runtime,
+        vaultRoot: restoredVaultRoot,
+        workspaceVersion: workspace.version,
+      });
+
+      expect(secondResult.status).toBe("scheduled");
+      expect(secondResult.nextWakeAt).toEqual(expect.any(String));
+      expect(secondResult.redactedStatus).toMatchObject({
+        hostedMailboxImportedCount: 1,
+        hostedOutboxDeliverySent: 1,
+      });
+      expect(responsesServer.requests).toHaveLength(2);
+      const secondSession = await readOnlyCodexSession(restoredVaultRoot);
+      expect(secondSession.providerSessionId).toBe(firstSession.providerSessionId);
+      expect(secondSession.codexRolloutRelativePath).toBe(firstSession.codexRolloutRelativePath);
+      expect(readCodexRolloutResponsesInput(responsesServer.requests[1]!))
+        .toContain("Conversation so far:\nAssistant:\n{\"kind\":\"send_message\"");
+      expect(readCodexRolloutResponsesInput(responsesServer.requests[1]!))
+        .toContain("\"text\":\"first rollout checkpoint reply\"");
+      expect(readCodexRolloutResponsesInput(responsesServer.requests[1]!))
+        .toContain("Send the second checkpoint continuity note.");
+      await expect(readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "state_1.sqlite"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "history.jsonl"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      const secondRunCheckpoints = checkpointRequests.slice(checkpointCountAfterFirstRun);
+      expect(secondRunCheckpoints.length).toBeGreaterThan(0);
+      const snapshotBundleRefs = secondRunCheckpoints
+        .slice()
+        .reverse()
+        .flatMap((request) => [
+          readHostedExecutionSnapshotHotRef(request.snapshotRef),
+          readHostedExecutionSnapshotBaseRef(request.snapshotRef),
+        ].filter((snapshotRef) => snapshotRef !== null));
+      const snapshotBundleRef = snapshotBundleRefs.find((snapshotRef) => {
+        const bytes = artifactPutBytesByHash.get(snapshotRef.hash) ?? null;
+        return readHostedBundleTextFile({
+          bytes,
+          expectedKind: "vault",
+          path: `.codex-hosted/${secondSession.codexRolloutRelativePath}`,
+          root: "operator-home",
+        })?.includes("second rollout checkpoint reply") === true;
+      }) ?? null;
+      expect(snapshotBundleRef).toEqual(expect.objectContaining({
+        hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      }));
+      const secondHotBundle = snapshotBundleRef
+        ? artifactPutBytesByHash.get(snapshotBundleRef.hash) ?? null
+        : null;
+      expect(readHostedBundleTextFile({
+        bytes: secondHotBundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${secondSession.codexRolloutRelativePath}`,
+        root: "operator-home",
+      })).toEqual(expect.stringContaining("second rollout checkpoint reply"));
+      expect(readHostedBundleTextFile({
+        bytes: secondHotBundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${secondSession.codexRolloutRelativePath}`,
+        root: "operator-home",
+      })).toEqual(expect.stringContaining("\"event\":\"thread.resumed\""));
+      expect(readHostedBundleTextFile({
+        bytes: secondHotBundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/rollouts/hosted-e2e-codex-shim.jsonl",
+        root: "operator-home",
+      })).toBeNull();
+      expect(readHostedBundleTextFile({
+        bytes: secondHotBundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/state_1.sqlite",
+        root: "operator-home",
+      })).toBeNull();
+      const codexSnapshotLogs = findRuntimeLogEntries(
+        runtimeLogRequests,
+        "workspace.codex_home_snapshot",
+      );
+      const latestCodexSnapshotLogJson = codexSnapshotLogs.at(-1)?.redactedJson;
+      expect(latestCodexSnapshotLogJson).toMatchObject({
+        codexResumeMissingRolloutCount: 0,
+        codexResumeRolloutBytes: expect.any(Number),
+        codexResumeThreadCount: 1,
+      });
+      const codexResumeRolloutBytes = latestCodexSnapshotLogJson?.codexResumeRolloutBytes;
+      if (typeof codexResumeRolloutBytes !== "number") {
+        throw new Error("Expected Codex snapshot log to include numeric rollout byte count.");
+      }
+      expect(codexResumeRolloutBytes).toBeGreaterThan(0);
+      expect(latestCodexSnapshotLogJson).not.toHaveProperty(
+        "codexResumeRolloutRelativePaths",
+      );
+    } finally {
+      await responsesServer.close();
+    }
+  }, 180_000);
 });
 
 interface BaselineArtifactPutCall {
@@ -442,6 +694,242 @@ async function seedOverBudgetCodexHome(input: {
   );
 }
 
+function createCodexRolloutNotificationWake(input: {
+  eventId: string;
+  instructions: string;
+  text: string;
+}) {
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: input.eventId,
+    memberId: CODEX_ROLLOUT_E2E_USER_ID,
+    notification: {
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: input.eventId,
+      instructions: input.instructions,
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: input.text,
+      },
+      route: {
+        actorId: "hosted-rollout-e2e-actor",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "linq_thread_codex_rollout_e2e",
+        },
+        identityId: "hbidx:phone:v1:codex-rollout-e2e",
+        threadId: "linq_thread_codex_rollout_e2e",
+        threadIsDirect: true,
+      },
+    },
+    occurredAt: TEST_NOW,
+  });
+}
+
+async function runCodexRolloutWorkspaceInvocation(input: {
+  attemptId: string;
+  decodedWakes: ReadonlyMap<string, ReturnType<typeof createCodexRolloutNotificationWake>>;
+  platform: HostedRuntimePlatform;
+  runtime: typeof BASELINE_RUNTIME;
+  vaultRoot: string;
+  workspaceVersion: string;
+}) {
+  const request = createWorkspaceInvocationRequest({
+    attemptId: input.attemptId,
+    userId: CODEX_ROLLOUT_E2E_USER_ID,
+    workspaceVersion: input.workspaceVersion,
+  });
+  const bridgeOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+    decodeMailboxPayload: {
+      async decode(decodeInput) {
+        const wake = input.decodedWakes.get(decodeInput.payloadCiphertext);
+        if (!wake) {
+          return {
+            reasonCode: "payload.decode_missing",
+            retryable: false,
+            status: "blocked",
+          };
+        }
+
+        return {
+          status: "decoded",
+          wake,
+        };
+      },
+    },
+    platform: input.platform,
+    readCurrentLease: () => ({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: request.userId,
+      workspaceVersion: request.workspaceVersion,
+    }),
+    request,
+    runtime: input.runtime,
+    vaultRoot: input.vaultRoot,
+  });
+
+  return await runHostedWorkspaceRuntimeJobInProcess({
+    request,
+    runtime: input.runtime,
+  }, {
+    ...bridgeOptions,
+    platform: input.platform,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function readOnlyCodexSession(vaultRoot: string): Promise<{
+  codexRolloutRelativePath: string;
+  providerSessionId: string;
+}> {
+  const sessionsDirectory = resolveAssistantStatePaths(vaultRoot).sessionsDirectory;
+  const fileNames = await readdir(sessionsDirectory);
+  for (const fileName of fileNames) {
+    if (!fileName.endsWith(".json")) {
+      continue;
+    }
+    const parsed = JSON.parse(await readFile(path.join(sessionsDirectory, fileName), "utf8")) as {
+      resumeState?: {
+        codexRolloutRelativePath?: unknown;
+        providerSessionId?: unknown;
+      } | null;
+    };
+    const providerSessionId = parsed.resumeState?.providerSessionId;
+    const codexRolloutRelativePath = parsed.resumeState?.codexRolloutRelativePath;
+    if (
+      typeof providerSessionId === "string"
+      && typeof codexRolloutRelativePath === "string"
+    ) {
+      return {
+        codexRolloutRelativePath,
+        providerSessionId,
+      };
+    }
+  }
+
+  throw new Error("Expected hosted Codex session resume state after notification turn.");
+}
+
+function buildAssistantNotificationDecisionResponse(text: string): string {
+  return JSON.stringify({
+    kind: "send_message",
+    privateSummary: "deliver rollout continuity proof",
+    text,
+  });
+}
+
+async function startCodexRolloutResponsesServer(input: {
+  responseTexts: readonly string[];
+}): Promise<{
+  baseUrl: string;
+  close(): Promise<void>;
+  linqBaseUrl: string;
+  linqRequests: string[];
+  requests: string[];
+}> {
+  const requests: string[] = [];
+  const linqRequests: string[] = [];
+  const responseTexts = [...input.responseTexts];
+  const server = createServer(async (request, response) => {
+    const body = await readHttpRequestBody(request);
+    const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (requestUrl.pathname.startsWith("/chats/")) {
+      linqRequests.push(body);
+      response.statusCode = 200;
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(JSON.stringify({
+        chat_id: "linq_thread_codex_rollout_e2e",
+        message: {
+          id: `linq_msg_codex_rollout_${linqRequests.length}`,
+        },
+      }));
+      return;
+    }
+
+    if (requestUrl.pathname !== "/v1/responses") {
+      response.statusCode = 404;
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(JSON.stringify({ error: "unexpected test endpoint" }));
+      return;
+    }
+
+    requests.push(body);
+    const nextText = responseTexts.shift() ?? buildAssistantNotificationDecisionResponse(
+      "fallback rollout checkpoint reply",
+    );
+    response.statusCode = 200;
+    response.setHeader("content-type", "application/json; charset=utf-8");
+    response.end(JSON.stringify({
+      id: `resp_codex_rollout_${requests.length}`,
+      object: "response",
+      output: [
+        {
+          content: [
+            {
+              text: nextText,
+              type: "output_text",
+            },
+          ],
+          id: `msg_codex_rollout_${requests.length}`,
+          role: "assistant",
+          type: "message",
+        },
+      ],
+    }));
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  return {
+    baseUrl: `${readServerBaseUrl(server)}/v1`,
+    close: async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
+    linqBaseUrl: readServerBaseUrl(server),
+    linqRequests,
+    requests,
+  };
+}
+
+async function readHttpRequestBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function readServerBaseUrl(server: Server): string {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Responses server did not bind to a TCP port.");
+  }
+  return `http://127.0.0.1:${address.port}`;
+}
+
+function readCodexRolloutResponsesInput(body: string): string {
+  const parsed = JSON.parse(body) as { input?: unknown };
+  if (typeof parsed.input !== "string") {
+    throw new Error("Codex rollout responses request did not contain string input.");
+  }
+  return parsed.input;
+}
+
 function createSyntheticPdfBytes(index: number): Uint8Array {
   const body = [
     "%PDF-1.7",
@@ -498,6 +986,7 @@ function createBaselinePlatform(input: {
 function createBaselineMailboxPort(input: {
   fetchRequests: HostedMailboxFetchRequest[];
   items: HostedMailboxItem[];
+  userId?: string;
 }): HostedRuntimeMailboxPort {
   return {
     async fetch(request): Promise<HostedMailboxFetchResponse> {
@@ -517,7 +1006,7 @@ function createBaselineMailboxPort(input: {
               BigInt(item.laneSeq) > BigInt(maxSeq) ? item.laneSeq : maxSeq,
             lane.importedSeq),
         })),
-        userId: TEST_USER_ID,
+        userId: input.userId ?? TEST_USER_ID,
       };
     },
     async fetchPayload() {
@@ -651,4 +1140,13 @@ function findFirstRuntimeLogEntry(
     }
   }
   return null;
+}
+
+function findRuntimeLogEntries(
+  requests: readonly HostedRuntimeLogRequest[],
+  eventCode: string,
+): HostedRuntimeLogRequest["entries"] {
+  return requests.flatMap((request) =>
+    request.entries.filter((entry) => entry.eventCode === eventCode)
+  );
 }

@@ -88,8 +88,22 @@ function buildCodexThreadIdentityFingerprint(input: {
     approvalPolicy: input.providerOptions.approvalPolicy,
     profile: input.providerOptions.profile,
     oss: input.providerOptions.oss,
-    codexHome: input.providerOptions.codexHome ?? null,
+    codexHome: normalizeCodexThreadIdentityCodexHome(input.providerOptions.codexHome),
     codexCommand: input.codexCommand,
     resumeKind: input.providerOptions.resumeKind,
   }
+}
+
+function normalizeCodexThreadIdentityCodexHome(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return null
+  }
+
+  const pathSegments = normalized.replace(/\\/gu, '/').split('/')
+  return pathSegments.at(-1) === '.codex-hosted'
+    ? '<hosted-codex-home>'
+    : normalized
 }

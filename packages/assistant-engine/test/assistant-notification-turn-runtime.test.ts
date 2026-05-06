@@ -482,7 +482,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
   )
 })
 
-test('sendAssistantNotificationLocal returns skip decisions without persisting or delivering', async () => {
+test('sendAssistantNotificationLocal returns skip decisions without delivering', async () => {
   const providerSession = createAssistantSession({
     binding: {
       actorId: 'actor-skip',
@@ -614,7 +614,13 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     session: providerSession,
   })
   expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: null,
+      persistUserPromptToTranscript: false,
+      providerResumeStateAction: 'persist-from-provider-turn',
+    }),
+  )
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
