@@ -2436,17 +2436,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint",
       ]);
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.latestWorkspace?.version, "2");
-      assert.equal(checkpointRequests.length, 2);
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "import");
-      assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
-      assert.equal(checkpointRequests[1]?.reason, "maintenance");
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
         hostedMailboxBlockedCount: 0,
         hostedMailboxConversationImportedSeq: "1",
         hostedMailboxFetchedCount: 1,
         hostedMailboxImportedCount: 1,
-        hostedMailboxProjectionCheckpoint: true,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
       });
@@ -2510,10 +2507,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.latestWorkspace?.version, "2");
+      assert.equal(result.latestWorkspace?.version, "1");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "maintenance",
       ]);
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");

@@ -266,10 +266,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       initialMailboxImport,
       input,
     });
-    await runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort({
+    await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
-      expectedUserId: input.expectedUserId,
-      initialMailboxImport,
       input,
     });
     return {
@@ -351,10 +349,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       initialMailboxImport,
       input,
     });
-    await runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort({
+    await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
-      expectedUserId: input.expectedUserId,
-      initialMailboxImport,
       input,
     });
   } catch (error) {
@@ -859,54 +855,6 @@ async function checkpointHostedWorkspaceUsageExportCleanup(input: {
   input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
 }
 
-async function checkpointHostedWorkspaceMailboxPostCheckpointEffects(input: {
-  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
-  expectedUserId: string;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
-  workspacePort: HostedRuntimeWorkspacePort;
-}): Promise<void> {
-  const latestWorkspace = input.checkpointRequestBuilder.latestWorkspace();
-  if (!latestWorkspace) {
-    return;
-  }
-
-  const mailboxImport =
-    input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
-  const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
-    mailboxImport,
-    {
-      hostedMailboxProjectionCheckpoint: true,
-    },
-  );
-  const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
-    importResult: mailboxImport.importResult,
-    ...hostedWorkspaceScheduledWake(latestWorkspace),
-    previousState: mailboxImport.state,
-    reason: "maintenance",
-    redactedStatus,
-    state: mailboxImport.state,
-  });
-  const checkpoint = await input.workspacePort.checkpoint({
-    ...checkpointRequest,
-    ...hostedWorkspaceScheduledWake(latestWorkspace),
-    reason: "maintenance",
-    redactedStatus,
-  });
-
-  if (checkpoint.workspace.userId !== input.expectedUserId) {
-    throw new HostedMailboxImportCheckpointUserMismatchError({
-      actualUserId: checkpoint.workspace.userId,
-      expectedUserId: input.expectedUserId,
-    });
-  }
-
-  if (!checkpoint.checkpointed) {
-    throw new HostedMailboxImportCheckpointConflictError(checkpoint);
-  }
-
-  input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
-}
-
 function createHostedWorkspaceCheckpointRequestSession(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder,
 ): HostedWorkspaceCheckpointRequestSession {
@@ -1089,10 +1037,8 @@ function isHostedMailboxPostCheckpointRedactedStringSafe(value: string): boolean
   );
 }
 
-async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(input: {
+async function runHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
-  expectedUserId: string;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
   input: HostedWorkspaceRunnerInput;
 }): Promise<void> {
   const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
@@ -1134,18 +1080,6 @@ async function runHostedMailboxPostCheckpointEffectsAndCheckpointBestEffort(inpu
     now: input.input.now,
     platform: input.input.platform,
   });
-
-  try {
-    await checkpointHostedWorkspaceMailboxPostCheckpointEffects({
-      checkpointRequestBuilder: input.checkpointRequestBuilder,
-      expectedUserId: input.expectedUserId,
-      initialMailboxImport: input.initialMailboxImport,
-      workspacePort: input.input.platform.workspacePort,
-    });
-  } catch {
-    // Projection checkpoints are best-effort. Assistant input and mailbox
-    // watermarks are already durable by the time these effects run.
-  }
 }
 
 async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort(input: {
