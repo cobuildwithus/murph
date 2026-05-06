@@ -1,7 +1,9 @@
-import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron";
+import { timingSafeEqual } from "node:crypto";
+
 import {
   backfillHostedBillingSnapshots,
 } from "@/src/lib/hosted-onboarding/stripe-billing-snapshot-backfill";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   jsonOk,
   readOptionalJsonObject,
@@ -9,7 +11,7 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 
 export const GET = withJsonError(async (request: Request) => {
-  requireVercelCronRequest(request);
+  requireHostedBillingBackfillRequest(request);
 
   const summary = await backfillHostedBillingSnapshots({
     apply: false,
@@ -22,7 +24,7 @@ export const GET = withJsonError(async (request: Request) => {
 });
 
 export const POST = withJsonError(async (request: Request) => {
-  requireVercelCronRequest(request);
+  requireHostedBillingBackfillRequest(request);
 
   const body = await readOptionalJsonObject(request, {
     limitBytes: 2_048,
@@ -54,4 +56,57 @@ function parseHostedBillingSnapshotBackfillLimit(value: unknown): number | undef
   }
 
   return parsed;
+}
+
+function requireHostedBillingBackfillRequest(request: Request): void {
+  const configuredSecret = normalizeOptionalString(process.env.HOSTED_BILLING_BACKFILL_SECRET);
+
+  if (!configuredSecret) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_BACKFILL_SECRET_REQUIRED",
+      message: "HOSTED_BILLING_BACKFILL_SECRET must be configured for billing backfill routes.",
+      httpStatus: 500,
+    });
+  }
+
+  const providedSecret = readBearerAuthorizationToken(request.headers.get("authorization"));
+
+  if (!providedSecret || !timingSafeEquals(configuredSecret, providedSecret)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_BACKFILL_UNAUTHORIZED",
+      message: "Unauthorized hosted billing backfill request.",
+      httpStatus: 401,
+    });
+  }
+}
+
+function readBearerAuthorizationToken(value: string | null): string | null {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized || !normalized.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = normalized.slice("Bearer ".length).trim();
+  return token.length > 0 ? token : null;
+}
+
+function normalizeOptionalString(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function timingSafeEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
