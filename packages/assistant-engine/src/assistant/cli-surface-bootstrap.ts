@@ -89,6 +89,22 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
   return contractSnapshot.contract
 }
 
+export async function readPersistedAssistantCliSurfaceBootstrapContext(input: {
+  sessionId: string
+  vault: string
+}): Promise<string | null> {
+  const docId = buildAssistantCliSurfaceBootstrapDocId(input.sessionId)
+  const stateDirectory = resolveAssistantStatePaths(input.vault).stateDirectory
+  const documentPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory,
+    },
+    docId,
+  )
+
+  return (await readPersistedAssistantCliSurfaceContract(documentPath))?.contract ?? null
+}
+
 export function buildAssistantCliSurfaceContract(
   manifest: AssistantCliLlmsManifest,
   input?: {

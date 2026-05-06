@@ -15,7 +15,10 @@ import {
   resolveCodexAssistantTargetCapabilities,
 } from '../provider-registry.js'
 import { buildAssistantActiveExperimentContextBlock } from '../active-experiment-context.js'
-import { resolveAssistantCliSurfaceBootstrapContext } from '../cli-surface-bootstrap.js'
+import {
+  readPersistedAssistantCliSurfaceBootstrapContext,
+  resolveAssistantCliSurfaceBootstrapContext,
+} from '../cli-surface-bootstrap.js'
 import {
   normalizeAssistantExecutionContext,
   type AssistantHostedDeviceConnectProvider,
@@ -322,8 +325,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const assistantCliContract =
+  const shouldPrepareConversationThreadInstructions =
     shouldPrepareThreadInstructions && input.profile.promptProfile === 'conversation'
+  const shouldTryPersistedThreadInstructions =
+    shouldPrepareConversationThreadInstructions &&
+    resumeProviderSessionId !== null &&
+    storedThreadInstructionsFingerprint !== null
+  let assistantCliContract = shouldTryPersistedThreadInstructions
+    ? await readPersistedAssistantCliSurfaceBootstrapContext({
+        sessionId: input.session.sessionId,
+        vault: input.input.vault,
+      })
+    : shouldPrepareConversationThreadInstructions
       ? await resolveAssistantCliSurfaceBootstrapContext({
           cliEnv: input.sharedPlan.cliAccess.env,
           executionContext: input.input.executionContext,
@@ -346,7 +359,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.route.providerOptions,
   )
   const toolSchemaHash = null
-  const systemPromptResult =
+  const buildRouteSystemPromptResult = (routeAssistantCliContract: string | null) =>
     input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             activeExperimentContext,
@@ -366,7 +379,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           })
       : buildAssistantSystemPromptWithCacheMetadata({
             activeExperimentContext,
-            assistantCliContract,
+            assistantCliContract: routeAssistantCliContract,
             allowSensitiveHealthContext:
               input.sharedPlan.allowSensitiveHealthContext,
             assistantHostedDeviceConnectAvailable:
@@ -388,6 +401,29 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }, {
             toolSchemaHash,
           })
+  let systemPromptResult = buildRouteSystemPromptResult(assistantCliContract)
+  let threadInstructionsFingerprint =
+    buildAssistantThreadInstructionsFingerprint(systemPromptResult.cacheMetadata)
+  let refreshThreadInstructions =
+    resumeProviderSessionId === null ||
+    threadInstructionsFingerprint === null ||
+    storedThreadInstructionsFingerprint !== threadInstructionsFingerprint
+  if (shouldTryPersistedThreadInstructions && refreshThreadInstructions) {
+    assistantCliContract = await resolveAssistantCliSurfaceBootstrapContext({
+      cliEnv: input.sharedPlan.cliAccess.env,
+      executionContext: input.input.executionContext,
+      sessionId: input.session.sessionId,
+      vault: input.input.vault,
+      workingDirectory,
+    })
+    systemPromptResult = buildRouteSystemPromptResult(assistantCliContract)
+    threadInstructionsFingerprint =
+      buildAssistantThreadInstructionsFingerprint(systemPromptResult.cacheMetadata)
+    refreshThreadInstructions =
+      resumeProviderSessionId === null ||
+      threadInstructionsFingerprint === null ||
+      storedThreadInstructionsFingerprint !== threadInstructionsFingerprint
+  }
   const systemPrompt = systemPromptResult.prompt
   const developerInstructions = [
     systemPromptResult.layers.staticCacheableCorePrompt,
@@ -398,12 +434,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const turnContextPrompt = normalizeNullableString(
     systemPromptResult.layers.dynamicTurnContextPrompt,
   )
-  const threadInstructionsFingerprint =
-    buildAssistantThreadInstructionsFingerprint(systemPromptResult.cacheMetadata)
-  const refreshThreadInstructions =
-    resumeProviderSessionId === null ||
-    threadInstructionsFingerprint === null ||
-    storedThreadInstructionsFingerprint !== threadInstructionsFingerprint
   const conversationMessages = await resolveAssistantTranscriptConversationMessages({
     promptProfile: input.profile.promptProfile,
     resumeProviderSessionId,

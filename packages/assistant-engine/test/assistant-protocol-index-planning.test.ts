@@ -16,6 +16,9 @@ const runtimeMocks = vi.hoisted(() => ({
 }))
 
 const planningMocks = vi.hoisted(() => ({
+  readPersistedAssistantCliSurfaceBootstrapContext: vi.fn(
+    async (): Promise<string | null> => null,
+  ),
   resolveAssistantCliSurfaceBootstrapContext: vi.fn(async () => 'bootstrap contract'),
   resolveAssistantVaultOverviewBlock: vi.fn(async () => null),
   resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
@@ -31,6 +34,8 @@ vi.mock('@murphai/health-commons/runtime', () => ({
 }))
 
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
+  readPersistedAssistantCliSurfaceBootstrapContext:
+    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext,
   resolveAssistantCliSurfaceBootstrapContext:
     planningMocks.resolveAssistantCliSurfaceBootstrapContext,
 }))
@@ -58,6 +63,7 @@ import type { CodexThreadIdentity } from '../src/assistant/provider-route.js'
 
 afterEach(() => {
   runtimeMocks.listGeneratedAssistantProtocolIndexEntries.mockReset()
+  planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.resolveAssistantVaultOverviewBlock.mockReset()
   planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
@@ -134,6 +140,10 @@ describe('assistant protocol index planning', () => {
     expect(initialPlan.threadInstructionsFingerprint).toEqual(
       expect.stringContaining('thread-instructions-v1:'),
     )
+    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockClear()
     planningMocks.resolveAssistantVaultOverviewBlock.mockClear()
 
     const resumedPlan = await resolveAssistantRouteTurnPlan({
@@ -162,6 +172,12 @@ describe('assistant protocol index planning', () => {
       initialPlan.threadInstructionsFingerprint,
     )
     expect(resumedPlan.sessionContext).toBeUndefined()
+    expect(
+      planningMocks.readPersistedAssistantCliSurfaceBootstrapContext,
+    ).toHaveBeenCalledTimes(1)
+    expect(
+      planningMocks.resolveAssistantCliSurfaceBootstrapContext,
+    ).not.toHaveBeenCalled()
     expect(planningMocks.resolveAssistantVaultOverviewBlock).not.toHaveBeenCalled()
   })
 
@@ -189,6 +205,9 @@ describe('assistant protocol index planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
+    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
 
     const resumedPlan = await resolveAssistantRouteTurnPlan({
       activeTurnHistory: {
@@ -354,6 +373,9 @@ describe('assistant protocol index planning', () => {
   })
 
   it('refreshes resumed thread instructions when the fingerprint changed', async () => {
+    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -387,6 +409,9 @@ describe('assistant protocol index planning', () => {
 
     expect(plan.resumeProviderSessionId).toBe('thread-resume')
     expect(plan.refreshThreadInstructions).toBe(true)
+    expect(
+      planningMocks.resolveAssistantCliSurfaceBootstrapContext,
+    ).toHaveBeenCalledTimes(1)
   })
 })
 
