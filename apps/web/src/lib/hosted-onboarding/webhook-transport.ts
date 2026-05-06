@@ -17,7 +17,10 @@ import {
   buildHostedLinqConversationHomeRedirectReply,
   sendHostedLinqChatMessage,
 } from "./linq";
-import { sanitizeHostedOnboardingStructuredLogDetails } from "./logging";
+import {
+  sanitizeHostedOnboardingStructuredLogDetails,
+  toHostedOnboardingLogIdSuffix,
+} from "./logging";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
 
@@ -190,7 +193,7 @@ function buildHostedLinqSideEffectLogDetails(
 
   return {
     elapsedMs: Math.max(0, elapsedMs),
-    effectId: effect.effectId,
+    effectIdSuffix: toHostedOnboardingLogIdSuffix(effect.effectId) ?? "unknown",
     hasIdempotencyKey: true,
     hasReplyToMessageId: typeof effect.payload.replyToMessageId === "string"
       && effect.payload.replyToMessageId.trim().length > 0,

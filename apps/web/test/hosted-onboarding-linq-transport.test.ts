@@ -215,7 +215,7 @@ describe("hosted Linq webhook transport", () => {
       expect(errorSpy).toHaveBeenCalledWith(
         "Hosted Linq side-effect delivery failed.",
         expect.objectContaining({
-          effectId: effect.effectId,
+          effectIdSuffix: "vent-1",
           failureStage: "http",
           hasIdempotencyKey: true,
           hasReplyToMessageId: true,
