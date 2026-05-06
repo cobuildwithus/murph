@@ -45,6 +45,16 @@ describe("runHostedWorkspaceInvocation abort forwarding", () => {
         userId: "member_abort_forwarding",
         workspaceVersion: "0",
       },
+      runtime: {
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: false,
+          },
+          deviceSync: null,
+          managedAutoReplyChannels: [],
+        },
+      },
     }, {
       signal: controller.signal,
     });
