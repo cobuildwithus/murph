@@ -30,6 +30,7 @@ const HOSTED_ONBOARDING_SENSITIVE_LOG_KEY_PATTERN =
   /authorization|secret|token|password|cookie|set-cookie|api[-_]?key/iu;
 const HOSTED_ONBOARDING_SAFE_DOMAIN_ERROR_DETAIL_KEYS = new Set([
   "code",
+  "operationName",
   "requestIdPresent",
   "statusCode",
   "type",

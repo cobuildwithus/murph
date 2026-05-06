@@ -145,7 +145,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
 
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith("sub_123", {
-      expand: ["items.data.price", "latest_invoice.payment_intent"],
+      expand: ["items.data.price"],
       items: [
         {
           id: "si_recurring",
@@ -157,14 +157,6 @@ describe("upgradeHostedBillingPlan", () => {
           price: "price_edge_usage",
         },
       ],
-      metadata: {
-        billingPlanCode: "launch_edge_monthly",
-        checkoutOffer: "standard",
-        memberId: "member_123",
-        trialDurationDays: "",
-        trialPolicyVersion: "",
-        trialUsageLimitUsdMicros: "",
-      },
       payment_behavior: "pending_if_incomplete",
       proration_behavior: "always_invoice",
     }, {
@@ -292,11 +284,11 @@ describe("upgradeHostedBillingPlan", () => {
     );
     expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: {
+        metadata: expect.objectContaining({
           billingPlanCode: "launch_edge_monthly",
           checkoutOffer: "standard",
           memberId: "member_123",
-        },
+        }),
       }),
       expect.any(Object),
       mocks.prismaClient,
@@ -367,7 +359,29 @@ describe("upgradeHostedBillingPlan", () => {
       status: "upgraded",
     });
 
-    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+    expect(mocks.stripe.subscriptions.update).toHaveBeenNthCalledWith(
+      1,
+      "sub_123",
+      expect.objectContaining({
+        expand: ["items.data.price"],
+        items: [
+          {
+            id: "si_recurring",
+            price: "price_edge_recurring",
+            quantity: 1,
+          },
+          {
+            id: "si_usage",
+            price: "price_edge_usage",
+          },
+        ],
+        payment_behavior: "pending_if_incomplete",
+        proration_behavior: "always_invoice",
+      }),
+      expect.any(Object),
+    );
+    expect(mocks.stripe.subscriptions.update).toHaveBeenNthCalledWith(
+      2,
       "sub_123",
       expect.objectContaining({
         metadata: {
@@ -383,11 +397,11 @@ describe("upgradeHostedBillingPlan", () => {
     );
     expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: {
+        metadata: expect.objectContaining({
           billingPlanCode: "launch_edge_monthly",
           checkoutOffer: "standard",
           memberId: "member_123",
-        },
+        }),
       }),
       expect.any(Object),
       mocks.prismaClient,
@@ -514,6 +528,7 @@ describe("upgradeHostedBillingPlan", () => {
       code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
       details: {
         code: "resource_missing",
+        operationName: "subscription.retrieve",
         requestIdPresent: true,
         statusCode: 404,
         type: "StripeInvalidRequestError",
