@@ -1,4 +1,5 @@
-import { rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import {
   assistantCronJobSchema,
@@ -305,6 +306,8 @@ afterEach(async () => {
 
 describe('assistant cron runtime orchestration', () => {
   it('lists mixed local and canonical jobs and computes status from both stores', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-list-')
     const localJob = await createLocalJob(vaultRoot, 'food-local')
     const canonicalJob = await createCanonicalJob(vaultRoot, 'daily-check-in')
@@ -648,6 +651,90 @@ describe('assistant cron runtime orchestration', () => {
     const updatedCanonical = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
     expect(updatedCanonical.state.lastSucceededAt).not.toBeNull()
     expect(updatedCanonical.state.runningAt).toBeNull()
+  })
+
+  it('reclaims stale canonical running jobs while preserving fresh running claims', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-stale-canonical-',
+    )
+    const staleJob = await createCanonicalJob(vaultRoot, 'stale-canonical')
+    const freshJob = await createCanonicalJob(vaultRoot, 'fresh-canonical')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const staleRecord = runtimeStore.jobs.find(
+      (record) => record.jobId === staleJob.jobId,
+    )
+    const freshRecord = runtimeStore.jobs.find(
+      (record) => record.jobId === freshJob.jobId,
+    )
+
+    if (!staleRecord || !freshRecord) {
+      throw new Error('Expected canonical runtime records to exist.')
+    }
+    await mkdir(path.dirname(paths.cronAutomationStatePath), {
+      recursive: true,
+    })
+    await writeFile(
+      paths.cronAutomationStatePath,
+      JSON.stringify(
+        {
+          jobs: [
+            {
+              ...staleRecord,
+              state: {
+                ...staleRecord.state,
+                pendingOccurrenceAt: '2026-04-08T12:00:00.000Z',
+                runningAt: '2026-04-08T11:30:00.000Z',
+                runningPid: 111,
+              },
+              updatedAt: '2026-04-08T11:30:00.000Z',
+            },
+            {
+              ...freshRecord,
+              state: {
+                ...freshRecord.state,
+                pendingOccurrenceAt: '2026-04-08T12:00:00.000Z',
+                runningAt: '2026-04-08T12:30:00.000Z',
+                runningPid: 222,
+              },
+              updatedAt: '2026-04-08T12:30:00.000Z',
+            },
+          ],
+          version: 1,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 5,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: 'Check in for stale-canonical',
+      }),
+    )
+
+    const reclaimed = await getAssistantCronJob(vaultRoot, staleJob.jobId)
+    expect(reclaimed.state.runningAt).toBeNull()
+    expect(reclaimed.state.lastSucceededAt).toBe('2026-04-08T13:00:00.000Z')
+
+    const stillRunning = await getAssistantCronJob(vaultRoot, freshJob.jobId)
+    expect(stillRunning.state.runningAt).toBe('2026-04-08T12:30:00.000Z')
+    expect(stillRunning.state.runningPid).toBe(222)
+    expect(stillRunning.state.lastSucceededAt).toBeNull()
   })
 
   it('processes a canonical daily-local midnight job when runtime state is missing', async () => {

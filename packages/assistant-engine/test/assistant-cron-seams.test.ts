@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -25,6 +25,7 @@ import { createTempVaultContext } from './test-helpers.js'
 const tempRoots: string[] = []
 
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
       rm(rootPath, {
@@ -240,6 +241,93 @@ describe('assistant cron canonical runtime store seams', () => {
     })
     await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
       jobs: [alphaRecord, betaRecord],
+      version: 1,
+    })
+  })
+
+  it('clears stale canonical running claims during store normalization', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    const paths = await createAssistantPaths('murph-assistant-cron-store-stale-')
+    const staleRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: 'stale',
+      now: '2026-04-08T11:00:00.000Z',
+    })
+    const freshRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: 'fresh',
+      now: '2026-04-08T12:30:00.000Z',
+    })
+
+    await mkdir(path.dirname(paths.cronAutomationStatePath), {
+      recursive: true,
+    })
+    await writeFile(
+      paths.cronAutomationStatePath,
+      JSON.stringify(
+        {
+          jobs: [
+            {
+              ...staleRecord,
+              state: {
+                ...staleRecord.state,
+                runningAt: '2026-04-08T11:30:00.000Z',
+                runningPid: 123,
+              },
+            },
+            {
+              ...freshRecord,
+              state: {
+                ...freshRecord.state,
+                runningAt: '2026-04-08T12:30:00.000Z',
+                runningPid: 456,
+              },
+            },
+          ],
+          version: 1,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+
+    expect(JSON.parse(await readFile(paths.cronAutomationStatePath, 'utf8'))).toEqual({
+      jobs: [
+        expect.objectContaining({
+          jobId: 'stale',
+          state: expect.objectContaining({
+            runningAt: '2026-04-08T11:30:00.000Z',
+            runningPid: 123,
+          }),
+        }),
+        expect.objectContaining({
+          jobId: 'fresh',
+          state: expect.objectContaining({
+            runningAt: '2026-04-08T12:30:00.000Z',
+            runningPid: 456,
+          }),
+        }),
+      ],
+      version: 1,
+    })
+
+    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
+      jobs: [
+        expect.objectContaining({
+          jobId: 'fresh',
+          state: expect.objectContaining({
+            runningAt: '2026-04-08T12:30:00.000Z',
+            runningPid: 456,
+          }),
+        }),
+        expect.objectContaining({
+          jobId: 'stale',
+          state: expect.objectContaining({
+            runningAt: null,
+            runningPid: null,
+          }),
+        }),
+      ],
       version: 1,
     })
   })
