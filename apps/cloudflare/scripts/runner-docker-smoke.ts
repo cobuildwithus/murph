@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     console.log(`codexVersion=${result.codexVersion}`);
     console.log(`codexAppServerHelpBytes=${result.codexAppServerHelpBytes}`);
     console.log(`codexHostedShellVaultCliLlmsBytes=${result.codexHostedShellVaultCliLlmsBytes}`);
-    console.log(`codexHostedShellMurphHelpBytes=${result.codexHostedShellMurphHelpBytes}`);
+    console.log(`codexHostedShellMurphPathBytes=${result.codexHostedShellMurphPathBytes}`);
     console.log(`codexHostedShellPythonVersion=${result.codexHostedShellPythonVersion}`);
     console.log(`operatorHomeRebound=${result.operatorHomeRebound}`);
     console.log(`vaultRootRebound=${result.vaultRootRebound}`);

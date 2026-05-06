@@ -903,10 +903,11 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
   const diagnostics = input.error.codexHomeSnapshotDiagnostics;
   const errorMessage = redactHostedRuntimeDiagnosticText(readHostedSnapshotErrorMessage(input.error));
   const errorName = input.error.name;
+  const { snapshotMode } = input;
 
   console.warn("Hosted Codex home snapshot failed.", {
     errorName,
-    snapshotMode: input.snapshotMode,
+    snapshotMode,
   });
   if (!input.platform.logPort) {
     return;
@@ -916,7 +917,7 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
     checkpointReason: input.request.reason,
     errorMessage,
     errorName,
-    snapshotMode: input.snapshotMode,
+    snapshotMode,
   };
   appendHostedCodexHomeSnapshotDiagnostics(redactedJson, diagnostics);
 

@@ -11,7 +11,7 @@ const validHostedRunnerSmokeResult = {
   codexAppServerHelpBytes: 2048,
   codexCommandDiscovered: true,
   codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
-  codexHostedShellMurphHelpBytes: 1536,
+  codexHostedShellMurphPathBytes: 1536,
   codexHostedShellPythonVersion: "Python 3.11.2",
   codexHostedShellVaultCliLlmsBytes: 4096,
   codexVersion: "codex-cli 0.125.0",
@@ -75,7 +75,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexAppServerHelpBytes: 2048,
       codexCommandDiscovered: true,
       codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
-      codexHostedShellMurphHelpBytes: 1536,
+      codexHostedShellMurphPathBytes: 1536,
       codexHostedShellPythonVersion: "Python 3.11.2",
       codexHostedShellVaultCliLlmsBytes: 4096,
       codexVersion: "codex-cli 0.125.0",
@@ -154,9 +154,9 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
-      codexHostedShellMurphHelpBytes: 0,
+      codexHostedShellMurphPathBytes: 0,
     })).toThrow(
-      "Hosted runner smoke result.codexHostedShellMurphHelpBytes must be a positive finite number.",
+      "Hosted runner smoke result.codexHostedShellMurphPathBytes must be a positive finite number.",
     );
 
     expect(() => parseHostedRunnerSmokeResult({

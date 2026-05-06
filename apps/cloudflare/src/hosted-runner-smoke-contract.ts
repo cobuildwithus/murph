@@ -12,7 +12,7 @@ export interface HostedRunnerSmokeResult {
   codexAppServerHelpBytes: number;
   codexCommandDiscovered: boolean;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
-  codexHostedShellMurphHelpBytes: number;
+  codexHostedShellMurphPathBytes: number;
   codexHostedShellPythonVersion: string;
   codexHostedShellVaultCliLlmsBytes: number;
   codexVersion: string;
@@ -86,9 +86,9 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.codexHostedConfigShellEnvironmentPolicyAllowlisted,
       "Hosted runner smoke result.codexHostedConfigShellEnvironmentPolicyAllowlisted",
     ),
-    codexHostedShellMurphHelpBytes: readPositiveFiniteNumber(
-      record.codexHostedShellMurphHelpBytes,
-      "Hosted runner smoke result.codexHostedShellMurphHelpBytes",
+    codexHostedShellMurphPathBytes: readPositiveFiniteNumber(
+      record.codexHostedShellMurphPathBytes,
+      "Hosted runner smoke result.codexHostedShellMurphPathBytes",
     ),
     codexHostedShellPythonVersion: readPython3VersionString(
       record.codexHostedShellPythonVersion,
