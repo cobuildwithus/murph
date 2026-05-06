@@ -708,8 +708,7 @@ function buildAssistantAvailableAutomationGuidanceText(
 ): string {
   return joinPromptSections(
     accessLine,
-    buildAssistantSharedAutomationActionText("vault-cli assistant run"),
-    buildAssistantSharedAutomationResearchText()
+    buildAssistantSharedAutomationActionText("vault-cli assistant run")
   );
 }
 
@@ -733,18 +732,6 @@ function buildAssistantSharedAutomationPreferenceText(): string {
   return `Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.
 
 Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.`;
-}
-
-function buildAssistantSharedAutomationResearchText(): string {
-  return `When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to ${code(
-    "research"
-  )}. Use ${code(
-    "deepthink"
-  )} only when the task is a GPT Pro synthesis without Deep Research.
-
-Keep waiting on long research runs unless they actually error or time out. Both commands wait for completion and save a markdown note under ${code(
-    "research/"
-  )} inside the vault.`;
 }
 
 function buildAssistantKnowledgeGuidanceText(input: {

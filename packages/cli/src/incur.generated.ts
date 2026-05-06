@@ -52,7 +52,6 @@ declare module 'incur' {
       'condition save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }
       'condition scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'deepthink': { args: { prompt: string }; options: { vault: string; requestId?: string; title?: string; chat?: string; browserPath?: string; timeout?: string; waitTimeout?: string } }
       'device account disconnect': { args: { accountId: string }; options: { vault: string; requestId?: string; baseUrl?: string } }
       'device account list': { args: {}; options: { vault: string; requestId?: string; baseUrl?: string; provider?: string } }
       'device account reconcile': { args: { accountId: string }; options: { vault: string; requestId?: string; baseUrl?: string } }
@@ -222,7 +221,6 @@ declare module 'incur' {
       'regimen scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'regimen show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'regimen stop': { args: { regimenId: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
-      'research': { args: { prompt: string }; options: { vault: string; requestId?: string; title?: string; chat?: string; browserPath?: string; timeout?: string; waitTimeout?: string } }
       'route estimate': { args: { origin: string; destination: string }; options: { waypoint?: string[]; profile?: "walking" | "cycling" | "driving" | "driving-traffic"; elevation?: boolean; geometry?: boolean; country?: string[]; language?: string; elevationSampleSpacingMeters?: number; maxElevationSamples?: number } }
       'run': { args: {}; options: { vault: string; requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'samples add': { args: {}; options: { vault: string; requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string; endAt?: string; durationMinutes?: number } }

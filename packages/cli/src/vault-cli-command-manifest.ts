@@ -79,11 +79,9 @@ import {
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
-import { registerResearchCommands } from './commands/research.js'
 import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
-import { researchRunResultSchema } from './research-cli-contracts.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
   knowledgeGetResultSchema as knowledgeShowResultSchema,
@@ -1347,28 +1345,6 @@ export const vaultCliCommandDescriptors = [
     ],
     register({ cli }) {
       registerKnowledgeCommands(cli)
-    },
-  },
-  {
-    id: 'research',
-    bindingMode: 'none',
-    rootCommandNames: ['research', 'deepthink'],
-    leafCommands: [
-      {
-        path: ['research'],
-        description:
-          'Run ChatGPT Deep Research through review:gpt, auto-send the staged prompt, wait for the response, and save the markdown note into research/ inside the vault. These runs commonly take 10 to 60 minutes.',
-        output: researchRunResultSchema,
-      },
-      {
-        path: ['deepthink'],
-        description:
-          'Run GPT Pro through review:gpt, auto-send the staged prompt, wait for the response, and save the markdown note into research/ inside the vault.',
-        output: researchRunResultSchema,
-      },
-    ],
-    register({ cli }) {
-      registerResearchCommands(cli)
     },
   },
   {

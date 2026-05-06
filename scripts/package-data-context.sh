@@ -27,7 +27,7 @@ Options:
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: output-packages)
   --name <prefix>            Output filename prefix (default: murph-data-bundle)
-  --no-docs                  Accepted for review-gpt package-script compatibility
+  --no-docs                  Accepted for compatibility with older review helpers
   -h, --help                 Show this help message
 USAGE
   exit "$exit_code"

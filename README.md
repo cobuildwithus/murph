@@ -173,7 +173,7 @@ The root CLI is no longer just a vault editor. The built command surface include
 - `device` for local wearable/device auth, status, and daemon control
 - env-gated route estimation through `vault-cli route estimate`, which uses temporary Mapbox geocoding and Search Box lookups for distance, duration, hiking POIs, and optional approximate elevation between two points without persisting the route payload in Murph state
 - root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`
-- AI-assisted synthesis helpers such as `research`, `deepthink`, and `knowledge`
+- AI-assisted synthesis helpers such as `knowledge`
 
 The `knowledge` surface is intentionally narrow: use it to persist pages, inspect saved pages, lint the wiki, rebuild the index, and tail the append-only wiki log. The assistant's wiki-maintainer workflow itself lives in the runtime prompt plus the dedicated `assistant.knowledge.*` tools, not in repo `AGENTS.md`.
 
@@ -246,22 +246,6 @@ pnpm typecheck
 pnpm test
 pnpm verify:acceptance
 ```
-
-## Maintainer helpers
-
-The repo also carries local review and ChatGPT-thread tooling for maintainers:
-
-- `pnpm review:gpt`
-- `pnpm review:gpt:full`
-- `pnpm review:gpt:delay --delay 50m --chat-url <url>`
-- `pnpm chatgpt:thread:export --chat-url <url> --output <path>`
-- `pnpm chatgpt:thread:download --chat-url <url> --attachment-text <filename> --output-dir <dir>`
-- `pnpm chatgpt:thread:watch --delay 70m --chat-url <url> [--session-id <uuid>]`
-- `pnpm review:gpt:data --vault ./vault --chat-url <url>`
-
-`pnpm review:gpt` now stages the lean default bundle: repo source plus the durable `agent-docs` context, while leaving out broad test trees, CI workflows, generated `agent-docs`, historical completed plans, prompt boilerplate, and the wider `docs/**` set beyond `docs/architecture.md`. Use `pnpm review:gpt:full` when you explicitly want the larger audit context.
-
-Those are contributor workflows, not the main product entrypoint, which is why they belong down here instead of near the top of the README. Their delayed-send plus thread export/download/wake behavior is owned by the upstream `review-gpt` CLI rather than repo-local helper mirrors, and the local wrappers prefer the sibling `../review-gpt` build when that checkout is available.
 
 ## Development notes
 

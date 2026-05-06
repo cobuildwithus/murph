@@ -1201,68 +1201,6 @@ test('root stop alias keeps the same command schema as assistant stop', async ()
   assert.deepEqual(rootSchema.options, assistantSchema.options)
 })
 
-test('research schema exposes the review:gpt orchestration options', async () => {
-  const schema = JSON.parse(
-    await runRawCli(['research', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('prompt' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['prompt'])
-  assert.equal('title' in schema.options.properties, true)
-  assert.equal('chat' in schema.options.properties, true)
-  assert.equal('browserPath' in schema.options.properties, true)
-  assert.equal('timeout' in schema.options.properties, true)
-  assert.equal('waitTimeout' in schema.options.properties, true)
-  assert.match(
-    String(
-      (
-        schema.options.properties.timeout as {
-          description?: string
-        }
-      ).description ?? '',
-    ),
-    /defaults this to 40m/u,
-  )
-  assert.match(
-    String(
-      (
-        schema.options.properties.waitTimeout as {
-          description?: string
-        }
-      ).description ?? '',
-    ),
-    /defaults to the overall timeout/u,
-  )
-  assert.deepEqual(schema.options.required, ['vault'])
-})
-
-test('deepthink schema stays aligned with research schema', async () => {
-  const researchSchema = JSON.parse(
-    await runRawCli(['research', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const deepthinkSchema = JSON.parse(
-    await runRawCli(['deepthink', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(deepthinkSchema.args, researchSchema.args)
-  assert.deepEqual(deepthinkSchema.options, researchSchema.options)
-})
-
 test('automation save schema exposes typed automation fields and a separate JSON import fallback', async () => {
   const saveSchema = JSON.parse(
     await runRawCli(['automation', 'save', '--schema', '--format', 'json']),
@@ -1854,6 +1792,14 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.equal(
     manifest.commands.some((command) => command.name === 'query projection status'),
     true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'research'),
+    false,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'deepthink'),
+    false,
   )
   const searchQueryCommand = manifest.commands.find(
     (command) => command.name === 'search query',

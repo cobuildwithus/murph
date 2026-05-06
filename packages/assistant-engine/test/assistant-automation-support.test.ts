@@ -807,7 +807,7 @@ describe('assistant auto-reply grouping', () => {
 })
 
 describe('assistant provider watchdog', () => {
-  it('emits provider progress and heartbeats for long-running research commands', () => {
+  it('emits provider progress and heartbeats for long-running knowledge commands', () => {
     vi.useFakeTimers()
     const events: Array<Record<string, unknown>> = []
     const watchdog = createAssistantProviderWatchdog({
@@ -824,9 +824,9 @@ describe('assistant provider watchdog', () => {
       id: 'command-1',
       kind: 'command',
       rawEvent: null,
-      safeText: 'researching',
+      safeText: 'writing knowledge',
       state: 'running',
-      text: '$ murph research inbox grouping',
+      text: '$ murph knowledge upsert --body "# Inbox grouping"',
     })
     watchdog.onProviderEvent({
       id: 'message-1',
@@ -839,16 +839,16 @@ describe('assistant provider watchdog', () => {
 
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({
-      details: '$ murph research inbox grouping',
+      details: '$ murph knowledge upsert --body "# Inbox grouping"',
       inputId: 'input-1',
       providerKind: 'command',
       providerState: 'running',
-      safeDetails: 'researching',
+      safeDetails: 'writing knowledge',
       type: 'input.reply-progress',
     })
 
     vi.advanceTimersByTime(1_000)
-    expect(events.at(-1)?.details).toContain('research command active for 1s')
+    expect(events.at(-1)?.details).toContain('knowledge upsert command active for 1s')
 
     watchdog.onProviderEvent({
       id: 'command-1',
@@ -856,10 +856,10 @@ describe('assistant provider watchdog', () => {
       rawEvent: null,
       safeText: 'done',
       state: 'completed',
-      text: '$ murph research inbox grouping',
+      text: '$ murph knowledge upsert --body "# Inbox grouping"',
     })
     vi.advanceTimersByTime(1_000)
-    expect(events.at(-1)?.details).not.toContain('research command active')
+    expect(events.at(-1)?.details).not.toContain('knowledge upsert command active')
 
     watchdog.dispose()
   })
@@ -893,14 +893,14 @@ describe('assistant provider watchdog', () => {
       id: 'tool-1',
       kind: 'tool',
       rawEvent: null,
-      safeText: 'deepthink',
+      safeText: 'knowledge',
       state: 'running',
-      text: 'tool deepthink',
+      text: 'tool knowledge upsert',
     })
 
     vi.advanceTimersByTime(2_000)
     expect(watchdog.signal.aborted).toBe(true)
-    expect(events.at(-1)?.details).toContain('during deepthink tool')
+    expect(events.at(-1)?.details).toContain('during knowledge upsert tool')
 
     const normalized = watchdog.normalizeError({
       context: {
@@ -918,7 +918,7 @@ describe('assistant provider watchdog', () => {
     watchdog.dispose()
   })
 
-  it('tracks review:gpt and knowledge-upsert operations and leaves primitive errors unchanged', () => {
+  it('tracks knowledge-upsert operations and leaves primitive errors unchanged', () => {
     vi.useFakeTimers()
 
     const events: Array<Record<string, unknown>> = []
@@ -931,17 +931,6 @@ describe('assistant provider watchdog', () => {
       providerLongRunningCommandStallTimeoutMs: 3_000,
       replyInputId: 'input-3',
     })
-
-    watchdog.onProviderEvent({
-      id: null,
-      kind: 'command',
-      rawEvent: null,
-      safeText: null,
-      state: 'running',
-      text: 'pnpm review:gpt inbox-thread',
-    })
-    vi.advanceTimersByTime(1_000)
-    expect(events.at(-1)?.details).toContain('review:gpt run active for 1s')
 
     watchdog.onProviderEvent({
       id: null,
@@ -966,7 +955,7 @@ describe('assistant provider watchdog', () => {
     watchdog.dispose()
   })
 
-  it('tracks bare review:gpt commands and research tools while ignoring non-tool text', () => {
+  it('ignores deleted review-gpt commands, deleted research tools, and non-tool text', () => {
     vi.useFakeTimers()
 
     const events: Array<Record<string, unknown>> = []
@@ -989,7 +978,9 @@ describe('assistant provider watchdog', () => {
       text: 'review:gpt issue-17',
     })
     vi.advanceTimersByTime(1_000)
-    expect(events.at(-1)?.details).toContain('review:gpt run active for 1s')
+    expect(events.map((event) => String(event.details ?? '')).join('\n')).not.toContain(
+      'review:gpt run active',
+    )
 
     watchdog.onProviderEvent({
       id: null,
@@ -1000,7 +991,9 @@ describe('assistant provider watchdog', () => {
       text: 'status update',
     })
     vi.advanceTimersByTime(1_000)
-    expect(events.at(-1)?.details).not.toContain('research tool active')
+    expect(events.map((event) => String(event.details ?? '')).join('\n')).not.toContain(
+      'research tool active',
+    )
 
     watchdog.onProviderEvent({
       id: null,
@@ -1011,7 +1004,9 @@ describe('assistant provider watchdog', () => {
       text: 'tool research knowledge graph',
     })
     vi.advanceTimersByTime(1_000)
-    expect(events.at(-1)?.details).toContain('research tool active for 1s')
+    expect(events.map((event) => String(event.details ?? '')).join('\n')).not.toContain(
+      'research tool active',
+    )
 
     watchdog.dispose()
   })
@@ -1052,11 +1047,11 @@ describe('assistant provider watchdog', () => {
       rawEvent: null,
       safeText: null,
       state: 'running',
-      text: 'tool research files',
+      text: 'tool knowledge upsert',
     })
 
     vi.advanceTimersByTime(60_000)
-    expect(events.at(-1)?.details).toContain('research tool active for 1m')
+    expect(events.at(-1)?.details).toContain('knowledge upsert tool active for 1m')
 
     watchdog.dispose()
 
@@ -1076,11 +1071,11 @@ describe('assistant provider watchdog', () => {
       rawEvent: null,
       safeText: null,
       state: 'running',
-      text: 'tool research files',
+      text: 'tool knowledge upsert',
     })
 
     vi.advanceTimersByTime(61_000)
-    expect(laterEvents.at(-1)?.details).toContain('research tool active for 1m')
+    expect(laterEvents.at(-1)?.details).toContain('knowledge upsert tool active for 1m')
 
     laterWatchdog.dispose()
   })

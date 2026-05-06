@@ -79,7 +79,7 @@ describe("runner bundle pnpm install config", () => {
         "minimumReleaseAge: 1440",
         "minimumReleaseAgeExclude:",
         "  - incur@0.4.4",
-        "  - '@cobuild/review-gpt@0.5.81'",
+        "  - '@next/env@16.2.2'",
         "",
       ].join("\n"),
       "utf8",
@@ -93,7 +93,7 @@ describe("runner bundle pnpm install config", () => {
       [
         "minimum-release-age=1440",
         "minimum-release-age-exclude[]=incur@0.4.4",
-        "minimum-release-age-exclude[]=@cobuild/review-gpt@0.5.81",
+        "minimum-release-age-exclude[]=@next/env@16.2.2",
         "",
       ].join("\n"),
     );

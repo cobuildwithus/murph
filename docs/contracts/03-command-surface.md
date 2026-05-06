@@ -27,8 +27,6 @@ vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--sta
 vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli chat [prompt] --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--request-id <id>]
 vault-cli run --vault <path> [--maxPerScan <n>] [--allowSelfAuthored] [--sessionRolloverHours <hours>] [--once] [--request-id <id>]
-vault-cli research <prompt> --vault <path> [--title <title>] [--chat <url-or-id>] [--browserPath <path>] [--timeout <duration>] [--waitTimeout <duration>] [--request-id <id>]
-vault-cli deepthink <prompt> --vault <path> [--title <title>] [--chat <url-or-id>] [--browserPath <path>] [--timeout <duration>] [--waitTimeout <duration>] [--request-id <id>]
 vault-cli knowledge upsert --vault <path> --body <markdown> [--title <title>] [--slug <slug>] [--page-type <type>] [--status <status>] [--clear-library-links] [--library-slug <slug> ...] [--related-slug <slug> ...] [--source-path <path> ...] [--request-id <id>]
 vault-cli knowledge list --vault <path> [--page-type <type>] [--status <status>] [--request-id <id>]
 vault-cli knowledge search <query> --vault <path> [--page-type <type>] [--status <status>] [--limit <n>] [--request-id <id>]
