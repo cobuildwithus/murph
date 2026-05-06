@@ -52,6 +52,7 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'providerActionCount',
   'providerSessionId',
   'providerStalled',
+  'providerUsageLimit',
   'recoverableConnectionLoss',
   'retryAfterSeconds',
   'retryable',
@@ -96,7 +97,10 @@ function annotateMissingCodexFailureContext(input: {
   code: string | null
   context: Record<string, unknown> | null
 }): Record<string, unknown> | null {
-  if (input.code !== 'ASSISTANT_CODEX_FAILED') {
+  if (
+    input.code !== 'ASSISTANT_CODEX_FAILED' &&
+    input.code !== 'ASSISTANT_CODEX_USAGE_LIMIT'
+  ) {
     return input.context
   }
 
@@ -190,7 +194,8 @@ function classifyFailureKind(input: {
   if (
     code?.startsWith('ASSISTANT_') ||
     message.includes('codex cli failed') ||
-    message.includes('assistant provider')
+    message.includes('assistant provider') ||
+    isUsageLimitMessage(message)
   ) {
     return 'provider'
   }
@@ -205,10 +210,24 @@ function isUsageLimitFailure(input: {
   const message = input.message.toLowerCase()
 
   return (
-    input.code === 'ASSISTANT_CODEX_FAILED' &&
-    (message.includes('usage limit') ||
-      message.includes('purchase more credits') ||
-      message.includes('try again at '))
+    (input.code === null ||
+      input.code === 'ASSISTANT_CODEX_FAILED' ||
+      input.code === 'ASSISTANT_CODEX_USAGE_LIMIT') &&
+    isUsageLimitMessage(message)
+  )
+}
+
+function isUsageLimitMessage(message: string): boolean {
+  return (
+    message.includes('usage limit') ||
+    message.includes('quota exceeded') ||
+    message.includes('current quota') ||
+    message.includes('insufficient quota') ||
+    message.includes('purchase more credits') ||
+    message.includes('out of credits') ||
+    message.includes('credit balance') ||
+    message.includes('plan and billing details') ||
+    message.includes('try again at ')
   )
 }
 

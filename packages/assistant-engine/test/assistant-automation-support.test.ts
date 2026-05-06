@@ -559,6 +559,41 @@ describe('assistant auto-reply failure observability', () => {
     expect(snapshot.message).not.toContain(syntheticHomePath)
   })
 
+  it('classifies quota and billing exhaustion as provider usage limits', () => {
+    const error = Object.assign(
+      new Error('Codex app-server turn failed. status failed. Quota exceeded. Check your plan and billing details.'),
+      {
+        code: 'ASSISTANT_CODEX_USAGE_LIMIT',
+        context: {
+          codexFailureDetailPresent: true,
+          codexFailureStage: 'turn_failed',
+          codexTurnStatus: 'failed',
+          providerActionCount: 0,
+          providerUsageLimit: true,
+          retryable: false,
+        },
+      },
+    )
+
+    const snapshot = describeAssistantAutoReplyFailure(error)
+
+    expect(snapshot).toMatchObject({
+      code: 'ASSISTANT_CODEX_USAGE_LIMIT',
+      kind: 'provider',
+      retryable: false,
+      safeSummary:
+        'provider usage limit reached (ASSISTANT_CODEX_USAGE_LIMIT)',
+    })
+    expect(snapshot.context).toEqual({
+      codexFailureDetailPresent: true,
+      codexFailureStage: 'turn_failed',
+      codexTurnStatus: 'failed',
+      providerActionCount: 0,
+      providerUsageLimit: true,
+      retryable: false,
+    })
+  })
+
   it('marks Codex provider failures that arrive without structured context', () => {
     const error = Object.assign(
       new Error('Codex app-server failed before structured diagnostics were attached.'),

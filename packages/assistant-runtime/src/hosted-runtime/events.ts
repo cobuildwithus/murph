@@ -90,6 +90,7 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES = new Set([
   "ASSISTANT_CODEX_INTERRUPTED",
   "ASSISTANT_CODEX_NOT_FOUND",
   "ASSISTANT_CODEX_RESUME_STALE",
+  "ASSISTANT_CODEX_USAGE_LIMIT",
   "ASSISTANT_PROVIDER_UNSUPPORTED",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_KIND_VALUES = new Set([
@@ -109,12 +110,15 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_KIND_VALUES = new Set([
   "timeout",
   "turn-failed",
   "unknown",
+  "usage-limit",
 ]);
 const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES = new Set([
   "codex-turn-failed",
   "connection-lost",
+  "credits-exhausted",
   "input-output-field",
   "invalid-input",
+  "quota-exceeded",
   "rate-limit",
   "resume-stale",
   "status-failed",

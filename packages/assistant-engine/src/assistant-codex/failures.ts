@@ -8,6 +8,9 @@ import {
 
 type CodexTurnMessage = Record<string, unknown>
 
+export const ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE =
+  'ASSISTANT_CODEX_USAGE_LIMIT'
+
 export function extractCodexThreadIdFromResult(result: unknown): string | null {
   const record = asRecord(result)
   const thread = asRecord(record?.thread)
@@ -105,15 +108,21 @@ export function buildCodexTurnFailedError(input: {
   if (detail) {
     parts.push(detail)
   }
+  const usageLimit = isCodexUsageLimitFailureText(detail)
 
-  return new VaultCliError('ASSISTANT_CODEX_FAILED', parts.join(' '), {
-    codexFailureDetailPresent: detail !== null,
-    codexFailureStage: 'turn_failed',
-    codexTurnStatus: input.status,
-    providerActionCount: input.providerActionCount,
-    providerSessionId: input.providerSessionId,
-    retryable: false,
-  })
+  return new VaultCliError(
+    usageLimit ? ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE : 'ASSISTANT_CODEX_FAILED',
+    parts.join(' '),
+    {
+      codexFailureDetailPresent: detail !== null,
+      codexFailureStage: 'turn_failed',
+      codexTurnStatus: input.status,
+      providerActionCount: input.providerActionCount,
+      providerSessionId: input.providerSessionId,
+      ...(usageLimit ? { providerUsageLimit: true } : {}),
+      retryable: false,
+    },
+  )
 }
 
 export function buildCodexFailure(input: {
@@ -129,10 +138,16 @@ export function buildCodexFailure(input: {
     normalizeStatusText(input.fallback ?? stderrTail) ??
     input.fallback ??
     stderrTail
-  const connectionLost = detail !== null && isCodexConnectionLossText(detail)
+  const usageLimit = isCodexUsageLimitFailureText(detail)
+  const connectionLost =
+    !usageLimit && detail !== null && isCodexConnectionLossText(detail)
 
   return new VaultCliError(
-    connectionLost ? 'ASSISTANT_CODEX_CONNECTION_LOST' : 'ASSISTANT_CODEX_FAILED',
+    connectionLost
+      ? 'ASSISTANT_CODEX_CONNECTION_LOST'
+      : usageLimit
+        ? ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE
+        : 'ASSISTANT_CODEX_FAILED',
     connectionLost
       ? buildCodexConnectionFailureMessage({
           ...input,
@@ -150,10 +165,26 @@ export function buildCodexFailure(input: {
       ...(typeof input.code === 'number' ? { codexExitCode: input.code } : {}),
       ...(input.signal ? { codexSignalPresent: true } : {}),
       providerActionCount: input.providerActionCount,
+      ...(usageLimit ? { providerUsageLimit: true } : {}),
       providerSessionId: connectionLost ? input.providerSessionId : null,
       recoverableConnectionLoss: connectionLost,
       retryable: connectionLost,
     },
+  )
+}
+
+export function isCodexUsageLimitFailureText(value: string | null): boolean {
+  const normalized = value?.toLowerCase() ?? ''
+
+  return (
+    normalized.includes('usage limit') ||
+    normalized.includes('quota exceeded') ||
+    normalized.includes('current quota') ||
+    normalized.includes('insufficient quota') ||
+    normalized.includes('purchase more credits') ||
+    normalized.includes('out of credits') ||
+    normalized.includes('credit balance') ||
+    normalized.includes('plan and billing details')
   )
 }
 
@@ -293,7 +324,9 @@ function buildCodexFailureMessage(input: {
     input.fallback ??
     tailText(input.stderr)
   const recoverableConnectionLoss =
-    detail !== null && isCodexConnectionLossText(detail)
+    !isCodexUsageLimitFailureText(detail) &&
+    detail !== null &&
+    isCodexConnectionLossText(detail)
 
   if (recoverableConnectionLoss) {
     const parts = ['Codex app-server lost the provider stream before the turn finished.']

@@ -104,6 +104,7 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "failureProviderActionCount",
   "failureProviderSessionId",
   "failureProviderStalled",
+  "failureProviderUsageLimit",
   "failureRecoverableConnectionLoss",
   "failureRetryAfterSeconds",
   "failureRetryable",

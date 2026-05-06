@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE,
   buildCodexConnectionFailureMessage,
   buildCodexFailure,
   buildCodexInterruptedError,
@@ -133,6 +134,52 @@ describe('assistant Codex failure helpers', () => {
         retryable: false,
       },
       message: 'Codex app-server was interrupted.',
+    })
+  })
+
+  it('builds specific usage-limit errors for quota and credit exhaustion', () => {
+    expect(
+      buildCodexTurnFailedError({
+        fallback: 'Quota exceeded. Check your plan and billing details.',
+        providerActionCount: 0,
+        providerSessionId: 'thread-usage-limit',
+        status: 'failed',
+      }),
+    ).toMatchObject({
+      code: ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE,
+      context: {
+        codexFailureDetailPresent: true,
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+        providerActionCount: 0,
+        providerSessionId: 'thread-usage-limit',
+        providerUsageLimit: true,
+        retryable: false,
+      },
+      message:
+        'Codex app-server turn failed. status failed. Quota exceeded. Check your plan and billing details.',
+    })
+
+    expect(
+      buildCodexFailure({
+        code: 1,
+        fallback: 'Purchase more credits before retrying.',
+        providerActionCount: 1,
+        providerSessionId: 'thread-process-exit',
+        signal: null,
+        stderr: '',
+      }),
+    ).toMatchObject({
+      code: ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE,
+      context: {
+        codexExitCode: 1,
+        codexFailureStage: 'process_exit',
+        providerActionCount: 1,
+        providerSessionId: null,
+        providerUsageLimit: true,
+        retryable: false,
+      },
+      message: 'Codex app-server failed. exit code 1. Purchase more credits before retrying.',
     })
   })
 

@@ -172,6 +172,8 @@ export function isAssistantProviderCapacityError(error: unknown): boolean {
     message.includes('quota') ||
     message.includes('too many requests') ||
     message.includes('purchase more credits') ||
+    message.includes('out of credits') ||
+    message.includes('credit balance') ||
     message.includes('please check your plan and billing details') ||
     message.includes('try again at ')
 
