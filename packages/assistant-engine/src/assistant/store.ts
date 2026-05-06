@@ -429,18 +429,20 @@ async function createAssistantSessionNotFoundError(input: {
 export async function readAssistantAutomationState(
   vault: string,
 ): Promise<AssistantAutomationState> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-  return readAutomationState(paths)
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    return readAutomationState(paths)
+  })
 }
 
 export async function saveAssistantAutomationState(
   vault: string,
   state: AssistantAutomationState,
 ): Promise<AssistantAutomationState> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-  return writeAutomationState(paths, assistantAutomationStateSchema.parse(state))
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    return writeAutomationState(paths, assistantAutomationStateSchema.parse(state))
+  })
 }
 
 async function saveAssistantSessionAtPaths(
