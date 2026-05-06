@@ -10,6 +10,7 @@ import { StartExperimentChannelDialog } from "@/src/components/experiments/exper
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
+import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
@@ -225,6 +226,21 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 8 of 21. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Support Action">
+          <div className="flex flex-col gap-3">
+            <Alert variant="destructive">
+              <AlertTitle>Unable to update Telegram</AlertTitle>
+              <AlertDescription>This verified session conflicts with an existing Murph account.</AlertDescription>
+            </Alert>
+            <ContactSupportAction
+              body="Hi Murph support,\n\nI need help with an account conflict."
+              subject="Murph account support"
+            />
           </div>
         </Section>
 

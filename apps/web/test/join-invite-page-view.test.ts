@@ -251,6 +251,24 @@ test("JoinInvitePageView renders messaging setup before checkout pricing", () =>
   });
 });
 
+test("JoinInvitePageView renders support mailto action for blocked accounts", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        status: createStatus({
+          stage: "blocked",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /Needs support/);
+  assert.match(markup, /Email support/);
+  assert.match(markup, /mailto:support@withmurph\.ai/);
+  assert.match(markup, /subject=Murph\+account\+support/);
+  assert.match(markup, /Context%3A\+Invite\+or\+hosted\+account\+is\+blocked/);
+});
+
 test("JoinInvitePageView renders active and activating account states", () => {
   const activeMarkup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {

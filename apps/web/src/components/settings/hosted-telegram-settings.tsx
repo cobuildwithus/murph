@@ -5,6 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { JoinInviteTelegramAccountSeed } from "@/src/components/hosted-onboarding/join-invite-page-model";
+import {
+  ContactSupportAction,
+  shouldShowContactSupportAction,
+} from "@/src/components/support/contact-support-action";
 import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
@@ -175,10 +179,25 @@ export function ConnectTelegram(props: {
       ) : null}
 
       {errorMessage ? (
-        <Alert variant="destructive">
-          <AlertTitle>Unable to update Telegram</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
+        <div className="space-y-3">
+          <Alert variant="destructive">
+            <AlertTitle>Unable to update Telegram</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+          {shouldShowContactSupportAction(errorMessage) ? (
+            <ContactSupportAction
+              body={[
+                "Hi Murph support,",
+                "",
+                "I need help linking Telegram to my Murph account.",
+                "",
+                "Context: Telegram setup or account support.",
+              ].join("\n")}
+              className="w-full sm:w-fit"
+              subject="Murph Telegram account support"
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {isSyncingTelegram && !isQuietSyncingTelegram ? (
