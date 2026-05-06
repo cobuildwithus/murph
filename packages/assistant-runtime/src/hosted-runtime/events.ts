@@ -62,6 +62,10 @@ const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA =
   "murph.assistant-automation-pass-timing.v1";
 const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_TYPE =
   "assistant.automation.pass_timing";
+const ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA =
+  "murph.assistant-local-message-timing.v1";
+const ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_TYPE =
+  "assistant.local_message.timing";
 const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -142,11 +146,28 @@ const HOSTED_ASSISTANT_AUTOMATION_PASS_TIMING_STAGE_VALUES = new Set([
   "input-refresh-finished",
   "outbox-drain-finished",
   "outbox-summary-finished",
+  "post-scan-outbox-drain-finished",
   "recovery-finished",
   "runtime-maintenance-finished",
   "scan-finished",
   "state-read",
   "status-refresh-finished",
+]);
+const HOSTED_ASSISTANT_LOCAL_MESSAGE_TIMING_STAGE_VALUES = new Set([
+  "artifacts-finalized",
+  "complete",
+  "defaults-resolved",
+  "delivery-finished",
+  "lock-acquired",
+  "preflight-finished",
+  "provider-completed",
+  "receipt-created",
+  "session-resolved",
+  "shared-plan-built",
+  "turn-finalized",
+  "turn-persisted",
+  "typing-started",
+  "typing-stop-finished",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
@@ -614,6 +635,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     return {
       details: automationPassTimingDiagnostic,
       message: "Hosted assistant automation pass timing captured.",
+    };
+  }
+
+  const localMessageTimingDiagnostic =
+    readHostedAssistantLocalMessageTimingTrace(event);
+  if (localMessageTimingDiagnostic) {
+    return {
+      details: localMessageTimingDiagnostic,
+      message: "Hosted assistant local-message timing captured.",
     };
   }
 
@@ -1087,6 +1117,7 @@ function readHostedAssistantAutomationPassTimingTrace(
     "automationPassInputRefreshSkipped",
     "automationPassInputRefreshSourceUnavailable",
     "automationPassOutboxNextAttemptPresent",
+    "automationPassPostScanOutboxDrainSkipped",
     "automationPassProgressed",
     "automationPassRecoveryProgressed",
     "automationPassStateProgressed",
@@ -1125,6 +1156,64 @@ function readHostedAssistantAutomationPassTimingTrace(
     "automationPassScanReplyReplied",
     "automationPassScanReplySkipped",
     "automationPassTotalElapsedMs",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+
+  return details;
+}
+
+function readHostedAssistantLocalMessageTimingTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA
+    || type !== ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const stage = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "localMessageTimingStage",
+    HOSTED_ASSISTANT_LOCAL_MESSAGE_TIMING_STAGE_VALUES,
+  );
+  if (!stage) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    localMessageTimingStage: stage,
+    localMessageTimingTraceType: "local-message",
+    providerTraceKind: "local_message.timing",
+    schema: ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA,
+  };
+
+  for (const key of [
+    "localMessageDeliveryRequested",
+    "localMessageHosted",
+    "localMessageQueueOnly",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of [
+    "localMessageElapsedMs",
+    "localMessageTotalElapsedMs",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,
