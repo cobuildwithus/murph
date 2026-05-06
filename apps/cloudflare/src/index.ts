@@ -154,6 +154,19 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     wrongMethodResponse: "not-found",
   },
   {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return isHostedWorkerTestEnvironment(context.env) ? null : notFound();
+    },
+    async handle(context, params) {
+      return handleTestRunAlarmRoute(context, params.userId);
+    },
+    match: matchTestUserRoute("/__test/users/", "/alarm"),
+    methods: ["POST"],
+    name: "test-run-alarm",
+    wrongMethodResponse: "not-found",
+  },
+  {
     authorization: "web-callback-signature",
     async handle(context) {
       return handleDeployContainerSmokeRoute(context);
@@ -348,6 +361,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }): Promise<HostedWorkspaceInvocationResult> {
     await this.runner.bindUser(input.userId);
     return this.runner.runUntilIdleOrBudget({ reason: input.reason });
+  }
+
+  async runAlarmForTest(input: { userId: string }): Promise<{ ok: true }> {
+    await this.runner.bindUser(input.userId);
+    await this.runner.alarm();
+    return { ok: true };
   }
 
   async fetch(): Promise<Response> {
@@ -639,6 +658,30 @@ async function handleTestRunUntilIdleRoute(
     reason: "manual",
     userId,
   }));
+}
+
+async function handleTestRunAlarmRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-run-alarm",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId);
+  return json(await stub.runAlarmForTest({ userId }));
 }
 
 async function handleRunnerNudgeRoute(

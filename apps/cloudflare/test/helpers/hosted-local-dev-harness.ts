@@ -24,6 +24,7 @@ export interface HostedLocalDevHarness {
   request(pathname: string, init?: RequestInit): Promise<Response>;
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   runtimeEnv: NodeJS.ProcessEnv;
   stderrTail(maxChars?: number): string;
   stop(): Promise<void>;
@@ -143,6 +144,15 @@ export async function startHostedLocalDevHarness(input: {
       },
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
+      runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
+        return await requestJsonForRuntime<{ ok: true }>(
+          `/__test/users/${encodeURIComponent(userId)}/alarm`,
+          {
+            headers: statusHeaders(userId),
+            method: "POST",
+          },
+        );
+      },
       runtimeEnv: stack.runtimeEnv,
       stop,
       stdoutTail: (maxChars?: number): string => stack?.stdoutTail(maxChars) ?? "",

@@ -1,5 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/types.ts";
@@ -125,6 +128,41 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
     })).rejects.toThrow(/terminal error[\s\S]*configuration_error/u);
 
     expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    await harness.stop();
+  }
+});
+
+it("calls the hosted-local alarm test route with the bound user headers", async () => {
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    return Response.json({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusHeaders: (userId) => ({
+      [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+    }),
+  });
+
+  try {
+    await expect(harness.runHostedAlarmForTest("member_alarm")).resolves.toEqual({ ok: true });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [request, init] = fetch.mock.calls[0]!;
+    expect(String(request)).toBe("http://127.0.0.1:8787/__test/users/member_alarm/alarm");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBe("Bearer oidc-token");
+    expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_alarm");
+    expect(init).toMatchObject({
+      method: "POST",
+    });
   } finally {
     await harness.stop();
   }
