@@ -106,10 +106,16 @@ describe('assistant local PDF evidence guidance', () => {
       'For supported wearable connection requests that still need a link, use `vault-cli device connect <provider> --format json`',
     )
     expect(prompt).toContain(
-      'Before creating a connection link, first check visible context and `vault-cli device account list --provider <provider> --format json`',
+      'Before creating a connection link, first check visible context and `vault-cli device account list --format json`',
     )
     expect(prompt).toContain(
-      'if that provider is already connected, acknowledge the existing connection instead of creating a new link',
+      'if the requested provider is already connected, acknowledge the existing connection instead of creating a new link',
+    )
+    expect(prompt).toContain(
+      'Junction-backed sources such as Garmin may show up as a `junction` account rather than under the source provider name',
+    )
+    expect(prompt).toContain(
+      'do not treat an empty `--provider garmin` result as proof that Garmin needs a new link',
     )
     expect(prompt).toContain(
       'put it on its own final line with no text after it',
@@ -662,7 +668,7 @@ describe('assistant conversation onboarding guidance', () => {
       'if a supported hosted wearable connection is already visible in context',
     )
     expect(prompt).toContain(
-      'Before creating a connection link, first check visible context and `vault-cli device account list --provider <provider> --format json`',
+      'Before creating a connection link, first check visible context and `vault-cli device account list --format json`',
     )
     expect(prompt).toContain(
       'do not ask them to send activity, steps, workouts, sleep, or recovery by message',
