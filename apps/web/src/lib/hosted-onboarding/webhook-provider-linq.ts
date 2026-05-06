@@ -216,10 +216,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return buildIgnoredLinqWebhookPlan("ai-usage-gate-denied");
       }
 
-      if (dailyState.quotaReplySentAt) {
-        return buildIgnoredLinqWebhookPlan("ai-usage-quota-reached");
-      }
-
       return buildAiUsageQuotaReplyResponse({
         chatId: summary.chatId,
         memberId: existingMember.id,

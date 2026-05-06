@@ -152,6 +152,36 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
+  it("does not mark the daily quota notice when sending an AI usage quota reply", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat-1",
+        idempotencyKey: effect.effectId,
+        message: "usage-limit",
+        replyToMessageId: "message-1",
+      }),
+    );
+    expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+  });
+
   it("logs safe structured Linq side-effect details when delivery fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValue(Object.assign(
