@@ -11,6 +11,7 @@ import {
 const ASSISTANT_CRON_CANONICAL_RUNTIME_STORE_VERSION = 1
 const ASSISTANT_CRON_CANONICAL_RUNTIME_RECORD_SCHEMA =
   'murph.assistant-canonical-cron-runtime-state.v1'
+const ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS = 60 * 60 * 1000
 
 const assistantCronCanonicalRuntimeStateSchema = z
   .object({
@@ -164,9 +165,38 @@ function normalizeAssistantCronCanonicalRuntimeStore(
   value: unknown,
 ): AssistantCronCanonicalRuntimeStore {
   const parsedCurrent = assistantCronCanonicalRuntimeStoreSchema.parse(value)
+  const nowMs = Date.now()
   return {
     ...parsedCurrent,
     jobs: [...parsedCurrent.jobs]
+      .map((record) => normalizeAssistantCronCanonicalRuntimeRecord(record, nowMs))
       .sort((left, right) => left.jobId.localeCompare(right.jobId)),
   }
+}
+
+function normalizeAssistantCronCanonicalRuntimeRecord(
+  record: AssistantCronCanonicalRuntimeRecord,
+  nowMs: number,
+): AssistantCronCanonicalRuntimeRecord {
+  if (record.state.runningAt === null) {
+    return record
+  }
+
+  const runningAtMs = Date.parse(record.state.runningAt)
+  const runningClaimIsStale =
+    !Number.isFinite(runningAtMs) ||
+    nowMs - runningAtMs > ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS
+
+  if (!runningClaimIsStale) {
+    return record
+  }
+
+  return assistantCronCanonicalRuntimeRecordSchema.parse({
+    ...record,
+    state: {
+      ...record.state,
+      runningAt: null,
+      runningPid: null,
+    },
+  })
 }
