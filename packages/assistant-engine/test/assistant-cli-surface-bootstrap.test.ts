@@ -41,6 +41,53 @@ test('buildAssistantCliSurfaceBootstrapDocId is stable for a session', async () 
   )
 })
 
+test('readPersistedAssistantCliSurfaceBootstrapContext returns a valid persisted contract without manifest generation', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-read-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const stateDirectory = resolveAssistantStatePaths(vaultRoot).stateDirectory
+  const docPath = resolveAssistantStateDocumentPath(
+    {
+      stateDirectory,
+    },
+    'sessions/session-read/cli-surface-bootstrap',
+  )
+  await mkdir(path.dirname(docPath), {
+    recursive: true,
+  })
+  const persistedContract = 'Murph CLI Contract:\nPersisted assistant cli contract'
+  await writeFile(
+    docPath,
+    JSON.stringify({
+      contract: persistedContract,
+      manifestFingerprint: '1'.repeat(64),
+      schemaVersion: 'murph.assistant-cli-surface-bootstrap.v1',
+      sourceDetail: 'full',
+    }),
+    'utf8',
+  )
+  const readAssistantCliLlmsManifest = vi.fn().mockRejectedValue(
+    new Error('manifest should not be read'),
+  )
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
+    readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
+  }))
+  const {
+    readPersistedAssistantCliSurfaceBootstrapContext,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = await readPersistedAssistantCliSurfaceBootstrapContext({
+    sessionId: 'session-read',
+    vault: vaultRoot,
+  })
+
+  assert.equal(contract, persistedContract)
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
+})
+
 test('buildAssistantCliSurfaceContract normalizes commands and renders family, args, and common option summaries', async () => {
   const {
     buildAssistantCliSurfaceContract,
