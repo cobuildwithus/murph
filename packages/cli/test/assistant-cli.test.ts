@@ -1142,7 +1142,9 @@ test('interactive bare model uses the Codex wizard selection before resolving de
   assert.equal(result.exitCode, null)
   assert.equal(result.envelope.ok, true)
   assert.equal(assistantWizard.mock.calls.length, 1)
-  assert.deepEqual(assistantWizard.mock.calls[0]?.[0], {})
+  assert.deepEqual(assistantWizard.mock.calls[0]?.[0], {
+    enableApiKeyProviderOnboarding: false,
+  })
   assert.equal(resolveAssistant.mock.calls.length, 1)
   assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
     allowPrompt: true,
@@ -1160,6 +1162,210 @@ test('interactive bare model uses the Codex wizard selection before resolving de
     result.envelope.data?.summary,
     'gpt-5.5 via Codex app-server',
   )
+})
+
+test('interactive bare model saves Venice from the wizard selection', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-venice-'))
+  cleanupPaths.push(homeRoot)
+
+  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
+    assistantPreset: 'codex' as const,
+    assistantModelProvider: 'venice',
+    assistantOss: false,
+  }))
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'venice-model',
+      modelProvider: options.assistantModelProvider ?? null,
+      codexCommand: null,
+      codexHome: options.assistantCodexHome ?? null,
+      profile: null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: options.assistantOss ?? false,
+      account: null,
+      detail: 'resolved Venice after wizard selection',
+    }),
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup: {
+      resolve: resolveAssistant,
+    },
+    assistantWizard,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    backend: {
+      modelProvider: string | null
+    } | null
+  }>(cli, ['model'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.deepEqual(assistantWizard.mock.calls[0]?.[0], {
+    enableApiKeyProviderOnboarding: false,
+  })
+  assert.equal(resolveAssistant.mock.calls[0]?.[0].options.assistantModelProvider, 'venice')
+  assert.equal(result.envelope.data?.backend?.modelProvider, 'venice')
+})
+
+test('interactive bare model clears a saved provider when wizard selects ChatGPT', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-clear-provider-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        codexHome: null,
+        model: 'venice-model',
+        modelProvider: 'venice',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'danger-full-access',
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
+    assistantPreset: 'codex' as const,
+    assistantModelProvider: null,
+    assistantOss: false,
+  }))
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.5',
+      modelProvider: options.assistantModelProvider ?? null,
+      codexCommand: null,
+      codexHome: null,
+      profile: null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: options.assistantOss ?? false,
+      account: null,
+      detail: 'resolved ChatGPT after wizard selection',
+    }),
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup: {
+      resolve: resolveAssistant,
+    },
+    assistantWizard,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    backend: {
+      modelProvider: string | null
+      oss: boolean
+    } | null
+  }>(cli, ['model'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(resolveAssistant.mock.calls[0]?.[0].options.assistantModelProvider, undefined)
+  assert.equal(result.envelope.data?.backend?.modelProvider, null)
+  assert.equal(result.envelope.data?.backend?.oss, false)
+})
+
+test('interactive bare model clears a saved provider when wizard selects local OSS', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-local-clear-provider-'))
+  cleanupPaths.push(homeRoot)
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        codexHome: null,
+        model: 'venice-model',
+        modelProvider: 'venice',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'danger-full-access',
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
+    assistantPreset: 'codex' as const,
+    assistantModelProvider: null,
+    assistantOss: true,
+  }))
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-oss:20b',
+      modelProvider: options.assistantModelProvider ?? null,
+      codexCommand: null,
+      codexHome: null,
+      profile: null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: options.assistantOss ?? false,
+      account: null,
+      detail: 'resolved local Codex after wizard selection',
+    }),
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup: {
+      resolve: resolveAssistant,
+    },
+    assistantWizard,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    backend: {
+      modelProvider: string | null
+      oss: boolean
+    } | null
+  }>(cli, ['model'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(resolveAssistant.mock.calls[0]?.[0].options.assistantModelProvider, undefined)
+  assert.equal(result.envelope.data?.backend?.modelProvider, null)
+  assert.equal(result.envelope.data?.backend?.oss, true)
 })
 
 test('model reuses existing Codex defaults when only the model changes', async () => {

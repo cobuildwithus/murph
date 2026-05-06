@@ -102,13 +102,6 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       codexHome: '/tmp/codex-home',
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: {
-        baseUrl: 'https://ai-gateway.vercel.sh/v1',
-        envKey: 'VERCEL_AI_API_KEY',
-        id: 'vercel-ai-gateway',
-        name: 'Vercel AI Gateway',
-        wireApi: 'responses',
-      },
       oss: false,
       profile: null,
       reasoningEffort: 'medium',

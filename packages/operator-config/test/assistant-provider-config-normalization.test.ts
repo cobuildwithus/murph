@@ -5,12 +5,9 @@ import {
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
 } from '../src/assistant/provider-config.ts'
-import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-} from '../src/assistant/target-runtime.ts'
 
 describe('assistant provider config normalization', () => {
-  it('re-sanitizes normalized Codex targets and attaches known model provider config', () => {
+  it('re-sanitizes normalized Codex targets without carrying registry metadata', () => {
     const staleNormalizedConfig: AssistantProviderConfig = {
       target: {
         kind: 'codex-cli',
@@ -18,7 +15,6 @@ describe('assistant provider config normalization', () => {
         codexHome: null,
         model: ' gpt-5.5 ',
         modelProvider: ' VERCEL-AI-GATEWAY ',
-        modelProviderConfig: null,
         oss: false,
         profile: null,
       },
@@ -37,13 +33,9 @@ describe('assistant provider config normalization', () => {
     }
     expect(normalized.target.model).toBe('gpt-5.5')
     expect(normalized.target.modelProvider).toBe('vercel-ai-gateway')
-    expect(normalized.target.modelProviderConfig).toEqual(
-      VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-    )
     expect(serializeAssistantProviderSessionOptions(normalized)).toMatchObject({
       executionDriver: 'codex-app-server',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       provider: 'codex-cli',
       resumeKind: 'codex-thread',
     })
@@ -55,5 +47,20 @@ describe('assistant provider config normalization', () => {
         provider: 'unsupported-provider',
       }),
     ).toThrow(/Assistant runtime targets must use Codex App Server/u)
+  })
+
+  it('fails closed when session options are serialized with invalid or unknown model providers', () => {
+    expect(() =>
+      serializeAssistantProviderSessionOptions({
+        provider: 'codex-cli',
+        modelProvider: 'not a provider',
+      }),
+    ).toThrow(/Unknown Codex model provider: not a provider/u)
+    expect(() =>
+      serializeAssistantProviderSessionOptions({
+        provider: 'codex-cli',
+        modelProvider: 'custom-provider',
+      }),
+    ).toThrow(/Unknown Codex model provider: custom-provider/u)
   })
 })

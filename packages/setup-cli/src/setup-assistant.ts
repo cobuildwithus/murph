@@ -122,6 +122,7 @@ export function createSetupAssistantResolver(
       let resolvedAssistant: SetupConfiguredAssistant
       switch (resolutionInput.preset) {
         case 'skip':
+          assertNoAssistantSkipOptionConflict(resolutionInput.options)
           resolvedAssistant = {
             preset: 'skip',
             enabled: false,
@@ -251,6 +252,29 @@ export function createSetupAssistantResolver(
           }
     },
   }
+}
+
+function assertNoAssistantSkipOptionConflict(options: SetupCommandOptions): void {
+  const conflicts = ([
+    ['--assistant-model-provider', options.assistantModelProvider],
+    ['--assistant-model', options.assistantModel],
+    ['--assistant-oss', options.assistantOss],
+    ['--assistant-codex-command', options.assistantCodexCommand],
+    ['--assistant-codex-home', options.assistantCodexHome],
+    ['--assistant-profile', options.assistantProfile],
+    ['--assistant-reasoning-effort', options.assistantReasoningEffort],
+  ] as const).flatMap(([flag, value]) =>
+    value === undefined ? [] : [flag],
+  )
+
+  if (conflicts.length === 0) {
+    return
+  }
+
+  throw new VaultCliError(
+    'SETUP_ASSISTANT_PRESET_CONFLICT',
+    `${conflicts[0]} cannot be used with --assistant-preset skip.`,
+  )
 }
 
 function shouldDetectSetupAssistantAccount(

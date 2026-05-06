@@ -32,6 +32,7 @@ export type SetupAssistantWizardResult = {
 }
 
 export interface SetupAssistantWizardInput {
+  enableApiKeyProviderOnboarding?: boolean
   initialAssistantModelProvider?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
@@ -105,39 +106,59 @@ export function getDefaultSetupWizardAssistantPreset(): SetupAssistantPreset {
   return getDefaultAssistantPreset()
 }
 
-export function listSetupWizardAssistantProviderOptions(): readonly SetupWizardAssistantProviderOption[] {
-  return setupWizardAssistantProviderOptions
-}
-
-export function listSetupAssistantWizardProviderOptions(): readonly SetupWizardAssistantProviderOption[] {
-  return setupWizardAssistantProviderOptions.filter(
+export function listSetupAssistantWizardProviderOptions(
+  input: { enableApiKeyProviderOnboarding?: boolean } = {},
+): readonly SetupWizardAssistantProviderOption[] {
+  return listSetupWizardAssistantProviderOptions(input).filter(
     (option) => option.provider !== 'skip',
   )
 }
 
+export function listSetupWizardAssistantProviderOptions(
+  input: { enableApiKeyProviderOnboarding?: boolean } = {},
+): readonly SetupWizardAssistantProviderOption[] {
+  return input.enableApiKeyProviderOnboarding === false
+    ? setupWizardAssistantProviderOptions.filter(
+        (option) =>
+          option.provider === 'codex-cloud' ||
+          option.provider === 'codex-local' ||
+          option.provider === 'skip',
+      )
+    : setupWizardAssistantProviderOptions
+}
+
 export function listSetupWizardAssistantProviderOptionsForCurrent(
   currentProvider: SetupWizardAssistantProvider,
+  input: { enableApiKeyProviderOnboarding?: boolean } = {},
 ): readonly SetupWizardAssistantProviderOption[] {
   return withCurrentAssistantProviderOption(
-    listSetupWizardAssistantProviderOptions(),
+    listSetupWizardAssistantProviderOptions(input),
     currentProvider,
+    input,
   )
 }
 
 export function listSetupAssistantWizardProviderOptionsForCurrent(
   currentProvider: SetupWizardAssistantProvider,
+  input: { enableApiKeyProviderOnboarding?: boolean } = {},
 ): readonly SetupWizardAssistantProviderOption[] {
   return withCurrentAssistantProviderOption(
-    listSetupAssistantWizardProviderOptions(),
+    listSetupAssistantWizardProviderOptions(input),
     currentProvider,
+    input,
   )
 }
 
 function withCurrentAssistantProviderOption(
   options: readonly SetupWizardAssistantProviderOption[],
   currentProvider: SetupWizardAssistantProvider,
+  input: { enableApiKeyProviderOnboarding?: boolean } = {},
 ): readonly SetupWizardAssistantProviderOption[] {
   if (options.some((option) => option.provider === currentProvider)) {
+    return options
+  }
+
+  if (input.enableApiKeyProviderOnboarding === false) {
     return options
   }
 
@@ -159,8 +180,9 @@ function withCurrentAssistantProviderOption(
 
 export function findSetupWizardAssistantProviderIndex(
   provider: SetupWizardAssistantProvider,
+  input: { enableApiKeyProviderOnboarding?: boolean } = {},
 ): number {
-  const index = setupWizardAssistantProviderOptions.findIndex(
+  const index = listSetupWizardAssistantProviderOptions(input).findIndex(
     (option) => option.provider === provider,
   )
   return index >= 0 ? index : 0
@@ -168,8 +190,9 @@ export function findSetupWizardAssistantProviderIndex(
 
 export function findSetupAssistantWizardProviderIndex(
   provider: SetupWizardAssistantProvider,
+  input: { enableApiKeyProviderOnboarding?: boolean } = {},
 ): number {
-  const index = listSetupAssistantWizardProviderOptions().findIndex(
+  const index = listSetupAssistantWizardProviderOptions(input).findIndex(
     (option) => option.provider === provider,
   )
   return index >= 0 ? index : 0
@@ -190,6 +213,20 @@ export function normalizeSetupAssistantWizardProvider(
   provider: SetupWizardAssistantProvider,
 ): SetupWizardAssistantProvider {
   return provider === 'skip' ? 'codex-cloud' : provider
+}
+
+export function resolveSetupAssistantWizardInitialProvider(input: {
+  enableApiKeyProviderOnboarding?: boolean
+  provider: SetupWizardAssistantProvider
+}): SetupWizardAssistantProvider {
+  if (
+    input.enableApiKeyProviderOnboarding === false &&
+    resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)
+  ) {
+    return 'codex-cloud'
+  }
+
+  return input.provider
 }
 
 export function inferSetupWizardAssistantProvider(input: {
@@ -373,10 +410,13 @@ export async function runSetupAssistantWizard(
     const createElement = React.createElement
     const { exit } = useApp()
     const initialAssistantProvider = normalizeSetupAssistantWizardProvider(
-      inferSetupWizardAssistantProvider({
-        modelProvider: input.initialAssistantModelProvider,
-        oss: input.initialAssistantOss,
-        preset: initialAssistantPreset,
+      resolveSetupAssistantWizardInitialProvider({
+        enableApiKeyProviderOnboarding: input.enableApiKeyProviderOnboarding,
+        provider: inferSetupWizardAssistantProvider({
+          modelProvider: input.initialAssistantModelProvider,
+          oss: input.initialAssistantOss,
+          preset: initialAssistantPreset,
+        }),
       }),
     )
     const initialAssistantMethod = inferSetupWizardAssistantMethod({
@@ -388,14 +428,25 @@ export async function runSetupAssistantWizard(
       () =>
         listSetupAssistantWizardProviderOptionsForCurrent(
           initialAssistantProvider,
+          {
+            enableApiKeyProviderOnboarding:
+              input.enableApiKeyProviderOnboarding,
+          },
         ),
-      [initialAssistantProvider],
+      [initialAssistantProvider, input.enableApiKeyProviderOnboarding],
     )
     const [step, setStep] = React.useState<'assistant-provider' | 'confirm'>(
       'assistant-provider',
     )
     const [assistantProviderIndex, setAssistantProviderIndex] = React.useState(
-      findSetupAssistantWizardProviderIndex(initialAssistantProvider),
+      () =>
+        findSetupAssistantWizardProviderIndex(
+          initialAssistantProvider,
+          {
+            enableApiKeyProviderOnboarding:
+              input.enableApiKeyProviderOnboarding,
+          },
+        ),
     )
     const [selectedAssistantProvider, setSelectedAssistantProvider] =
       React.useState<SetupWizardAssistantProvider>(initialAssistantProvider)

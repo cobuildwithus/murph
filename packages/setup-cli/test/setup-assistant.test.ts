@@ -80,6 +80,12 @@ test('setup assistant option normalization infers Codex presets and rejects lega
     }),
     'skip',
   )
+  assert.equal(
+    inferSetupAssistantPresetFromOptions({
+      assistantModelProvider: 'venice',
+    }),
+    'codex',
+  )
   assert.equal(inferSetupAssistantPresetFromOptions({}), null)
 })
 
@@ -523,6 +529,64 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
       'Use Codex with gpt-5.5. Use Codex model provider vercel-ai-gateway. An explicit Codex home is configured; path redacted in CLI output.',
   })
   assert.equal(capturedAssistants.length, 1)
+})
+
+test('setup assistant resolver rejects skip with Codex-specific options', async () => {
+  const resolver = createSetupAssistantResolver()
+
+  await assert.rejects(
+    resolver.resolve({
+      allowPrompt: false,
+      commandName: 'murph setup',
+      options: createSetupOptions({
+        assistantModelProvider: 'venice',
+        assistantPreset: 'skip',
+      }),
+      preset: 'skip',
+    }),
+    /--assistant-model-provider cannot be used with --assistant-preset skip/u,
+  )
+})
+
+test('setup assistant resolver fails closed for invalid provider combinations', async () => {
+  const resolver = createSetupAssistantResolver()
+
+  await assert.rejects(
+    resolver.resolve({
+      allowPrompt: false,
+      commandName: 'murph setup',
+      options: createSetupOptions({
+        assistantModelProvider: 'venice',
+        assistantOss: true,
+      }),
+      preset: 'codex',
+    }),
+    /--assistant-model-provider cannot be used with --assistant-oss/u,
+  )
+
+  await assert.rejects(
+    resolver.resolve({
+      allowPrompt: false,
+      commandName: 'murph setup',
+      options: createSetupOptions({
+        assistantModelProvider: 'unknown-provider',
+      }),
+      preset: 'codex',
+    }),
+    /Unknown Codex model provider: unknown-provider/u,
+  )
+
+  await assert.rejects(
+    resolver.resolve({
+      allowPrompt: false,
+      commandName: 'murph setup',
+      options: createSetupOptions({
+        assistantModelProvider: 'venice',
+      }),
+      preset: 'codex',
+    }),
+    /--assistant-model is required when --assistant-model-provider venice is selected/u,
+  )
 })
 
 test('setup assistant plan name helpers cover known and custom plans', () => {

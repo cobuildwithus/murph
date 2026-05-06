@@ -12,7 +12,6 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '../src/assistant/provider-config.ts'
 import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
   assistantExecutionDriverValues,
   assistantResumeKindValues,
 } from '../src/assistant/target-runtime.ts'
@@ -70,7 +69,6 @@ describe('operator config Codex-only hard-cut contracts', () => {
       executionDriver: 'codex-app-server',
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       provider: 'codex-cli',
       resumeKind: 'codex-thread',
     })

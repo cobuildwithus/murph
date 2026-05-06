@@ -187,10 +187,11 @@ export const assistantHeadersSchema = z.record(
 
 export const assistantCodexModelProviderConfigSchema = z
   .object({
-    id: z.string().trim().regex(/^[a-z0-9][a-z0-9._-]*$/u),
+    id: z.string().trim().regex(/^[a-z0-9][a-z0-9_-]*$/u),
     name: z.string().min(1),
     baseUrl: z.string().url(),
     envKey: z.string().min(1),
+    failureHint: z.string().min(1).optional(),
     wireApi: z.enum(assistantCodexModelProviderWireApiValues),
   })
   .strict()
@@ -213,6 +214,8 @@ export const assistantCodexModelTargetSchema = z
 export const assistantModelTargetSchema = assistantCodexModelTargetSchema
 const assistantThreadInstructionsFingerprintPattern =
   /^thread-instructions-v1:[a-f0-9]{64}:[a-f0-9]{64}$/u
+const assistantCodexRolloutRelativePathPattern =
+  /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$/u
 const assistantThreadInstructionsFingerprintSchema = z.preprocess(
   (value) => normalizeAssistantThreadInstructionsFingerprint(value),
   z
@@ -221,9 +224,15 @@ const assistantThreadInstructionsFingerprintSchema = z.preprocess(
     .regex(assistantThreadInstructionsFingerprintPattern)
     .nullable(),
 )
+const assistantCodexRolloutRelativePathSchema = z.preprocess(
+  (value) => normalizeAssistantCodexRolloutRelativePath(value),
+  z.string().min(1).nullable(),
+)
 
 export const assistantSessionResumeStateSchema = z
   .object({
+    codexRolloutRelativePath:
+      assistantCodexRolloutRelativePathSchema.optional(),
     providerSessionId: z.string().min(1).nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),
     threadInstructionsFingerprint:
@@ -242,6 +251,42 @@ function normalizeAssistantThreadInstructionsFingerprint(
   return assistantThreadInstructionsFingerprintPattern.test(normalized)
     ? normalized
     : null
+}
+
+function normalizeAssistantCodexRolloutRelativePath(
+  value: unknown,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith('/') ||
+    normalized.includes('\\')
+  ) {
+    return null
+  }
+
+  const segments = normalized.split('/')
+  if (segments.some((segment) =>
+    segment.length === 0 || segment === '.' || segment === '..',
+  )) {
+    return null
+  }
+
+  const match = assistantCodexRolloutRelativePathPattern.exec(normalized)
+  if (
+    !match ||
+    match[1] !== match[4] ||
+    match[2] !== match[5] ||
+    match[3] !== match[6]
+  ) {
+    return null
+  }
+
+  return normalized
 }
 
 function createAssistantOpaqueIdSchema(kind: string) {
@@ -268,7 +313,6 @@ export const assistantProviderSessionOptionsSchema = z.object({
   oss: z.boolean(),
   codexHome: z.string().min(1).nullable().optional(),
   modelProvider: z.string().min(1).nullable().optional(),
-  modelProviderConfig: assistantCodexModelProviderConfigSchema.nullable().optional(),
   executionDriver: z.enum(assistantExecutionDriverValues),
   resumeKind: z.enum(assistantResumeKindValues).nullable(),
   headers: assistantHeadersSchema.nullable().optional(),
@@ -384,9 +428,6 @@ function buildAssistantRuntimeSession(
     ...(resolvedRuntimeTarget.modelProvider
       ? { modelProvider: resolvedRuntimeTarget.modelProvider }
       : {}),
-    ...(resolvedRuntimeTarget.modelProviderConfig
-      ? { modelProviderConfig: resolvedRuntimeTarget.modelProviderConfig }
-      : {}),
   })
   return {
     ...value,
@@ -410,6 +451,9 @@ function normalizeAssistantSessionResumeState(
     typeof value.resumeRouteId === 'string' && value.resumeRouteId.trim().length > 0
       ? value.resumeRouteId.trim()
       : null
+  const codexRolloutRelativePath = normalizeAssistantCodexRolloutRelativePath(
+    value.codexRolloutRelativePath,
+  )
   const threadInstructionsFingerprint =
     normalizeAssistantThreadInstructionsFingerprint(
       value.threadInstructionsFingerprint,
@@ -423,6 +467,7 @@ function normalizeAssistantSessionResumeState(
   }
 
   return assistantSessionResumeStateSchema.parse({
+    ...(codexRolloutRelativePath ? { codexRolloutRelativePath } : {}),
     providerSessionId,
     resumeRouteId,
     ...(threadInstructionsFingerprint

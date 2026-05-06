@@ -1,4 +1,5 @@
 import { normalizeNullableString } from './shared.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 
 export const assistantExecutionDriverValues = [
   'codex-app-server',
@@ -22,6 +23,7 @@ export interface AssistantCodexModelProviderConfig {
   name: string
   baseUrl: string
   envKey: string
+  failureHint?: string
   wireApi: AssistantCodexModelProviderWireApi
 }
 
@@ -32,6 +34,11 @@ export interface AssistantCodexLocalOnboardingProviderConfig {
   modelPrompt: string
   providerId: string
   selectableInLocalOnboarding: boolean
+}
+
+interface AssistantCodexModelProviderRegistration {
+  config: AssistantCodexModelProviderConfig
+  localOnboarding?: AssistantCodexLocalOnboardingProviderConfig
 }
 
 export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID = 'vercel-ai-gateway'
@@ -68,36 +75,58 @@ export const VENICE_CODEX_MODEL_PROVIDER_CONFIG = {
   name: 'Venice.ai',
   baseUrl: 'https://api.venice.ai/api/v1',
   envKey: 'VENICE_API_KEY',
+  failureHint:
+    'Venice via Codex Responses failed. Check VENICE_API_KEY, the Venice model id, account balance/rate limits, and whether this key/model has Venice Responses API Alpha access.',
   wireApi: 'responses',
 } as const satisfies AssistantCodexModelProviderConfig
 
+const ASSISTANT_CODEX_MODEL_PROVIDER_REGISTRATIONS = [
+  {
+    config: OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  },
+  {
+    config: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+    localOnboarding: createLocalOnboardingProviderConfig(
+      VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+      {
+        defaultModel: 'gpt-5.5',
+        description: 'Use Codex through Vercel AI Gateway.',
+        label: 'Vercel AI Gateway',
+        modelPrompt: 'Model id to use with Codex',
+        selectableInLocalOnboarding: false,
+      },
+    ),
+  },
+  {
+    config: VENICE_CODEX_MODEL_PROVIDER_CONFIG,
+    localOnboarding: createLocalOnboardingProviderConfig(
+      VENICE_CODEX_MODEL_PROVIDER_CONFIG,
+      {
+        defaultModel: null,
+        description: 'Use Codex with a Venice API key.',
+        label: 'Venice.ai',
+        modelPrompt: 'Venice model id to use with Codex',
+        selectableInLocalOnboarding: true,
+      },
+    ),
+  },
+] as const satisfies readonly AssistantCodexModelProviderRegistration[]
+
 export const ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS = [
-  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-  VENICE_CODEX_MODEL_PROVIDER_CONFIG,
+  ...ASSISTANT_CODEX_MODEL_PROVIDER_REGISTRATIONS.map(
+    (registration) => registration.config,
+  ),
 ] as const satisfies readonly AssistantCodexModelProviderConfig[]
 
 export const ASSISTANT_CODEX_MODEL_PROVIDER_IDS =
   ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.id)
 
-export const LOCAL_SETUP_CODEX_PROVIDER_CONFIGS = [
-  {
-    defaultModel: 'gpt-5.5',
-    description: 'Use Codex through Vercel AI Gateway.',
-    label: 'Vercel AI Gateway',
-    modelPrompt: 'Model id to use with Codex',
-    providerId: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
-    selectableInLocalOnboarding: false,
-  },
-  {
-    defaultModel: null,
-    description: 'Use Codex with a Venice API key.',
-    label: 'Venice.ai',
-    modelPrompt: 'Venice model id to use with Codex',
-    providerId: VENICE_CODEX_MODEL_PROVIDER_ID,
-    selectableInLocalOnboarding: true,
-  },
-] as const satisfies readonly AssistantCodexLocalOnboardingProviderConfig[]
+export const LOCAL_SETUP_CODEX_PROVIDER_CONFIGS =
+  ASSISTANT_CODEX_MODEL_PROVIDER_REGISTRATIONS.flatMap((registration) =>
+    'localOnboarding' in registration && registration.localOnboarding
+      ? [registration.localOnboarding]
+      : [],
+  ) as readonly AssistantCodexLocalOnboardingProviderConfig[]
 
 export const LOCAL_SETUP_CODEX_PROVIDER_IDS =
   LOCAL_SETUP_CODEX_PROVIDER_CONFIGS.map((config) => config.providerId)
@@ -170,7 +199,6 @@ export interface AssistantResolvedRuntimeTarget {
   continuityFingerprint: string
   executionDriver: AssistantExecutionDriver
   modelProvider: string | null
-  modelProviderConfig: AssistantCodexModelProviderConfig | null
   resumeKind: AssistantResumeKind | null
   supportsNativeResume: boolean
   supportsReasoningEffort: boolean
@@ -228,7 +256,6 @@ export function resolveAssistantRuntimeTarget(
       continuityFingerprint,
       executionDriver: 'codex-app-server',
       modelProvider,
-      modelProviderConfig: resolveAssistantCodexModelProviderConfig(modelProvider),
       resumeKind: 'codex-thread',
       supportsNativeResume: true,
       supportsReasoningEffort: true,
@@ -257,6 +284,42 @@ export function resolveAssistantCodexModelProviderConfig(
     : null
 }
 
+export function resolveStrictAssistantCodexModelProvider(
+  value: string | null | undefined,
+): {
+  config: AssistantCodexModelProviderConfig | null
+  id: string | null
+} {
+  const raw = normalizeNullableString(value)
+  if (!raw) {
+    return {
+      config: null,
+      id: null,
+    }
+  }
+
+  const id = normalizeAssistantCodexModelProvider(raw)
+  if (!id) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Unknown Codex model provider: ${raw}.`,
+    )
+  }
+
+  const config = resolveAssistantCodexModelProviderConfig(id)
+  if (!config && !isCodexReservedModelProviderId(id)) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Unknown Codex model provider: ${raw}.`,
+    )
+  }
+
+  return {
+    config,
+    id,
+  }
+}
+
 export function resolveAssistantCodexLocalOnboardingProviderConfig(
   value: string | null | undefined,
 ): AssistantCodexLocalOnboardingProviderConfig | null {
@@ -270,6 +333,16 @@ export function isAssistantCodexLocalOnboardingProvider(
   value: string | null | undefined,
 ): boolean {
   return resolveAssistantCodexLocalOnboardingProviderConfig(value) !== null
+}
+
+function createLocalOnboardingProviderConfig(
+  providerConfig: AssistantCodexModelProviderConfig,
+  onboarding: Omit<AssistantCodexLocalOnboardingProviderConfig, 'providerId'>,
+): AssistantCodexLocalOnboardingProviderConfig {
+  return {
+    ...onboarding,
+    providerId: providerConfig.id,
+  }
 }
 
 export function isCodexReservedModelProviderId(

@@ -34,10 +34,6 @@ import {
   mergeAssistantHeaders,
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
-import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-} from '../src/assistant/target-runtime.ts'
-
 test('assistant header helpers canonicalize, dedupe, sort, and redact persistence-unsafe values', () => {
   const normalizedHeaders = normalizeAssistantHeaders({
     authorization: 'Bearer kept-secret-value',
@@ -134,7 +130,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
       codexHome: '/tmp/home',
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       oss: true,
       profile: 'default',
     },
@@ -166,7 +161,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     executionDriver: 'codex-app-server',
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: true,
     profile: 'default',
     provider: 'codex-cli',
@@ -180,7 +174,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     codexHome: '/tmp/home',
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: true,
     profile: 'default',
     reasoningEffort: 'low',

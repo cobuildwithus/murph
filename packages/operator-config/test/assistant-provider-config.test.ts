@@ -8,7 +8,6 @@ import {
 } from '../src/assistant/provider-config.ts'
 import {
   VENICE_CODEX_MODEL_PROVIDER_CONFIG,
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexLocalOnboardingProviderConfig,
 } from '../src/assistant/target-runtime.ts'
 
@@ -40,7 +39,6 @@ describe('assistant provider config runtime resolution', () => {
         codexHome: '/tmp/codex-home',
         model: 'gpt-5.5',
         modelProvider: 'vercel-ai-gateway',
-        modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
         oss: false,
         profile: 'hosted',
       },
@@ -50,7 +48,6 @@ describe('assistant provider config runtime resolution', () => {
     expect(resolved).toMatchObject({
       executionDriver: 'codex-app-server',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       resumeKind: 'codex-thread',
       supportsNativeResume: true,
       target: { kind: 'codex-cli' },
@@ -61,7 +58,6 @@ describe('assistant provider config runtime resolution', () => {
       executionDriver: 'codex-app-server',
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       provider: 'codex-cli',
       reasoningEffort: 'medium',
       resumeKind: 'codex-thread',
@@ -70,7 +66,6 @@ describe('assistant provider config runtime resolution', () => {
     expect(serializeAssistantProviderOperatorDefaults(input)).toMatchObject({
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     })
   })
 
@@ -89,7 +84,6 @@ describe('assistant provider config runtime resolution', () => {
         kind: 'codex-cli',
         model: 'venice-model',
         modelProvider: 'venice',
-        modelProviderConfig: VENICE_CODEX_MODEL_PROVIDER_CONFIG,
       },
     })
     expect(VENICE_CODEX_MODEL_PROVIDER_CONFIG).toEqual({
@@ -97,6 +91,8 @@ describe('assistant provider config runtime resolution', () => {
       name: 'Venice.ai',
       baseUrl: 'https://api.venice.ai/api/v1',
       envKey: 'VENICE_API_KEY',
+      failureHint:
+        'Venice via Codex Responses failed. Check VENICE_API_KEY, the Venice model id, account balance/rate limits, and whether this key/model has Venice Responses API Alpha access.',
       wireApi: 'responses',
     })
     expect(resolveAssistantCodexLocalOnboardingProviderConfig('venice')).toEqual({

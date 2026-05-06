@@ -7,7 +7,6 @@ import {
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
   normalizeAssistantExecutionDriver,
   normalizeAssistantResumeKind,
   resolveAssistantRuntimeTarget,
@@ -30,10 +29,6 @@ test('assistant target runtime exposes only Codex app-server execution and resum
   assert.equal(codexTarget.executionDriver, 'codex-app-server')
   assert.equal(codexTarget.resumeKind, 'codex-thread')
   assert.equal(codexTarget.modelProvider, 'vercel-ai-gateway')
-  assert.deepEqual(
-    codexTarget.modelProviderConfig,
-    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-  )
   assert.equal(codexTarget.supportsNativeResume, true)
   assert.equal(codexTarget.supportsReasoningEffort, true)
 
@@ -98,10 +93,6 @@ test('assistant session parsing resolves Codex modelProvider and status automati
   assert.equal(parsedSession.providerOptions.continuityFingerprint, runtimeTarget.continuityFingerprint)
   assert.equal(parsedSession.providerOptions.executionDriver, 'codex-app-server')
   assert.equal(parsedSession.providerOptions.modelProvider, 'vercel-ai-gateway')
-  assert.deepEqual(
-    parsedSession.providerOptions.modelProviderConfig,
-    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-  )
   assert.equal(parsedSession.providerOptions.resumeKind, 'codex-thread')
 
   const statusAutomation = assistantStatusAutomationSchema.parse({

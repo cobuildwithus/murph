@@ -10,6 +10,9 @@ import {
   saveDefaultVaultConfig,
 } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  LOCAL_SETUP_CODEX_PROVIDER_CONFIGS,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 import { showWearablePreferences } from '@murphai/vault-usecases'
 import {
@@ -37,6 +40,9 @@ import {
 import {
   applySetupRuntimeEnvOverridesToProcess,
   createSetupRuntimeEnvResolver,
+  describeSetupAssistantModelProviderStatus,
+  resolveSetupAssistantModelProviderEnvKeys,
+  resolveSetupAssistantModelProviderMissingEnv,
   describeSetupChannelStatus,
   describeSetupWearableStatus,
   SETUP_RUNTIME_ENV_NOTICE,
@@ -97,9 +103,11 @@ export interface SuccessfulSetupContext {
 
 export interface SetupWizardRunner {
   run(input: {
+    assistantProviderStatuses?: Partial<Record<string, SetupWizardRuntimeStatus>>
     channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
     commandName: string
     deviceSyncLocalBaseUrl?: string | null
+    enableApiKeyProviderOnboarding?: boolean
     initialAssistantModelProvider?: string | null
     initialAssistantOss?: boolean | null
     initialAssistantPreset?: SetupAssistantPreset
@@ -168,14 +176,19 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     let selectedAssistantModelProvider: string | null | undefined =
       context.options.assistantModelProvider
     let envOverrides: NodeJS.ProcessEnv | undefined
+    let provisioningEnvOverrides: NodeJS.ProcessEnv | undefined
+    let assistantEnvOverrides: NodeJS.ProcessEnv | undefined
 
     if (interactiveWizard) {
       const currentEnv = runtimeEnv.getCurrentEnv()
       const wizardResult = await wizard.run({
+        assistantProviderStatuses:
+          buildSetupWizardAssistantProviderStatuses(currentEnv),
         channelStatuses: buildSetupWizardChannelStatuses(currentEnv, getPlatform()),
         commandName,
         deviceSyncLocalBaseUrl:
           resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
+        enableApiKeyProviderOnboarding: true,
         initialAssistantModelProvider:
           context.options.assistantModelProvider ?? null,
         initialAssistantOss: context.options.assistantOss ?? null,
@@ -231,6 +244,19 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
             preset: selectedAssistantPreset,
           })
 
+    if (!interactiveWizard && selectedAssistant?.modelProvider) {
+      const missingProviderEnv = resolveSetupAssistantModelProviderMissingEnv(
+        selectedAssistant.modelProvider,
+        runtimeEnv.getCurrentEnv(),
+      )
+      if (missingProviderEnv.length > 0) {
+        throw new VaultCliError(
+          'SETUP_ASSISTANT_PROVIDER_ENV_MISSING',
+          `${missingProviderEnv.join(', ')} must be set in the environment when --assistant-model-provider ${selectedAssistant.modelProvider} is selected.`,
+        )
+      }
+    }
+
     if (interactiveWizard) {
       const currentEnv = runtimeEnv.getCurrentEnv()
       const publicUrlHelpText = buildSetupWizardPublicUrlHelpText({
@@ -249,7 +275,13 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         helpText: publicUrlHelpText,
         wearables: selectedWearables ?? [],
       })
-      applySetupRuntimeEnvOverridesToProcess(envOverrides)
+      const splitEnvOverrides = splitSetupAssistantProviderEnvOverrides({
+        assistantModelProvider: selectedAssistant?.modelProvider ?? null,
+        envOverrides,
+      })
+      provisioningEnvOverrides = splitEnvOverrides.provisioningEnvOverrides
+      assistantEnvOverrides = splitEnvOverrides.assistantEnvOverrides
+      applySetupRuntimeEnvOverridesToProcess(provisioningEnvOverrides)
     }
 
     const setupHost =
@@ -262,7 +294,8 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       allowChannelPrompts: interactiveWizard,
       channels: selectedChannels,
       dryRun: context.options.dryRun,
-      envOverrides,
+      envOverrides: provisioningEnvOverrides,
+      localEnvOverrides: envOverrides,
       rebuild: context.options.rebuild,
       requestId: context.options.requestId ?? null,
       strict: context.options.strict,
@@ -272,6 +305,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       wearables: selectedWearables,
       whisperModel: context.options.whisperModel,
     })
+    applySetupRuntimeEnvOverridesToProcess(assistantEnvOverrides)
 
     if (result.dryRun) {
       return context.ok(result)
@@ -538,6 +572,10 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
 function collectSetupMissingEnvKeys(result: SetupResult): string[] {
   const keys = new Set<string>()
 
+  for (const key of result.assistant?.missingEnv ?? []) {
+    keys.add(key)
+  }
+
   for (const channel of result.channels) {
     for (const key of channel.missingEnv) {
       keys.add(key)
@@ -565,12 +603,62 @@ function buildSetupWizardChannelStatuses(
   ) as Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
 }
 
+function buildSetupWizardAssistantProviderStatuses(
+  env: NodeJS.ProcessEnv,
+): Partial<Record<string, SetupWizardRuntimeStatus>> {
+  return Object.fromEntries(
+    LOCAL_SETUP_CODEX_PROVIDER_CONFIGS.map((config) => [
+      config.providerId,
+      describeSetupAssistantModelProviderStatus(config.providerId, env),
+    ]),
+  )
+}
+
 function buildSetupWizardWearableStatuses(
   env: NodeJS.ProcessEnv,
 ): Partial<Record<SetupWearable, SetupWizardRuntimeStatus>> {
   return Object.fromEntries(
     setupWearableValues.map((wearable) => [wearable, describeSetupWearableStatus(wearable, env)]),
   ) as Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
+}
+
+function splitSetupAssistantProviderEnvOverrides(input: {
+  assistantModelProvider?: string | null
+  envOverrides?: NodeJS.ProcessEnv
+}): {
+  assistantEnvOverrides: NodeJS.ProcessEnv | undefined
+  provisioningEnvOverrides: NodeJS.ProcessEnv | undefined
+} {
+  const assistantEnvKeys = new Set(
+    resolveSetupAssistantModelProviderEnvKeys(input.assistantModelProvider),
+  )
+  if (!input.envOverrides || assistantEnvKeys.size === 0) {
+    return {
+      assistantEnvOverrides: undefined,
+      provisioningEnvOverrides: input.envOverrides,
+    }
+  }
+
+  const assistantEnvOverrides: NodeJS.ProcessEnv = {}
+  const provisioningEnvOverrides: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(input.envOverrides)) {
+    if (assistantEnvKeys.has(key)) {
+      assistantEnvOverrides[key] = value
+    } else {
+      provisioningEnvOverrides[key] = value
+    }
+  }
+
+  return {
+    assistantEnvOverrides:
+      Object.keys(assistantEnvOverrides).length > 0
+        ? assistantEnvOverrides
+        : undefined,
+    provisioningEnvOverrides:
+      Object.keys(provisioningEnvOverrides).length > 0
+        ? provisioningEnvOverrides
+        : undefined,
+  }
 }
 
 function resolveSetupWizardPublicBaseUrl(

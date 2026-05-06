@@ -14,6 +14,7 @@ import {
   listSetupWizardAssistantMethodOptions,
   listSetupWizardAssistantProviderOptions,
   normalizeSetupAssistantWizardProvider,
+  resolveSetupAssistantWizardInitialProvider,
   resolveSetupWizardAssistantMethodForProvider,
   resolveSetupWizardAssistantSelection,
 } from '../src/setup-assistant-wizard.js'
@@ -45,6 +46,37 @@ test('setup assistant wizard provider lists and indices normalize to Codex defau
   )
   assert.equal(normalizeSetupAssistantWizardProvider('skip'), 'codex-cloud')
   assert.equal(normalizeSetupAssistantWizardProvider('codex-local'), 'codex-local')
+})
+
+test('setup assistant wizard can hide API-key providers outside full onboarding', () => {
+  const allProviders = listSetupWizardAssistantProviderOptions({
+    enableApiKeyProviderOnboarding: false,
+  })
+  const selectableProviders = listSetupAssistantWizardProviderOptions({
+    enableApiKeyProviderOnboarding: false,
+  })
+
+  assert.deepEqual(
+    allProviders.map((option) => option.provider),
+    ['codex-cloud', 'codex-local', 'skip'],
+  )
+  assert.deepEqual(
+    selectableProviders.map((option) => option.provider),
+    ['codex-cloud', 'codex-local'],
+  )
+  assert.equal(
+    findSetupWizardAssistantProviderIndex('venice', {
+      enableApiKeyProviderOnboarding: false,
+    }),
+    0,
+  )
+  assert.equal(
+    resolveSetupAssistantWizardInitialProvider({
+      enableApiKeyProviderOnboarding: false,
+      provider: 'venice',
+    }),
+    'codex-cloud',
+  )
 })
 
 test('setup assistant wizard infers Codex cloud, local, and skip selections', () => {

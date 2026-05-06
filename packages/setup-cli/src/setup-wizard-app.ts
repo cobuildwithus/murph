@@ -19,6 +19,7 @@ import {
   inferSetupWizardAssistantProvider,
   listSetupWizardAssistantMethodOptions,
   listSetupWizardAssistantProviderOptionsForCurrent,
+  resolveSetupAssistantWizardInitialProvider,
   resolveSetupWizardAssistantMethodForProvider,
   resolveSetupWizardAssistantSelection,
   type SetupWizardAssistantMethod,
@@ -85,10 +86,12 @@ type SetupWizardAppResult = {
 }
 
 export interface SetupWizardAppProps {
+  assistantProviderStatuses?: Partial<Record<string, SetupWizardRuntimeStatus>>
   channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
   commandName: string
   defaultScheduledUpdateIds: ReadonlySet<string>
   deviceSyncLocalBaseUrl?: string | null
+  enableApiKeyProviderOnboarding?: boolean
   initialAssistantModelProvider?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset: SetupAssistantPreset
@@ -119,10 +122,13 @@ export function SetupWizardApp(
 ): React.ReactElement {
   const createElement = React.createElement
   const { exit } = useApp()
-  const initialAssistantProvider = inferSetupWizardAssistantProvider({
-    modelProvider: input.initialAssistantModelProvider,
-    oss: input.initialAssistantOss,
-    preset: input.initialAssistantPreset,
+  const initialAssistantProvider = resolveSetupAssistantWizardInitialProvider({
+    enableApiKeyProviderOnboarding: input.enableApiKeyProviderOnboarding,
+    provider: inferSetupWizardAssistantProvider({
+      modelProvider: input.initialAssistantModelProvider,
+      oss: input.initialAssistantOss,
+      preset: input.initialAssistantPreset,
+    }),
   })
   const initialAssistantMethod = inferSetupWizardAssistantMethod({
     oss: input.initialAssistantOss,
@@ -130,7 +136,9 @@ export function SetupWizardApp(
     provider: initialAssistantProvider,
   })
   const assistantProviderOptions =
-    listSetupWizardAssistantProviderOptionsForCurrent(initialAssistantProvider)
+    listSetupWizardAssistantProviderOptionsForCurrent(initialAssistantProvider, {
+      enableApiKeyProviderOnboarding: input.enableApiKeyProviderOnboarding,
+    })
   const [step, setStep] = React.useState<SetupWizardStep>('intro')
   const [assistantProviderIndex, setAssistantProviderIndex] = React.useState(
     findAssistantProviderOptionIndex(
@@ -521,7 +529,13 @@ export function SetupWizardApp(
     selectedScheduledUpdateNames,
   )
   const selectedWearableSummary = formatSelectionSummary(selectedWearableNames)
+  const selectedAssistantProviderStatus = assistantSelection.modelProvider
+    ? input.assistantProviderStatuses?.[assistantSelection.modelProvider]
+    : undefined
   const selectedReadyNow = [
+    ...(selectedAssistantProviderStatus?.ready && assistantSelection.modelProvider
+      ? [`${assistantSelection.summary} key`]
+      : []),
     ...selectedChannels.flatMap((channel) =>
       resolveSetupWizardChannelStatus(input.channelStatuses, channel).ready
         ? [formatSetupChannel(channel)]
@@ -534,6 +548,14 @@ export function SetupWizardApp(
     ),
   ]
   const selectedNeedsEnv = [
+    ...(selectedAssistantProviderStatus &&
+    selectedAssistantProviderStatus.missingEnv.length > 0
+      ? [
+          `${assistantSelection.summary} (${formatMissingEnv(
+            selectedAssistantProviderStatus.missingEnv,
+          )})`,
+        ]
+      : []),
     ...selectedChannels.flatMap((channel) => {
       const status = resolveSetupWizardChannelStatus(input.channelStatuses, channel)
       return status.missingEnv.length > 0

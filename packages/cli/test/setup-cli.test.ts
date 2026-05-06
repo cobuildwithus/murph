@@ -1938,6 +1938,16 @@ test('onboard resolves assistant defaults from explicit Codex options when the w
         }
       },
     },
+    runtimeEnv: {
+      getCurrentEnv() {
+        return {
+          VERCEL_AI_API_KEY: 'vercel-test-key',
+        }
+      },
+      async promptForMissing() {
+        throw new Error('noninteractive setup must not prompt for provider keys')
+      },
+    },
     services: {
       async setupMacos(input: any) {
         receivedAssistants.push(input.assistant)

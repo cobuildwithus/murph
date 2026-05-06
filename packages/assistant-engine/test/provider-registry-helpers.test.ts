@@ -1273,6 +1273,47 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result).toEqual(executionResult)
   })
 
+  it('passes Venice provider id and config overrides through the Codex app-server seam', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed with Venice.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'venice-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'venice-thread',
+      turnId: 'turn-venice',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'venice-model',
+        modelProvider: 'venice',
+      }),
+      userPrompt: 'Run Venice.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
+      .calls[0]?.[0]
+    expect(appServerInput).toMatchObject({
+      model: 'venice-model',
+      modelProvider: 'venice',
+    })
+    expect(appServerInput?.configOverrides).toEqual(
+      expect.arrayContaining([
+        'model_providers.venice.name="Venice.ai"',
+        'model_providers.venice.base_url="https://api.venice.ai/api/v1"',
+        'model_providers.venice.env_key="VENICE_API_KEY"',
+        'model_providers.venice.wire_api="responses"',
+        'model_providers.venice.requires_openai_auth=false',
+        'shell_environment_policy.ignore_default_excludes=false',
+      ]),
+    )
+  })
+
   it('replays active-turn history only on stale native-resume fallback', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 
@@ -1823,13 +1864,15 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it('adds the Venice runtime hint when invalid-output fallback fails', async () => {
+    const authHeaderPrefix = ['Authorization:', 'Bearer'].join(' ')
+    const sentinel = 'venice_secret_SENTINEL'
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',
       'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.7.output: Invalid input"}}',
     )
     const fallbackError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',
-      'fallback failed',
+      `fallback failed: ${authHeaderPrefix} ${sentinel}; VENICE_API_KEY=${sentinel}; raw ${sentinel}`,
     )
 
     codexAppServerMocks.executeCodexAppServerTurn
@@ -1847,6 +1890,9 @@ describe('Codex assistant registry helpers', () => {
         provider: 'codex-cli',
         modelProvider: 'venice',
       }),
+      env: {
+        VENICE_API_KEY: sentinel,
+      },
       resumeProviderSessionId: 'corrupt-venice-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
@@ -1860,6 +1906,9 @@ describe('Codex assistant registry helpers', () => {
       code: 'ASSISTANT_CODEX_FAILED',
       message: expect.stringContaining('Venice via Codex Responses failed.'),
     })
+    const error = attempt.error as Error
+    expect(error.message).not.toContain(sentinel)
+    expect(error.message).toContain('[REDACTED]')
   })
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {
