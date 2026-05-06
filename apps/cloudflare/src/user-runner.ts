@@ -1373,6 +1373,13 @@ export class HostedUserRunner {
     result: HostedWorkspaceInvocationResult;
     userId: string;
   }): Promise<void> {
+    if (isCommittedIdleShutdownCheckpointResult(input.result)) {
+      await this.finishCommittedIdleShutdownCheckpointBestEffort({
+        userId: input.userId,
+      });
+      return;
+    }
+
     const record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
       const scheduledRecord = await this.syncPendingWorkAlarm(record);
@@ -1390,13 +1397,6 @@ export class HostedUserRunner {
       return;
     }
 
-    if (isCommittedIdleShutdownCheckpointResult(input.result)) {
-      await this.finishIdleShutdownCheckpoint({
-        userId: input.userId,
-      });
-      return;
-    }
-
     await this.stateStore.clearIdleShutdownCheckpoint();
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: input.result.nextWakeAt ?? null,
@@ -1410,6 +1410,42 @@ export class HostedUserRunner {
       phase: "scheduled",
       userId: input.userId,
     });
+  }
+
+  private async finishCommittedIdleShutdownCheckpointBestEffort(input: {
+    userId: string;
+  }): Promise<void> {
+    try {
+      await this.finishIdleShutdownCheckpoint(input);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          cleanupErrorCode: safeCleanupErrorCode(error),
+        },
+        error,
+        level: "warn",
+        message: "Hosted idle-shutdown checkpoint committed but cleanup failed.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+
+      try {
+        await this.runtimeAlarmScheduler.syncStoredAlarm();
+      } catch (syncError) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            cleanupErrorCode: safeCleanupErrorCode(syncError),
+          },
+          error: syncError,
+          level: "warn",
+          message: "Hosted idle-shutdown checkpoint cleanup alarm resync failed.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+      }
+    }
   }
 
   private async finishIdleShutdownCheckpoint(input: {
