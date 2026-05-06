@@ -13,8 +13,6 @@ import {
 const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
 const DEFAULT_HOSTED_CODEX_PATH =
   "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-const HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS_ENV =
-  "HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS";
 
 export async function maybeInstallHostedE2ECodexAppServerStub(input: {
   codexHome: string;
@@ -32,8 +30,6 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
     source: buildHostedE2ECodexAppServerStubSource({
       assistantProviderBaseUrl,
       turnDelayMs: readHostedE2ECodexAppServerStubTurnDelayMs(input.runtimeEnv),
-      useUuidThreads:
-        input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS_ENV] === "1",
     }),
   });
 }
@@ -41,10 +37,8 @@ export async function maybeInstallHostedE2ECodexAppServerStub(input: {
 export function buildHostedE2ECodexAppServerStubSource(input: {
   assistantProviderBaseUrl: string;
   turnDelayMs?: number | null;
-  useUuidThreads?: boolean | null;
 }): string {
   const turnDelayMs = input.turnDelayMs ?? 25;
-  const useUuidThreads = input.useUuidThreads === true;
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
@@ -52,7 +46,6 @@ const readline = require("node:readline");
 
 const assistantProviderBaseUrl = ${JSON.stringify(input.assistantProviderBaseUrl)};
 const turnDelayMs = ${JSON.stringify(turnDelayMs)};
-const useUuidThreads = ${JSON.stringify(useUuidThreads)};
 const processThreadPrefix = String(process.pid % 1000000).padStart(6, "0");
 let threadCounter = 0;
 let turnCounter = 0;
@@ -94,7 +87,7 @@ function buildRolloutRelativePath(threadId) {
 
 function readRolloutPath(threadId) {
   const codexHome = readCodexHome();
-  if (!codexHome || !useUuidThreads) {
+  if (!codexHome) {
     return null;
   }
   return path.join(codexHome, buildRolloutRelativePath(threadId));
@@ -144,36 +137,6 @@ function loadThreadHistoryFromRollout(threadId) {
         ? [parsed.assistantText.trim()]
         : [];
     });
-}
-
-function writeProviderContinuityEvent(event) {
-  const codexHome = readCodexHome();
-  if (!codexHome) {
-    return;
-  }
-
-  try {
-    const continuityDirectory = path.join(codexHome, "rollouts");
-    const continuityPath = path.join(continuityDirectory, "hosted-e2e-codex-shim.jsonl");
-    fs.mkdirSync(continuityDirectory, {
-      mode: 0o700,
-      recursive: true,
-    });
-    fs.appendFileSync(
-      continuityPath,
-      JSON.stringify({
-        schema: "murph.hosted-e2e-codex-shim-continuity.v1",
-        ...event,
-      }) + "\\n",
-      {
-        encoding: "utf8",
-        mode: 0o600,
-      },
-    );
-    fs.chmodSync(continuityPath, 0o600);
-  } catch {
-    throw new Error("hosted E2E Codex shim could not write provider continuity state");
-  }
 }
 
 function readTextInput(params) {
@@ -330,29 +293,17 @@ async function handleRpc(message) {
     const requestedThreadId = typeof params.threadId === "string" && params.threadId.trim()
       ? params.threadId.trim()
       : null;
-    const threadId = requestedThreadId
-      ?? (useUuidThreads ? buildUuidThreadId(++threadCounter) : "thread_hosted_local_" + (++threadCounter));
-    if (useUuidThreads && method === "thread/resume") {
+    const threadId = requestedThreadId ?? buildUuidThreadId(++threadCounter);
+    if (method === "thread/resume") {
       const rolloutPath = readRolloutPath(threadId);
       if (!rolloutPath || !fs.existsSync(rolloutPath)) {
         writeRpcError(id, "no rollout found for thread id " + threadId);
         return;
       }
     }
-    const threadPath = useUuidThreads
-      ? appendThreadRolloutEvent(threadId, {
-        event: method === "thread/resume" ? "thread.resumed" : "thread.started",
-      })
-      : null;
-    try {
-      writeProviderContinuityEvent({
-        event: method === "thread/resume" ? "thread.resumed" : "thread.started",
-        threadId,
-      });
-    } catch (error) {
-      writeRpcError(id, error instanceof Error ? error.message : String(error));
-      return;
-    }
+    const threadPath = appendThreadRolloutEvent(threadId, {
+      event: method === "thread/resume" ? "thread.resumed" : "thread.started",
+    });
     writeRpc({
       id,
       result: {
@@ -368,7 +319,7 @@ async function handleRpc(message) {
   if (method === "turn/start" && id !== null) {
     const threadId = typeof params.threadId === "string" && params.threadId.trim()
       ? params.threadId.trim()
-      : "thread_hosted_local_" + (threadCounter || 1);
+      : buildUuidThreadId(threadCounter || ++threadCounter);
     const turnId = "turn_hosted_local_" + (++turnCounter);
     const turn = {
       completed: false,

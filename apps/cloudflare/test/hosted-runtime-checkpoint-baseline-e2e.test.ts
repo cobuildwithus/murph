@@ -458,7 +458,6 @@ describe("hosted runtime checkpoint baseline", () => {
         HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_LOG_FINGERPRINT_SECRET: "synthetic-rollout-log-secret",
-        HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
         [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: responsesServer.baseUrl,
         LINQ_API_BASE_URL: responsesServer.linqBaseUrl,
         LINQ_API_TOKEN: "linq-rollout-e2e-token",
