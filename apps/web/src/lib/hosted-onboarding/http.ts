@@ -28,13 +28,33 @@ const HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_ENTRIES = 20;
 const HOSTED_ONBOARDING_PERSISTED_ERROR_TOKEN_MAX_LENGTH = 128;
 const HOSTED_ONBOARDING_SENSITIVE_LOG_KEY_PATTERN =
   /authorization|secret|token|password|cookie|set-cookie|api[-_]?key/iu;
+const HOSTED_ONBOARDING_SAFE_DOMAIN_ERROR_DETAIL_KEYS = new Set([
+  "code",
+  "requestIdPresent",
+  "statusCode",
+  "type",
+]);
 
 export const HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE = "[redacted]";
 
 export { readJsonObject, readOptionalJsonObject };
 
 function mapHostedOnboardingError(error: unknown) {
-  return isHostedOnboardingError(error) ? mapDomainJsonError(error) : null;
+  if (!isHostedOnboardingError(error)) {
+    return null;
+  }
+
+  const mapping = mapDomainJsonError(error);
+  const logDetails = describeHostedOnboardingDomainErrorDetailsForLog(error.details);
+
+  return logDetails
+    ? {
+        ...mapping,
+        log: {
+          details: logDetails,
+        },
+      }
+    : mapping;
 }
 
 function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unknown> | null {
@@ -48,6 +68,43 @@ function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unk
       ...(prismaDetails ?? {}),
       ...(developmentDetails ?? {}),
     };
+  }
+
+  return null;
+}
+
+function describeHostedOnboardingDomainErrorDetailsForLog(
+  details: Record<string, unknown> | undefined,
+): Record<string, unknown> | null {
+  if (!details) {
+    return null;
+  }
+
+  const safeDetails = Object.entries(details).flatMap(([key, value]) => {
+    if (!HOSTED_ONBOARDING_SAFE_DOMAIN_ERROR_DETAIL_KEYS.has(key)) {
+      return [];
+    }
+
+    const safeValue = sanitizeHostedOnboardingDomainErrorDetailValue(value);
+    return safeValue === null ? [] : [[key, safeValue] as const];
+  });
+
+  return safeDetails.length > 0
+    ? { errorDetails: Object.fromEntries(safeDetails) }
+    : null;
+}
+
+function sanitizeHostedOnboardingDomainErrorDetailValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return sanitizeHostedOnboardingLogString(value);
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
   }
 
   return null;

@@ -269,6 +269,32 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
+  it("stores subscription periods from subscription items when Stripe omits root period fields", async () => {
+    await applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
+        itemCurrentPeriodEnd: 1_747_612_800,
+        itemCurrentPeriodStart: 1_745_020_800,
+        items: ["price_pulse_base"],
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_sub_updated_item_period",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentPeriodEnd: new Date("2025-05-19T00:00:00.000Z"),
+        currentPeriodStart: new Date("2025-04-19T00:00:00.000Z"),
+      }),
+    );
+  });
+
   it("keeps subscription.active trial updates in trial phase until the paid conversion invoice arrives", async () => {
     mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
       billingRef: {
@@ -620,21 +646,37 @@ function makeStripeSubscription(
     currentPeriodEnd: number | null;
     currentPeriodStart: number | null;
     id: string;
+    itemCurrentPeriodEnd: number | null;
+    itemCurrentPeriodStart: number | null;
     items: string[];
     metadata: Record<string, string>;
     status: Stripe.Subscription.Status;
     trialEnd: number | null;
     trialStart: number | null;
-  }>,
+}>,
 ): Stripe.Subscription {
-  // @ts-expect-error - the synthetic fixture is intentionally narrower than Stripe.Subscription.
+  const currentPeriodEnd = overrides?.currentPeriodEnd === null
+    ? undefined
+    : overrides?.currentPeriodEnd ?? 1_747_612_800;
+  const currentPeriodStart = overrides?.currentPeriodStart === null
+    ? undefined
+    : overrides?.currentPeriodStart ?? 1_745_020_800;
+  const itemCurrentPeriodEnd = overrides?.itemCurrentPeriodEnd === null
+    ? undefined
+    : overrides?.itemCurrentPeriodEnd;
+  const itemCurrentPeriodStart = overrides?.itemCurrentPeriodStart === null
+    ? undefined
+    : overrides?.itemCurrentPeriodStart;
+
   return {
     customer: overrides?.customer ?? "cus_123",
     id: overrides?.id ?? "sub_123",
-    current_period_end: overrides?.currentPeriodEnd ?? 1_747_612_800,
-    current_period_start: overrides?.currentPeriodStart ?? 1_745_020_800,
+    ...(currentPeriodEnd === undefined ? {} : { current_period_end: currentPeriodEnd }),
+    ...(currentPeriodStart === undefined ? {} : { current_period_start: currentPeriodStart }),
     items: {
       data: (overrides?.items ?? []).map((priceId) => ({
+        ...(itemCurrentPeriodEnd === undefined ? {} : { current_period_end: itemCurrentPeriodEnd }),
+        ...(itemCurrentPeriodStart === undefined ? {} : { current_period_start: itemCurrentPeriodStart }),
         price: {
           id: priceId,
         },

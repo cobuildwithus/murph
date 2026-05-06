@@ -559,25 +559,14 @@ function buildHostedStripeSubscriptionBillingPeriodSnapshot(
   currentPeriodStart?: Date | null;
 } {
   const currentBillingPlanCode = resolveHostedStripeSubscriptionBillingPlanCode(subscription);
-  const currentPeriodStart = readHostedStripeSubscriptionDate(
-    subscription,
-    "current_period_start",
-  );
-  const currentPeriodEnd = readHostedStripeSubscriptionDate(
-    subscription,
-    "current_period_end",
-  );
-  const hasPeriod =
-    currentPeriodStart !== null
-    && currentPeriodEnd !== null
-    && currentPeriodStart.getTime() < currentPeriodEnd.getTime();
+  const currentPeriod = readHostedStripeSubscriptionCurrentPeriod(subscription);
 
   return {
     ...(currentBillingPlanCode ? { currentBillingPlanCode } : {}),
-    ...(hasPeriod
+    ...(currentPeriod
       ? {
-          currentPeriodEnd,
-          currentPeriodStart,
+          currentPeriodEnd: currentPeriod.currentPeriodEnd,
+          currentPeriodStart: currentPeriod.currentPeriodStart,
         }
       : {}),
   };
@@ -793,11 +782,68 @@ function readHostedStripeSubscriptionPriceIds(
   return priceIds;
 }
 
+function readHostedStripeSubscriptionCurrentPeriod(
+  subscription: Stripe.Subscription,
+): {
+  currentPeriodEnd: Date;
+  currentPeriodStart: Date;
+} | null {
+  return readHostedStripeObjectCurrentPeriod(subscription) ??
+    readHostedStripeSubscriptionItemCurrentPeriod(subscription);
+}
+
+function readHostedStripeSubscriptionItemCurrentPeriod(
+  subscription: Stripe.Subscription,
+): {
+  currentPeriodEnd: Date;
+  currentPeriodStart: Date;
+} | null {
+  const items = subscription.items?.data ?? [];
+  for (const item of items) {
+    const currentPeriod = readHostedStripeObjectCurrentPeriod(item);
+    if (currentPeriod) {
+      return currentPeriod;
+    }
+  }
+
+  return null;
+}
+
+function readHostedStripeObjectCurrentPeriod(
+  value: object,
+): {
+  currentPeriodEnd: Date;
+  currentPeriodStart: Date;
+} | null {
+  const currentPeriodStart = readHostedStripeObjectDate(value, "current_period_start");
+  const currentPeriodEnd = readHostedStripeObjectDate(value, "current_period_end");
+
+  if (
+    !currentPeriodStart ||
+    !currentPeriodEnd ||
+    currentPeriodStart.getTime() >= currentPeriodEnd.getTime()
+  ) {
+    return null;
+  }
+
+  return {
+    currentPeriodEnd,
+    currentPeriodStart,
+  };
+}
+
 function readHostedStripeSubscriptionDate(
   subscription: Stripe.Subscription,
   field: "current_period_end" | "current_period_start" | "trial_end" | "trial_start",
 ): Date | null {
-  const raw = Reflect.get(subscription, field);
+  return readHostedStripeObjectDate(subscription, field);
+}
+
+function readHostedStripeObjectDate(
+  value: object,
+  field: "current_period_end" | "current_period_start" | "trial_end" | "trial_start",
+): Date | null {
+  const raw = Reflect.get(value, field);
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
     return null;
   }
