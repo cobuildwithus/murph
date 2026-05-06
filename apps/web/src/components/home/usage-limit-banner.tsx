@@ -36,7 +36,7 @@ const usageLimitBannerCopy: Record<
     title: "Trial billing is updating",
   },
   trial_usage_limit_reached: {
-    action: "Start Pulse plan",
+    action: "Start Pulse",
     body:
       "Start your Pulse plan now to keep Murph replying.",
     title: "Trial credits are used up",
