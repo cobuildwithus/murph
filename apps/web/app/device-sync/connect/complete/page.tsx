@@ -98,7 +98,7 @@ export default async function DeviceSyncConnectCompletePage({
   const SecondaryActionIcon = failed ? RefreshCwIcon : ArrowRightIcon;
   const secondaryAction = failed
     ? { href: "/connect", label: "Try again" }
-    : { href: "/", label: "Go home" };
+    : { href: "/home", label: "Go home" };
 
   return (
     <main className="min-h-screen bg-background px-4 py-16 text-foreground sm:px-6 lg:px-8">

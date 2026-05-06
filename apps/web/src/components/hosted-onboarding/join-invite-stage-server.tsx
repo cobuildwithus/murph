@@ -40,7 +40,7 @@ const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 const PULSE_TRIAL_FEATURES = [
   "Full Pulse access for 7 days",
-  "Card required, cancel anytime",
+  "Cancel anytime",
   "Then $8/month",
 ];
 

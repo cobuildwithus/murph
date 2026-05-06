@@ -16,7 +16,7 @@ export function ConnectedAccountCard(props: {
   return (
     <div
       className={cn(
-        "flex flex-col gap-4 rounded-xl border border-border bg-muted/40 p-5",
+        "flex flex-col gap-4 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-5",
         className,
       )}
     >

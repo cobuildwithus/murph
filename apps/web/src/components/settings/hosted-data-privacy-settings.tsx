@@ -232,7 +232,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       <ConnectedAccountCard
         label="Export data"
         value="Download your Murph data"
-        meta="Exports account, messaging, wearable, usage, and redacted diagnostic records. Tokens, lookup keys, nonces, and invite codes are not included."
+        meta="Account, messaging, wearable, and usage records as JSON."
         action={
           <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} type="button" variant="outline">
             <DownloadIcon data-icon="inline-start" />
@@ -245,7 +245,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
         className="border-destructive/30 bg-destructive/5"
         label="Delete data"
         value="Delete your Murph account data"
-        meta="Deletes live Murph-hosted data, revokes wearable providers where possible, and triggers Cloudflare runner/R2 cleanup when configured. Requires two confirmations."
+        meta="Permanently deletes your Murph data. Requires two confirmations."
         action={
           <Button disabled={deletePending || deletionSummary !== null} onClick={openDialog} type="button" variant="destructive">
             <Trash2Icon data-icon="inline-start" />

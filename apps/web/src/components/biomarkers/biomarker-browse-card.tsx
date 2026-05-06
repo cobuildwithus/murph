@@ -42,14 +42,6 @@ export function BiomarkerBrowseCard({
     >
       <div className="flex items-start justify-between gap-3">
         <BiomarkerIcon routeId={routeId} className="size-10 shrink-0" />
-        <span
-          className={cn(
-            "mt-1.5 size-2.5 shrink-0 rounded-full",
-            routeId === "rem-sleep-minutes" || routeId === "deep-sleep-minutes" || routeId === "glucose" || routeId === "sleep-quality"
-              ? "bg-amber-500"
-              : "bg-[#7a8c6e]",
-          )}
-        />
       </div>
 
       <div className="flex flex-col gap-2">
