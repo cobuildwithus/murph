@@ -212,7 +212,7 @@ describe("handleRunnerOutboundRequest", () => {
     resetRunnerOutboundSharedCachesForTest();
   });
 
-  it("bootstraps the bound user before returning the outbound stub", async () => {
+  it("returns the outbound stub without a bindUser round trip", async () => {
     type ReceiverSensitiveStub = WorkerBindUserRunnerStubLike & {
       marker: string;
     };
@@ -237,11 +237,10 @@ describe("handleRunnerOutboundRequest", () => {
     const resolvedStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
 
     expect(resolvedStub).toBe(stub);
-    expect(stub.bindUser).toHaveBeenCalledOnce();
-    expect(stub.bindUser).toHaveBeenCalledWith("member_123");
+    expect(stub.bindUser).not.toHaveBeenCalled();
   });
 
-  it("does not reuse successful outbound bindUser assertions across calls", async () => {
+  it("resolves fresh outbound stubs without binding the runner", async () => {
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const getByName = vi.fn(() => ({
       bindUser,
@@ -259,10 +258,10 @@ describe("handleRunnerOutboundRequest", () => {
     expect(firstStub).not.toBe(secondStub);
     expect(secondStub).not.toBe(thirdStub);
     expect(getByName).toHaveBeenCalledTimes(3);
-    expect(bindUser).toHaveBeenCalledTimes(3);
+    expect(bindUser).not.toHaveBeenCalled();
   });
 
-  it("retries rejected outbound bindUser assertions", async () => {
+  it("does not call failing bindUser hooks while resolving outbound stubs", async () => {
     const bindUser = vi.fn()
       .mockRejectedValueOnce(new Error("bind failed"))
       .mockResolvedValueOnce({ userId: "member_123" });
@@ -274,17 +273,14 @@ describe("handleRunnerOutboundRequest", () => {
       },
     });
 
-    await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).rejects.toThrow(
-      "bind failed",
-    );
     await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).resolves.toMatchObject({
       bindUser,
     });
 
-    expect(bindUser).toHaveBeenCalledTimes(2);
+    expect(bindUser).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the runner stub is malformed at runtime", async () => {
+  it("defers runner method validation until a hot-path route needs it", async () => {
     const env = createDirectRunnerOutboundEnv({
       USER_RUNNER: {
         getByName() {
@@ -293,9 +289,7 @@ describe("handleRunnerOutboundRequest", () => {
       },
     });
 
-    await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).rejects.toThrow(
-      'User runner stub does not implement bindUser.',
-    );
+    await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).resolves.toEqual({});
   });
 
   it("rejects internal worker proxy traffic when the proxy header is missing", async () => {
@@ -627,7 +621,7 @@ describe("handleRunnerOutboundRequest", () => {
     },
   );
 
-  it("reuses the bound user runner stub while proxying workspace checkpoints", async () => {
+  it("reuses the runner stub without binding while proxying workspace checkpoints", async () => {
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const recordActiveInvocationWorkspaceCheckpoint = vi.fn(async () => ({
@@ -677,7 +671,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(getByName).toHaveBeenCalledOnce();
-    expect(bindUser).toHaveBeenCalledOnce();
+    expect(bindUser).not.toHaveBeenCalled();
     expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       leaseGeneration: "9",
@@ -1867,8 +1861,8 @@ describe("handleRunnerOutboundRequest", () => {
     expect(secondResponse.status).toBe(200);
     expect(firstResponse.status).toBe(200);
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
-    expect(getByName).toHaveBeenCalledTimes(4);
-    expect(bindUser).toHaveBeenCalledTimes(4);
+    expect(getByName).toHaveBeenCalledTimes(2);
+    expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -1921,7 +1915,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(secondResponse.status).toBe(200);
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
-    expect(bindUser).toHaveBeenCalledTimes(3);
+    expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -2270,23 +2264,16 @@ describe("handleRunnerOutboundRequest", () => {
     expect(secondContext.rootKey).not.toBe(firstContext.rootKey);
     expect(secondContext.rootKey[0]).toBe(101);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
-    expect(bindUser).toHaveBeenCalledTimes(2);
+    expect(bindUser).not.toHaveBeenCalled();
   });
 
-  it("coalesces concurrent outbound runtime crypto cold binds and fetches", async () => {
+  it("coalesces concurrent outbound runtime crypto cold fetches without binding the runner", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture({
       cacheMaxAgeMs: 10_000,
       cryptoContextVersion: "ctx-pending-single-flight",
       fetchedAt: "2026-05-04T00:00:00.000Z",
     });
-    let releaseBind!: () => void;
-    const bindRelease = new Promise<void>((resolve) => {
-      releaseBind = resolve;
-    });
-    const bindUser = vi.fn(async (userId: string) => {
-      await bindRelease;
-      return { userId };
-    });
+    const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
@@ -2317,9 +2304,6 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
 
-    expect(bindUser).toHaveBeenCalledOnce();
-    expect(fixture.fetchMock).not.toHaveBeenCalled();
-    releaseBind();
     const [firstResolved, secondResolved] = await Promise.all([firstContext, secondContext]);
 
     expect(firstResolved.rootKeyId).toBe("udrk:runtime:test-root");
@@ -2335,7 +2319,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
 
     expect(thirdResolved).not.toBe(firstResolved);
-    expect(bindUser).toHaveBeenCalledTimes(2);
+    expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 

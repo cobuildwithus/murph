@@ -13,11 +13,11 @@ import type {
   HostedUserCryptoContext,
 } from "../hosted-crypto/runtime-user-crypto-context.ts";
 import type {
-  WorkerBindUserRunnerStubLike,
   WorkerEnvironmentContract,
+  WorkerUserRunnerStubLike,
 } from "../worker-contracts.ts";
 
-interface RunnerOutboundUserRunnerStubLike extends WorkerBindUserRunnerStubLike {
+interface RunnerOutboundUserRunnerStubLike extends WorkerUserRunnerStubLike {
   ownsActiveInvocationLease?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -53,7 +53,7 @@ interface RunnerOutboundUserRunnerStubLike extends WorkerBindUserRunnerStubLike 
 }
 
 export interface RunnerOutboundEnvironmentSource
-  extends WorkerEnvironmentContract<WorkerBindUserRunnerStubLike> {}
+  extends WorkerEnvironmentContract<RunnerOutboundUserRunnerStubLike> {}
 
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
@@ -99,7 +99,6 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 
   const cacheToken = {};
   const promise = (async (): Promise<HostedUserCryptoContext> => {
-    await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
     return await requireHostedUserCryptoContextFromEnvironment({
       bucket: input.bucket,
       domain: input.domain,
@@ -133,10 +132,7 @@ export async function resolveRunnerOutboundUserRunnerStub(
   env: RunnerOutboundEnvironmentSource,
   userId: string,
 ): Promise<RunnerOutboundUserRunnerStubLike> {
-  const stub = env.USER_RUNNER.getByName(userId);
-  requireRunnerOutboundUserStubMethod(stub, "bindUser");
-  await stub.bindUser(userId);
-  return stub;
+  return env.USER_RUNNER.getByName(userId);
 }
 
 export function requireRunnerOutboundUserStubMethod<TKey extends keyof RunnerOutboundUserRunnerStubLike>(
