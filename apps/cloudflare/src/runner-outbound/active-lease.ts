@@ -72,6 +72,17 @@ export async function requireRunnerActiveInvocationLease(input: {
   return headers;
 }
 
+export function requireRunnerActiveInvocationLeaseHeaders(
+  request: Request,
+): RunnerActiveInvocationLeaseHeaders {
+  const headers = readRunnerActiveInvocationLeaseHeaders(request);
+  if (!headers) {
+    throw new RunnerActiveInvocationLeaseError();
+  }
+
+  return headers;
+}
+
 export function writeRunnerActiveInvocationLeaseHeaders(
   headers: Headers,
   lease: RunnerActiveInvocationLeaseWriteHeaders,

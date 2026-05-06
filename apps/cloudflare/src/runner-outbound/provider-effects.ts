@@ -31,7 +31,7 @@ import {
 } from "../runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerActiveInvocationLease,
+  requireRunnerActiveInvocationLeaseHeaders,
   RunnerActiveInvocationLeaseError,
 } from "./active-lease.ts";
 import type {
@@ -68,11 +68,7 @@ export async function handleRunnerProviderEffectsRequest(input: {
   }
 
   try {
-    await requireRunnerActiveInvocationLease({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
+    requireRunnerActiveInvocationLeaseHeaders(input.request);
   } catch (error) {
     if (error instanceof RunnerActiveInvocationLeaseError) {
       return unauthorized();
