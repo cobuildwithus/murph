@@ -71,6 +71,7 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
+const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
 
 type HostedAiUsageGateDecision =
@@ -371,7 +372,10 @@ export class HostedUserRunner {
           record: runningRecord,
           runnerTimeoutMs: this.env.runnerTimeoutMs,
         })
-      : new Date(nowMs + this.env.retryDelayMs).toISOString();
+      : new Date(nowMs + resolveHostedRunnerFailureRetryDelayMs({
+          defaultRetryDelayMs: this.env.retryDelayMs,
+          reason: "nudge",
+        })).toISOString();
     const record = await this.markPendingNudgeAndApplyAlarm({
       preferredWakeAt,
     });
@@ -1000,6 +1004,7 @@ export class HostedUserRunner {
 
   private async scheduleHostedWakeRetryAlarm(input: {
     respectMaxAttempts?: boolean;
+    retryDelayMs?: number;
     userId?: string | null;
   } = {}): Promise<boolean> {
     if (input.respectMaxAttempts === true) {
@@ -1026,7 +1031,9 @@ export class HostedUserRunner {
     }
 
     await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
+      preferredWakeAt: new Date(
+        Date.now() + (input.retryDelayMs ?? this.env.retryDelayMs),
+      ).toISOString(),
     });
     return true;
   }
@@ -1041,10 +1048,15 @@ export class HostedUserRunner {
 
     void this.runUntilIdleOrBudget({ reason: input.reason })
       .catch(async (error) => {
+        const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
+          defaultRetryDelayMs: this.env.retryDelayMs,
+          reason: input.reason,
+        });
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
             reason: input.reason,
+            retryDelayMs,
           },
           error,
           level: "warn",
@@ -1056,6 +1068,7 @@ export class HostedUserRunner {
         try {
           await this.scheduleHostedWakeRetryAlarm({
             respectMaxAttempts: true,
+            retryDelayMs,
             userId: input.userId,
           });
         } catch (retryError) {
@@ -1308,4 +1321,15 @@ function resolvePendingNudgeWakeAt(input: {
       ? orphanObservedAtMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS
       : input.nowMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS;
   return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, orphanDeadlineMs))).toISOString();
+}
+
+function resolveHostedRunnerFailureRetryDelayMs(input: {
+  defaultRetryDelayMs: number;
+  reason: HostedWorkspaceInvocationReason;
+}): number {
+  if (input.reason !== "nudge") {
+    return input.defaultRetryDelayMs;
+  }
+
+  return Math.min(input.defaultRetryDelayMs, IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS);
 }
