@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ReceiptText } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
@@ -110,31 +110,14 @@ function StartPaidPulseConfirmationDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <DialogHeader className="gap-3 pr-10">
-          <div className="flex size-10 items-center justify-center rounded-full border border-[#c4a882]/30 bg-[#c4a882]/15 text-[#736a58]">
-            <ReceiptText className="size-5" aria-hidden="true" />
-          </div>
-          <div className="space-y-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-              Billing
-            </p>
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              Start Pulse plan
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              Your trial ends now. Pulse starts at {pulsePriceLabel} once billing is confirmed.
-            </DialogDescription>
-          </div>
+        <DialogHeader className="pr-10">
+          <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+            Start Pulse
+          </DialogTitle>
+          <DialogDescription className="text-sm leading-6 text-[#736a58]">
+            Your trial ends and Pulse begins at {pulsePriceLabel}.
+          </DialogDescription>
         </DialogHeader>
-
-        <div className="rounded-lg border border-[#c4a882]/25 bg-[#c4a882]/10 p-4">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-            Pulse
-          </p>
-          <p className="mt-1 font-serif text-3xl/8 font-semibold tracking-normal text-[#2d3436]">
-            {pulsePriceLabel}
-          </p>
-        </div>
 
         {props.errorMessage ? (
           <p
@@ -145,21 +128,25 @@ function StartPaidPulseConfirmationDialog(props: {
           </p>
         ) : null}
 
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="flex flex-col gap-2">
           <Button
             type="button"
-            variant="outline"
-            onClick={() => props.onOpenChange(false)}
+            size="lg"
+            onClick={props.onConfirm}
             disabled={props.isStarting}
+            className="w-full"
           >
-            Cancel
+            {props.isStarting ? "Starting..." : "Start Pulse"}
           </Button>
           <Button
             type="button"
-            onClick={props.onConfirm}
+            size="lg"
+            variant="ghost"
+            onClick={() => props.onOpenChange(false)}
             disabled={props.isStarting}
+            className="w-full"
           >
-            {props.isStarting ? "Starting..." : "Start Pulse plan"}
+            Cancel
           </Button>
         </div>
       </DialogContent>
