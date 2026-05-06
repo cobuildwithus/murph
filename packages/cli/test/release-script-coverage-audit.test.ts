@@ -221,35 +221,6 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
     expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
     expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
-    expect(rootPackageJson.scripts?.['review:gpt']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas',
-    )
-    expect(rootPackageJson.scripts?.['review:gpt:full']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas --config-path scripts/review-gpt-full.config.sh',
-    )
-    expect(rootPackageJson.scripts?.['review:gpt:diagnose']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh thread phlebas diagnose',
-    )
-    expect(rootPackageJson.scripts?.['review:gpt:delay']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas delay',
-    )
-    expect(rootPackageJson.scripts?.['review:gpt:schedule']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas delay',
-    )
-    expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
-    expect(rootPackageJson.scripts?.['research:run']).toBe('node scripts/research-run.mjs')
-    expect(rootPackageJson.scripts?.['chatgpt:thread:export']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh thread phlebas export --format json --filter-output exportPath',
-    )
-    expect(rootPackageJson.scripts?.['chatgpt:thread:download']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh thread phlebas download --format json --filter-output downloadedFile',
-    )
-    expect(rootPackageJson.scripts?.['chatgpt:thread:watch']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh thread phlebas wake --no-poll-until-complete --format json',
-    )
-    expect(rootPackageJson.scripts?.['chatgpt:thread:wake']).toBe(
-      'bash scripts/review-gpt-browser-profile.sh thread phlebas wake --no-poll-until-complete --format json',
-    )
     expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
       'node scripts/check-workspace-package-cycles.mjs',
     )
@@ -257,16 +228,34 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
   })
 
-  it('keeps repo thread helpers routed through the packaged review-gpt commands without local shadow logic', () => {
+  it('does not expose review-gpt or ChatGPT thread package-script helpers', () => {
     const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
       path.join(repoRoot, 'pnpm-workspace.yaml'),
       'utf8',
     )
-    const reviewGptVersionRange = String(
-      rootPackageJson.devDependencies?.['@cobuild/review-gpt'] ?? '',
-    )
-    const reviewGptPinnedVersion = reviewGptVersionRange.replace(/^\^/u, '')
+    const removedScripts = [
+      'review:gpt',
+      'review:gpt:full',
+      'review:gpt:protocol',
+      'review:gpt:protocol:all',
+      'review:gpt:diagnose',
+      'review:gpt:delay',
+      'review:gpt:schedule',
+      'review:gpt:data',
+      'research',
+      'research:init',
+      'research:materialize',
+      'research:run',
+      'chatgpt:thread:export',
+      'chatgpt:thread:download',
+      'chatgpt:thread:watch',
+      'chatgpt:thread:wake',
+    ]
+
+    for (const scriptName of removedScripts) {
+      expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
+    }
 
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-export.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-download.mjs'))).toBe(false)
@@ -277,10 +266,15 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(reviewGptVersionRange).toMatch(/^\^0\.5\.\d+$/u)
-    expect(pnpmWorkspace).toContain(`  - '@cobuild/review-gpt@${reviewGptPinnedVersion}'`)
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBeUndefined()
+    expect(pnpmWorkspace).not.toContain('@cobuild/review-gpt')
     expect(pnpmWorkspace).not.toContain('patchedDependencies:')
-    expect(existsSync(path.join(repoRoot, 'patches', `@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
   it('keeps reverse-dependent CLI coverage on the source lane for inboxd-only diffs', () => {
@@ -527,19 +521,7 @@ Updated: 2026-04-24
     }
   })
 
-  it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {
-    const leanReviewConfig = readFileSync(
-      path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
-      'utf8',
-    )
-    const fullReviewConfig = readFileSync(
-      path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'),
-      'utf8',
-    )
-    const dataReviewConfig = readFileSync(
-      path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'),
-      'utf8',
-    )
+  it('keeps repo-tools audit bundles wired without review-gpt wrappers', () => {
     const repoToolsConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'repo-tools.config.sh'),
       'utf8',
@@ -549,19 +531,6 @@ Updated: 2026-04-24
       'utf8',
     )
 
-    expect(leanReviewConfig).toContain('include_tests=0')
-    expect(leanReviewConfig).toContain('include_docs=0')
-    expect(leanReviewConfig).toContain('snapshot_attachment_name="murph-review-gpt.repo-snapshot.zip"')
-    expect(leanReviewConfig).toContain('package_script="scripts/package-review-gpt-context.sh"')
-    expect(leanReviewConfig).toContain('review_gpt_register_dir_preset "privacy" "privacy.md"')
-    expect(fullReviewConfig).toContain('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review-gpt.config.sh"')
-    expect(fullReviewConfig).toContain('include_tests=1')
-    expect(fullReviewConfig).toContain('include_docs=1')
-    expect(fullReviewConfig).toContain('package_script="scripts/package-review-gpt-context-full.sh"')
-    expect(dataReviewConfig).toContain('include_tests=0')
-    expect(dataReviewConfig).toContain('include_docs=0')
-    expect(dataReviewConfig).toContain('repomix_attachment_format="none"')
-    expect(dataReviewConfig).toContain('package_script="scripts/package-data-context.sh"')
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'")
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'")
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'")
@@ -575,24 +544,6 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain(
       'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
     )
-  })
-
-  it('keeps review-gpt browser profile recovery on existing windows', () => {
-    const profileHelper = readFileSync(
-      path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'),
-      'utf8',
-    )
-
-    expect(profileHelper).toContain('--new-tab')
-    expect(profileHelper).toContain('/json/new?https://chatgpt.com/')
-    expect(profileHelper).toContain('open -g -j -a "$profile_app"')
-    expect(profileHelper).toContain('murph_review_gpt_profile_endpoint_ready "$profile_slug"')
-    expect(profileHelper).toContain('murph_review_gpt_profile_process_ids "$profile_slug"')
-    expect(profileHelper).toContain('has running browser processes but no ready remote-debugging endpoint')
-    expect(profileHelper).toContain('will not restart a lane automatically')
-    expect(profileHelper).not.toContain('--new-window')
-    expect(profileHelper).not.toContain('open -g -na')
-    expect(profileHelper).not.toContain('REVIEW_GPT_ALLOW_BROWSER_FOREGROUND')
   })
 
   it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {
@@ -1009,9 +960,9 @@ exit 1
   })
 
   it('packages only canonical vault files without runtime or export-pack residue', () => {
-    const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-data-'))
+    const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-data-context-'))
     const vaultRoot = path.join(parentRoot, 'vault')
-    const outputRoot = path.join(repoRoot, '.tmp-review-gpt-data')
+    const outputRoot = path.join(repoRoot, '.tmp-data-context')
 
     rmSync(outputRoot, { recursive: true, force: true })
     mkdirSync(path.join(vaultRoot, 'journal', '2026'), { recursive: true })

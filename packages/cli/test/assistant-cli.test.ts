@@ -174,7 +174,7 @@ test('formatAssistantRunEventForTerminal keeps long-running auto-reply heartbeat
   const event: AssistantRunEvent = {
     inputId: 'ain_safe_123',
     details:
-      'assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
+      'assistant still running after 45m; knowledge upsert command active for 43m; last provider activity 43m ago',
     providerKind: 'status',
     providerState: 'running',
     type: 'input.reply-progress',
@@ -184,7 +184,7 @@ test('formatAssistantRunEventForTerminal keeps long-running auto-reply heartbeat
 
   assert.equal(
     message,
-    'reply-progress ain_safe_123: assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
+    'reply-progress ain_safe_123: assistant still running after 45m; knowledge upsert command active for 43m; last provider activity 43m ago',
   )
 })
 
@@ -717,14 +717,6 @@ test('root chat alias participates in default-vault injection', () => {
     ['workout', 'add', 'Ran 5k', '--vault', '/tmp/default-vault'],
   )
   assert.deepEqual(
-    applyDefaultVaultToArgs(['research', 'Check ApoB updates'], '/tmp/default-vault'),
-    ['research', 'Check ApoB updates', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['deepthink', 'Think through recovery tradeoffs'], '/tmp/default-vault'),
-    ['deepthink', 'Think through recovery tradeoffs', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
     applyDefaultVaultToArgs(['chat', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
     ['chat', '--vault', '/tmp/explicit-vault'],
   )
@@ -815,6 +807,8 @@ test('manifest marks query as vault-backed while model and route are exempt', ()
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('model'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('commons'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('route'), true)
+  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('research'), false)
+  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('deepthink'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('model'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('commons'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('route'), false)

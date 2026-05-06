@@ -35,8 +35,6 @@ readonly shell_syntax_check_scripts=(
   "scripts/committer"
   "scripts/package-audit-context.sh"
   "scripts/package-data-context.sh"
-  "scripts/review-gpt.data.config.sh"
-  "scripts/review-gpt-data.sh"
   "scripts/repo-tools.config.sh"
   "scripts/release.sh"
   "scripts/release-check.sh"

@@ -158,7 +158,6 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
     patterns: [
       "assistant-*.test.ts",
       "knowledge-runtime.test.ts",
-      "research-runtime.test.ts",
     ],
   },
   {

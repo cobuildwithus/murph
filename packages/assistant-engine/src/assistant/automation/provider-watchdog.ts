@@ -317,7 +317,7 @@ function matchAssistantAutoReplyLongRunningCommand(
     return null
   }
 
-  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|murph)\s+(research|deepthink|knowledge\s+upsert)(?:\s|$)/iu.exec(
+  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|murph)\s+(knowledge\s+upsert)(?:\s|$)/iu.exec(
     commandText,
   )
   if (cliCommandMatch) {
@@ -328,19 +328,7 @@ function matchAssistantAutoReplyLongRunningCommand(
     }
   }
 
-  if (/(?:^|\s)(?:[^\s]+\/)?(?:pnpm|npm|yarn)\s+review:gpt(?:\s|$)/iu.test(commandText)) {
-    return {
-      key: event.id ?? 'command:review:gpt',
-      label: 'review:gpt run',
-    }
-  }
-
-  return /\breview:gpt\b/iu.test(commandText)
-    ? {
-        key: event.id ?? 'command:review:gpt',
-        label: 'review:gpt run',
-      }
-    : null
+  return null
 }
 
 function matchAssistantAutoReplyLongRunningTool(
@@ -351,13 +339,6 @@ function matchAssistantAutoReplyLongRunningTool(
     return null
   }
 
-  if (/\bdeepthink\b/iu.test(toolText)) {
-    return {
-      key: event.id ?? 'tool:deepthink',
-      label: 'deepthink tool',
-    }
-  }
-
   if (/\bknowledge\b/iu.test(toolText) && /\bupsert\b/iu.test(toolText)) {
     return {
       key: event.id ?? 'tool:knowledge-upsert',
@@ -365,10 +346,5 @@ function matchAssistantAutoReplyLongRunningTool(
     }
   }
 
-  return /\bresearch\b/iu.test(toolText)
-    ? {
-        key: event.id ?? 'tool:research',
-        label: 'research tool',
-      }
-    : null
+  return null
 }
