@@ -479,7 +479,7 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
   assert.equal(skipped.enabled, false)
   assert.equal(skipped.provider, null)
   assert.match(skipped.detail, /Skipped assistant setup/u)
-  assert.equal(capturedAssistants[0]?.provider, null)
+  assert.equal(capturedAssistants.length, 0)
 
   const defaultCodex = await resolver.resolve({
     allowPrompt: false,
@@ -500,7 +500,6 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     options: createSetupOptions({
       assistantModel: 'gpt-5.5',
       assistantModelProvider: 'vercel-ai-gateway',
-      assistantOss: true,
       assistantCodexCommand: 'codex-beta',
       assistantProfile: 'team',
     }),
@@ -518,17 +517,12 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
-    oss: true,
-    account: {
-      source: 'codex-auth-json',
-      kind: 'account',
-      planCode: 'team',
-      planName: 'Team',
-      quota: null,
-    },
+    oss: false,
+    account: null,
     detail:
-      'Use Codex with the local model gpt-5.5. Use Codex model provider vercel-ai-gateway. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
+      'Use Codex with gpt-5.5. Use Codex model provider vercel-ai-gateway. An explicit Codex home is configured; path redacted in CLI output.',
   })
+  assert.equal(capturedAssistants.length, 1)
 })
 
 test('setup assistant plan name helpers cover known and custom plans', () => {

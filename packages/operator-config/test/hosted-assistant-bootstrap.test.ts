@@ -9,6 +9,7 @@ import {
 } from '../src/assistant/hosted-config.ts'
 import {
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  VENICE_CODEX_MODEL_PROVIDER_CONFIG,
 } from '../src/assistant/target-runtime.ts'
 
 afterEach(() => {
@@ -94,6 +95,14 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
       modelProvider: 'openai',
     },
   })
+  const veniceProfile = createHostedAssistantProfile({
+    id: 'member-venice',
+    providerConfig: {
+      provider: 'codex-cli',
+      model: 'venice-model',
+      modelProvider: VENICE_CODEX_MODEL_PROVIDER_CONFIG.id,
+    },
+  })
   const config = createHostedAssistantConfig({
     activeProfileId: readyProfile.id,
     profiles: [readyProfile, providerOnlyProfile],
@@ -110,6 +119,7 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
   assert.deepEqual(resolveReadyHostedAssistantProfile(config), readyProfile)
   assert.equal(resolveReadyHostedAssistantProfile(null), null)
   assert.equal(isHostedAssistantProfileReady(providerOnlyProfile), true)
+  assert.equal(isHostedAssistantProfileReady(veniceProfile), false)
   assert.equal(isHostedAssistantProfileReady(null), false)
   assert.deepEqual(compileHostedAssistantProfileProviderConfig(readyProfile), {
     approvalPolicy: 'never',
@@ -375,7 +385,7 @@ test('hosted assistant bootstrap rejects unsupported hosted provider aliases', a
     readOperatorConfigResult: null,
   })
 
-  for (const provider of ['codex-cli', 'not-a-provider']) {
+  for (const provider of ['codex-cli', 'not-a-provider', 'venice']) {
     await assert.rejects(
       () =>
         moduleWithProfile.ensureHostedAssistantOperatorDefaults({

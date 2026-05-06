@@ -1863,6 +1863,7 @@ test('wizard resolves Codex cloud selection without endpoint metadata', () => {
     {
       detail: 'Murph will use your saved Codex / ChatGPT sign-in.',
       methodLabel: null,
+      modelProvider: null,
       oss: false,
       preset: 'codex',
       providerLabel: 'ChatGPT / Codex sign-in',

@@ -19,6 +19,7 @@ import {
   type HostedAssistantProfile,
 } from './assistant/hosted-config.js'
 import {
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexModelProviderConfig,
 } from './assistant/target-runtime.js'
@@ -72,6 +73,12 @@ const HOSTED_ASSISTANT_SUPPORTED_PROVIDER_LABEL =
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
 const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_LABEL =
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey
+export const HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS = [
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+] as const
+const hostedAssistantAllowedProviderIdSet = new Set<string>(
+  HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS,
+)
 const DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT: AssistantReasoningEffort = 'medium'
 const DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY: AssistantApprovalPolicy = 'never'
 const DEFAULT_HOSTED_ASSISTANT_SANDBOX: AssistantSandbox = 'danger-full-access'
@@ -195,7 +202,10 @@ export function isHostedAssistantProfileReady(
   }
 
   const providerConfig = hostedAssistantProfileToProviderConfigInput(profile)
-  return resolveAssistantCodexModelProviderConfig(providerConfig.modelProvider) !== null
+  const modelProvider = providerConfig.modelProvider ?? null
+  return modelProvider !== null
+    && hostedAssistantAllowedProviderIdSet.has(modelProvider)
+    && resolveAssistantCodexModelProviderConfig(modelProvider) !== null
 }
 
 export function resolveReadyHostedAssistantProfile(

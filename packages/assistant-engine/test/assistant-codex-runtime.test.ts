@@ -158,6 +158,15 @@ describe('assistant codex runtime', () => {
       sandbox: 'workspace-write',
       serviceName: 'murph',
     })
+    expect(
+      buildCodexThreadStartParams({
+        ...baseInput,
+        modelProvider: 'venice',
+      }),
+    ).toMatchObject({
+      model: 'gpt-5',
+      modelProvider: 'venice',
+    })
 
     expect(
       buildCodexThreadResumeParams({

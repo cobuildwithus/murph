@@ -67,6 +67,7 @@ test.sequential(
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
+        assistantModelProvider: null,
         assistantOss: false,
         assistantPreset: 'codex',
       })
@@ -99,6 +100,7 @@ test.sequential(
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
+        assistantModelProvider: null,
         assistantOss: true,
         assistantPreset: 'codex',
       })
@@ -164,7 +166,42 @@ test.sequential(
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
+        assistantModelProvider: null,
         assistantOss: true,
+        assistantPreset: 'codex',
+      })
+    })
+  },
+  WIZARD_TEST_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant wizard can finish with Venice as the model provider',
+  async () => {
+    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+      const wizardResultPromise = runSetupAssistantWizard({
+        initialAssistantPreset: 'codex',
+      })
+
+      await waitForRenderedText(
+        flush,
+        readOutput,
+        /How should Murph answer\?/u,
+      )
+      await writeInput('\u001B[B')
+      await writeInput('\u001B[B')
+      await writeInput('\r')
+      const reviewOutput = await waitForRenderedText(
+        flush,
+        readOutput,
+        /Review/u,
+      )
+      assert.match(reviewOutput, /Venice\.ai/u)
+      await writeInput('\r')
+
+      assert.deepEqual(await wizardResultPromise, {
+        assistantModelProvider: 'venice',
+        assistantOss: false,
         assistantPreset: 'codex',
       })
     })

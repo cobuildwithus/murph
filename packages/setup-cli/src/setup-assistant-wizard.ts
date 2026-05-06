@@ -1,6 +1,11 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
 import { getDefaultSetupAssistantPreset as getDefaultAssistantPreset } from './setup-assistant.js'
+import {
+  LOCAL_SETUP_CODEX_PROVIDER_CONFIGS,
+  normalizeAssistantCodexModelProvider,
+  resolveAssistantCodexLocalOnboardingProviderConfig,
+} from '@murphai/operator-config/assistant/target-runtime'
 import type { SetupAssistantPreset } from '@murphai/operator-config/setup-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -21,11 +26,13 @@ import {
 } from './setup-wizard-ui.js'
 
 export type SetupAssistantWizardResult = {
+  assistantModelProvider?: string | null
   assistantOss?: boolean | null
   assistantPreset?: Exclude<SetupAssistantPreset, 'skip'>
 }
 
 export interface SetupAssistantWizardInput {
+  initialAssistantModelProvider?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
 }
@@ -33,12 +40,17 @@ export interface SetupAssistantWizardInput {
 export type SetupWizardAssistantProvider =
   | 'codex-cloud'
   | 'codex-local'
+  | LocalSetupCodexProviderId
   | 'skip'
 
 export type SetupWizardAssistantMethod =
   | 'codex-cloud'
   | 'codex-local'
+  | LocalSetupCodexProviderId
   | 'skip'
+
+type LocalSetupCodexProviderId =
+  (typeof LOCAL_SETUP_CODEX_PROVIDER_CONFIGS)[number]['providerId']
 
 interface SetupWizardAssistantProviderOption {
   description: string
@@ -57,6 +69,7 @@ interface SetupWizardAssistantMethodOption {
 export interface SetupWizardResolvedAssistantSelection {
   detail: string
   methodLabel: string | null
+  modelProvider: string | null
   oss: boolean | null
   preset: SetupAssistantPreset
   providerLabel: string
@@ -74,6 +87,13 @@ const setupWizardAssistantProviderOptions: readonly SetupWizardAssistantProvider
     title: 'Codex local model',
     description: 'Use Codex with a local OSS model.',
   },
+  ...LOCAL_SETUP_CODEX_PROVIDER_CONFIGS.filter(
+    (config) => config.selectableInLocalOnboarding,
+  ).map((config) => ({
+    provider: config.providerId as SetupWizardAssistantProvider,
+    title: config.label,
+    description: config.description,
+  })),
   {
     provider: 'skip',
     title: 'Skip for now',
@@ -93,6 +113,48 @@ export function listSetupAssistantWizardProviderOptions(): readonly SetupWizardA
   return setupWizardAssistantProviderOptions.filter(
     (option) => option.provider !== 'skip',
   )
+}
+
+export function listSetupWizardAssistantProviderOptionsForCurrent(
+  currentProvider: SetupWizardAssistantProvider,
+): readonly SetupWizardAssistantProviderOption[] {
+  return withCurrentAssistantProviderOption(
+    listSetupWizardAssistantProviderOptions(),
+    currentProvider,
+  )
+}
+
+export function listSetupAssistantWizardProviderOptionsForCurrent(
+  currentProvider: SetupWizardAssistantProvider,
+): readonly SetupWizardAssistantProviderOption[] {
+  return withCurrentAssistantProviderOption(
+    listSetupAssistantWizardProviderOptions(),
+    currentProvider,
+  )
+}
+
+function withCurrentAssistantProviderOption(
+  options: readonly SetupWizardAssistantProviderOption[],
+  currentProvider: SetupWizardAssistantProvider,
+): readonly SetupWizardAssistantProviderOption[] {
+  if (options.some((option) => option.provider === currentProvider)) {
+    return options
+  }
+
+  const currentProviderConfig =
+    resolveAssistantCodexLocalOnboardingProviderConfig(currentProvider)
+  if (!currentProviderConfig) {
+    return options
+  }
+
+  return [
+    {
+      description: currentProviderConfig.description,
+      provider: currentProviderConfig.providerId as SetupWizardAssistantProvider,
+      title: currentProviderConfig.label,
+    },
+    ...options,
+  ]
 }
 
 export function findSetupWizardAssistantProviderIndex(
@@ -131,11 +193,17 @@ export function normalizeSetupAssistantWizardProvider(
 }
 
 export function inferSetupWizardAssistantProvider(input: {
+  modelProvider?: string | null
   oss?: boolean | null
   preset: SetupAssistantPreset
 }): SetupWizardAssistantProvider {
   if (input.preset === 'skip') {
     return 'skip'
+  }
+
+  const modelProvider = normalizeAssistantCodexModelProvider(input.modelProvider)
+  if (resolveAssistantCodexLocalOnboardingProviderConfig(modelProvider)) {
+    return modelProvider as LocalSetupCodexProviderId
   }
 
   return input.oss === true ? 'codex-local' : 'codex-cloud'
@@ -148,6 +216,10 @@ export function inferSetupWizardAssistantMethod(input: {
 }): SetupWizardAssistantMethod {
   if (input.preset === 'skip' || input.provider === 'skip') {
     return 'skip'
+  }
+
+  if (resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)) {
+    return input.provider as LocalSetupCodexProviderId
   }
 
   return input.oss === true || input.provider === 'codex-local'
@@ -171,8 +243,11 @@ export function resolveSetupWizardAssistantMethodForProvider(input: {
     case 'skip':
       return 'skip'
     case 'codex-cloud':
-    default:
       return 'codex-cloud'
+    default:
+      return resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)
+        ? (input.provider as LocalSetupCodexProviderId)
+        : 'codex-cloud'
   }
 }
 
@@ -190,6 +265,7 @@ export function resolveSetupWizardAssistantSelection(input: {
     return {
       detail: 'Murph will leave your current assistant settings alone for now.',
       methodLabel: null,
+      modelProvider: null,
       oss: null,
       preset: 'skip',
       providerLabel: 'Skip for now',
@@ -201,6 +277,7 @@ export function resolveSetupWizardAssistantSelection(input: {
     return {
       detail: 'Murph will ask which local model id to save next.',
       methodLabel: null,
+      modelProvider: null,
       oss: true,
       preset: 'codex',
       providerLabel: 'Codex local model',
@@ -208,9 +285,30 @@ export function resolveSetupWizardAssistantSelection(input: {
     }
   }
 
+  const providerConfig = resolveAssistantCodexLocalOnboardingProviderConfig(
+    input.provider,
+  )
+  if (providerConfig) {
+    const modelLabel = providerConfig.modelPrompt.replace(
+      /\s+to use with Codex$/u,
+      '',
+    )
+    const modelLabelText = modelLabel === 'Model id' ? 'model id' : modelLabel
+    return {
+      detail: `Murph will ask which ${modelLabelText} to save next.`,
+      methodLabel: null,
+      modelProvider: providerConfig.providerId,
+      oss: false,
+      preset: 'codex',
+      providerLabel: providerConfig.label,
+      summary: providerConfig.label,
+    }
+  }
+
   return {
     detail: 'Murph will use your saved Codex / ChatGPT sign-in.',
     methodLabel: null,
+    modelProvider: null,
     oss: false,
     preset: 'codex',
     providerLabel: 'ChatGPT / Codex sign-in',
@@ -228,6 +326,8 @@ export function buildSetupWizardAssistantProviderBadges(input: {
     badges.push({ label: 'recommended', tone: 'success' })
   } else if (input.provider === 'codex-local') {
     badges.push({ label: 'local', tone: 'accent' })
+  } else if (resolveAssistantCodexLocalOnboardingProviderConfig(input.provider)) {
+    badges.push({ label: 'api key', tone: 'accent' })
   } else {
     badges.push({ label: 'no change', tone: 'muted' })
   }
@@ -274,6 +374,7 @@ export async function runSetupAssistantWizard(
     const { exit } = useApp()
     const initialAssistantProvider = normalizeSetupAssistantWizardProvider(
       inferSetupWizardAssistantProvider({
+        modelProvider: input.initialAssistantModelProvider,
         oss: input.initialAssistantOss,
         preset: initialAssistantPreset,
       }),
@@ -283,7 +384,13 @@ export async function runSetupAssistantWizard(
       preset: initialAssistantPreset,
       provider: initialAssistantProvider,
     })
-    const assistantProviderOptions = listSetupAssistantWizardProviderOptions()
+    const assistantProviderOptions = React.useMemo(
+      () =>
+        listSetupAssistantWizardProviderOptionsForCurrent(
+          initialAssistantProvider,
+        ),
+      [initialAssistantProvider],
+    )
     const [step, setStep] = React.useState<'assistant-provider' | 'confirm'>(
       'assistant-provider',
     )
@@ -402,6 +509,7 @@ export async function runSetupAssistantWizard(
         }
 
         completion.submit({
+          assistantModelProvider: latestAssistantRef.current.modelProvider,
           assistantOss: latestAssistantRef.current.oss,
           assistantPreset: latestAssistantRef.current.preset,
         })
