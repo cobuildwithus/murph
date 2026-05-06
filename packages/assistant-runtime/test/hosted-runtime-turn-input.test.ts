@@ -247,6 +247,71 @@ describe("createHostedAssistantInputSource", () => {
     });
   });
 
+  it("does not let newer preferred input skip older unprocessed input", async () => {
+    const vaultRoot = await createTempVault();
+    const older = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_older",
+        eventId: "evt_older",
+        itemId: "item_older",
+        laneSeq: "10",
+        messageId: "msg_older",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "older unprocessed note",
+      }),
+    });
+    const preferred = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_preferred",
+        eventId: "evt_preferred",
+        itemId: "item_preferred",
+        laneSeq: "20",
+        messageId: "msg_preferred",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "newer preferred note",
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      preferredInputIds: [preferred.inputId],
+      requestId: "req_preferred",
+      runtime: createRuntime(),
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    const fullPage = await source.listInputCandidates({
+      limit: 2,
+      sourceId: "linq",
+    });
+    const first = await source.listInputCandidates({
+      limit: 1,
+      sourceId: "linq",
+    });
+    const second = await source.listInputCandidates({
+      afterCursor: first.nextCursor,
+      limit: 1,
+      sourceId: "linq",
+    });
+
+    expect(fullPage.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      older.inputId,
+      preferred.inputId,
+    ]);
+    expect(fullPage.nextCursor).toEqual(preferred.cursor);
+    expect(first.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      older.inputId,
+    ]);
+    expect(first.nextCursor).toEqual(older.cursor);
+    expect(second.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      preferred.inputId,
+    ]);
+    expect(second.nextCursor).toEqual(preferred.cursor);
+  });
+
   it("logs and rethrows hosted mailbox refresh failures", async () => {
     const hostedError = new Error("hosted mailbox refresh failed");
     const source = createHostedAssistantInputSource({
@@ -312,14 +377,24 @@ function createRuntime(input: {
   };
 }
 
-function createAssistantInputEvent() {
+function createAssistantInputEvent(input: {
+  dedupeKey?: string;
+  eventId?: string;
+  itemId?: string;
+  laneSeq?: string;
+  messageId?: string;
+  occurredAt?: string;
+  receivedAt?: string;
+  text?: string;
+} = {}) {
+  const text = input.text ?? "late same-conversation note";
   return {
     content: {
-      text: "late same-conversation note",
-      transcriptText: "late same-conversation note",
+      text,
+      transcriptText: text,
       userMessageContent: [
         {
-          text: "late same-conversation note",
+          text,
           type: "text" as const,
         },
       ],
@@ -332,20 +407,20 @@ function createAssistantInputEvent() {
       threadId: "thread_1",
       threadIsDirect: true,
     },
-    occurredAt: "2026-04-23T00:00:02.000Z",
-    receivedAt: "2026-04-23T00:00:03.000Z",
+    occurredAt: input.occurredAt ?? "2026-04-23T00:00:02.000Z",
+    receivedAt: input.receivedAt ?? "2026-04-23T00:00:03.000Z",
     replyTarget: {
       channel: "linq",
-      messageId: "msg_late",
+      messageId: input.messageId ?? "msg_late",
       threadId: "thread_1",
     },
     sourceRef: {
-      dedupeKey: "dedupe_late",
-      eventId: "evt_late",
-      itemId: "item_late",
+      dedupeKey: input.dedupeKey ?? "dedupe_late",
+      eventId: input.eventId ?? "evt_late",
+      itemId: input.itemId ?? "item_late",
       kind: "hosted-mailbox" as const,
       lane: "conversation" as const,
-      laneSeq: "42",
+      laneSeq: input.laneSeq ?? "42",
       payloadSchema: "murph.hosted-mailbox-payload.v1",
       payloadSource: "inline" as const,
       source: "hosted-mailbox" as const,

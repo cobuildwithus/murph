@@ -5,6 +5,7 @@ import {
   compareAssistantInputCursors,
   createStoreBackedAssistantInputSource,
   readAssistantInputEvent,
+  type AssistantInputCandidateBatch,
   type AssistantInputCandidate,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
@@ -111,20 +112,74 @@ export function createHostedAssistantInputSource(input: {
   return {
     ...source,
     async listInputCandidates(query) {
+      const base = await source.listInputCandidates(query);
       const preferred = await listPreferredAssistantInputCandidates({
         preferredInputIds,
         query,
         vaultRoot: input.vaultRoot,
       });
       if (preferred.length === 0) {
-        return source.listInputCandidates(query);
+        return base;
       }
-      return {
-        inputs: preferred,
-        nextCursor: preferred[preferred.length - 1]?.event.cursor ?? query.afterCursor ?? null,
-      };
+      return mergePreferredAssistantInputCandidates({
+        base,
+        preferred,
+        query,
+      });
     },
   };
+}
+
+function mergePreferredAssistantInputCandidates(input: {
+  base: AssistantInputCandidateBatch;
+  preferred: readonly AssistantInputCandidate[];
+  query: AssistantInputCandidateQuery;
+}): AssistantInputCandidateBatch {
+  const limit = normalizePreferredAssistantInputLimit(input.query.limit);
+  const baseNextCursor = input.base.nextCursor;
+  const safePreferred = baseNextCursor
+    ? input.preferred.filter(
+        (candidate) =>
+          compareAssistantInputCursors(candidate.event.cursor, baseNextCursor) <= 0,
+      )
+    : input.base.inputs.length === 0
+      ? input.preferred
+      : [];
+  const candidatesByInputId = new Map<string, AssistantInputCandidate>();
+
+  for (const candidate of [...safePreferred, ...input.base.inputs]) {
+    const inputId = candidate.event.inputId;
+    if (!candidatesByInputId.has(inputId)) {
+      candidatesByInputId.set(inputId, candidate);
+    }
+  }
+
+  const selected = [...candidatesByInputId.values()]
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.event.cursor, right.event.cursor)
+    )
+    .slice(0, limit);
+
+  return {
+    inputs: selected,
+    nextCursor: latestAssistantInputCursor(
+      selected.map((candidate) => candidate.event.cursor),
+      input.query.afterCursor ?? null,
+    ),
+  };
+}
+
+function latestAssistantInputCursor(
+  cursors: readonly AssistantInputCandidate["event"]["cursor"][],
+  fallback: AssistantInputCandidate["event"]["cursor"] | null,
+): AssistantInputCandidate["event"]["cursor"] | null {
+  return cursors.reduce<AssistantInputCandidate["event"]["cursor"] | null>(
+    (latest, cursor) =>
+      !latest || compareAssistantInputCursors(cursor, latest) > 0
+        ? cursor
+        : latest,
+    fallback,
+  );
 }
 
 async function listPreferredAssistantInputCandidates(input: {
