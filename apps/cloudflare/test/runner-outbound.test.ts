@@ -1105,9 +1105,18 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects provider effect requests for stale active leases", async () => {
+  it("routes provider effects without a Durable Object lease round trip", async () => {
     const ownsActiveInvocationLease = vi.fn(async () => false);
-    const fetchMock = vi.fn();
+    const bindUser = vi.fn(async (userId: string) => ({ userId }));
+    const getByName = vi.fn(() => ({
+      bindUser,
+      ownsActiveInvocationLease,
+    }));
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(null, {
+      status: 204,
+    }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -1119,31 +1128,24 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
+        LINQ_API_TOKEN: "linq-token",
         USER_RUNNER: {
-          getByName() {
-            return {
-              async bindUser(userId: string) {
-                return { userId };
-              },
-              ownsActiveInvocationLease,
-            };
-          },
+          getByName,
         },
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(401);
-    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      leaseGeneration: "9",
-      userId: "member_123",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(getByName).not.toHaveBeenCalled();
+    expect(bindUser).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("authorizes provider effects by active invocation identity instead of workspace version", async () => {
+  it("authorizes provider effects from active invocation headers without workspace checks", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
     });
@@ -1173,11 +1175,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      leaseGeneration: "9",
-      userId: "member_123",
-    });
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
