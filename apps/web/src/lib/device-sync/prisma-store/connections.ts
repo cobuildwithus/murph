@@ -166,7 +166,7 @@ export class PrismaHostedConnectionStore {
             metadataJson: toPrismaJsonObject(metadata),
             nextReconcileAt: maybeDate(input.nextReconcileAt),
             scopesJson: scopes,
-            status: requestedStatus ?? existing.status,
+            status: requestedStatus ?? "active",
           },
           ...hostedConnectionRecordArgs,
         });
