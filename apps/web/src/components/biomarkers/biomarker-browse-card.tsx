@@ -56,7 +56,7 @@ export function BiomarkerBrowseCard({
       </div>
 
       {summary ? (
-        <p className="text-sm/6 text-muted-foreground text-pretty line-clamp-1">
+        <p className="text-sm/6 text-muted-foreground text-pretty line-clamp-2">
           {summary}
         </p>
       ) : null}
