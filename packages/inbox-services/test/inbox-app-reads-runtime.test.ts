@@ -45,10 +45,12 @@ const connectorMocks = vi.hoisted(() => ({
 const daemonMocks = vi.hoisted(() => ({
   createProcessSignalBridge: vi.fn(),
   normalizeDaemonState: vi.fn(),
+  verifyDaemonStateForExpectedOwner: vi.fn(),
   writeDaemonState: vi.fn(),
 }))
 
 const processKillMocks = vi.hoisted(() => ({
+  captureProcessIdentity: vi.fn(),
   tryKillProcess: vi.fn(),
 }))
 
@@ -97,6 +99,8 @@ vi.mock('../src/inbox-services/daemon.js', async () => {
     ...actual,
     createProcessSignalBridge: daemonMocks.createProcessSignalBridge,
     normalizeDaemonState: daemonMocks.normalizeDaemonState,
+    verifyDaemonStateForExpectedOwner:
+      daemonMocks.verifyDaemonStateForExpectedOwner,
     writeDaemonState: daemonMocks.writeDaemonState,
   }
 })
@@ -107,6 +111,7 @@ vi.mock('@murphai/runtime-state/node', async () => {
   )
   return {
     ...actual,
+    captureProcessIdentity: processKillMocks.captureProcessIdentity,
     tryKillProcess: processKillMocks.tryKillProcess,
   }
 })
@@ -838,6 +843,10 @@ test('runtime ops parse, requeue, status, and stop stay deterministic', async ()
     .mockResolvedValueOnce(runningState)
     .mockResolvedValueOnce(runningState)
     .mockResolvedValueOnce(stoppedState)
+  daemonMocks.verifyDaemonStateForExpectedOwner.mockResolvedValue({
+    verified: true,
+    state: runningState,
+  })
 
   const ops = createInboxRuntimeOps(env)
 
@@ -885,6 +894,7 @@ test('runtime stop rejects idle state, escalates to SIGKILL, and surfaces timeou
       sleep: vi.fn(async () => {}),
     }),
   )
+  daemonMocks.verifyDaemonStateForExpectedOwner.mockReset()
 
   daemonMocks.normalizeDaemonState.mockResolvedValueOnce({
     configPath: '.runtime/operations/inbox/config.json',
@@ -908,6 +918,31 @@ test('runtime stop rejects idle state, escalates to SIGKILL, and surfaces timeou
     (error: unknown) =>
       error instanceof VaultCliError && error.code === 'INBOX_NOT_RUNNING',
   )
+  assert.equal(processKillMocks.tryKillProcess.mock.calls.length, 0)
+
+  daemonMocks.normalizeDaemonState.mockResolvedValueOnce({
+    configPath: '.runtime/operations/inbox/config.json',
+    connectorIds: [],
+    databasePath: '.runtime/projections/inboxd.sqlite',
+    message: 'Stale daemon state found; recorded PID belongs to a different process.',
+    pid: 888,
+    running: false,
+    stale: true,
+    startedAt: '2026-04-08T11:50:00.000Z',
+    statePath: '.runtime/operations/inbox/state.json',
+    status: 'stale',
+    stoppedAt: '2026-04-08T12:00:00.000Z',
+  })
+  await assert.rejects(
+    () =>
+      ops.stop({
+        requestId: null,
+        vault: paths.absoluteVaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError && error.code === 'INBOX_NOT_RUNNING',
+  )
+  assert.equal(processKillMocks.tryKillProcess.mock.calls.length, 0)
 
   const runningState = {
     configPath: '.runtime/operations/inbox/config.json',
@@ -929,16 +964,37 @@ test('runtime stop rejects idle state, escalates to SIGKILL, and surfaces timeou
     status: 'stopped',
     stoppedAt: '2026-04-08T12:00:02.000Z',
   }
+  daemonMocks.normalizeDaemonState.mockResolvedValueOnce(runningState)
+  daemonMocks.verifyDaemonStateForExpectedOwner.mockResolvedValueOnce({
+    verified: false,
+    state: runningState,
+    reason: 'identity-unverifiable',
+  })
+  await assert.rejects(
+    () =>
+      ops.stop({
+        requestId: null,
+        vault: paths.absoluteVaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError && error.code === 'INBOX_STOP_UNVERIFIED',
+  )
+  assert.equal(processKillMocks.tryKillProcess.mock.calls.length, 0)
+
   let forceStopReads = 0
   daemonMocks.normalizeDaemonState.mockImplementation(async () => {
     forceStopReads += 1
     if (forceStopReads === 1) {
       return runningState
     }
-    if (forceStopReads <= 51) {
+    if (forceStopReads <= 52) {
       return runningState
     }
     return stoppedState
+  })
+  daemonMocks.verifyDaemonStateForExpectedOwner.mockResolvedValue({
+    verified: true,
+    state: runningState,
   })
 
   const forceStopped = await ops.stop({
@@ -960,6 +1016,119 @@ test('runtime stop rejects idle state, escalates to SIGKILL, and surfaces timeou
       }),
     (error: unknown) =>
       error instanceof VaultCliError && error.code === 'INBOX_STOP_TIMEOUT',
+  )
+})
+
+test('runtime stop re-verifies daemon ownership before SIGKILL and stops on stale state', async () => {
+  const paths = await createTempPaths()
+  stateMocks.ensureInitialized.mockResolvedValue(paths)
+
+  const ops = createInboxRuntimeOps(
+    createEnv({
+      sleep: vi.fn(async () => {}),
+    }),
+  )
+  daemonMocks.verifyDaemonStateForExpectedOwner.mockReset()
+
+  const runningState = {
+    configPath: '.runtime/operations/inbox/config.json',
+    connectorIds: ['telegram-main'],
+    databasePath: '.runtime/projections/inboxd.sqlite',
+    message: null,
+    pid: 777,
+    running: true,
+    stale: false,
+    startedAt: '2026-04-08T11:50:00.000Z',
+    statePath: '.runtime/operations/inbox/state.json',
+    status: 'running',
+    stoppedAt: null,
+  }
+  const staleState = {
+    ...runningState,
+    message: 'Stale daemon state found; recorded PID belongs to a different process.',
+    running: false,
+    stale: true,
+    status: 'stale',
+    stoppedAt: '2026-04-08T12:00:00.000Z',
+  }
+
+  daemonMocks.normalizeDaemonState.mockResolvedValue(runningState)
+  daemonMocks.verifyDaemonStateForExpectedOwner
+    .mockResolvedValueOnce({ verified: true, state: runningState })
+    .mockResolvedValueOnce({
+      verified: false,
+      state: staleState,
+      reason: 'pid-not-running',
+    })
+
+  const stopped = await ops.stop({
+    requestId: null,
+    vault: paths.absoluteVaultRoot,
+  })
+
+  assert.equal(stopped.status, 'stale')
+  assert.equal(stopped.stale, true)
+  assert.deepEqual(
+    processKillMocks.tryKillProcess.mock.calls.map((call) => call[2]),
+    ['SIGCONT', 'SIGTERM'],
+  )
+})
+
+test('runtime stop refuses SIGKILL when daemon generation changes under the same pid', async () => {
+  const paths = await createTempPaths()
+  stateMocks.ensureInitialized.mockResolvedValue(paths)
+
+  const ops = createInboxRuntimeOps(
+    createEnv({
+      sleep: vi.fn(async () => {}),
+    }),
+  )
+  daemonMocks.verifyDaemonStateForExpectedOwner.mockReset()
+
+  const runningState = {
+    configPath: '.runtime/operations/inbox/config.json',
+    connectorIds: ['telegram-main'],
+    databasePath: '.runtime/projections/inboxd.sqlite',
+    message: null,
+    pid: 777,
+    running: true,
+    stale: false,
+    startedAt: '2026-04-08T11:50:00.000Z',
+    statePath: '.runtime/operations/inbox/state.json',
+    status: 'running',
+    stoppedAt: null,
+  }
+  const changedState = {
+    ...runningState,
+    message: 'Stale daemon state found; daemon ownership changed while stopping.',
+    running: false,
+    stale: true,
+    startedAt: '2026-04-08T11:59:59.000Z',
+    status: 'stale',
+    stoppedAt: '2026-04-08T12:00:00.000Z',
+  }
+
+  daemonMocks.normalizeDaemonState.mockResolvedValue(runningState)
+  daemonMocks.verifyDaemonStateForExpectedOwner
+    .mockResolvedValueOnce({ verified: true, state: runningState })
+    .mockResolvedValueOnce({
+      verified: false,
+      state: changedState,
+      reason: 'owner-changed',
+    })
+
+  await assert.rejects(
+    () =>
+      ops.stop({
+        requestId: null,
+        vault: paths.absoluteVaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError && error.code === 'INBOX_STOP_UNVERIFIED',
+  )
+  assert.deepEqual(
+    processKillMocks.tryKillProcess.mock.calls.map((call) => call[2]),
+    ['SIGCONT', 'SIGTERM'],
   )
 })
 
@@ -1276,6 +1445,11 @@ test('runtime run writes failed daemon state when the daemon surface throws', as
 
   stateMocks.ensureInitialized.mockResolvedValue(paths)
   stateMocks.readConfig.mockResolvedValue(createConfig([connector]))
+  processKillMocks.captureProcessIdentity.mockResolvedValue({
+    pid: 321,
+    platform: 'linux',
+    startToken: 'linux-proc-start:321',
+  })
   daemonMocks.createProcessSignalBridge.mockReturnValue({
     cleanup,
     signal: new AbortController().signal,
@@ -1363,6 +1537,11 @@ test('runtime run instruments connector backfill/watch events and records daemon
 
   stateMocks.ensureInitialized.mockResolvedValue(paths)
   stateMocks.readConfig.mockResolvedValue(createConfig([connector]))
+  processKillMocks.captureProcessIdentity.mockResolvedValue({
+    pid: 321,
+    platform: 'linux',
+    startToken: 'linux-proc-start:321',
+  })
   daemonMocks.createProcessSignalBridge.mockReturnValue({
     cleanup,
     signal: abortController.signal,
@@ -1446,6 +1625,13 @@ test('runtime run instruments connector backfill/watch events and records daemon
     daemonMocks.writeDaemonState.mock.calls.map((call) => call[1].status),
     ['running', 'stopped'],
   )
+  assert.deepEqual(daemonMocks.writeDaemonState.mock.calls[0]?.[2], {
+    processIdentity: {
+      pid: 321,
+      platform: 'linux',
+      startToken: 'linux-proc-start:321',
+    },
+  })
   assert.deepEqual(
     onEvent.mock.calls.map((call) => call[0].type),
     [
