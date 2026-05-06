@@ -219,7 +219,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("skips timer device-sync work for webhook nudges even if import accounting is stale", async () => {
+  it("keeps timer device-sync work enabled for webhook nudges without active input", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       reason: "nudge",
@@ -227,7 +227,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
-        skipDeviceSync: true,
+        skipDeviceSync: false,
       }),
     );
   });
@@ -243,6 +243,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         skipDeviceSync: false,
       }),
     );
+  });
+
+  it("preserves an existing workspace wake when active input skips device-sync work", async () => {
+    const nextWakeAt = "2026-04-27T00:05:00.000Z";
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      reason: "nudge",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt,
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt,
+      progressed: true,
+    }));
+  });
+
+  it("schedules a near follow-up wake when active input consumes a due alarm and skips device sync", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    try {
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        reason: "alarm",
+        workspace: {
+          checkpointedAt: "2026-04-27T00:00:00.000Z",
+          createdAt: "2026-04-27T00:00:00.000Z",
+          nextWakeAt: "2026-04-26T23:59:59.000Z",
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-04-27T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+
+      expect(result).toEqual(expect.objectContaining({
+        nextWakeAt: "2026-04-27T00:00:30.000Z",
+        progressed: true,
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("exposes hosted device connect providers and link helper from the platform port", async () => {
@@ -1273,6 +1327,7 @@ function createPhaseInput(input: {
   runtimeForwardedEnv?: Record<string, string>;
   runtimeLivenessPort?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["runtimeLivenessPort"];
   runtimeUserEnv?: Record<string, string>;
+  workspace?: HostedWorkspaceRuntimeAssistantPhaseInput["workspace"];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
   return {
     initialMailboxImport: {
@@ -1368,7 +1423,7 @@ function createPhaseInput(input: {
       userEnv: input.runtimeUserEnv ?? {},
     },
     runtimeEnv: {},
-    workspace: null,
+    workspace: input.workspace ?? null,
   };
 }
 
