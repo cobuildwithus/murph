@@ -135,6 +135,43 @@ async function sendHostedContainerGetRequest(input: {
   });
 }
 
+async function sendHostedContainerDeclaredLengthRequest(input: {
+  authorization?: string;
+  contentLength: number;
+  path: string;
+  port: number;
+}): Promise<{ json: unknown; status: number }> {
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      headers: {
+        ...(input.authorization ? { authorization: input.authorization } : {}),
+        "connection": "close",
+        "content-length": String(input.contentLength),
+        "content-type": "application/json; charset=utf-8",
+      },
+      host: "127.0.0.1",
+      method: "POST",
+      path: input.path,
+      port: input.port,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        const bodyText = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          json: bodyText.length > 0 ? JSON.parse(bodyText) : null,
+          status: response.statusCode ?? 0,
+        });
+      });
+    });
+
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 async function sendHostedContainerChunkedRequest(input: {
   authorization?: string;
   chunks: string[];
@@ -462,24 +499,22 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
-      body: " ".repeat(hostedContainerRunRequestBodyLimitBytes + 1),
-      headers: {
-        authorization: "Bearer runner-token",
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
+    const response = await sendHostedContainerDeclaredLengthRequest({
+      authorization: "Bearer runner-token",
+      contentLength: hostedContainerRunRequestBodyLimitBytes + 1,
+      path: "/internal/workspace-invocation",
+      port: address.port,
     });
 
     expect(response.status).toBe(413);
-    await expect(response.json()).resolves.toEqual({
+    expect(response.json).toEqual({
       code: "request_body_too_large",
       error: "Request body too large.",
     });
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects chunked oversized invocation requests while streaming without content-length", async () => {
+  it("rejects oversized invocation requests while receiving the body", async () => {
     const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
@@ -1272,8 +1307,82 @@ describe("startHostedContainerEntrypoint", () => {
       error: "Hosted execution runtime failed.",
     });
     expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
-    expect(readdir).toHaveBeenCalledTimes(2);
+    expect(readdir).toHaveBeenCalledTimes(3);
     expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("kills daemonized same-user processes created during a warm-container job", async () => {
+    const daemonPid = process.pid + 1750;
+    let runnerStarted = false;
+    let killed = false;
+    const kill = vi.fn(() => {
+      killed = true;
+    });
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted ? [{ isDirectory: () => true, name: String(daemonPid) }] : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${process.pid}/stat`)) {
+        return `${process.pid} (node) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${process.pid}/status`)) {
+        return "Name:\tnode\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      if (String(filePath).endsWith(`/${daemonPid}/stat`)) {
+        const state = killed ? "Z" : "S";
+        return `${daemonPid} (daemon) ${state} 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${daemonPid}/status`)) {
+        return "Name:\tdaemon\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockImplementation(
+      async () => {
+        runnerStarted = true;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_daemon_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(daemonPid, "SIGKILL");
+    expect(readdir).toHaveBeenCalledTimes(3);
   });
 
   it("still rejects lingering descendant processes after the cleanup pass", async () => {
