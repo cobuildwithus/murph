@@ -16,7 +16,7 @@ import {
   parseHostedMailboxPayloadDecodeRequest,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
-  requireRunnerActiveInvocationLease,
+  requireRunnerActiveInvocationLeaseHeaders,
   RunnerActiveInvocationLeaseError,
 } from "./active-lease.ts";
 import {
@@ -50,11 +50,7 @@ export async function handleRunnerMailboxPayloadDecodeRequest(input: {
   }
 
   try {
-    await requireRunnerActiveInvocationLease({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
+    requireRunnerActiveInvocationLeaseHeaders(input.request);
   } catch (error) {
     if (error instanceof RunnerActiveInvocationLeaseError) {
       return unauthorized();

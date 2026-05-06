@@ -16,7 +16,7 @@ import {
 } from "../hosted-email.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerActiveInvocationLease,
+  requireRunnerActiveInvocationLeaseHeaders,
   RunnerActiveInvocationLeaseError,
 } from "./active-lease.ts";
 import {
@@ -163,7 +163,7 @@ async function requestOwnsActiveInvocationLease(input: {
   userId: string;
 }): Promise<boolean> {
   try {
-    await requireRunnerActiveInvocationLease(input);
+    requireRunnerActiveInvocationLeaseHeaders(input.request);
     return true;
   } catch (error) {
     if (error instanceof RunnerActiveInvocationLeaseError) {

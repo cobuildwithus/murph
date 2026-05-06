@@ -1218,6 +1218,34 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("skips the duplicate web AI usage gate for pending nudge invocations", async () => {
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      usageGateResponse: {
+        allowed: false,
+        noticeCode: "pulse_upgrade_edge",
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+        userNotice: "Limit reached.",
+      },
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      "UPDATE runner_meta SET pending_nudge = 1 WHERE user_id = ?",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
+        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
+      ),
+    ).toBe(false);
+  });
+
   it("refreshes the cached runtime crypto context after the web TTL expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
