@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   accountHostedAiUsageForAllowanceTx,
+  claimHostedAiUsageLimitNotice,
   priceHostedAiUsageForAllowance,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
@@ -293,7 +294,7 @@ describe("resolveHostedAiUsageGate", () => {
       userNotice: {
         code: "pulse_upgrade_edge",
         message:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
       },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
@@ -317,7 +318,7 @@ describe("resolveHostedAiUsageGate", () => {
       userNotice: {
         code: "edge_enable_usage_based_pricing",
         message:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to enable usage-based pricing.",
+          "Hey, you've reached your usage limit for the month. Enable usage-based pricing: https://withmurph.ai/home",
       },
     });
   });
@@ -374,7 +375,7 @@ describe("resolveHostedAiUsageGate", () => {
       userNotice: {
         code: "trial_usage_limit_reached",
         message:
-          "You've reached the hosted AI usage included in your trial. Open https://withmurph.ai/home to upgrade.",
+          "You've reached the hosted AI usage included in your trial. Upgrade: https://withmurph.ai/home",
       },
     });
   });
@@ -655,6 +656,44 @@ describe("resolveHostedAiUsageGate", () => {
         spentUsdMicros: 4_000_000n,
       }),
     }));
+  });
+});
+
+describe("claimHostedAiUsageLimitNotice", () => {
+  it("claims the usage-period limit notice once", async () => {
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const prisma = {
+      hostedAiUsagePeriod: {
+        updateMany,
+      },
+    };
+
+    await expect(claimHostedAiUsageLimitNotice({
+      memberId: "member_123",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: prisma as never,
+      sentAt: "2026-03-29T12:00:00.000Z",
+    })).resolves.toBe(true);
+
+    await expect(claimHostedAiUsageLimitNotice({
+      memberId: "member_123",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: prisma as never,
+      sentAt: "2026-03-29T12:00:01.000Z",
+    })).resolves.toBe(false);
+
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      data: {
+        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
+      },
+      where: {
+        limitNoticeSentAt: null,
+        memberId: "member_123",
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      },
+    });
   });
 });
 

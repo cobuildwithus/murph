@@ -41,6 +41,7 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
+  claimHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate,
 } from "../hosted-execution/usage-allowance";
 import {
@@ -214,6 +215,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
     if (!usageGate.allowed) {
       if (!usageGate.userNotice) {
         return buildIgnoredLinqWebhookPlan("ai-usage-gate-denied");
+      }
+
+      if (usageGate.reason === "ai_usage_limit_exceeded") {
+        const claimedNotice = await claimHostedAiUsageLimitNotice({
+          memberId: existingMember.id,
+          periodStart: usageGate.periodStart,
+          prisma: input.prisma,
+        });
+
+        if (!claimedNotice) {
+          return buildIgnoredLinqWebhookPlan("ai-usage-gate-denied");
+        }
       }
 
       return buildAiUsageQuotaReplyResponse({

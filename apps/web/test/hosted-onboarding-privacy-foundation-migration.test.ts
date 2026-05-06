@@ -204,6 +204,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAiUsageLimitNoticeMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026050601_hosted_ai_usage_limit_notice_sent/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -227,6 +234,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050501_stripe_checkout_email_authorization",
       "2026050502_hosted_ai_usage_allowance",
       "2026050503_pulse_trial_checkout_offer",
+      "2026050601_hosted_ai_usage_limit_notice_sent",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -283,6 +291,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(pulseTrialCheckoutOfferMigrationSql).not.toContain("CREATE INDEX");
     expect(pulseTrialCheckoutOfferMigrationSql).not.toContain("CREATE TYPE");
     expect(pulseTrialCheckoutOfferMigrationSql).not.toContain("launch_trial");
+    expect(hostedAiUsageLimitNoticeMigrationSql).toContain(
+      'ADD COLUMN "limit_notice_sent_at" TIMESTAMP(3)',
+    );
+    expect(hostedAiUsageLimitNoticeMigrationSql).toContain(
+      'CREATE INDEX "hosted_ai_usage_period_limit_notice_sent_at_idx"',
+    );
+    expect(hostedAiUsageLimitNoticeMigrationSql).not.toContain("NOT NULL");
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_payload" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event_alias" CASCADE');
     expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event" CASCADE');
