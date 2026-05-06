@@ -34,6 +34,10 @@ export const DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE = path.join(
   ".tmp",
   "linq-webhook-registration.json",
 );
+export const HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE = path.join(
+  ".tmp",
+  "hosted-local-dev-crypto-state.dev.vars",
+);
 export const DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME = "dev";
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync";
 // Local Cloudflare startup can include a full runner bundle build and cold container prep.
@@ -52,8 +56,8 @@ export const HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV =
   "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL";
 export const WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES = [] as const;
 
-// Persisted in apps/cloudflare/.dev.vars for hosted-local state even when the
-// value is web-only or otherwise not declared in generated Wrangler config.
+// Persisted for interactive hosted-local state even when the value is web-only
+// or otherwise not declared in generated Wrangler config.
 export const HOSTED_LOCAL_STATE_ONLY_ENV_NAMES = [
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
   "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
