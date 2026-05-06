@@ -680,6 +680,70 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     })).toThrow("projection path does not match route bundle id");
   });
 
+  it("rejects generated research study urls with unsafe schemes", async () => {
+    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
+    const finnishRoute = routeIndex.routes.find((entry) =>
+      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
+    );
+    if (!finnishRoute?.projections) {
+      throw new Error("Expected a generated Finnish sauna route with projections.");
+    }
+
+    const unsafeUrls = [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "file:///etc/passwd",
+      "//example.test/source",
+      "https://user:password@example.test/source",
+    ];
+
+    for (const unsafeUrl of unsafeUrls) {
+      const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
+      await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
+      await mkdir(path.join(generatedWebRoot, "tabs/experiments/finnish-sauna"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(generatedWebRoot, "routes/index.json"),
+        JSON.stringify({
+          ...routeIndex,
+          routes: [finnishRoute],
+        }),
+        "utf8",
+      );
+      const researchTab = JSON.parse(
+        readFileSync(
+          new URL("../generated/web/tabs/experiments/finnish-sauna/research.json", import.meta.url),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      const studies = researchTab["studies"];
+      if (!Array.isArray(studies) || typeof studies[0] !== "object" || studies[0] === null) {
+        throw new Error("Expected generated Finnish sauna research studies.");
+      }
+      const firstStudy = studies[0] as Record<string, unknown>;
+      await writeFile(
+        path.join(generatedWebRoot, "tabs/experiments/finnish-sauna/research.json"),
+        JSON.stringify({
+          ...researchTab,
+          studies: [
+            {
+              ...firstStudy,
+              url: unsafeUrl,
+            },
+            ...studies.slice(1),
+          ],
+        }),
+        "utf8",
+      );
+
+      expect(() => loadGeneratedHealthCommonsWebExperimentResearchTab({
+        generatedWebRoot,
+        routeId: "finnish-sauna",
+      })).toThrow("Health Commons generated experiment research tab is invalid");
+    }
+  });
+
   it("rejects unsafe projection paths in generated route indexes", async () => {
     const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
     const finnishRoute = routeIndex.routes.find((entry) =>

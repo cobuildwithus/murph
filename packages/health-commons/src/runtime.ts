@@ -2054,8 +2054,24 @@ function isGeneratedWebResearchStudy(value: unknown): boolean {
     (value["year"] === undefined || typeof value["year"] === "number") &&
     (value["participants"] === undefined || typeof value["participants"] === "number") &&
     (value["includedStudyCount"] === undefined || typeof value["includedStudyCount"] === "number") &&
-    (value["url"] === undefined || typeof value["url"] === "string")
+    (
+      value["url"] === undefined ||
+      (typeof value["url"] === "string" && isSafeGeneratedWebHttpUrl(value["url"]))
+    )
   );
+}
+
+function isSafeGeneratedWebHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      url.username === "" &&
+      url.password === ""
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isGeneratedWebExperimentSignal(value: unknown): boolean {
