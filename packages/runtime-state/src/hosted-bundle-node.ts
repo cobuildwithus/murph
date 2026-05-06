@@ -39,6 +39,7 @@ export type HostedBundleArtifactRestoreFilter = (
 ) => boolean | Promise<boolean>;
 
 export interface HostedBundleSnapshotRootInput {
+  explicitFiles?: readonly string[];
   optional?: boolean;
   root: string;
   rootKey: string;
@@ -61,6 +62,7 @@ export async function snapshotHostedBundleRoots(input: {
   ) => boolean | Promise<boolean>;
 }): Promise<Uint8Array | null> {
   const files: HostedBundleArchiveFile[] = [];
+  const includedPaths = new Set<string>();
   let includedRootCount = 0;
   const configuredRootsByKey = new Map<string, HostedBundleSnapshotRootInput[]>();
   const includedRootsByKey = new Map<string, HostedBundleSnapshotRootInput[]>();
@@ -80,7 +82,7 @@ export async function snapshotHostedBundleRoots(input: {
         continue;
       }
 
-      throw new Error(`Hosted bundle root does not exist: ${root.root}`);
+      throw new Error(`Hosted bundle root "${root.rootKey}" does not exist.`);
     }
 
     includedRootCount += 1;
@@ -90,13 +92,26 @@ export async function snapshotHostedBundleRoots(input: {
     } else {
       includedRootsByKey.set(root.rootKey, [root]);
     }
-    files.push(
-      ...(await collectBundleFiles({
+    appendHostedBundleFiles(
+      files,
+      includedPaths,
+      await collectBundleFiles({
         externalizeFile: input.externalizeFile,
         root: root.root,
         rootKey: root.rootKey,
         shouldIncludeRelativePath: root.shouldIncludeRelativePath ?? (() => true),
-      })),
+      }),
+    );
+    appendHostedBundleFiles(
+      files,
+      includedPaths,
+      await collectExplicitBundleFiles({
+        explicitFiles: root.explicitFiles ?? [],
+        includedPaths,
+        externalizeFile: input.externalizeFile,
+        root: root.root,
+        rootKey: root.rootKey,
+      }),
     );
   }
 
@@ -104,7 +119,6 @@ export async function snapshotHostedBundleRoots(input: {
     return null;
   }
 
-  const includedPaths = new Set(files.map((file) => `${file.root}:${file.path}`));
   const materializedPreservedArtifactPaths = input.materializedPreservedArtifactPaths ?? new Set<string>();
   for (const artifact of input.preservedArtifacts ?? []) {
     if (!configuredRootsByKey.has(artifact.root)) {
@@ -476,6 +490,80 @@ async function collectBundleFiles(input: {
   }
 
   return files;
+}
+
+async function collectExplicitBundleFiles(input: {
+  explicitFiles: readonly string[];
+  includedPaths: ReadonlySet<string>;
+  externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
+  root: string;
+  rootKey: string;
+}): Promise<HostedBundleArchiveFile[]> {
+  const normalizedPaths = [...new Set(input.explicitFiles.map((explicitFile) =>
+    normalizeBundlePath(explicitFile)
+  ))].sort((left, right) => left.localeCompare(right));
+  const files: HostedBundleArchiveFile[] = [];
+
+  for (const normalizedPath of normalizedPaths) {
+    if (input.includedPaths.has(`${input.rootKey}:${normalizedPath}`)) {
+      continue;
+    }
+
+    if (!(await isBundledRegularFilePath(input.root, normalizedPath))) {
+      throw new Error(`Hosted bundle explicit file is not a regular file for root "${input.rootKey}".`);
+    }
+
+    const absolutePath = path.join(
+      input.root,
+      ...normalizedPath.split(path.posix.sep),
+    );
+    const bytes = new Uint8Array(await readFile(absolutePath));
+    const artifact = input.externalizeFile
+      ? await input.externalizeFile({
+          absolutePath,
+          bytes,
+          path: normalizedPath,
+          root: input.rootKey,
+        })
+      : null;
+
+    if (artifact) {
+      files.push({
+        artifact,
+        path: normalizedPath,
+        root: input.rootKey,
+      });
+      continue;
+    }
+
+    files.push({
+      contentsBase64: Buffer.from(bytes).toString("base64"),
+      path: normalizedPath,
+      root: input.rootKey,
+    });
+  }
+
+  return files;
+}
+
+function appendHostedBundleFiles(
+  files: HostedBundleArchiveFile[],
+  includedPaths: Set<string>,
+  candidates: readonly HostedBundleArchiveFile[],
+): void {
+  for (const candidate of candidates) {
+    const normalizedPath = normalizeBundlePath(candidate.path);
+    const pathKey = `${candidate.root}:${normalizedPath}`;
+    if (includedPaths.has(pathKey)) {
+      continue;
+    }
+
+    files.push({
+      ...candidate,
+      path: normalizedPath,
+    });
+    includedPaths.add(pathKey);
+  }
 }
 
 async function directoryExists(directoryPath: string): Promise<boolean> {

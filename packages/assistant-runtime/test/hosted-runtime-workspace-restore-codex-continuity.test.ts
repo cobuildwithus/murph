@@ -286,6 +286,15 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.deepEqual(artifactGetCalls, [baseHash, firstHotHash]);
       artifactGetCalls.length = 0;
       logRequests.length = 0;
+      const restoredOperatorHomeRoot = path.join(
+        path.dirname(restoredVaultRoot),
+        `${path.basename(restoredVaultRoot)}-operator-home`,
+      );
+      await writeFile(
+        path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"),
+        "sandbox_mode = \"danger-full-access\"\n",
+        "utf8",
+      );
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
         platform,
@@ -296,6 +305,9 @@ describe("hosted workspace restore Codex continuity", () => {
       });
 
       assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      await assert.rejects(
+        readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
+      );
       assert.equal(await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
         await readFile(
@@ -315,6 +327,11 @@ describe("hosted workspace restore Codex continuity", () => {
       });
       const rolloutRelativePath = secondHotSnapshot.resumeState.codexRolloutRelativePath;
       assert.ok(rolloutRelativePath);
+      await writeFile(
+        path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"),
+        "sandbox_mode = \"danger-full-access\"\n",
+        "utf8",
+      );
       artifactGetCalls.length = 0;
       logRequests.length = 0;
 
@@ -328,6 +345,10 @@ describe("hosted workspace restore Codex continuity", () => {
 
       assert.deepEqual(artifactGetCalls, []);
       assert.equal(
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
+        "sandbox_mode = \"danger-full-access\"\n",
+      );
+      assert.equal(
         await readFile(
           path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"),
           "utf8",
@@ -339,10 +360,97 @@ describe("hosted workspace restore Codex continuity", () => {
       );
       assert.deepEqual(flattenLogEntries(logRequests), []);
 
+      await rm(
+        path.join(
+          restoredOperatorHomeRoot,
+          ".codex-hosted",
+          rolloutRelativePath,
+        ),
+        { force: true },
+      );
+      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+        snapshotRef: secondSnapshotRef,
+        vaultRoot: restoredVaultRoot,
+      });
+      artifactGetCalls.length = 0;
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: secondSnapshotRef,
+        }),
+      });
+      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      assert.equal(
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
+        JSON.stringify({ session: "second" }) + "\n",
+      );
+
+      const staleThreadId = "00000000-0000-4000-8000-000000000099";
+      const staleRolloutRelativePath =
+        `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${staleThreadId}.jsonl`;
+      const staleRolloutJson = "{\"session\":\"stale\"}\n";
+      await mkdir(path.join(restoredOperatorHomeRoot, ".murph"), { recursive: true });
+      await mkdir(path.join(restoredOperatorHomeRoot, ".codex-hosted", path.dirname(staleRolloutRelativePath)), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(restoredOperatorHomeRoot, ".codex-hosted", staleRolloutRelativePath),
+        staleRolloutJson,
+        "utf8",
+      );
+      await writeFile(
+        path.join(restoredOperatorHomeRoot, ".murph", "hosted-codex-continuity.json"),
+        JSON.stringify({
+          schema: "murph.hosted-codex-continuity.v1",
+          threads: [{
+            codexRolloutRelativePath: staleRolloutRelativePath,
+            providerSessionId: staleThreadId,
+            rolloutBlob: {
+              byteSize: Buffer.byteLength(staleRolloutJson),
+              sha256: sha256HostedBundleHex(Buffer.from(staleRolloutJson)),
+              storage: "hosted-bundle.v1",
+            },
+          }],
+        }) + "\n",
+        "utf8",
+      );
+      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+        snapshotRef: secondSnapshotRef,
+        vaultRoot: restoredVaultRoot,
+      });
+      artifactGetCalls.length = 0;
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: secondSnapshotRef,
+        }),
+      });
+      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+
+      const secondRolloutJson = JSON.stringify({ session: "second" }) + "\n";
+      await writeFile(
+        path.join(restoredOperatorHomeRoot, ".murph", "hosted-codex-continuity.json"),
+        JSON.stringify({
+          schema: "murph.hosted-codex-continuity.v1",
+          threads: [{
+            codexRolloutRelativePath: rolloutRelativePath,
+            providerSessionId: secondHotSnapshot.resumeState.providerSessionId,
+            rolloutBlob: {
+              byteSize: Buffer.byteLength(secondRolloutJson),
+              sha256: sha256HostedBundleHex(Buffer.from(secondRolloutJson)),
+              storage: "hosted-bundle.v1",
+            },
+          }],
+        }) + "\n",
+        "utf8",
+      );
       await writeFile(
         path.join(
-          path.dirname(restoredVaultRoot),
-          `${path.basename(restoredVaultRoot)}-operator-home`,
+          restoredOperatorHomeRoot,
           ".codex-hosted",
           rolloutRelativePath,
         ),
@@ -353,16 +461,133 @@ describe("hosted workspace restore Codex continuity", () => {
         snapshotRef: secondSnapshotRef,
         vaultRoot: restoredVaultRoot,
       });
+      artifactGetCalls.length = 0;
 
-      await assert.rejects(
-        restoreHostedWorkspaceRuntimeJobWorkspace({
-          platform,
-          vaultRoot: restoredVaultRoot,
-          workspace: createWorkspaceState({
-            snapshotRef: secondSnapshotRef,
-          }),
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: secondSnapshotRef,
         }),
-        /mismatch/u,
+      });
+      assert.deepEqual(artifactGetCalls, [secondHotHash]);
+      assert.equal(
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
+        secondRolloutJson,
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("falls back to bundle restore when base restore cache Codex continuity is stale", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-base-cache-stale-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
+      const sourceBaseOperatorHomeRoot = path.join(workspaceRoot, "base-operator-home");
+      const baseAssistantRoot = resolveAssistantStatePaths(sourceBaseVaultRoot).assistantStateRoot;
+      const threadId = "00000000-0000-4000-8000-000000000039";
+      const rolloutRelativePath =
+        `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+      const rolloutJson = "{\"codex\":\"base\"}\n";
+      await mkdir(path.join(baseAssistantRoot, "sessions"), { recursive: true });
+      await mkdir(path.join(sourceBaseOperatorHomeRoot, ".murph"), { recursive: true });
+      await mkdir(path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", path.dirname(rolloutRelativePath)), {
+        recursive: true,
+      });
+      await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
+      await writeFile(
+        path.join(baseAssistantRoot, "sessions", "session-latest.json"),
+        JSON.stringify({
+          resumeState: {
+            codexRolloutRelativePath: rolloutRelativePath,
+            providerSessionId: threadId,
+            resumeRouteId: "route-base",
+          },
+          session: "base",
+        }) + "\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+        rolloutJson,
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceBaseOperatorHomeRoot, ".murph", "hosted-codex-continuity.json"),
+        JSON.stringify({
+          schema: "murph.hosted-codex-continuity.v1",
+          threads: [{
+            codexRolloutRelativePath: rolloutRelativePath,
+            providerSessionId: threadId,
+            rolloutBlob: {
+              byteSize: Buffer.byteLength(rolloutJson),
+              sha256: sha256HostedBundleHex(Buffer.from(rolloutJson)),
+              storage: "hosted-bundle.v1",
+            },
+          }],
+        }) + "\n",
+        "utf8",
+      );
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+          {
+            root: sourceBaseOperatorHomeRoot,
+            rootKey: "operator-home",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const baseRef = createBundleRef({
+        hash: baseHash,
+        key: `cloudflare-workspace-base/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+      const artifactGetCalls: string[] = [];
+      const platform = createRestorePlatform({
+        artifactBytesByHash: new Map([[baseHash, baseBundle]]),
+        artifactGetCalls,
+      });
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: baseRef,
+        }),
+      });
+      assert.deepEqual(artifactGetCalls, [baseHash]);
+
+      const restoredOperatorHomeRoot = path.join(
+        path.dirname(restoredVaultRoot),
+        `${path.basename(restoredVaultRoot)}-operator-home`,
+      );
+      await rm(
+        path.join(restoredOperatorHomeRoot, ".murph", "hosted-codex-continuity.json"),
+        { force: true },
+      );
+      artifactGetCalls.length = 0;
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: baseRef,
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, [baseHash]);
+      assert.equal(
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
+        rolloutJson,
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
@@ -411,7 +636,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("fails hosted runtime restore cache hit when Codex manifest is missing", async () => {
+  test("falls back to bundle restore when hot restore cache Codex manifest is missing", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-cache-missing-"));
 
     try {
@@ -479,17 +704,20 @@ describe("hosted workspace restore Codex continuity", () => {
         { force: true },
       );
 
-      await assert.rejects(
-        restoreHostedWorkspaceRuntimeJobWorkspace({
-          platform,
-          vaultRoot: restoredVaultRoot,
-          workspace: createWorkspaceState({
-            snapshotRef,
-          }),
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
         }),
-        /manifest is missing/u,
+      });
+      assert.deepEqual(artifactGetCalls, [hotHash]);
+      const rolloutRelativePath = hotSnapshot.resumeState.codexRolloutRelativePath;
+      assert.ok(rolloutRelativePath);
+      assert.equal(
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
+        JSON.stringify({ session: "cache-missing" }) + "\n",
       );
-      assert.deepEqual(artifactGetCalls, []);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

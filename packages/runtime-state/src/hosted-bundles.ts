@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, type Stats } from "node:fs";
 import path from "node:path";
 import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 
@@ -135,7 +135,6 @@ interface HostedCodexContinuityCollection {
   invalidPathCount: number;
   missingRolloutCount: number;
   requestedThreadCount: number;
-  rolloutRelativePaths: ReadonlySet<string>;
 }
 
 export class HostedAssistantRuntimeHotStateBudgetExceededError extends Error {
@@ -301,15 +300,14 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
       ...(input.operatorHomeRoot
         ? [
             {
+              explicitFiles: createHostedCodexContinuitySnapshotExplicitFiles(
+                hostedCodexContinuity,
+              ),
               optional: true,
               root: operatorHomeRoot!,
               rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
               shouldIncludeRelativePath(relativePath: string) {
-                return shouldIncludeHostedOperatorHomeRelativePath({
-                  codexRolloutRelativePaths:
-                    hostedCodexContinuity.rolloutRelativePaths,
-                  relativePath,
-                });
+                return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
               },
             },
           ]
@@ -321,7 +319,7 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
   });
 
   if (vaultBundle === null) {
-    throw new Error(`Hosted vault bundle could not be created for ${vaultRoot}.`);
+    throw new Error("Hosted vault bundle could not be created.");
   }
   const bundleWithCodexContinuityManifest =
     hostedCodexContinuity.entries.length > 0
@@ -330,9 +328,10 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
           kind: "vault",
           path: HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
           root: WORKSPACE_OPERATOR_HOME_ROOT,
-          text: JSON.stringify(createHostedCodexContinuityManifest(
-            hostedCodexContinuity.entries,
-          )) + "\n",
+          text: JSON.stringify(createHostedCodexContinuityManifestFromBundle({
+            bytes: vaultBundle,
+            entries: hostedCodexContinuity.entries,
+          })) + "\n",
         })
       : vaultBundle;
   return {
@@ -392,15 +391,14 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
       ...(operatorHomeRoot
         ? [
             {
+              explicitFiles: createHostedCodexContinuitySnapshotExplicitFiles(
+                hostedCodexContinuity,
+              ),
               optional: true,
               root: operatorHomeRoot,
               rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
               shouldIncludeRelativePath(relativePath: string) {
-                return shouldIncludeHostedOperatorHomeRelativePath({
-                  codexRolloutRelativePaths:
-                    hostedCodexContinuity.rolloutRelativePaths,
-                  relativePath,
-                });
+                return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
               },
             },
           ]
@@ -409,7 +407,7 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
   });
 
   if (bundle === null) {
-    throw new Error(`Hosted assistant runtime hot-state bundle could not be created for ${vaultRoot}.`);
+    throw new Error("Hosted assistant runtime hot-state bundle could not be created.");
   }
   const bundleWithCodexContinuityManifest =
     hostedCodexContinuity.entries.length > 0
@@ -418,9 +416,10 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
           kind: "vault",
           path: HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
           root: WORKSPACE_OPERATOR_HOME_ROOT,
-          text: JSON.stringify(createHostedCodexContinuityManifest(
-            hostedCodexContinuity.entries,
-          )) + "\n",
+          text: JSON.stringify(createHostedCodexContinuityManifestFromBundle({
+            bytes: bundle,
+            entries: hostedCodexContinuity.entries,
+          })) + "\n",
         })
       : bundle;
 
@@ -582,17 +581,25 @@ export async function restoreHostedExecutionContext(input: {
   await mkdir(operatorHomeRoot, { recursive: true });
 
   if (input.bundle) {
-    await restoreHostedBundleRoots({
-      artifactResolver: input.artifactResolver,
-      bytes: input.bundle,
-      expectedKind: "vault",
-      roots: {
-        [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
-        vault: vaultRoot,
-      },
-      shouldRestoreArtifact: input.shouldRestoreArtifact,
-    });
-    await verifyRestoredHostedCodexContinuityManifest(operatorHomeRoot);
+    await clearHostedCodexContinuityRestoreRoot(operatorHomeRoot);
+    try {
+      await restoreHostedBundleRoots({
+        artifactResolver: input.artifactResolver,
+        bytes: input.bundle,
+        expectedKind: "vault",
+        roots: {
+          [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
+          vault: vaultRoot,
+        },
+        shouldRestoreArtifact: input.shouldRestoreArtifact,
+      });
+      await verifyRestoredHostedCodexContinuityManifest(operatorHomeRoot, {
+        assistantStateRoot,
+      });
+    } catch (error) {
+      await clearHostedCodexContinuityRestoreRoot(operatorHomeRoot);
+      throw error;
+    }
   }
 
   return {
@@ -605,9 +612,17 @@ export async function restoreHostedExecutionContext(input: {
 export async function verifyRestoredHostedCodexContinuityManifest(
   operatorHomeRoot: string,
   options?: {
+    allowUnmanifestedCodexHomeFiles?: boolean;
+    assistantStateRoot?: string;
     requireManifest?: boolean;
   },
 ): Promise<void> {
+  const requiredContinuity = options?.assistantStateRoot
+    ? await readAssistantSessionProviderResumeRequirements(options.assistantStateRoot)
+    : [];
+  const requireManifest =
+    options?.requireManifest === true || requiredContinuity.length > 0;
+
   let rawManifest: string;
   try {
     rawManifest = await readFile(
@@ -616,7 +631,7 @@ export async function verifyRestoredHostedCodexContinuityManifest(
     );
   } catch (error) {
     if (isMissingPathError(error)) {
-      if (options?.requireManifest) {
+      if (requireManifest) {
         throw new Error("Hosted Codex continuity manifest is missing after restore.");
       }
       await removeHostedCodexHomeFiles(operatorHomeRoot);
@@ -627,6 +642,8 @@ export async function verifyRestoredHostedCodexContinuityManifest(
 
   const manifest = parseHostedCodexContinuityManifest(rawManifest);
   const allowedRolloutRelativePaths = new Set<string>();
+  const manifestThreadKeys = new Set<string>();
+  const codexHomeRoot = path.join(operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH);
   for (const thread of manifest.threads) {
     const normalizedPath = normalizeHostedCodexRolloutRelativePathForProvider({
       providerSessionId: thread.providerSessionId,
@@ -636,35 +653,90 @@ export async function verifyRestoredHostedCodexContinuityManifest(
       throw new Error("Hosted Codex continuity manifest contains an invalid rollout path.");
     }
     allowedRolloutRelativePaths.add(normalizedPath.relativePath);
+    manifestThreadKeys.add(createHostedCodexContinuityThreadKey({
+      providerSessionId: thread.providerSessionId,
+      rolloutRelativePath: normalizedPath.relativePath,
+    }));
 
-    const absolutePath = path.join(
-      operatorHomeRoot,
-      HOSTED_CODEX_HOME_RELATIVE_PATH,
-      normalizedPath.relativePath,
-    );
-    const entry = await lstat(absolutePath);
-    if (!entry.isFile() || entry.isSymbolicLink()) {
+    const rolloutFile = await inspectHostedCodexRolloutFile({
+      codexHomeRoot,
+      relativePath: normalizedPath.relativePath,
+    });
+    if (!rolloutFile) {
       throw new Error("Hosted Codex continuity rollout was not restored as a regular file.");
     }
-    if (entry.size !== thread.rolloutBlob.byteSize) {
+    if (rolloutFile.stats.size !== thread.rolloutBlob.byteSize) {
       throw new Error("Hosted Codex continuity rollout byte size mismatch after restore.");
     }
-    const sha256 = await sha256FileHex(absolutePath);
+    const sha256 = await sha256FileHex(rolloutFile.absolutePath);
     if (sha256 !== thread.rolloutBlob.sha256) {
       throw new Error("Hosted Codex continuity rollout SHA-256 mismatch after restore.");
     }
   }
-  await assertNoUnmanifestedHostedCodexHomeFiles({
-    allowedRolloutRelativePaths,
-    operatorHomeRoot,
+  assertHostedCodexContinuityManifestCoversAssistantSessions({
+    manifestThreadKeys,
+    requirements: requiredContinuity,
   });
+  if (options?.allowUnmanifestedCodexHomeFiles !== true) {
+    await assertNoUnmanifestedHostedCodexHomeFiles({
+      allowedRolloutRelativePaths,
+      operatorHomeRoot,
+    });
+  }
+}
+
+function assertHostedCodexContinuityManifestCoversAssistantSessions(input: {
+  manifestThreadKeys: ReadonlySet<string>;
+  requirements: ReadonlyArray<{
+    codexRolloutRelativePath: string | null;
+    providerSessionId: string;
+  }>;
+}): void {
+  for (const requirement of input.requirements) {
+    const normalizedPath = normalizeHostedCodexRolloutRelativePathForProvider({
+      providerSessionId: requirement.providerSessionId,
+      value: requirement.codexRolloutRelativePath,
+    });
+    if (normalizedPath.reason !== null) {
+      throw new Error(
+        "Hosted Codex continuity manifest is missing restored session rollout state.",
+      );
+    }
+
+    if (!input.manifestThreadKeys.has(createHostedCodexContinuityThreadKey({
+      providerSessionId: requirement.providerSessionId,
+      rolloutRelativePath: normalizedPath.relativePath,
+    }))) {
+      throw new Error(
+        "Hosted Codex continuity manifest is missing a restored session rollout.",
+      );
+    }
+  }
+}
+
+function createHostedCodexContinuityThreadKey(input: {
+  providerSessionId: string;
+  rolloutRelativePath: string;
+}): string {
+  return `${input.providerSessionId}:${input.rolloutRelativePath}`;
+}
+
+export async function clearHostedCodexContinuityRestoreRoot(
+  operatorHomeRoot: string,
+): Promise<void> {
+  await removeHostedCodexHomeFiles(operatorHomeRoot);
 }
 
 async function removeHostedCodexHomeFiles(operatorHomeRoot: string): Promise<void> {
-  await rm(path.join(operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH), {
-    force: true,
-    recursive: true,
-  });
+  await Promise.all([
+    rm(path.join(operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH), {
+      force: true,
+      recursive: true,
+    }),
+    rm(path.join(operatorHomeRoot, HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH), {
+      force: true,
+    }),
+  ]);
 }
 
 async function assertNoUnmanifestedHostedCodexHomeFiles(input: {
@@ -1204,6 +1276,23 @@ function readErrorMessage(error: unknown): string {
   }
 }
 
+function readRedactedErrorMessage(error: unknown): string {
+  return redactHostedDiagnosticMessage(readErrorMessage(error));
+}
+
+function redactHostedDiagnosticMessage(message: string): string {
+  return message
+    .replace(/\.codex-hosted(?:\/[^\s:'"]+)+/gu, ".codex-hosted/<REDACTED_PATH>")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer <REDACTED>")
+    .replace(/("(?:api[_-]?key|token|secret|password)"\s*:\s*")[^"]+(")/giu, "$1<REDACTED>$2")
+    .replace(/(authorization\s*[:=]\s*)[^\s,'"{}]+/giu, "$1<REDACTED>")
+    .replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,'"{}]+/giu, "$1<REDACTED>")
+    .replace(/\/Users\/[^/\s:'"]+/gu, "<HOME_DIR>")
+    .replace(/\/home\/[^/\s:'"]+/gu, "<HOME_DIR>")
+    .replace(/[A-Za-z]:\\Users\\[^\\\s:'"]+/gu, "<HOME_DIR>")
+    .slice(0, 1000);
+}
+
 function shouldIncludeWorkspaceSnapshotRuntimeRelativePath(relativePath: string): boolean {
   if (isHostedRuntimeSnapshotExcludedRelativePath(relativePath)) {
     return false;
@@ -1374,48 +1463,21 @@ function parseWorkspaceSnapshotArtifactPath(relativePath: string): {
   };
 }
 
-function shouldIncludeHostedOperatorHomeRelativePath(input: {
-  codexRolloutRelativePaths: ReadonlySet<string>;
-  relativePath: string;
-}): boolean {
-  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.relativePath);
+function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
 
-  if (
+  return (
     normalizedRelativePath === ".murph"
     || normalizedRelativePath === ".murph/config.json"
-  ) {
-    return true;
-  }
-
-  if (hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH)) {
-    const codexHomeRelativePath = normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
-      ? ""
-      : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length);
-    return shouldIncludeHostedCodexContinuityRelativePath({
-      allowedRolloutRelativePaths: input.codexRolloutRelativePaths,
-      relativePath: codexHomeRelativePath,
-    });
-  }
-
-  return false;
+  );
 }
 
-function shouldIncludeHostedCodexContinuityRelativePath(input: {
-  allowedRolloutRelativePaths: ReadonlySet<string>;
-  relativePath: string;
-}): boolean {
-  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.relativePath);
-  if (input.allowedRolloutRelativePaths.size === 0) {
-    return false;
-  }
-  if (normalizedRelativePath.length === 0) {
-    return true;
-  }
-
-  return [...input.allowedRolloutRelativePaths].some((allowedPath) =>
-    normalizedRelativePath === allowedPath
-    || allowedPath.startsWith(`${normalizedRelativePath}${path.posix.sep}`),
-  );
+function createHostedCodexContinuitySnapshotExplicitFiles(
+  collection: HostedCodexContinuityCollection,
+): string[] {
+  return [...new Set(collection.entries.map((entry) =>
+    `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`
+  ))].sort((left, right) => left.localeCompare(right));
 }
 
 function isHostedCodexActiveRolloutSnapshotRelativePath(relativePath: string): boolean {
@@ -1437,7 +1499,6 @@ function createEmptyHostedCodexContinuityCollection(): HostedCodexContinuityColl
     invalidPathCount: 0,
     missingRolloutCount: 0,
     requestedThreadCount: 0,
-    rolloutRelativePaths: new Set(),
   };
 }
 
@@ -1458,7 +1519,6 @@ async function collectMissingHostedCodexContinuity(
     invalidPathCount: 0,
     missingRolloutCount: requirements.length,
     requestedThreadCount: requirements.length,
-    rolloutRelativePaths: new Set(),
   };
 }
 
@@ -1501,7 +1561,7 @@ async function prepareHostedCodexContinuitySnapshot(input: {
         codexResumeRolloutRelHashes: [],
         codexResumeThreadCount: requirements.length,
       },
-      message: `Hosted Codex continuity snapshot preparation failed: ${readErrorMessage(error)}`,
+      message: `Hosted Codex continuity snapshot preparation failed: ${readRedactedErrorMessage(error)}`,
     });
   }
 
@@ -1533,12 +1593,13 @@ async function collectHostedCodexContinuity(input: {
   let missingRolloutCount = 0;
 
   for (const requirement of requirements) {
-    const normalizedPath = normalizeHostedCodexRolloutRelativePathForProvider({
+    const preparedRolloutRelativePath = input.preparedThreads.get(
+      requirement.providerSessionId,
+    ) ?? null;
+    const normalizedPath = resolveHostedCodexContinuityRequirementPath({
       providerSessionId: requirement.providerSessionId,
-      value:
-        requirement.codexRolloutRelativePath
-        ?? input.preparedThreads.get(requirement.providerSessionId)
-        ?? null,
+      preparedRolloutRelativePath,
+      sessionRolloutRelativePath: requirement.codexRolloutRelativePath,
     });
     if (normalizedPath.reason === "archived") {
       archivedUnsupportedCount += 1;
@@ -1549,25 +1610,21 @@ async function collectHostedCodexContinuity(input: {
       continue;
     }
 
-    const absolutePath = path.join(codexHomeRoot, normalizedPath.relativePath);
-    let fileStats;
-    try {
-      fileStats = await lstat(absolutePath);
-    } catch {
-      missingRolloutCount += 1;
-      continue;
-    }
-    if (!fileStats.isFile() || fileStats.isSymbolicLink()) {
+    const rolloutFile = await inspectHostedCodexRolloutFile({
+      codexHomeRoot,
+      relativePath: normalizedPath.relativePath,
+    });
+    if (!rolloutFile) {
       missingRolloutCount += 1;
       continue;
     }
 
     entries.push({
-      absolutePath,
-      byteSize: fileStats.size,
+      absolutePath: rolloutFile.absolutePath,
+      byteSize: rolloutFile.stats.size,
       codexRolloutRelativePath: normalizedPath.relativePath,
       providerSessionId: requirement.providerSessionId,
-      sha256: await sha256FileHex(absolutePath),
+      sha256: await sha256FileHex(rolloutFile.absolutePath),
     });
   }
 
@@ -1578,8 +1635,91 @@ async function collectHostedCodexContinuity(input: {
     invalidPathCount,
     missingRolloutCount,
     requestedThreadCount: requirements.length,
-    rolloutRelativePaths: new Set(entries.map((entry) => entry.codexRolloutRelativePath)),
   };
+}
+
+function resolveHostedCodexContinuityRequirementPath(input: {
+  providerSessionId: string;
+  preparedRolloutRelativePath: string | null;
+  sessionRolloutRelativePath: string | null;
+}):
+  | {
+      reason: null;
+      relativePath: string;
+    }
+  | {
+      reason: "archived" | "invalid";
+      relativePath?: never;
+    } {
+  const sessionPath = normalizeHostedCodexRolloutRelativePathForProvider({
+    providerSessionId: input.providerSessionId,
+    value: input.sessionRolloutRelativePath,
+  });
+  const preparedPath = normalizeHostedCodexRolloutRelativePathForProvider({
+    providerSessionId: input.providerSessionId,
+    value: input.preparedRolloutRelativePath,
+  });
+
+  if (input.sessionRolloutRelativePath && input.preparedRolloutRelativePath) {
+    if (sessionPath.reason === "archived" || preparedPath.reason === "archived") {
+      return { reason: "archived" };
+    }
+    if (
+      sessionPath.reason !== null
+      || preparedPath.reason !== null
+      || sessionPath.relativePath !== preparedPath.relativePath
+    ) {
+      return { reason: "invalid" };
+    }
+    return sessionPath;
+  }
+
+  return input.sessionRolloutRelativePath ? sessionPath : preparedPath;
+}
+
+async function inspectHostedCodexRolloutFile(input: {
+  codexHomeRoot: string;
+  relativePath: string;
+}): Promise<{
+  absolutePath: string;
+  stats: Stats;
+} | null> {
+  const segments = normalizeWorkspaceSnapshotRelativePath(input.relativePath)
+    .split(path.posix.sep)
+    .filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  let currentPath = input.codexHomeRoot;
+  for (const [index, segment] of segments.entries()) {
+    const nextPath = path.join(currentPath, segment);
+    let entry: Stats;
+    try {
+      entry = await lstat(nextPath);
+    } catch {
+      return null;
+    }
+
+    if (entry.isSymbolicLink()) {
+      return null;
+    }
+    if (index === segments.length - 1) {
+      return entry.isFile()
+        ? {
+            absolutePath: nextPath,
+            stats: entry,
+          }
+        : null;
+    }
+    if (!entry.isDirectory()) {
+      return null;
+    }
+
+    currentPath = nextPath;
+  }
+
+  return null;
 }
 
 function createHostedCodexContinuityDiagnostics(input: {
@@ -1674,6 +1814,43 @@ function createHostedCodexContinuityManifest(entries: HostedCodexContinuityEntry
         || left.codexRolloutRelativePath.localeCompare(right.codexRolloutRelativePath),
       ),
   };
+}
+
+function createHostedCodexContinuityManifestFromBundle(input: {
+  bytes: Uint8Array | ArrayBuffer;
+  entries: HostedCodexContinuityEntry[];
+}): ReturnType<typeof createHostedCodexContinuityManifest> {
+  const archive = parseHostedBundleArchive(input.bytes);
+  if (archive.kind !== "vault") {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
+    );
+  }
+
+  return createHostedCodexContinuityManifest(input.entries.map((entry) => {
+    const snapshotPath = `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`;
+    const rolloutFile = archive.files.find((file) =>
+      file.root === WORKSPACE_OPERATOR_HOME_ROOT && file.path === snapshotPath
+    );
+    if (!rolloutFile) {
+      throw new Error("Hosted Codex continuity rollout was not included in the snapshot bundle.");
+    }
+
+    if (isHostedBundleArtifactEntry(rolloutFile)) {
+      return {
+        ...entry,
+        byteSize: rolloutFile.artifact.byteSize,
+        sha256: rolloutFile.artifact.sha256,
+      };
+    }
+
+    const bytes = Buffer.from(rolloutFile.contentsBase64, "base64");
+    return {
+      ...entry,
+      byteSize: bytes.byteLength,
+      sha256: sha256BytesHex(bytes),
+    };
+  }));
 }
 
 function parseHostedCodexContinuityManifest(rawManifest: string): {
@@ -1850,6 +2027,10 @@ async function sha256FileHex(absolutePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
+function sha256BytesHex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 function fingerprintHostedCodexContinuityRelativePath(input: {
   hashSecret: string;
   relativePath: string;
@@ -1866,91 +2047,6 @@ function normalizeHostedCodexHomeSnapshotHashSecret(
 ): string | null {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : null;
-}
-
-function isHostedCodexHomeHistoryBasename(basename: string): boolean {
-  return basename === "history"
-    || basename === "history.json"
-    || basename === "history.jsonl"
-    || basename === "history.jsonl.db"
-    || basename === "history.jsonl.db-shm"
-    || basename === "history.jsonl.db-wal"
-    || basename.endsWith(".history")
-    || basename.endsWith(".history.json")
-    || basename.endsWith(".history.jsonl")
-    || basename.endsWith(".history.jsonl.db")
-    || basename.endsWith(".history.jsonl.db-shm")
-    || basename.endsWith(".history.jsonl.db-wal");
-}
-
-function isHostedCodexHomeSensitiveBasename(basename: string): boolean {
-  if (
-    basename === ".netrc"
-    || basename === "auth.json"
-    || basename === "credentials.json"
-    || basename === "oauth.json"
-    || basename === "token.json"
-    || basename === "tokens.json"
-  ) {
-    return true;
-  }
-
-  if (
-    hasHostedCodexHomeSensitiveBasenameToken(basename)
-    || basename.includes("access-token")
-    || basename.includes("api-key")
-    || basename.includes("apikey")
-    || basename.includes("credential")
-    || basename.includes("cookie")
-    || basename.includes("oauth")
-    || basename.includes("password")
-    || basename.includes("refresh-token")
-    || basename.includes("secret")
-    || basename.includes("token")
-  ) {
-    return true;
-  }
-
-  return hasHostedCodexHomeSensitiveExtension(basename);
-}
-
-function hasHostedCodexHomeSensitiveBasenameToken(basename: string): boolean {
-  const tokens = basename.split(/[^a-z0-9]+/u);
-  return tokens.some((token) =>
-    token === "auth"
-    || token === "apikey"
-    || token === "cert"
-    || token === "certificate"
-    || token === "credential"
-    || token === "credentials"
-    || token === "cookie"
-    || token === "key"
-    || token === "keys"
-    || token === "oauth"
-    || token === "password"
-    || token === "secret"
-    || token === "token"
-  );
-}
-
-function hasHostedCodexHomeSensitiveExtension(basename: string): boolean {
-  return (
-    basename.endsWith(".cer")
-    || basename.endsWith(".crt")
-    || basename.endsWith(".der")
-    || basename.endsWith(".key")
-    || basename.endsWith(".keystore")
-    || basename.endsWith(".lock")
-    || basename.endsWith(".log")
-    || basename.endsWith(".p12")
-    || basename.endsWith(".pem")
-    || basename.endsWith(".pfx")
-    || basename.endsWith(".pid")
-    || basename.endsWith(".sock")
-    || basename.endsWith(".socket")
-    || basename.endsWith(".tmp")
-    || basename.startsWith(".tmp-")
-  );
 }
 
 function shouldExternalizeWorkspaceArtifact(input: HostedBundleArtifactSnapshotInput): boolean {
