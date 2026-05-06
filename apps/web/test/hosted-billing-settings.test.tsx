@@ -92,6 +92,42 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Pulse/);
     assert.match(markup, /\$8 \/ month/);
     assert.match(markup, /Manage your plan and payment details\./);
+    assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
+  });
+
+  test("shows a simple free trial note below the billing action", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canUpgradeToEdge: false,
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+    }));
+
+    assert.match(markup, /Manage subscription/);
+    assert.match(markup, /Pulse/);
+    assert.match(markup, /You&#x27;re on a free trial/);
+  });
+
+  test("renders the free trial note beneath the billing action row", async () => {
+    const { HostedBillingSettingsAction } = await import("@/src/components/settings/hosted-billing-settings-action");
+    const rendered = await renderClientComponent(createElement(HostedBillingSettingsAction, {
+      helperText: "You're on a free trial",
+    }));
+
+    const root = rendered.container.firstElementChild;
+    assert.ok(root);
+    assert.equal(root.tagName, "DIV");
+    const [actionsRow, helperRow] = [...root.children];
+    assert.ok(actionsRow);
+    assert.equal(actionsRow.tagName, "DIV");
+    assert.ok(helperRow);
+    assert.equal(helperRow.tagName, "P");
+    assert.match(actionsRow.textContent ?? "", /Manage subscription/);
+    assert.equal(helperRow.textContent, "You're on a free trial");
+
+    await rendered.cleanup();
   });
 
   test("omits the Edge upgrade action when settings already sees an Edge plan", async () => {
@@ -100,6 +136,7 @@ describe("HostedBillingSettings", () => {
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
       canUpgradeToEdge: false,
+      currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
     }));
 
@@ -108,6 +145,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /\$20 \/ month/);
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Manage your plan and payment details\./);
+    assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
   test("omits the Edge upgrade action when billing state is not eligible", async () => {
