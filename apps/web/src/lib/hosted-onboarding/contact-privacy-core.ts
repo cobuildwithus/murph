@@ -18,6 +18,7 @@ export type HostedBlindIndexKind =
   | "stripe-checkout-session"
   | "stripe-customer"
   | "stripe-subscription"
+  | "stripe-subscription-schedule"
   | "telegram-user"
   | "wallet-address";
 
@@ -103,6 +104,21 @@ export function createHostedStripeSubscriptionLookupKeyReadCandidates(
 ): string[] {
   return createHostedLookupKeyReadCandidates(
     "stripe-subscription",
+    normalizeHostedOpaqueInput(value),
+  );
+}
+
+export function createHostedStripeSubscriptionScheduleLookupKey(
+  value: string | null | undefined,
+): string | null {
+  return createHostedLookupKey("stripe-subscription-schedule", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedStripeSubscriptionScheduleLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "stripe-subscription-schedule",
     normalizeHostedOpaqueInput(value),
   );
 }

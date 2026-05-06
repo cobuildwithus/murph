@@ -9,6 +9,7 @@ import {
   createHostedStripeCheckoutSessionLookupKey,
   createHostedStripeCustomerLookupKey,
   createHostedStripeSubscriptionLookupKey,
+  createHostedStripeSubscriptionScheduleLookupKey,
   createHostedWalletAddressLookupKey,
   hostedPhoneLookupKeyMatchesValue,
   parseHostedBlindIndex,
@@ -40,6 +41,7 @@ describe("hosted member lookup keys", () => {
     const linq = createHostedLinqChatLookupKey("chat_123");
     const customer = createHostedStripeCustomerLookupKey("cus_123");
     const subscription = createHostedStripeSubscriptionLookupKey("sub_123");
+    const subscriptionSchedule = createHostedStripeSubscriptionScheduleLookupKey("sched_123");
     const checkout = createHostedStripeCheckoutSessionLookupKey("cs_123");
     const event = createHostedStripeBillingEventLookupKey("evt_123");
 
@@ -47,6 +49,7 @@ describe("hosted member lookup keys", () => {
     expect(linq).toMatch(/^hbidx:linq-chat:v1:/u);
     expect(customer).toMatch(/^hbidx:stripe-customer:v1:/u);
     expect(subscription).toMatch(/^hbidx:stripe-subscription:v1:/u);
+    expect(subscriptionSchedule).toMatch(/^hbidx:stripe-subscription-schedule:v1:/u);
     expect(checkout).toMatch(/^hbidx:stripe-checkout-session:v1:/u);
     expect(event).toMatch(/^hbidx:stripe-billing-event:v1:/u);
 
@@ -54,6 +57,7 @@ describe("hosted member lookup keys", () => {
     expect(linq).not.toContain("chat_123");
     expect(customer).not.toContain("cus_123");
     expect(subscription).not.toContain("sub_123");
+    expect(subscriptionSchedule).not.toContain("sched_123");
     expect(checkout).not.toContain("cs_123");
     expect(event).not.toContain("evt_123");
   });
