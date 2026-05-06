@@ -288,14 +288,17 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
               {exportDialogError}
             </p>
           ) : null}
-          <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
+          <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
             <Checkbox
+              id="hosted-data-export-acknowledge"
               checked={acknowledgedSensitiveDownload}
               onCheckedChange={setAcknowledgedSensitiveDownload}
-              className="mt-0.5"
+              className="size-7 shrink-0"
             />
-            <span>This export may contain sensitive health data and private notes.</span>
-          </label>
+            <label htmlFor="hosted-data-export-acknowledge" className="cursor-pointer">
+              This export may contain sensitive health data and private notes.
+            </label>
+          </div>
           <div className="flex flex-col gap-2">
             <Button type="button" size="xl" onClick={() => void handleExportConfirmed()} disabled={!exportReady} className="w-full">
               <DownloadIcon data-icon="inline-start" />
@@ -365,22 +368,28 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
                     placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                   />
                 </div>
-                <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
+                <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
                   <Checkbox
+                    id="hosted-data-delete-irreversible"
                     checked={acknowledgedIrreversibleDeletion}
                     onCheckedChange={setAcknowledgedIrreversibleDeletion}
-                    className="mt-0.5"
+                    className="size-7 shrink-0"
                   />
-                  <span>This deletion is irreversible.</span>
-                </label>
-                <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
+                  <label htmlFor="hosted-data-delete-irreversible" className="cursor-pointer">
+                    This deletion is irreversible.
+                  </label>
+                </div>
+                <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
                   <Checkbox
+                    id="hosted-data-delete-retention"
                     checked={acknowledgedProviderAndBackupLimits}
                     onCheckedChange={setAcknowledgedProviderAndBackupLimits}
-                    className="mt-0.5"
+                    className="size-7 shrink-0"
                   />
-                  <span>Provider records (Stripe, Privy) and backups follow separate retention.</span>
-                </label>
+                  <label htmlFor="hosted-data-delete-retention" className="cursor-pointer">
+                    Provider records (Stripe, Privy) and backups follow separate retention.
+                  </label>
+                </div>
               </div>
               <div className="flex flex-col gap-2">
                 <Button type="button" size="xl" variant="destructive" onClick={() => void handleDeleteConfirmed()} disabled={!deleteReady} className="w-full">
