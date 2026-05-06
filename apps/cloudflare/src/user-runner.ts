@@ -75,6 +75,9 @@ const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
 const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
+// Temporary production hotfix: full idle-shutdown checkpoints currently exceed
+// the stateless Worker artifact proxy memory budget on large workspaces.
+const IDLE_SHUTDOWN_CHECKPOINTS_ENABLED = false;
 
 type HostedAiUsageGateDecision =
   | {
@@ -229,6 +232,23 @@ export class HostedUserRunner {
         userId: record.userId ?? null,
       });
       await this.scheduleHostedWakeRetryAlarm();
+      return;
+    }
+
+    if (dueAlarm.kind === "idle_shutdown_checkpoint" && !IDLE_SHUTDOWN_CHECKPOINTS_ENABLED) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
+      await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: record.nextWakeAt,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          runnerAlarmKind: dueAlarm.kind,
+        },
+        message: "Hosted runner skipped disabled idle-shutdown checkpoint alarm.",
+        phase: "scheduled",
+        userId: record.userId,
+      });
       return;
     }
 
@@ -1129,7 +1149,11 @@ export class HostedUserRunner {
       return;
     }
 
-    if (input.resultStatus === "idle" && input.fallbackNextWakeAt === null) {
+    if (
+      IDLE_SHUTDOWN_CHECKPOINTS_ENABLED
+      && input.resultStatus === "idle"
+      && input.fallbackNextWakeAt === null
+    ) {
       const idleSchedule = await this.scheduleIdleShutdownCheckpointIfCurrent(input.userId);
       if (idleSchedule?.kind === "scheduled") {
         emitHostedExecutionStructuredLog({
@@ -1680,7 +1704,7 @@ function shouldRunHostedRunnerInvocation(input: {
   reason: HostedWorkspaceInvocationReason;
   record: RunnerStateRecord;
 }): boolean {
-  return input.reason === "idle_shutdown_checkpoint"
+  return (IDLE_SHUTDOWN_CHECKPOINTS_ENABLED && input.reason === "idle_shutdown_checkpoint")
     || input.reason === "manual"
     || input.record.pendingNudge
     || input.dueWake === true;
