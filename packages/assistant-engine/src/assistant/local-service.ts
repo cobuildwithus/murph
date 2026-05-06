@@ -112,6 +112,62 @@ export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 const MAX_ACTIVE_TURN_INPUT_CONTINUATIONS = 3
 const DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID = 'initial'
+const ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA =
+  'murph.assistant-local-message-timing.v1'
+const ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_TYPE =
+  'assistant.local_message.timing'
+
+type AssistantLocalMessageTimingStage =
+  | 'artifacts-finalized'
+  | 'complete'
+  | 'defaults-resolved'
+  | 'delivery-finished'
+  | 'lock-acquired'
+  | 'preflight-finished'
+  | 'provider-completed'
+  | 'receipt-created'
+  | 'session-resolved'
+  | 'shared-plan-built'
+  | 'turn-finalized'
+  | 'turn-persisted'
+  | 'typing-started'
+  | 'typing-stop-finished'
+
+function createAssistantLocalMessageTimingEmitter(
+  input: AssistantMessageInput,
+  executionContext: ReturnType<typeof normalizeAssistantExecutionContext>,
+): (stage: AssistantLocalMessageTimingStage) => void {
+  const trace = input.onTraceEvent
+  const totalStartedAt = Date.now()
+  let stageStartedAt = totalStartedAt
+
+  return (stage) => {
+    if (!trace) {
+      return
+    }
+
+    const now = Date.now()
+    const elapsedMs = Math.max(0, now - stageStartedAt)
+    const totalElapsedMs = Math.max(0, now - totalStartedAt)
+    stageStartedAt = now
+
+    trace({
+      providerSessionId: null,
+      rawEvent: {
+        schema: ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA,
+        type: ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_TYPE,
+        localMessageDeliveryRequested: input.deliverResponse === true,
+        localMessageElapsedMs: elapsedMs,
+        localMessageHosted: executionContext?.hosted != null,
+        localMessageQueueOnly: input.deliveryDispatchMode === 'queue-only',
+        localMessageStage: stage,
+        localMessageTimingStage: stage,
+        localMessageTotalElapsedMs: totalElapsedMs,
+      },
+      updates: [],
+    })
+  }
+}
 
 async function appendUserTranscriptEntryForTurn(input: {
   createdAt?: string | null
@@ -235,6 +291,8 @@ export async function sendAssistantMessageLocal(
   }
 
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
+  const emitTiming = createAssistantLocalMessageTimingEmitter(input, executionContext)
+  emitTiming('preflight-finished')
   const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
     executionContext,
     fallbackTarget: createDefaultLocalAssistantModelTarget(),
@@ -243,10 +301,12 @@ export async function sendAssistantMessageLocal(
     defaults: await resolveAssistantOperatorDefaults(),
     executionContext,
   })
+  emitTiming('defaults-resolved')
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      emitTiming('lock-acquired')
       const resolved = await resolveAssistantMessageSession({
         boundaryDefaultTarget,
         defaults,
@@ -257,7 +317,9 @@ export async function sendAssistantMessageLocal(
         resolved,
         source: 'assistant-message',
       })
+      emitTiming('session-resolved')
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
+      emitTiming('shared-plan-built')
       const route = resolveAssistantTurnRoute(input, defaults, resolved)
       const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
@@ -268,6 +330,7 @@ export async function sendAssistantMessageLocal(
         prompt: input.prompt,
         deliveryRequested: input.deliverResponse === true,
       })
+      emitTiming('receipt-created')
 
       await recordAssistantDiagnosticEvent({
         vault: input.vault,
@@ -290,6 +353,7 @@ export async function sendAssistantMessageLocal(
         session: resolved.session,
         sharedPlan,
       })
+      emitTiming('typing-started')
       let activeTurnInputController: ReturnType<
         typeof createAssistantActiveTurnInputController
       > | null = null
@@ -312,6 +376,7 @@ export async function sendAssistantMessageLocal(
           vault: input.vault,
         })
         userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
+        emitTiming('turn-persisted')
         let currentUserTurn = userTurn
         const runtimeState = createAssistantRuntimeStateService(input.vault)
         const initialAcceptedTurnInputItems = resolveInitialAcceptedTurnInputItems({
@@ -409,6 +474,7 @@ export async function sendAssistantMessageLocal(
           }
 
           providerResult = providerOutcome.providerTurn
+          emitTiming('provider-completed')
           if (!providerRequestJournal) {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.recordProviderRequest({
@@ -603,6 +669,7 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })
+        emitTiming('artifacts-finalized')
         const deliveryOutcome = await dispatchAssistantReply({
           input: currentInput,
           response: providerResult.response,
@@ -610,6 +677,7 @@ export async function sendAssistantMessageLocal(
           sharedPlan,
           turnId: currentUserTurn.turnId,
         })
+        emitTiming('delivery-finished')
 
         await finalizeDeliveredAssistantTurn({
           firstContactGuidanceInjected:
@@ -620,6 +688,7 @@ export async function sendAssistantMessageLocal(
           turnId: currentUserTurn.turnId,
           vault: input.vault,
         })
+        emitTiming('turn-finalized')
 
         const result = normalizeAssistantAskResultForReturn({
           vault: redactAssistantDisplayPath(input.vault),
@@ -640,6 +709,7 @@ export async function sendAssistantMessageLocal(
               ? deliveryOutcome.error
               : null,
         })
+        emitTiming('complete')
         activeTurnInputController.complete(result)
         return result
       } catch (error) {
@@ -707,6 +777,7 @@ export async function sendAssistantMessageLocal(
       } finally {
         activeTurnInputController?.close()
         await stopAssistantChannelTypingIndicator(typingIndicator)
+        emitTiming('typing-stop-finished')
         if (
           !(
             executionContext?.hosted != null

@@ -88,6 +88,7 @@ type AssistantAutomationPassTimingStage =
   | 'input-refresh-finished'
   | 'outbox-drain-finished'
   | 'outbox-summary-finished'
+  | 'post-scan-outbox-drain-finished'
   | 'recovery-finished'
   | 'runtime-maintenance-finished'
   | 'scan-finished'
@@ -997,6 +998,29 @@ export async function runAssistantAutomationPass(
     automationPassScanReplyFailed: scanResult.replies.failed,
     automationPassScanReplyReplied: scanResult.replies.replied,
     automationPassScanReplySkipped: scanResult.replies.skipped,
+  })
+  const shouldDrainOutboxAfterScan =
+    applyCanonicalWrites
+    && (input.drainOutbox ?? true)
+    && input.deliveryDispatchMode === 'queue-only'
+    && scanResult.replies.replied > 0
+  const postScanOutboxResult = shouldDrainOutboxAfterScan
+    ? await drainAssistantOutbox({
+        vault: input.vault,
+        limit: input.maxPerScan,
+      })
+    : {
+        attempted: 0,
+        failed: 0,
+        queued: 0,
+        sent: 0,
+      }
+  emitTiming('post-scan-outbox-drain-finished', {
+    automationPassOutboxAttempted: postScanOutboxResult.attempted,
+    automationPassOutboxSent: postScanOutboxResult.sent,
+    automationPassOutboxFailed: postScanOutboxResult.failed,
+    automationPassOutboxQueued: postScanOutboxResult.queued,
+    automationPassPostScanOutboxDrainSkipped: !shouldDrainOutboxAfterScan,
   })
   const cronResult = applyCanonicalWrites
     ? await processDueAssistantCronJobs({
