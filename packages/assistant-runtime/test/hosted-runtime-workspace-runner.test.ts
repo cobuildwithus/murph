@@ -44,6 +44,7 @@ import {
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedMailboxImportCheckpointResult,
   type HostedRuntimeEffectsPort,
+  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -69,6 +70,15 @@ import type {
   HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
+
+function requireMailboxSnapshotInput(
+  input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+) {
+  if (!("state" in input) || !("previousState" in input)) {
+    throw new Error("Expected mailbox checkpoint snapshot input.");
+  }
+  return input;
+}
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_runner";
@@ -1184,7 +1194,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             const sourceBundleHash = "a".repeat(64);
             const state = await readHostedMailboxImportState({ vaultRoot });
             snapshotWatermarks.push(state.watermarks.conversation);
-            assert.equal(snapshotInput.state.watermarks.conversation, "1");
+            assert.equal(requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation, "1");
             assert.deepEqual(snapshotInput.redactedStatus, {
               hostedMailboxBlockedCount: 0,
               hostedMailboxConversationImportedSeq: "1",

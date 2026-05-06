@@ -334,6 +334,7 @@ export const HOSTED_WORKSPACE_CHECKPOINT_REASONS = [
   "outbox_receipt",
   "system_mailbox_receipt",
   "maintenance",
+  "idle_shutdown",
 ] as const;
 
 export type HostedWorkspaceCheckpointReason =
@@ -502,6 +503,7 @@ export const HOSTED_WORKSPACE_INVOCATION_REASONS = [
   "alarm",
   "retry",
   "manual",
+  "idle_shutdown_checkpoint",
 ] as const;
 
 export type HostedWorkspaceInvocationReason = (typeof HOSTED_WORKSPACE_INVOCATION_REASONS)[number];

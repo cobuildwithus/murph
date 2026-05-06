@@ -88,6 +88,7 @@ path also runs it inside the apply step before artifact validation and upload.
 Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
+- `HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS=60000`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000`
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
@@ -117,13 +118,16 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
-invocations leave that shell running until the configured idle lifecycle expiry
-fires. Each invocation still runs through an isolated child process with fresh
+invocations that finish idle schedule one lease-scoped idle-shutdown base
+checkpoint shortly before the configured idle lifecycle expiry. New user
+activity clears that pending checkpoint and pushes the idle window forward.
+Each invocation still runs through an isolated child process with fresh
 invocation-local cache/temp roots and a fresh outbound worker-proxy token.
 
 The warm shell is destroyed when an invocation fails, outbound proxy cleanup
 fails, warm health is stale, deploy smoke finishes, explicit cleanup is called,
-or Cloudflare reports idle activity expiry.
+Cloudflare reports idle activity expiry, or the idle-shutdown base checkpoint
+completes with no pending work.
 
 ## Deploy Artifacts
 

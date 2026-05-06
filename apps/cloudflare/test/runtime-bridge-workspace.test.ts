@@ -1548,6 +1548,7 @@ type CheckpointReason = (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number];
 
 function expectedCheckpointSnapshotMode(reason: CheckpointReason): "full" | "hot" {
   switch (reason) {
+    case "idle_shutdown":
     case "maintenance":
     case "system_mailbox_receipt":
       return "full";

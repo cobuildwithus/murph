@@ -64,8 +64,22 @@ export interface HostedWorkspaceSnapshotCheckpointResult {
   snapshotRef: HostedWorkspaceCheckpointRequest["snapshotRef"];
 }
 
-export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
-  HostedWorkspaceRunnerCheckpointRequestInput;
+type HostedWorkspaceSnapshotCheckpointMailboxInput =
+  Omit<HostedMailboxImportCheckpointRequestInput, "redactedStatus">;
+
+type HostedWorkspaceSnapshotCheckpointIdleInput = {
+  reason: "idle_shutdown";
+};
+
+export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput = (
+  | HostedWorkspaceSnapshotCheckpointMailboxInput
+  | HostedWorkspaceSnapshotCheckpointIdleInput
+) & {
+  nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
+  reason: HostedWorkspaceCheckpointReason;
+  redactedStatus?: HostedRuntimeRedactedJson | null;
+};
 
 export type HostedWorkspaceSnapshotCheckpointBuilder = (
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -73,7 +87,7 @@ export type HostedWorkspaceSnapshotCheckpointBuilder = (
 
 export interface HostedWorkspaceCheckpointRequestBuilder {
   createRequest(
-    input: HostedWorkspaceRunnerCheckpointRequestInput,
+    input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
   ): Promise<HostedWorkspaceCheckpointRequest> | HostedWorkspaceCheckpointRequest;
 }
 
@@ -194,7 +208,7 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
           ? input.nextWakeReason ?? null
           : metadata.nextWakeReason ?? null,
         reason: input.reason,
-        redactedStatus: cloneHostedRuntimeRedactedJson(input.redactedStatus),
+        redactedStatus: cloneHostedRuntimeRedactedJson(input.redactedStatus ?? null),
         snapshotRef: metadata.snapshotRef,
       };
     },
@@ -222,7 +236,7 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
           ? requestInput.nextWakeReason ?? null
           : input.metadata.nextWakeReason ?? null,
         reason: requestInput.reason,
-        redactedStatus: cloneHostedRuntimeRedactedJson(requestInput.redactedStatus),
+        redactedStatus: cloneHostedRuntimeRedactedJson(requestInput.redactedStatus ?? null),
         snapshotRef: snapshot.snapshotRef,
       };
     },
@@ -1084,7 +1098,7 @@ function summarizeMailboxRefreshResult(
 }
 
 function cloneHostedRuntimeRedactedJson(
-  value: HostedRuntimeRedactedJson,
-): HostedRuntimeRedactedJson {
-  return { ...value };
+  value: HostedRuntimeRedactedJson | null,
+): HostedRuntimeRedactedJson | null {
+  return value ? { ...value } : null;
 }

@@ -1132,15 +1132,33 @@ export async function destroyHostedExecutionContainer(input: {
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   userId: string;
-}): Promise<void> {
+}): Promise<{
+  attempted: boolean;
+  errorCode: string | null;
+  ok: boolean;
+}> {
   if (!input.runnerContainerNamespace) {
-    return;
+    return {
+      attempted: false,
+      errorCode: null,
+      ok: true,
+    };
   }
 
   try {
     await input.runnerContainerNamespace.getByName(input.runnerContainerName ?? input.userId).destroyInstance();
-  } catch {
+    return {
+      attempted: true,
+      errorCode: null,
+      ok: true,
+    };
+  } catch (error) {
     // best-effort cleanup only
+    return {
+      attempted: true,
+      errorCode: error instanceof Error && error.name ? error.name : "UnknownError",
+      ok: false,
+    };
   }
 }
 

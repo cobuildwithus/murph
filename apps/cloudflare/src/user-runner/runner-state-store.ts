@@ -34,6 +34,21 @@ export interface RunnerInvocationLeaseOwnershipResult {
   record: RunnerStateRecord;
 }
 
+export type RunnerDueAlarm =
+  | {
+    kind: "none";
+    record: RunnerStateRecord;
+  }
+  | {
+    kind: "drain";
+    record: RunnerStateRecord;
+  }
+  | {
+    idleWorkspaceVersion: string;
+    kind: "idle_shutdown_checkpoint";
+    record: RunnerStateRecord;
+  };
+
 export interface RunnerInvocationCheckpointResult {
   clearedOrphanObservation: boolean;
   recorded: boolean;
@@ -116,19 +131,53 @@ export class RunnerStateStore {
     }
   }
 
-  async clearNextWakeIfDue(nowMs: number): Promise<RunnerStateRecord> {
+  async consumeDueRunnerAlarm(nowMs: number): Promise<RunnerDueAlarm> {
     const meta = this.requireMetaRowSync();
-    const parsedMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;
+    const nextWakeAtMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;
+    const idleCheckpointDueAtMs = meta.idle_shutdown_checkpoint_due_at
+      ? Date.parse(meta.idle_shutdown_checkpoint_due_at)
+      : Number.NaN;
 
-    if (Number.isFinite(parsedMs) && parsedMs <= nowMs) {
+    if (Number.isFinite(nextWakeAtMs) && nextWakeAtMs <= nowMs) {
       meta.next_wake_at = null;
       this.writeMetaRowSync(meta);
+      return {
+        kind: "drain",
+        record: this.readStateFromMetaSync(meta),
+      };
     }
 
-    return this.readStateFromMetaSync(meta);
+    if (
+      Number.isFinite(idleCheckpointDueAtMs)
+      && idleCheckpointDueAtMs <= nowMs
+    ) {
+      if (!meta.idle_shutdown_checkpoint_workspace_version) {
+        this.clearIdleShutdownCheckpointMetaSync(meta);
+        this.writeMetaRowSync(meta);
+        return {
+          kind: "none",
+          record: this.readStateFromMetaSync(meta),
+        };
+      }
+
+      const idleWorkspaceVersion = meta.idle_shutdown_checkpoint_workspace_version;
+      this.clearIdleShutdownCheckpointMetaSync(meta);
+      this.writeMetaRowSync(meta);
+      return {
+        idleWorkspaceVersion,
+        kind: "idle_shutdown_checkpoint",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    return {
+      kind: "none",
+      record: this.readStateFromMetaSync(meta),
+    };
   }
 
   async beginInvocation(input: {
+    consumePendingNudge?: boolean;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<RunnerInvocationLease> {
@@ -147,7 +196,9 @@ export class RunnerStateStore {
     meta.active_invocation_reason = input.reason;
     meta.active_invocation_started_at = startedAt;
     meta.active_workspace_version = null;
-    meta.pending_nudge = 0;
+    if (input.consumePendingNudge !== false) {
+      meta.pending_nudge = 0;
+    }
     this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
 
@@ -249,9 +300,30 @@ export class RunnerStateStore {
   } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     meta.pending_nudge = 1;
+    this.clearIdleShutdownCheckpointMetaSync(meta);
     meta.next_wake_at = resolveRunnerNextWakeAt({
       preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
     });
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async scheduleIdleShutdownCheckpoint(input: {
+    dueAt: string;
+    workspaceVersion: string;
+  }): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    meta.idle_shutdown_checkpoint_due_at = normalizeIsoDateString(input.dueAt);
+    meta.idle_shutdown_checkpoint_workspace_version = input.workspaceVersion;
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async clearIdleShutdownCheckpoint(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    this.clearIdleShutdownCheckpointMetaSync(meta);
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -512,6 +584,8 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at,
+        idle_shutdown_checkpoint_due_at,
+        idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
         retry_failure_count
@@ -542,10 +616,12 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at,
+        idle_shutdown_checkpoint_due_at,
+        idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
@@ -559,6 +635,8 @@ export class RunnerStateStore {
       meta.last_error_at,
       meta.last_error_code,
       meta.last_invocation_at,
+      meta.idle_shutdown_checkpoint_due_at,
+      meta.idle_shutdown_checkpoint_workspace_version,
       meta.next_wake_at,
       meta.pending_nudge,
       normalizeRetryFailureCount(meta.retry_failure_count),
@@ -606,6 +684,11 @@ export class RunnerStateStore {
     meta.last_error_code = null;
   }
 
+  private clearIdleShutdownCheckpointMetaSync(meta: RunnerMetaRow): void {
+    meta.idle_shutdown_checkpoint_due_at = null;
+    meta.idle_shutdown_checkpoint_workspace_version = null;
+  }
+
   private readActiveInvocationLeaseSync(meta: RunnerMetaRow): RunnerInvocationLease | null {
     if (
       !meta.active_invocation_id
@@ -642,5 +725,18 @@ function normalizeLeaseGeneration(value: number | null): number {
 function isHostedWorkspaceInvocationReasonValue(
   value: unknown,
 ): value is HostedWorkspaceInvocationReason {
-  return value === "nudge" || value === "alarm" || value === "retry" || value === "manual";
+  return value === "nudge"
+    || value === "alarm"
+    || value === "retry"
+    || value === "manual"
+    || value === "idle_shutdown_checkpoint";
+}
+
+function normalizeIsoDateString(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new TypeError("Hosted runner idle checkpoint due time must be an ISO date string.");
+  }
+
+  return parsed.toISOString();
 }

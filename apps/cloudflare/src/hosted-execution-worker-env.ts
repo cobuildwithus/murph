@@ -16,8 +16,10 @@ export interface HostedExecutionWorkerEnvironment {
   hostedWebAllowHttpHosts?: readonly string[];
   hostedWebBaseUrl: string;
   maxEventAttempts: number;
+  idleShutdownCheckpointSafetyMarginMs: number;
   retryDelayMs: number;
   runnerReadyTimeoutMs: number;
+  runnerIdleTtlMs: number;
   runnerTimeoutMs: number;
   webControlTimeoutMs: number;
 }
@@ -90,6 +92,11 @@ export function readHostedExecutionWorkerEnvironment(
       3,
       "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
     ),
+    idleShutdownCheckpointSafetyMarginMs: parsePositiveInteger(
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS),
+      60_000,
+      "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS",
+    ),
     retryDelayMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RETRY_DELAY_MS),
       30_000,
@@ -99,6 +106,11 @@ export function readHostedExecutionWorkerEnvironment(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS),
       20_000,
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
+    ),
+    runnerIdleTtlMs: parsePositiveInteger(
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS),
+      300_000,
+      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
     ),
     runnerTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),

@@ -709,6 +709,7 @@ function resolveHostedWorkspaceCheckpointSnapshotMode(
   reason: HostedWorkspaceCheckpointRequest["reason"],
 ): HostedWorkspaceCheckpointSnapshotMode {
   switch (reason) {
+    case "idle_shutdown":
     case "maintenance":
     case "system_mailbox_receipt":
       return "full";
