@@ -327,7 +327,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("acknowledges active invocation heartbeats without a Durable Object round trip", async () => {
+  it("records active invocation heartbeats and surfaces pending input", async () => {
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
       inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
@@ -367,16 +367,25 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      inputAvailable: false,
-      nextAlarmAt: null,
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true,
-      pendingNudge: false,
+      pendingNudge: true,
     });
-    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
   });
 
-  it("keeps body-only active invocation heartbeats compatible with warm runners", async () => {
-    const recordActiveInvocationHeartbeat = vi.fn();
+  it("records body-only active invocation heartbeats for warm runners", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true as const,
+      pendingNudge: false,
+    }));
     const response = await handleRunnerOutboundRequest(
       new Request(HEARTBEAT_URL, {
         body: JSON.stringify({
@@ -412,7 +421,11 @@ describe("handleRunnerOutboundRequest", () => {
       ok: true,
       pendingNudge: false,
     });
-    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
   });
 
   it("rejects heartbeat proxy traffic when the invocation proxy token does not match", async () => {

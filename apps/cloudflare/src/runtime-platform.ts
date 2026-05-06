@@ -103,6 +103,7 @@ type HostedWebControlTransport =
 
 const HOSTED_MAILBOX_READ_RETRY_ATTEMPTS = 2;
 const HOSTED_MAILBOX_READ_RETRY_DELAY_MS = 100;
+const CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS = 1_000;
 
 export interface HostedWorkspaceCheckpointBridgeAuthority {
   readCurrentLease():
@@ -199,6 +200,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
       })
     : {};
   return {
+    runtimeLivenessIntervalMs: CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
     artifactStore: {
       async get(sha256) {
         const response = await fetchHostedResponse({

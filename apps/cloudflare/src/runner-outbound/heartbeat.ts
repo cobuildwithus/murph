@@ -1,5 +1,7 @@
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
+  requireRunnerOutboundUserStubMethod,
+  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 import {
@@ -44,12 +46,16 @@ export async function handleRunnerHeartbeatRequest(input: {
     }
   }
 
-  return json({
-    inputAvailable: false,
-    nextAlarmAt: null,
-    ok: true,
-    pendingNudge: false,
-  });
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const recordActiveInvocationHeartbeat = requireRunnerOutboundUserStubMethod(
+    stub,
+    "recordActiveInvocationHeartbeat",
+  );
+  return json(await recordActiveInvocationHeartbeat({
+    attemptId: payload.attemptId,
+    leaseGeneration: payload.leaseGeneration,
+    userId: input.userId,
+  }));
 }
 
 async function readHeartbeatPayload(request: Request): Promise<
