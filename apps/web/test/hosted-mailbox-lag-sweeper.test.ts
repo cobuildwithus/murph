@@ -40,6 +40,7 @@ describe("hosted mailbox lag sweeper", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: true,
       inFlight: false,
       nextAlarmAtPresent: true,
     });
@@ -186,6 +187,7 @@ describe("hosted mailbox lag sweeper", () => {
       alreadyRunning: null,
       configured: true,
       errorCode: "TimeoutError",
+      immediateDriveStarted: null,
       inFlight: null,
       nextAlarmAtPresent: null,
     });

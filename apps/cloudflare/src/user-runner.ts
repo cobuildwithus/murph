@@ -464,6 +464,7 @@ export class HostedUserRunner {
       accepted: true,
       alarmScheduled: record.nextWakeAt !== null,
       alreadyRunning,
+      immediateDriveStarted,
       inFlight: alreadyRunning,
       nextAlarmAt: record.nextWakeAt,
     };

@@ -114,6 +114,7 @@ function expectVitestSpawnCall(): void {
   expect(typeof options?.cwd).toBe("string");
   expect(options?.env === process.env).toBe(false);
   expect(options?.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
+  expect(options?.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("1");
   expect(options?.env.MURPH_HOSTED_LOCAL_RUN_ID).toEqual(expect.any(String));
   expect(options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID).toBe(
     options?.env.MURPH_HOSTED_LOCAL_RUN_ID,

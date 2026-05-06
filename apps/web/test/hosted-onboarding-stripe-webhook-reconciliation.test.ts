@@ -50,6 +50,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });

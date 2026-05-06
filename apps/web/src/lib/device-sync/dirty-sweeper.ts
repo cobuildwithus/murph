@@ -75,6 +75,7 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
         logger.info("Hosted device-sync dirty sweeper runner nudge accepted.", {
           alarmScheduled: nudge.alarmScheduled,
           alreadyRunning: nudge.alreadyRunning,
+          immediateDriveStarted: nudge.immediateDriveStarted,
           inFlight: nudge.inFlight,
           nextAlarmAtPresent: nudge.nextAlarmAtPresent,
           userFingerprint,
