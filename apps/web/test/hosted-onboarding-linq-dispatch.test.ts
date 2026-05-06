@@ -2207,14 +2207,7 @@ https://join.example.test/join/code_first_text`);
       ok: true,
       reason: "sent-ai-usage-quota-reply",
     });
-    expect(mocks.claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-    });
-    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0],
-    );
+    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
@@ -2230,7 +2223,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("suppresses repeat Linq AI usage quota replies after the daily quota notice is already marked", async () => {
+  it("sends Linq AI usage quota replies even after the daily quota notice is already marked", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
@@ -2284,12 +2277,19 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(response).toMatchObject({
-      ignored: true,
       ok: true,
-      reason: "ai-usage-quota-reached",
+      reason: "sent-ai-usage-quota-reply",
     });
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        idempotencyKey: "linq-message:evt_ai_usage_limit_repeat",
+        message:
+          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+        replyToMessageId: "msg_123",
+      }),
+    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });

@@ -412,6 +412,7 @@ async function markHostedLinqNoticeSentForSideEffect(
     case "invite_signin":
       return;
     case "ai_usage_quota":
+      return;
     case "daily_quota":
       await claimHostedLinqQuotaReplyNotice({
         memberId: effect.payload.memberId,
