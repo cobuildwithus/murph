@@ -43,6 +43,9 @@ import type {
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
 } from '../../assistant-codex.js'
+import {
+  createAssistantProviderTurnTimingEmitter,
+} from '../provider-turn/timing-trace.js'
 import { fileURLToPath } from 'node:url'
 
 const CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
@@ -141,6 +144,7 @@ export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
 export async function executeCodexAssistantTurnAttempt(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
+  const emitTiming = createAssistantProviderTurnTimingEmitter(input.onTraceEvent)
   const providerConfig = input.providerConfig
   if (!isAssistantCodexTargetConfig(providerConfig)) {
     throw new VaultCliError(
@@ -202,32 +206,46 @@ export async function executeCodexAssistantTurnAttempt(
     sandbox: providerConfig.policy.sandbox ?? undefined,
     workingDirectory: input.workingDirectory,
   } as const
+  emitTiming('codex-input-built')
 
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
   let providerContinuation
   const runFreshThreadFallback = async () => {
-    return await executeCodexAppServerTurn({
+    const prompt = resolveAssistantProviderPrompt({
+      ...input,
+      resumeProviderSessionId: null,
+    })
+    emitTiming('codex-prompt-built')
+    const appServerResult = await executeCodexAppServerTurn({
       ...baseAppServerInput,
-      prompt: resolveAssistantProviderPrompt({
-        ...input,
-        resumeProviderSessionId: null,
-      }),
+      prompt,
       resumeSessionId: undefined,
     })
+    emitTiming('codex-app-server-returned', {
+      providerTurnActionCount: appServerResult.providerActionCount,
+      providerTurnRawEventCount: appServerResult.jsonEvents.length,
+    })
+    return appServerResult
   }
 
   try {
+    const prompt = resolveAssistantProviderPrompt(
+      input.resumeProviderSessionId
+        ? {
+            ...input,
+            activeTurnMessages: undefined,
+          }
+        : input,
+    )
+    emitTiming('codex-prompt-built')
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
-      prompt: resolveAssistantProviderPrompt(
-        input.resumeProviderSessionId
-          ? {
-              ...input,
-              activeTurnMessages: undefined,
-            }
-          : input,
-      ),
+      prompt,
       resumeSessionId: input.resumeProviderSessionId,
+    })
+    emitTiming('codex-app-server-returned', {
+      providerTurnActionCount: result.providerActionCount,
+      providerTurnRawEventCount: result.jsonEvents.length,
     })
   } catch (error) {
     const failureContext = readCodexAppServerTurnFailureContext(error)
@@ -329,7 +347,15 @@ export async function executeCodexAssistantTurnAttempt(
     }
   }
 
-  return {
+  const usage = extractCodexAssistantProviderUsage({
+    providerConfig,
+    rawEvents: result.jsonEvents,
+  })
+  emitTiming('codex-usage-extracted', {
+    providerTurnRawEventCount: result.jsonEvents.length,
+    providerTurnUsagePresent: hasCodexAssistantProviderUsageData(usage),
+  })
+  const attemptResult: AssistantProviderTurnAttemptResult = {
     metadata: {
       activityLabels: [],
       executedToolCount: 0,
@@ -349,12 +375,11 @@ export async function executeCodexAssistantTurnAttempt(
       stderr: result.stderr,
       stdout: result.stdout,
       rawEvents: result.jsonEvents,
-      usage: extractCodexAssistantProviderUsage({
-        providerConfig,
-        rawEvents: result.jsonEvents,
-      }),
+      usage,
     },
   }
+  emitTiming('codex-result-built')
+  return attemptResult
 }
 
 function hasCodexAssistantProviderUsageData(

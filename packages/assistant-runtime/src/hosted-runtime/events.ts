@@ -44,6 +44,10 @@ const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   "murph.assistant-provider-plan-diagnostics.v1";
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = "assistant.provider.plan";
+const ASSISTANT_PROVIDER_TURN_TIMING_TRACE_SCHEMA =
+  "murph.assistant-provider-turn-timing.v1";
+const ASSISTANT_PROVIDER_TURN_TIMING_TRACE_TYPE =
+  "assistant.provider.turn_timing";
 const ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
   "murph.assistant-codex-invalid-output-diagnostics.v1";
 const ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
@@ -74,6 +78,25 @@ const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
 const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
   "hosted-stable-proc-cwd",
   "raw",
+]);
+const HOSTED_ASSISTANT_PROVIDER_TURN_TIMING_STAGE_VALUES = new Set([
+  "attempt-env-built",
+  "attempt-failed-recorded",
+  "attempt-observability-recorded",
+  "attempt-plan-built",
+  "attempt-started-recorded",
+  "attempt-succeeded-recorded",
+  "codex-app-server-returned",
+  "codex-attempt-finished",
+  "codex-input-built",
+  "codex-prompt-built",
+  "codex-result-built",
+  "codex-usage-extracted",
+  "execution-plan-built",
+  "provider-plan-recorded",
+  "provider-plan-trace-emitted",
+  "provider-request-planned",
+  "tool-issues-recorded",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES = new Set([
   "fallback-failed",
@@ -602,6 +625,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     };
   }
 
+  const providerTurnTimingDiagnostic =
+    readHostedAssistantProviderTurnTimingTrace(event);
+  if (providerTurnTimingDiagnostic) {
+    return {
+      details: providerTurnTimingDiagnostic,
+      message: "Hosted assistant provider turn timing captured.",
+    };
+  }
+
   const invalidOutputDiagnostic =
     readHostedAssistantCodexInvalidOutputDiagnosticTrace(event);
   if (invalidOutputDiagnostic) {
@@ -1072,6 +1104,65 @@ function readHostedAssistantCodexAppServerTimingTrace(
     "codexTimingTurnIdPresent",
     readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingTurnIdPresent"),
   );
+
+  return details;
+}
+
+function readHostedAssistantProviderTurnTimingTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_PROVIDER_TURN_TIMING_TRACE_SCHEMA
+    || type !== ASSISTANT_PROVIDER_TURN_TIMING_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const stage = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "providerTurnStage",
+    HOSTED_ASSISTANT_PROVIDER_TURN_TIMING_STAGE_VALUES,
+  );
+  if (!stage) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    providerTraceKind: "provider.turn_timing",
+    providerTurnStage: stage,
+    providerTurnTraceType: "provider-turn",
+    schema: ASSISTANT_PROVIDER_TURN_TIMING_TRACE_SCHEMA,
+  };
+
+  for (const key of [
+    "providerTurnOk",
+    "providerTurnUsagePresent",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of [
+    "providerTurnActionCount",
+    "providerTurnElapsedMs",
+    "providerTurnRawEventCount",
+    "providerTurnTotalElapsedMs",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
 
   return details;
 }
