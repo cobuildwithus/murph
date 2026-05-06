@@ -59,6 +59,13 @@ describe("cloudflare worker queue backpressure routes", () => {
         inFlight: false,
         nextAlarmAt: null,
       })),
+      nudgeHostedRunnerForUser: vi.fn(async (_userId: string) => ({
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: false,
+        inFlight: false,
+        nextAlarmAt: null,
+      })),
       runUntilIdleOrBudget: vi.fn(async () => ({
         nextWakeAt: null,
         status: "idle" as const,
@@ -91,8 +98,9 @@ describe("cloudflare worker queue backpressure routes", () => {
       inFlight: false,
       nextAlarmAt: null,
     });
-    expect(stub.bindUser).toHaveBeenCalledWith("member_123");
-    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 });

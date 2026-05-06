@@ -306,6 +306,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.nudgeHostedRunner();
   }
 
+  async nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult> {
+    return this.runner.nudgeHostedRunnerForUser(userId);
+  }
+
   async ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -662,8 +666,8 @@ async function handleRunnerNudgeRoute(
     throw error;
   }
 
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  const nudge = await stub.nudgeHostedRunner();
+  const stub = context.env.USER_RUNNER.getByName(userId);
+  const nudge = await stub.nudgeHostedRunnerForUser(userId);
 
   return json(nudge, 202);
 }

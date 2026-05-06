@@ -78,6 +78,7 @@ Updated: 2026-05-06
 - 2026-05-06 deploy unblock decision: write Health Commons generated artifacts through temp-file rename so concurrent deploy builds do not observe partially written generated files.
 - 2026-05-06 hot-path receipt fallback decision: hosted queue-only auto-replies skip the global turn-receipt fallback scan and rely on terminal evidence/cursors on the live send path; the receipt fallback remains enabled for non-hosted/recovery paths.
 - 2026-05-06 pre-scan input decision: automation passes refresh the assistant input source once before reading automation state and scanning so messages that arrive while a workspace restore is already in progress are imported before candidate selection.
+- 2026-05-06 nudge RPC decision: the control nudge route calls one Durable Object RPC that binds the user and nudges internally, avoiding the route-side `bindUser` RPC plus second `nudgeHostedRunner` RPC on the live webhook handoff path.
 
 ## Current evidence
 
@@ -140,3 +141,6 @@ Updated: 2026-05-06
   - `pnpm --workspace-concurrency=4 --filter @murphai/contracts --filter @murphai/runtime-state --filter @murphai/core --filter @murphai/gateway-core --filter @murphai/health-metrics --filter @murphai/health-commons --filter @murphai/importers --filter @murphai/device-syncd --filter @murphai/hosted-execution --filter @murphai/messaging-ingress --filter @murphai/parsers --filter @murphai/inboxd --filter @murphai/query --filter @murphai/operator-config --filter @murphai/vault-usecases --filter @murphai/inbox-services --filter @murphai/assistant-engine --filter @murphai/gateway-local --filter @murphai/assistantd --filter @murphai/assistant-cli --filter @murphai/assistant-runtime --filter @murphai/cloudflare-hosted-control --filter @murphai/setup-cli --filter @murphai/murph --filter @murphai/cloudflare-runner run build`
   - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-automation-runtime.test.ts --testNamePattern "hosted queue-only|input before recovery|timing traces"`
   - `pnpm --dir packages/assistant-engine typecheck`
+  - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/index.test.ts apps/cloudflare/test/index-backpressure.test.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage`
+  - `pnpm --dir apps/cloudflare typecheck`
+  - `git diff --check -- apps/cloudflare/src/index.ts apps/cloudflare/src/worker-routes/shared.ts apps/cloudflare/src/user-runner.ts apps/cloudflare/test/index.test.ts apps/cloudflare/test/index-backpressure.test.ts`
