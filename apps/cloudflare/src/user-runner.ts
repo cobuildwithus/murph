@@ -1462,9 +1462,7 @@ export class HostedUserRunner {
     }
     await this.stateStore.clearIdleShutdownCheckpoint();
     await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: destroyed.ok ? null : new Date(
-        Date.now() + this.env.retryDelayMs,
-      ).toISOString(),
+      preferredWakeAt: null,
     });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",

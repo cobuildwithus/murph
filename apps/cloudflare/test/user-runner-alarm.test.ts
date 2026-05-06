@@ -1730,6 +1730,65 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("does not schedule a normal drain when post-checkpoint container destroy fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-cleanup-destroy-fail"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {
+      throw new Error("destroy unavailable after checkpoint");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await expect(
+      runner["finishIdleShutdownCheckpoint"]({ userId: "member_123" }),
+    ).resolves.toBeUndefined();
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(alarms.at(-1)).toBe("deleted");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                last_error_code,
+                next_wake_at,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      last_error_code: null,
+      next_wake_at: null,
+      retry_failure_count: 0,
+    }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          destroyOk: false,
+        }),
+        level: "warn",
+        message: "Hosted runner completed idle-shutdown checkpoint container cleanup.",
+      }),
+    );
+  });
   it("does not finish idle-shutdown cleanup when the runtime only returns scheduled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
