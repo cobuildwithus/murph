@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { Unplug } from "lucide-react";
 
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
@@ -349,23 +348,17 @@ function SourceCard({
 
       {source.connected ? (
         <div className="mt-auto flex flex-col gap-2">
-          <div className="flex min-h-10 flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-foreground">Connected</span>
-            {canDisconnect ? (
-              <Button
-                type="button"
-                aria-label={`Disconnect ${source.name}`}
-                disabled={pendingDisconnect}
-                onClick={() => onDisconnectTargetChange(source)}
-                size="xs"
-                variant="outline"
-                className="ml-auto border-border/80 bg-background/70 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-              >
-                <Unplug className="size-3" aria-hidden="true" />
-                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
-              </Button>
-            ) : null}
-          </div>
+          {canDisconnect ? (
+            <button
+              type="button"
+              aria-label={`Disconnect ${source.name}`}
+              disabled={pendingDisconnect}
+              onClick={() => onDisconnectTargetChange(source)}
+              className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline self-start"
+            >
+              {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+            </button>
+          ) : null}
           {errorMessage ? (
             <p role="alert" className="text-xs leading-snug text-destructive">
               {errorMessage}
@@ -686,21 +679,22 @@ function ConnectDisconnectDialog({
             {errorMessage}
           </p>
         ) : null}
-        <div className="flex flex-wrap justify-end gap-3">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            Keep connected
-          </Button>
+        <div className="flex flex-col gap-2">
           <Button
             type="button"
-            variant="destructive"
+            size="lg"
             onClick={() => {
               if (source) {
                 void onConfirm(source);
               }
             }}
             disabled={pending}
+            className="w-full"
           >
             {pending ? "Disconnecting..." : "Disconnect"}
+          </Button>
+          <Button type="button" size="lg" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending} className="w-full">
+            Cancel
           </Button>
         </div>
       </DialogContent>
