@@ -110,6 +110,7 @@ test.sequential(
         'experiment',
         'start',
         'typed-confounders',
+        '--custom',
         '--title',
         'Typed Confounders',
         '--started-on',

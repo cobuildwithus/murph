@@ -211,12 +211,12 @@ function shiftLocalDate(date: string, days: number): string {
   return shifted.toISOString().slice(0, 10)
 }
 
-function normalizeProtocolVariantKey(value: string): string {
+function normalizeProtocolVariantKey(value: string, optionName = 'protocol-key'): string {
   const trimmed = value.trim()
   if (!trimmed.startsWith('protocol_variant:')) {
     throw new VaultCliError(
       'invalid_option',
-      '--protocol-key must be a full protocol_variant:<family>/<variant> key.',
+      `--${optionName} must be a full protocol_variant:<family>/<variant> key.`,
     )
   }
 
@@ -237,6 +237,29 @@ function requireProtocolVariantEntity(key: string): ProtocolVariantEntity {
     throw new VaultCliError(
       'not_found',
       `No Health Commons protocol variant matched ${key}.`,
+    )
+  }
+
+  return entity
+}
+
+function resolveProtocolVariantEntity(
+  lookup: string,
+  optionName = 'from-protocol',
+): ProtocolVariantEntity {
+  const trimmed = lookup.trim()
+  const reader = getGeneratedHealthCommonsCatalogReader()
+  const entity = trimmed.startsWith('protocol_variant:')
+    ? reader.findByKey(normalizeProtocolVariantKey(trimmed, optionName))
+    : reader.findByRouteId({
+        entityType: 'protocol_variant',
+        routeId: trimmed,
+      })
+
+  if (!isProtocolVariantEntity(entity)) {
+    throw new VaultCliError(
+      'not_found',
+      `No Health Commons protocol variant matched --${optionName} "${lookup}".`,
     )
   }
 
@@ -438,7 +461,8 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
     startedOn?: string
     status?: z.infer<typeof experimentStatusSchema>
     body?: string
-    protocolKey?: string
+    fromProtocol?: string
+    custom?: boolean
     testPlanId?: string
     pageRevisionId?: string
     runSpecRevisionId?: string
@@ -470,10 +494,39 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
     weeklyDigestEnabled?: boolean
   }
 }) {
+  const fromProtocol = input.options.fromProtocol?.trim()
+  const custom = input.options.custom === true
+
+  if (fromProtocol !== undefined && custom) {
+    throw new VaultCliError(
+      'invalid_option',
+      'experiment start accepts either --from-protocol or --custom, not both.',
+    )
+  }
+
+  if (fromProtocol === undefined && !custom) {
+    throw new VaultCliError(
+      'invalid_option',
+      'experiment start must choose a source: use --from-protocol <key-or-route> for a Health Commons protocol-backed run, or --custom for an intentionally unlinked custom experiment.',
+    )
+  }
+
+  if (
+    custom &&
+    (input.options.testPlanId !== undefined ||
+      input.options.pageRevisionId !== undefined ||
+      input.options.runSpecRevisionId !== undefined)
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--test-plan-id, --page-revision-id, and --run-spec-revision-id are only valid with --from-protocol.',
+    )
+  }
+
   const protocol =
-    input.options.protocolKey === undefined
+    fromProtocol === undefined
       ? undefined
-      : requireProtocolVariantEntity(input.options.protocolKey)
+      : resolveProtocolVariantEntity(fromProtocol, 'from-protocol')
   const testPlan = protocol
     ? resolveProtocolTestPlan({
         entity: protocol,
@@ -676,7 +729,7 @@ async function hydrateExperimentProtocolDefaults(input: {
   const payload = buildExperimentPlanPayloadFromTypedOptions({
     slug: current.slug,
     options: {
-      protocolKey,
+      fromProtocol: protocolKey,
       testPlanId: input.options.testPlanId ?? current.commonsProtocolRef?.testPlanId,
       baselineStart: input.options.baselineStart ?? current.runPlan?.baselineStart,
       baselineEnd: input.options.baselineEnd ?? current.runPlan?.baselineEnd,
@@ -1014,7 +1067,7 @@ export function registerExperimentCommands(
 
   experiment.command('start', {
     description:
-      'Start a typed experiment run, hydrating protocol defaults when a Health Commons protocol key is supplied.',
+      'Start a typed experiment run from a Health Commons protocol or as an explicit custom experiment.',
     args: z.object({
       slug: slugSchema,
     }),
@@ -1024,11 +1077,15 @@ export function registerExperimentCommands(
       startedOn: localDateSchema.optional().describe('Optional experiment start date.'),
       status: experimentStatusSchema.optional().describe('Optional experiment status.'),
       body: z.string().min(1).optional().describe('Optional markdown body.'),
-      protocolKey: z
+      fromProtocol: z
         .string()
         .min(1)
         .optional()
-        .describe('Full Health Commons protocol_variant:<family>/<variant> key.'),
+        .describe('Health Commons protocol_variant key or experiment route id.'),
+      custom: z
+        .boolean()
+        .optional()
+        .describe('Start an intentionally unlinked custom experiment.'),
       testPlanId: z
         .string()
         .min(1)

@@ -453,6 +453,7 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
     ['blood-test', 'upsert'],
     ['condition', 'upsert'],
     ['event', 'upsert'],
+    ['experiment', 'create'],
     ['family', 'upsert'],
     ['food', 'upsert'],
     ['genetics', 'upsert'],

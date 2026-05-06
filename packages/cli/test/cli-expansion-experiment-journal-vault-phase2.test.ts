@@ -169,7 +169,9 @@ test('experiment start schema exposes typed fields while protocol import-json ke
 
   assert.deepEqual(experimentStartSchema.args.required, ['slug'])
   assert.equal('input' in experimentStartSchema.options.properties, false)
-  assert.equal('protocolKey' in experimentStartSchema.options.properties, true)
+  assert.equal('protocolKey' in experimentStartSchema.options.properties, false)
+  assert.equal('fromProtocol' in experimentStartSchema.options.properties, true)
+  assert.equal('custom' in experimentStartSchema.options.properties, true)
   assert.equal('interventionStart' in experimentStartSchema.options.properties, true)
   assert.equal('dryRun' in experimentStartSchema.options.properties, true)
   assert.equal('input' in protocolImportJsonSchema.options.properties, true)
@@ -183,6 +185,70 @@ test('experiment start schema exposes typed fields while protocol import-json ke
     'vault',
   ])
   assert.equal('confirmedPlan' in experimentStartSchema.output.properties, false)
+})
+
+test.sequential('experiment start requires an explicit protocol or custom source', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-source-'))
+
+  try {
+    const missingSource = await runSliceCli([
+      'experiment',
+      'start',
+      'sleep-reset',
+      '--title',
+      'Sleep Reset',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-biomarker-key',
+      'biomarker:sleep-efficiency',
+      '--vault',
+      vaultRoot,
+    ])
+    const conflictingSource = await runSliceCli([
+      'experiment',
+      'start',
+      'sleep-reset',
+      '--from-protocol',
+      'finnish-sauna',
+      '--custom',
+      '--intervention-start',
+      '2026-05-01',
+      '--vault',
+      vaultRoot,
+    ])
+    const customWithProtocolOnlyOption = await runSliceCli([
+      'experiment',
+      'start',
+      'sleep-reset',
+      '--custom',
+      '--test-plan-id',
+      'rhr-21d',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-biomarker-key',
+      'biomarker:sleep-efficiency',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(missingSource.ok, false)
+    assert.match(
+      missingSource.error.message ?? '',
+      /must choose a source: use --from-protocol <key-or-route>.*or --custom/u,
+    )
+    assert.equal(conflictingSource.ok, false)
+    assert.match(
+      conflictingSource.error.message ?? '',
+      /either --from-protocol or --custom, not both/u,
+    )
+    assert.equal(customWithProtocolOnlyOption.ok, false)
+    assert.match(
+      customWithProtocolOnlyOption.error.message ?? '',
+      /--test-plan-id, --page-revision-id, and --run-spec-revision-id are only valid with --from-protocol/u,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test.sequential('protocol import-json writes a reviewed private protocol payload', async () => {
@@ -417,6 +483,7 @@ test.sequential(
         'experiment',
         'start',
         'sauna-daily',
+        '--custom',
         '--title',
         'Sauna Daily',
         '--hypothesis',
@@ -879,8 +946,8 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'experiment',
       'start',
       'sauna-two-week',
-      '--protocol-key',
-      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+      '--from-protocol',
+      'finnish-sauna',
       '--intervention-start',
       '2026-05-01',
       '--dry-run',
@@ -900,7 +967,7 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'experiment',
       'start',
       'sauna-two-week',
-      '--protocol-key',
+      '--from-protocol',
       'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
       '--intervention-start',
       '2026-05-01',
@@ -996,6 +1063,7 @@ test.sequential(
         'experiment',
         'start',
         'context-seam',
+        '--custom',
         '--title',
         'Context Seam',
         '--started-on',
@@ -1274,6 +1342,7 @@ test.sequential(
         'experiment',
         'start',
         'focus-sprint',
+        '--custom',
         '--title',
         'Focus Sprint',
         '--started-on',
@@ -1454,6 +1523,7 @@ test.sequential(
         'experiment',
         'start',
         'focus-sprint',
+        '--custom',
         '--title',
         'Focus Sprint',
         '--started-on',

@@ -71,7 +71,7 @@ Useful commands:
 - `vault-cli experiment progress <id> --format json` for current adherence, setup readiness, analysis readiness, wearable coverage, and review context after due logic says a check is actionable.
 - `vault-cli experiment outcome analyze <id> --format json` when the user wants a run review, end-of-run interpretation, or a worth-repeating judgment.
 - `vault-cli experiment outcome write <id> --format json` when the deterministic outcome is ready, the user wants it persisted, and the experiment record should link to the saved outcome artifact.
-- `vault-cli experiment start <slug> --protocol-key <protocol_variant:key> --intervention-start <YYYY-MM-DD> ...` only after the setup is resolved enough to persist a run.
+- `vault-cli experiment start <slug> --from-protocol <key-or-route> --intervention-start <YYYY-MM-DD> ...` only after protocol-linked setup is resolved enough to persist a run. Use `--custom` only when no same-family Health Commons protocol exists or the user explicitly wants an unlinked experiment.
 - `vault-cli experiment start <slug> ... --dry-run --format json` to validate typed start fields before writing.
 - `vault-cli experiment edit <id> ...` when an existing run needs scalar fixes, richer `commonsProtocolRef`, `runPlan`, `onboarding`, or `assistantSupport` fields.
 - Prefer `vault-cli automation save` with typed schedule, instruction, and route flags after the user opts into reminders or check-ins. Use `automation import-json --input -` only for advanced payloads the typed surface cannot express.

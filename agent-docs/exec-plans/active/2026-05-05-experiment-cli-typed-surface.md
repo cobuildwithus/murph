@@ -43,15 +43,16 @@ Responsibilities:
 - Support `--dry-run` as the typed replacement for the current JSON `experiment plan --input` validation flow.
 - Fail with typed missing-field errors when required safety, logistics, windows, or measurement fields are absent.
 
-Protocol-backed starts may omit `--title` and `--hypothesis` when `--protocol-key` can hydrate clear defaults. Protocol-free starts must provide enough typed fields to avoid creating another incomplete active run.
+Protocol-backed starts may omit `--title` and `--hypothesis` when `--from-protocol` can hydrate clear defaults. Custom starts must opt in with `--custom` and provide enough typed fields to avoid creating another incomplete active run. `experiment start` without either `--from-protocol` or `--custom` fails.
 
 Assistant prompt examples should use the smallest normal form, then add only explicit user answers or overrides:
 
-`vault-cli experiment start <slug> --protocol-key <protocol_variant:key> --intervention-start <YYYY-MM-DD>`
+`vault-cli experiment start <slug> --from-protocol <key-or-route> --intervention-start <YYYY-MM-DD>`
 
 Assistant-normal typed options:
 
-- `--protocol-key <protocol_variant:key>`
+- `--from-protocol <key-or-route>`
+- `--custom`
 - `--test-plan-id <id>`
 - `--title <title>`
 - `--hypothesis <text>`
@@ -217,9 +218,9 @@ Three review agents stress-tested the plan and current patch. Folded refinements
 
 ## Open Questions
 
-- `--protocol-key` may choose the protocol's default onboarding `planDefaults.testPlanId`; callers can override with `--test-plan-id`.
+- `experiment start --from-protocol` may choose the protocol's default onboarding `planDefaults.testPlanId`; callers can override with `--test-plan-id`.
 - `experiment edit --hydrate-protocol-defaults` does not overwrite existing user-authored structured fields. Overwrites require explicit typed edit flags.
-- Should protocol-free `experiment start` require explicit `runPlan` and `analysisPlan` fields, or should it only permit `--status planned` until those fields exist?
+- Resolved 2026-05-07: protocol-free `experiment start` requires explicit `--custom`; starting with neither `--from-protocol` nor `--custom` is invalid.
 
 ## Working Set
 
