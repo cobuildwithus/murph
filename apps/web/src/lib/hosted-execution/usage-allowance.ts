@@ -595,6 +595,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
+  const limitIncreased = current.limitUsdMicros < resolved.limitUsdMicros;
   const upgraded = await input.tx.hostedAiUsagePeriod.update({
     where: {
       memberId_periodStart: {
@@ -608,6 +609,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
         ? current.blockedAt ?? input.now
         : null,
       limitUsdMicros: resolved.limitUsdMicros,
+      ...(limitIncreased ? { limitNoticeSentAt: null } : {}),
       periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },

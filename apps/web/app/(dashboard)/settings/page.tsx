@@ -7,6 +7,7 @@ import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { getPrisma } from "@/src/lib/prisma";
+import { canUpgradeHostedBillingPlanToEdge } from "@/src/lib/hosted-onboarding/billing-plans";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
@@ -56,7 +57,11 @@ export default async function SettingsPage() {
           </div>
           <HostedBillingSettings
             authenticated={authenticated}
-            currentBillingPlanCode={billingRef?.currentBillingPlanCode ?? null}
+            canUpgradeToEdge={canUpgradeHostedBillingPlanToEdge({
+              currentBillingPhase: billingRef?.currentBillingPhase,
+              currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+              currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+            })}
           />
         </section>
 

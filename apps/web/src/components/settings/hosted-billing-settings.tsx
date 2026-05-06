@@ -3,7 +3,7 @@ import { HostedBillingSettingsAction } from "./hosted-billing-settings-action";
 
 export function HostedBillingSettings(props: {
   authenticated: boolean;
-  currentBillingPlanCode?: string | null;
+  canUpgradeToEdge?: boolean;
 }) {
   if (!props.authenticated) {
     return (
@@ -20,7 +20,7 @@ export function HostedBillingSettings(props: {
         Manage your plan and payment details.
       </p>
       <HostedBillingSettingsAction
-        showUpgrade={props.currentBillingPlanCode === "launch_monthly"}
+        showUpgrade={props.canUpgradeToEdge === true}
       />
     </div>
   );

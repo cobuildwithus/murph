@@ -155,6 +155,29 @@ export function parseHostedBillingPhase(value: unknown): HostedBillingPhase | nu
     : null;
 }
 
+export function isHostedPulseTrialBillingState(input: {
+  currentBillingPhase?: unknown;
+  currentCheckoutOffer?: unknown;
+}): boolean {
+  const phase = parseHostedBillingPhase(input.currentBillingPhase);
+  const offer = parseHostedBillingCheckoutOffer(input.currentCheckoutOffer);
+
+  return phase === "trial" ||
+    (offer === HOSTED_PULSE_TRIAL_OFFER && phase !== "paid");
+}
+
+export function canUpgradeHostedBillingPlanToEdge(input: {
+  currentBillingPhase?: unknown;
+  currentBillingPlanCode?: unknown;
+  currentCheckoutOffer?: unknown;
+}): boolean {
+  const phase = parseHostedBillingPhase(input.currentBillingPhase);
+
+  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
+    phase === "paid" &&
+    !isHostedPulseTrialBillingState(input);
+}
+
 export function requireHostedPulseTrialPolicy(
   policyVersion: string | null | undefined,
 ): HostedPulseTrialPolicy | null {

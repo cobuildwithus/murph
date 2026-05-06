@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
-  requireHostedStripeCheckoutConfig: vi.fn(),
+  requireHostedStripeBillingPlanConfig: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   stripe: {
     billingPortal: {
@@ -38,7 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
-  requireHostedStripeCheckoutConfig: mocks.requireHostedStripeCheckoutConfig,
+  requireHostedStripeBillingPlanConfig: mocks.requireHostedStripeBillingPlanConfig,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
@@ -72,12 +72,14 @@ describe("upgradeHostedBillingPlan", () => {
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     });
-    mocks.requireHostedStripeCheckoutConfig.mockImplementation((input: {
+    mocks.requireHostedStripeBillingPlanConfig.mockImplementation((input: {
       billingPlanCode: "launch_monthly" | "launch_edge_monthly";
     }) => ({
       billingPlanCode: input.billingPlanCode,
@@ -111,7 +113,11 @@ describe("upgradeHostedBillingPlan", () => {
       ],
       metadata: {
         billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
         memberId: "member_123",
+        trialDurationDays: "",
+        trialPolicyVersion: "",
+        trialUsageLimitUsdMicros: "",
       },
       status: "active",
     }));
@@ -121,6 +127,7 @@ describe("upgradeHostedBillingPlan", () => {
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.resolveHostedAiUsageGate.mockResolvedValue({
       allowed: true,
+      billingPlanCode: "launch_edge_monthly",
     });
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       status: "sent",
@@ -152,7 +159,11 @@ describe("upgradeHostedBillingPlan", () => {
       ],
       metadata: {
         billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
         memberId: "member_123",
+        trialDurationDays: "",
+        trialPolicyVersion: "",
+        trialUsageLimitUsdMicros: "",
       },
       payment_behavior: "pending_if_incomplete",
       proration_behavior: "always_invoice",
@@ -183,9 +194,211 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
+  test("recovers when Stripe is already Edge but local billing is still Pulse", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_usage", "price_edge_usage"],
+      ],
+      metadata: {
+        billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_edge_monthly",
+      status: "upgraded",
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "sub_123",
+      }),
+      expect.objectContaining({
+        sourceType: "stripe.customer.subscription.updated.inline-plan-upgrade",
+      }),
+      mocks.prismaClient,
+    );
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "billing.plan-upgrade",
+      userId: "member_123",
+    });
+  });
+
+  test("normalizes stale Stripe metadata before recovering an already-applied Edge upgrade", async () => {
+    const staleMetadata: Record<string, string> = {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      trialDurationDays: "7",
+      trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialUsageLimitUsdMicros: "2500000",
+    };
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_usage", "price_edge_usage"],
+      ],
+      metadata: staleMetadata,
+      status: "active",
+    }));
+    mocks.stripe.subscriptions.update.mockImplementationOnce(async (_id, params) =>
+      makeSubscription({
+        customer: "cus_123",
+        items: [
+          ["si_recurring", "price_edge_recurring"],
+          ["si_usage", "price_edge_usage"],
+        ],
+        metadata: applyStripeMetadataUpdate(staleMetadata, params.metadata ?? {}),
+        status: "active",
+      })
+    );
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_edge_monthly",
+      status: "upgraded",
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      {
+        expand: ["items.data.price"],
+        metadata: {
+          billingPlanCode: "launch_edge_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+          trialDurationDays: "",
+          trialPolicyVersion: "",
+          trialUsageLimitUsdMicros: "",
+        },
+      },
+      {
+        idempotencyKey: expect.stringMatching(
+          /^hosted-billing-plan-upgrade-metadata:[a-f0-9]{64}$/u,
+        ),
+      },
+    );
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          billingPlanCode: "launch_edge_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+      }),
+      expect.any(Object),
+      mocks.prismaClient,
+    );
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "billing.plan-upgrade",
+      userId: "member_123",
+    });
+  });
+
+  test("rejects Pulse Trial upgrades before mutating Stripe", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("does not preserve Pulse Trial metadata when upgrading to Edge", async () => {
+    const oldMetadata: Record<string, string> = {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      trialDurationDays: "7",
+      trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialUsageLimitUsdMicros: "2500000",
+    };
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+        ["si_usage", "price_pulse_usage"],
+      ],
+      metadata: oldMetadata,
+      status: "active",
+    }));
+    mocks.stripe.subscriptions.update.mockImplementationOnce(async (_id, params) => {
+      return makeSubscription({
+        customer: "cus_123",
+        items: [
+          ["si_recurring", "price_edge_recurring"],
+          ["si_usage", "price_edge_usage"],
+        ],
+        metadata: applyStripeMetadataUpdate(oldMetadata, params.metadata ?? {}),
+        status: "active",
+      });
+    });
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_edge_monthly",
+      status: "upgraded",
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        metadata: {
+          billingPlanCode: "launch_edge_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+          trialDurationDays: "",
+          trialPolicyVersion: "",
+          trialUsageLimitUsdMicros: "",
+        },
+      }),
+      expect.any(Object),
+    );
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          billingPlanCode: "launch_edge_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+      }),
+      expect.any(Object),
+      mocks.prismaClient,
+    );
+  });
+
   test("returns already_on_plan without calling Stripe when the billing ref is already Edge", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -236,7 +449,9 @@ describe("upgradeHostedBillingPlan", () => {
 
   test("rejects missing Stripe subscription identifiers", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: null,
@@ -283,15 +498,26 @@ describe("upgradeHostedBillingPlan", () => {
   });
 
   test("maps Stripe provider failures to safe retryable route errors", async () => {
-    mocks.stripe.subscriptions.retrieve.mockRejectedValueOnce(
-      new Error("No such subscription: sub_sensitive_123"),
-    );
+    const error = new Error("No such subscription");
+    Object.assign(error, {
+      code: "resource_missing",
+      requestId: "req_123",
+      statusCode: 404,
+      type: "StripeInvalidRequestError",
+    });
+    mocks.stripe.subscriptions.retrieve.mockRejectedValueOnce(error);
 
     await expect(upgradeHostedBillingPlan({
       memberId: "member_123",
       targetPlanCode: "launch_edge_monthly",
     })).rejects.toMatchObject({
       code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+      details: {
+        code: "resource_missing",
+        requestIdPresent: true,
+        statusCode: 404,
+        type: "StripeInvalidRequestError",
+      },
       httpStatus: 502,
       message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
       retryable: true,
@@ -364,6 +590,25 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
+
+  test("does not report upgraded when local reconciliation has not reached Edge", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+    });
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_UPGRADE_RECONCILIATION_PENDING",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
 });
 
 function makeSubscription(input: {
@@ -389,4 +634,22 @@ function makeSubscription(input: {
     pending_update: input.pendingUpdate ? {} : null,
     status: input.status,
   } as Stripe.Subscription;
+}
+
+function applyStripeMetadataUpdate(
+  existing: Record<string, string>,
+  update: Stripe.MetadataParam,
+): Record<string, string> {
+  const metadata = {
+    ...existing,
+  };
+  for (const [key, value] of Object.entries(update)) {
+    if (value === "") {
+      delete metadata[key];
+    } else if (typeof value === "string") {
+      metadata[key] = value;
+    }
+  }
+
+  return metadata;
 }
