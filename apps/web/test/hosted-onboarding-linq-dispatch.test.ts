@@ -2166,7 +2166,8 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 100_000n,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message: "Hey - you've reached your usage limit for the month. Upgrade to Edge for more usage.",
+        message:
+          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
       },
     });
     const prisma = asPrismaTransactionClient({
@@ -2221,7 +2222,8 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         idempotencyKey: "linq-message:evt_ai_usage_limit",
-        message: "Hey - you've reached your usage limit for the month. Upgrade to Edge for more usage.",
+        message:
+          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
         replyToMessageId: "msg_123",
       }),
     );
@@ -2245,7 +2247,8 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 100_000n,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message: "Hey - you've reached your usage limit for the month. Upgrade to Edge for more usage.",
+        message:
+          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
       },
     });
     const prisma = asPrismaTransactionClient({

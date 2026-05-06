@@ -6,6 +6,7 @@ import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  resolveHostedAiUsageGate: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
 }));
 
@@ -68,6 +69,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
+}));
+
 const MEMBER = {
   billingStatus: "active",
   createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -77,12 +82,23 @@ const MEMBER = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: MEMBER,
     session: null,
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
+  mocks.resolveHostedAiUsageGate.mockResolvedValue({
+    allowed: true,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    remainingUsdMicros: 4_000_000n,
+    spentUsdMicros: 6_000_000n,
+  });
 });
 
 test("HomePage hides the connect devices card when device sync is already active", async () => {
@@ -97,4 +113,32 @@ test("HomePage hides the connect devices card when device sync is already active
   assert.match(markup, /Sync labs/);
   assert.match(markup, /Start an experiment/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls[0]?.[0]?.member, MEMBER);
+  assert.equal(mocks.resolveHostedAiUsageGate.mock.calls[0]?.[0]?.memberId, MEMBER.id);
+});
+
+test("HomePage shows a usage-limit upgrade banner when assistant usage is exhausted", async () => {
+  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_000n,
+    userNotice: {
+      code: "pulse_upgrade_edge",
+      message:
+        "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /You are out of included usage/);
+  assert.match(markup, /Upgrade to Edge/);
+  assert.match(markup, /href="\/settings"/);
 });
