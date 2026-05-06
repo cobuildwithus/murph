@@ -175,6 +175,58 @@ describe('assistant local PDF evidence guidance', () => {
 })
 
 describe('assistant consumption lookup guidance', () => {
+  it('treats raw health and meal data as implicit logging intent', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'When the audience/privacy section says this conversation is private enough for full health context',
+    )
+    expect(prompt).toContain(
+      'treat raw health, meal, supplement, workout, activity, symptom, body, or physical-state data as implicit logging intent',
+    )
+    expect(prompt).toContain(
+      'when the user simply sends it without an explicit question',
+    )
+    expect(prompt).toContain(
+      'Examples include "I just ate this", a meal photo, a supplement label, a weight/body measurement, a symptom note, or a workout snippet',
+    )
+    expect(prompt).toContain(
+      'Use the matching write surface, log the health-relevant fields that can be recovered, mark uncertainty, and briefly confirm what was saved',
+    )
+    expect(prompt).toContain(
+      'Omit incidental identifiers, faces, exact locations, order IDs, and unrelated image or document details; save identifier-bearing details only when the user explicitly asks and the audience/privacy rules and selected write surface allow that kind of detail',
+    )
+    expect(prompt).toContain(
+      'Do not log when the user clearly asks only for analysis/advice, asks not to save, the audience/privacy section says not to store sensitive health details',
+    )
+    expect(prompt).toContain(
+      'the evidence is too ambiguous to make a meaningful record without one targeted follow-up',
+    )
+  })
+
+  it('keeps implicit logging gated off in non-private prompt contexts', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      allowSensitiveHealthContext: false,
+    }))
+
+    expect(prompt).toContain('This conversation is not private enough')
+    expect(prompt).toContain(
+      'Do not volunteer, quote back, or store sensitive health details unless the user just raised them and they are necessary to answer the current request',
+    )
+    expect(prompt).toContain(
+      'the audience/privacy section says not to store sensitive health details',
+    )
+    expect(prompt).toContain(
+      'When the audience/privacy section says this conversation is private enough, shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission',
+    )
+    expect(prompt).toContain(
+      'Do not use this write-surface permission when the audience/privacy section says not to store sensitive health details',
+    )
+    expect(prompt).not.toContain(
+      'Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface.',
+    )
+  })
+
   it('uses a concise decision rule for identifiable consumed products', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -526,6 +578,22 @@ describe('assistant experiment onboarding guidance', () => {
 })
 
 describe('assistant notification decision guidance', () => {
+  it('does not include normal conversation write-intent guidance', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput(),
+    ).prompt
+
+    expect(prompt).toContain('This turn is a scheduled notification decision')
+    expect(prompt).toContain('read-only CLI commands before deciding')
+    expect(prompt).not.toContain('Normal conversation logging:')
+    expect(prompt).not.toContain(
+      'treat raw health, meal, supplement, workout, activity, symptom, body, or physical-state data as implicit logging intent',
+    )
+    expect(prompt).not.toContain(
+      'Use the matching write surface directly for straightforward captures and memory updates',
+    )
+  })
+
   it('carves first-session prep automations out of deterministic followup due checks', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
