@@ -115,6 +115,17 @@ class HostedContainerRequestBodyTooLargeError extends RangeError {
   }
 }
 
+interface HostedContainerProcessState {
+  ppid: number | null;
+  state: string | null;
+  uid: number | null;
+}
+
+interface HostedContainerProcessSnapshot {
+  pids: Set<number>;
+  rootUid: number | null;
+}
+
 export async function startHostedContainerEntrypoint(input: {
   controlToken: string | null;
   port?: number;
@@ -536,12 +547,13 @@ function resolveHostedContainerRuntimeDependencies(
 
 async function enforceHostedContainerProcessIsolation(
   processApi: HostedContainerProcessApi,
+  baseline: HostedContainerProcessSnapshot,
 ): Promise<void> {
   if (process.platform === "win32") {
     return;
   }
 
-  const firstPass = await listUnexpectedHostedContainerDescendantProcessIds(process.pid, processApi);
+  const firstPass = await listUnexpectedHostedContainerProcessIds(process.pid, processApi, baseline);
   if (firstPass.length === 0) {
     return;
   }
@@ -556,7 +568,7 @@ async function enforceHostedContainerProcessIsolation(
 
   await new Promise((resolve) => setTimeout(resolve, 25));
 
-  const secondPass = await listUnexpectedHostedContainerDescendantProcessIds(process.pid, processApi);
+  const secondPass = await listUnexpectedHostedContainerProcessIds(process.pid, processApi, baseline);
   if (secondPass.length > 0) {
     throw new HostedRunnerShellIsolationError(
       `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
@@ -564,10 +576,29 @@ async function enforceHostedContainerProcessIsolation(
   }
 }
 
-async function listUnexpectedHostedContainerDescendantProcessIds(
+async function snapshotHostedContainerProcesses(
   rootPid: number,
   processApi: HostedContainerProcessApi,
-): Promise<number[]> {
+): Promise<HostedContainerProcessSnapshot> {
+  if (process.platform === "win32") {
+    return {
+      pids: new Set(),
+      rootUid: null,
+    };
+  }
+
+  const rootState = await readHostedContainerProcessState(rootPid, processApi);
+  const processStates = await readHostedContainerProcessStates(rootPid, processApi);
+  return {
+    pids: new Set(processStates.keys()),
+    rootUid: rootState.uid,
+  };
+}
+
+async function readHostedContainerProcessStates(
+  rootPid: number,
+  processApi: HostedContainerProcessApi,
+): Promise<Map<number, HostedContainerProcessState>> {
   let entries;
   try {
     entries = await processApi.readdir("/proc");
@@ -577,10 +608,7 @@ async function listUnexpectedHostedContainerDescendantProcessIds(
     );
   }
 
-  const processStates = new Map<number, {
-    ppid: number | null;
-    state: string | null;
-  }>();
+  const processStates = new Map<number, HostedContainerProcessState>();
 
   for (const entry of entries) {
     if (!entry.isDirectory()) {
@@ -595,7 +623,16 @@ async function listUnexpectedHostedContainerDescendantProcessIds(
     processStates.set(pid, await readHostedContainerProcessState(pid, processApi));
   }
 
-  const unexpected: number[] = [];
+  return processStates;
+}
+
+async function listUnexpectedHostedContainerProcessIds(
+  rootPid: number,
+  processApi: HostedContainerProcessApi,
+  baseline: HostedContainerProcessSnapshot,
+): Promise<number[]> {
+  const processStates = await readHostedContainerProcessStates(rootPid, processApi);
+  const descendantPids = new Set<number>();
   const frontier = [rootPid];
   const visited = new Set<number>(frontier);
 
@@ -612,45 +649,73 @@ async function listUnexpectedHostedContainerDescendantProcessIds(
 
       visited.add(pid);
       frontier.push(pid);
+      descendantPids.add(pid);
+    }
+  }
 
-      if (state.state === "Z") {
-        continue;
-      }
+  const unexpected: number[] = [];
+  for (const [pid, state] of processStates) {
+    if (state.state === "Z") {
+      continue;
+    }
 
+    if (descendantPids.has(pid)) {
+      unexpected.push(pid);
+      continue;
+    }
+
+    if (
+      baseline.rootUid !== null
+      && state.uid === baseline.rootUid
+      && !baseline.pids.has(pid)
+    ) {
       unexpected.push(pid);
     }
   }
 
-  return unexpected;
+  return unexpected.sort((left, right) => left - right);
 }
 
 async function readHostedContainerProcessState(
   pid: number,
   processApi: HostedContainerProcessApi,
-): Promise<{
-  ppid: number | null;
-  state: string | null;
-}> {
+): Promise<HostedContainerProcessState> {
+  let ppid: number | null = null;
+  let state: string | null = null;
+  let uid: number | null = null;
+
   try {
     const stat = await processApi.readFile(`/proc/${pid}/stat`, "utf8");
     const commandEnd = stat.lastIndexOf(") ");
 
-    if (commandEnd === -1 || commandEnd + 2 >= stat.length) {
-      return { ppid: null, state: null };
+    if (commandEnd !== -1 && commandEnd + 2 < stat.length) {
+      const remainder = stat.slice(commandEnd + 2).trim();
+      const [stateRaw, ppidRaw] = remainder.split(/\s+/u, 2);
+      const parsedPpid = Number.parseInt(ppidRaw ?? "", 10);
+
+      ppid = Number.isInteger(parsedPpid) ? parsedPpid : null;
+      state = typeof stateRaw === "string" && stateRaw.length > 0 ? stateRaw : null;
     }
-
-    const remainder = stat.slice(commandEnd + 2).trim();
-    const [state, ppidRaw] = remainder.split(/\s+/u, 2);
-
-    return {
-      ppid: Number.isInteger(Number.parseInt(ppidRaw ?? "", 10))
-        ? Number.parseInt(ppidRaw ?? "", 10)
-        : null,
-      state: typeof state === "string" && state.length > 0 ? state : null,
-    };
   } catch {
-    return { ppid: null, state: null };
+    // Processes can exit while /proc is being scanned.
   }
+
+  try {
+    uid = readHostedContainerProcessUid(
+      await processApi.readFile(`/proc/${pid}/status`, "utf8"),
+    );
+  } catch {
+    // UID is only needed for the daemonized-orphan cleanup path.
+  }
+
+  return { ppid, state, uid };
+}
+
+function readHostedContainerProcessUid(status: string): number | null {
+  const uidLine = status.split("\n").find((line) => line.startsWith("Uid:"));
+  const uidRaw = uidLine?.trim().split(/\s+/u)[1];
+  const uid = Number.parseInt(uidRaw ?? "", 10);
+  return Number.isInteger(uid) && uid >= 0 ? uid : null;
 }
 
 export function createRequestAbortController(
@@ -861,11 +926,15 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
+  const processBaseline = runtime.processIsolation
+    ? await snapshotHostedContainerProcesses(process.pid, runtime.processApi)
+    : null;
+
   try {
     return await runHostedWorkspaceInvocation(input, runtime, options);
   } finally {
-    if (runtime.processIsolation) {
-      await enforceHostedContainerProcessIsolation(runtime.processApi);
+    if (processBaseline) {
+      await enforceHostedContainerProcessIsolation(runtime.processApi, processBaseline);
     }
   }
 }
