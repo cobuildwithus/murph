@@ -21,6 +21,53 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/src/components/ui/dialog", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  const noopOpenChange: (open: boolean) => void = () => {};
+  const DialogContext = React.createContext<{
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+  }>({
+    onOpenChange: noopOpenChange,
+    open: false,
+  });
+  const passthrough = (tag: keyof HTMLElementTagNameMap) =>
+    function Passthrough(props: {
+      children?: React.ReactNode;
+      className?: string;
+    }) {
+      return React.createElement(tag, props, props.children);
+    };
+
+  return {
+    Dialog(props: {
+      children?: React.ReactNode;
+      onOpenChange?: (open: boolean) => void;
+      open?: boolean;
+    }) {
+      return React.createElement(
+        DialogContext.Provider,
+        {
+          value: {
+            onOpenChange: props.onOpenChange ?? (() => {}),
+            open: props.open === true,
+          },
+        },
+        props.children,
+      );
+    },
+    DialogContent(props: { children?: React.ReactNode; className?: string }) {
+      const context = React.useContext(DialogContext);
+      return context.open
+        ? React.createElement("div", { className: props.className, role: "dialog" }, props.children)
+        : null;
+    },
+    DialogDescription: passthrough("p"),
+    DialogHeader: passthrough("div"),
+    DialogTitle: passthrough("h2"),
+  };
+});
+
 describe("HostedBillingSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -36,10 +83,14 @@ describe("HostedBillingSettings", () => {
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
       canUpgradeToEdge: true,
+      currentBillingPlanCode: "launch_monthly",
     }));
 
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Upgrade to Edge/);
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Pulse/);
+    assert.match(markup, /\$8 \/ month/);
     assert.match(markup, /Manage your plan and payment details\./);
   });
 
@@ -49,9 +100,12 @@ describe("HostedBillingSettings", () => {
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
       canUpgradeToEdge: false,
+      currentBillingPlanCode: "launch_edge_monthly",
     }));
 
     assert.doesNotMatch(markup, /Upgrade to Edge/);
+    assert.match(markup, /Edge/);
+    assert.match(markup, /\$20 \/ month/);
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Manage your plan and payment details\./);
   });
@@ -62,9 +116,11 @@ describe("HostedBillingSettings", () => {
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
       canUpgradeToEdge: false,
+      currentBillingPlanCode: "launch_monthly",
     }));
 
     assert.doesNotMatch(markup, /Upgrade to Edge/);
+    assert.match(markup, /Pulse/);
     assert.match(markup, /Manage subscription/);
   });
 
@@ -74,6 +130,15 @@ describe("HostedBillingSettings", () => {
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    assert.match(rendered.window.document.body.textContent ?? "", /Confirm Edge upgrade/);
+    assert.match(rendered.window.document.body.textContent ?? "", /\$8\/month/);
+    assert.match(rendered.window.document.body.textContent ?? "", /\$20\/month/);
+
+    const confirmButton = findButtonByText(rendered.window.document, "Confirm upgrade", rendered.window);
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
 
     assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
@@ -101,6 +166,10 @@ describe("HostedBillingSettings", () => {
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findButtonByText(rendered.window.document, "Confirm upgrade", rendered.window);
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
 
     assert.equal(mocks.routerRefresh.mock.calls.length, 0);
@@ -130,6 +199,10 @@ describe("HostedBillingSettings", () => {
     await act(async () => {
       upgradeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
+    const confirmButton = findButtonByText(rendered.window.document, "Confirm upgrade", rendered.window);
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
 
     assert.equal(manageButton.disabled, true);
 
@@ -143,6 +216,17 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 });
+
+function findButtonByText(
+  document: Document,
+  text: string,
+  window: Window & typeof globalThis,
+): HTMLButtonElement {
+  const button = [...document.querySelectorAll("button")]
+    .find((candidate) => candidate.textContent?.includes(text));
+  assert.ok(button instanceof window.HTMLButtonElement);
+  return button;
+}
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;

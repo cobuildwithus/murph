@@ -19,11 +19,12 @@ const mocks = vi.hoisted(() => ({
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
     canUpgradeToEdge?: boolean;
+    currentBillingPlanCode?: unknown;
   }) =>
     React.createElement(
       "div",
       null,
-      `Hosted billing settings ${String(props.authenticated)} ${String(props.canUpgradeToEdge ?? false)}`,
+      `Hosted billing settings ${String(props.authenticated)} ${String(props.canUpgradeToEdge ?? false)} ${String(props.currentBillingPlanCode ?? "")}`,
     )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
@@ -193,6 +194,7 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
     canUpgradeToEdge: true,
+    currentBillingPlanCode: "launch_monthly",
   }), undefined);
   expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
     memberId: "member_123",

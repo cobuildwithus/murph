@@ -6,12 +6,12 @@ import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { PageHeader } from "@/src/components/ui/page-header";
-import { getPrisma } from "@/src/lib/prisma";
-import { canUpgradeHostedBillingPlanToEdge } from "@/src/lib/hosted-onboarding/billing-plans";
-import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
-import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+import { canUpgradeHostedBillingPlanToEdge } from "@/src/lib/hosted-onboarding/billing-plans";
+import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -45,51 +45,52 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-8">
-        <PageHeader
-          eyebrow="Settings"
-          title="Your account"
-          description="Subscription, connected accounts, and data privacy."
+      <PageHeader
+        eyebrow="Settings"
+        title="Your account"
+        description="Subscription, connected accounts, and data privacy."
+      />
+
+      <section className="flex flex-col gap-4">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Billing
+        </div>
+        <HostedBillingSettings
+          authenticated={authenticated}
+          canUpgradeToEdge={canUpgradeHostedBillingPlanToEdge({
+            currentBillingPhase: billingRef?.currentBillingPhase,
+            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+            currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+          })}
+          currentBillingPlanCode={billingRef?.currentBillingPlanCode}
         />
+      </section>
 
-        <section className="flex flex-col gap-4">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Billing
-          </div>
-          <HostedBillingSettings
-            authenticated={authenticated}
-            canUpgradeToEdge={canUpgradeHostedBillingPlanToEdge({
-              currentBillingPhase: billingRef?.currentBillingPhase,
-              currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-              currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-            })}
+      <section className="flex flex-col gap-4">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Messaging
+        </div>
+        {account ? (
+          <HostedAccountSettingsCards
+            account={account}
+            murphPhoneNumber={routing?.linqRecipientPhone ?? null}
           />
-        </section>
+        ) : null}
+      </section>
 
-        <section className="flex flex-col gap-4">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Messaging
-          </div>
-          {account ? (
-            <HostedAccountSettingsCards
-              account={account}
-              murphPhoneNumber={routing?.linqRecipientPhone ?? null}
-            />
-          ) : null}
-        </section>
+      <section className="flex flex-col gap-4">
+        <HostedDeviceSyncSettings
+          authenticated={authenticated}
+          member={authenticatedMember}
+        />
+      </section>
 
-        <section className="flex flex-col gap-4">
-          <HostedDeviceSyncSettings
-            authenticated={authenticated}
-            member={authenticatedMember}
-          />
-        </section>
-
-        <section className="flex flex-col gap-4">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Data & privacy
-          </div>
-          <HostedDataPrivacySettings authenticated={authenticated} />
-        </section>
+      <section className="flex flex-col gap-4">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Data & privacy
+        </div>
+        <HostedDataPrivacySettings authenticated={authenticated} />
+      </section>
     </div>
   );
 }
