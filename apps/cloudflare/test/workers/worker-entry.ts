@@ -2,6 +2,9 @@ import { DurableObject, env } from "cloudflare:workers";
 import {
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
+import type {
+  HostedWorkspaceInvocationReason,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
@@ -17,8 +20,17 @@ import {
   HostedUserRunner,
   type DurableObjectStateLike,
 } from "../../src/user-runner.ts";
+import {
+  RunnerStateStore,
+  type RunnerInvocationLease,
+} from "../../src/user-runner/runner-state-store.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../../src/worker-contracts.ts";
+import {
+  requireRunnerActiveInvocationLease,
+  requireRunnerActiveInvocationLeaseHeaders,
+  writeRunnerActiveInvocationLeaseHeaders,
+} from "../../src/runner-outbound/active-lease.ts";
 import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
@@ -62,11 +74,13 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   private readonly bucket: R2BucketLike;
   private readonly runtimeEnv: HostedExecutionEnvironment;
   private readonly runner: HostedUserRunner;
+  private readonly stateStore: RunnerStateStore;
 
   constructor(ctx: DurableObjectState, env: TestWorkerEnvironment) {
     super(ctx, env);
     this.bucket = createTestControlledBucket(env.BUNDLES);
     const state = toDurableObjectStateLike(ctx);
+    this.stateStore = new RunnerStateStore(state);
     this.runtimeEnv = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
     this.runner = new HostedUserRunner(
       state,
@@ -79,6 +93,34 @@ export class VitestUserRunnerDurableObject extends DurableObject {
 
   async bindUser(userId: string): Promise<{ userId: string }> {
     return this.runner.bindUser(userId);
+  }
+
+  async beginLeaseForTest(input: {
+    reason?: HostedWorkspaceInvocationReason;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<RunnerInvocationLease> {
+    const lease = await this.stateStore.beginInvocation({
+      reason: input.reason ?? "manual",
+      userId: input.userId,
+    });
+    if (!input.workspaceVersion) {
+      return lease;
+    }
+
+    return await this.stateStore.bindInvocationWorkspaceVersion({
+      lease,
+      workspaceVersion: input.workspaceVersion,
+    });
+  }
+
+  async ownsActiveInvocationLease(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean> {
+    return await this.runner.ownsActiveInvocationLease(input);
   }
 
   async wake(input: TestWake): Promise<HostedRunnerStatusResponse> {
@@ -246,6 +288,10 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     return Response.json(await getUserRunnerStub(body.userId).bindUser(body.userId));
   }
 
+  if (url.pathname === "/__test/runner/lease-latency" && request.method === "POST") {
+    return Response.json(await measureRunnerLeaseLatency(request));
+  }
+
   if (url.pathname === "/__test/alarm" && request.method === "POST") {
     const body = await request.json() as { userId?: unknown };
 
@@ -329,7 +375,18 @@ function getUserRunnerStub(userId: string) {
     env as {
       USER_RUNNER: {
         getByName(name: string): {
+          beginLeaseForTest(input: {
+            reason?: HostedWorkspaceInvocationReason;
+            userId: string;
+            workspaceVersion?: string | null;
+          }): Promise<RunnerInvocationLease>;
           bindUser(userId: string): Promise<{ userId: string }>;
+          ownsActiveInvocationLease(input: {
+            attemptId: string;
+            leaseGeneration: string;
+            userId: string;
+            workspaceVersion?: string | null;
+          }): Promise<boolean>;
           wakeWithOutcome(input: TestWake): Promise<TestWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
           runnerStatus(): Promise<HostedRunnerStatusResponse>;
@@ -337,6 +394,143 @@ function getUserRunnerStub(userId: string) {
       };
     }
   ).USER_RUNNER).getByName(userId);
+}
+
+async function measureRunnerLeaseLatency(request: Request): Promise<{
+  estimatedAddedLatency: LatencySummary;
+  headerOnly: LatencySummary;
+  iterations: number;
+  liveLease: LatencySummary;
+  warmupIterations: number;
+}> {
+  const body = await request.json() as {
+    iterations?: unknown;
+    userId?: unknown;
+    warmupIterations?: unknown;
+  };
+  const userId = typeof body.userId === "string" && body.userId.length > 0
+    ? body.userId
+    : "member_runner_lease_latency";
+  const iterations = readBoundedInteger(body.iterations, {
+    defaultValue: 200,
+    max: 2_000,
+    min: 20,
+  });
+  const warmupIterations = readBoundedInteger(body.warmupIterations, {
+    defaultValue: 25,
+    max: 200,
+    min: 0,
+  });
+
+  const lease = await getUserRunnerStub(userId).beginLeaseForTest({
+    userId,
+    workspaceVersion: "7",
+  });
+  const leaseRequest = createLeaseLatencyRequest(lease);
+
+  for (let index = 0; index < warmupIterations; index += 1) {
+    requireRunnerActiveInvocationLeaseHeaders(leaseRequest);
+    await requireRunnerActiveInvocationLease({
+      env: readWorkerEnvironmentSource(),
+      request: leaseRequest,
+      userId,
+    });
+  }
+
+  const headerOnlySamples: number[] = [];
+  const liveLeaseSamples: number[] = [];
+  const addedSamples: number[] = [];
+  for (let index = 0; index < iterations; index += 1) {
+    const headerStartedAt = performance.now();
+    requireRunnerActiveInvocationLeaseHeaders(leaseRequest);
+    const headerElapsed = performance.now() - headerStartedAt;
+
+    const liveStartedAt = performance.now();
+    await requireRunnerActiveInvocationLease({
+      env: readWorkerEnvironmentSource(),
+      request: leaseRequest,
+      userId,
+    });
+    const liveElapsed = performance.now() - liveStartedAt;
+
+    headerOnlySamples.push(headerElapsed);
+    liveLeaseSamples.push(liveElapsed);
+    addedSamples.push(liveElapsed - headerElapsed);
+  }
+
+  return {
+    estimatedAddedLatency: summarizeLatency(addedSamples),
+    headerOnly: summarizeLatency(headerOnlySamples),
+    iterations,
+    liveLease: summarizeLatency(liveLeaseSamples),
+    warmupIterations,
+  };
+}
+
+type LatencySummary = {
+  avgMs: number;
+  maxMs: number;
+  minMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  samples: number;
+  totalMs: number;
+};
+
+function createLeaseLatencyRequest(lease: RunnerInvocationLease): Request {
+  const headers = new Headers();
+  writeRunnerActiveInvocationLeaseHeaders(headers, {
+    attemptId: lease.attemptId,
+    leaseGeneration: lease.leaseGeneration,
+    workspaceVersion: lease.workspaceVersion ?? "7",
+  });
+  return new Request("http://results.worker/__test/lease-latency", {
+    headers,
+    method: "POST",
+  });
+}
+
+function summarizeLatency(samples: readonly number[]): LatencySummary {
+  const sorted = [...samples].sort((left, right) => left - right);
+  const total = samples.reduce((sum, value) => sum + value, 0);
+  return {
+    avgMs: roundLatencyMs(total / samples.length),
+    maxMs: roundLatencyMs(sorted[sorted.length - 1] ?? 0),
+    minMs: roundLatencyMs(sorted[0] ?? 0),
+    p50Ms: roundLatencyMs(readPercentile(sorted, 0.5)),
+    p95Ms: roundLatencyMs(readPercentile(sorted, 0.95)),
+    samples: samples.length,
+    totalMs: roundLatencyMs(total),
+  };
+}
+
+function readPercentile(sortedSamples: readonly number[], percentile: number): number {
+  if (sortedSamples.length === 0) {
+    return 0;
+  }
+  const index = Math.min(
+    sortedSamples.length - 1,
+    Math.max(0, Math.ceil(sortedSamples.length * percentile) - 1),
+  );
+  return sortedSamples[index] ?? 0;
+}
+
+function readBoundedInteger(
+  value: unknown,
+  bounds: {
+    defaultValue: number;
+    max: number;
+    min: number;
+  },
+): number {
+  const numberValue = typeof value === "number" && Number.isFinite(value)
+    ? Math.trunc(value)
+    : bounds.defaultValue;
+  return Math.min(bounds.max, Math.max(bounds.min, numberValue));
+}
+
+function roundLatencyMs(value: number): number {
+  return Math.round(value * 1_000) / 1_000;
 }
 
 async function driveRunnerNudgeForTest(
