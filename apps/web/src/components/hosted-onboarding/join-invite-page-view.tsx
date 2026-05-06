@@ -33,7 +33,7 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
           ? "max-w-lg"
           : model.status.stage === "checkout"
             ? "max-w-5xl"
-            : "max-w-xl",
+            : "max-w-md",
       ].join(" ")}>
         <PageHeader
           eyebrow={<JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />}
