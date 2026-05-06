@@ -375,6 +375,46 @@ describe("handleRunnerOutboundRequest", () => {
     expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
   });
 
+  it("keeps body-only active invocation heartbeats compatible with warm runners", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn();
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        body: JSON.stringify({
+          attemptId: "workspace-invocation-1",
+          leaseGeneration: "1",
+          requestId: "hosted-workspace-invocation:workspace-invocation-1",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    });
+    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
+  });
+
   it("rejects heartbeat proxy traffic when the invocation proxy token does not match", async () => {
     const response = await handleRunnerOutboundRequest(
       new Request(HEARTBEAT_URL, {

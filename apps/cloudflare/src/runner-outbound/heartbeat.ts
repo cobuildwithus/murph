@@ -29,23 +29,19 @@ export async function handleRunnerHeartbeatRequest(input: {
   }
 
   const headers = readRunnerActiveInvocationLeaseHeaders(input.request);
-  if (!headers) {
-    return json({
-      ok: false,
-      reason: "malformed_request",
-    });
-  }
-  if (headers.attemptId !== payload.attemptId) {
-    return json({
-      ok: false,
-      reason: "stale_attempt",
-    });
-  }
-  if (headers.leaseGeneration !== payload.leaseGeneration) {
-    return json({
-      ok: false,
-      reason: "stale_generation",
-    });
+  if (headers) {
+    if (headers.attemptId !== payload.attemptId) {
+      return json({
+        ok: false,
+        reason: "stale_attempt",
+      });
+    }
+    if (headers.leaseGeneration !== payload.leaseGeneration) {
+      return json({
+        ok: false,
+        reason: "stale_generation",
+      });
+    }
   }
 
   return json({
