@@ -62,6 +62,7 @@ export default async function SettingsPage() {
             currentBillingPlanCode: billingRef?.currentBillingPlanCode,
             currentCheckoutOffer: billingRef?.currentCheckoutOffer,
           })}
+          currentBillingPhase={billingRef?.currentBillingPhase}
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
         />
       </section>

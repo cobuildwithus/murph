@@ -13,6 +13,7 @@ interface HostedBillingPortalResponse {
 }
 
 export function HostedBillingSettingsAction(props: {
+  helperText?: string | null;
   showUpgrade?: boolean;
 }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -56,6 +57,11 @@ export function HostedBillingSettingsAction(props: {
           {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
         </Button>
       </div>
+      {props.helperText ? (
+        <p className="text-xs leading-tight text-muted-foreground sm:max-w-xs sm:text-right">
+          {props.helperText}
+        </p>
+      ) : null}
       <p
         role="alert"
         aria-live="polite"
