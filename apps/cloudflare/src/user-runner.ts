@@ -72,6 +72,7 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
+const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
 const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
 
 type HostedAiUsageGateDecision =
@@ -375,6 +376,7 @@ export class HostedUserRunner {
       : new Date(nowMs + resolveHostedRunnerFailureRetryDelayMs({
           defaultRetryDelayMs: this.env.retryDelayMs,
           reason: "nudge",
+          retryFailureCount: runningRecord.retryFailureCount,
         })).toISOString();
     const record = await this.markPendingNudgeAndApplyAlarm({
       preferredWakeAt,
@@ -649,8 +651,14 @@ export class HostedUserRunner {
         lease,
       });
       if (failure.failed) {
+        const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
+          defaultRetryDelayMs: this.env.retryDelayMs,
+          reason: input.reason,
+          retryFailureCount: failure.record.retryFailureCount,
+        });
         await this.scheduleHostedWakeRetryAlarm({
           respectMaxAttempts: true,
+          retryDelayMs,
           userId: initialRecord.userId,
         });
       }
@@ -1048,9 +1056,11 @@ export class HostedUserRunner {
 
     void this.runUntilIdleOrBudget({ reason: input.reason })
       .catch(async (error) => {
+        const record = await this.tryReadStateForRetryScheduling();
         const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
           defaultRetryDelayMs: this.env.retryDelayMs,
           reason: input.reason,
+          retryFailureCount: record?.retryFailureCount ?? 0,
         });
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
@@ -1087,6 +1097,14 @@ export class HostedUserRunner {
       });
 
     return true;
+  }
+
+  private async tryReadStateForRetryScheduling(): Promise<RunnerStateRecord | null> {
+    try {
+      return await this.stateStore.readState();
+    } catch {
+      return null;
+    }
   }
 
   private readAllowedRunnerSecretsSource(): Readonly<Record<string, string | undefined>> {
@@ -1326,10 +1344,15 @@ function resolvePendingNudgeWakeAt(input: {
 function resolveHostedRunnerFailureRetryDelayMs(input: {
   defaultRetryDelayMs: number;
   reason: HostedWorkspaceInvocationReason;
+  retryFailureCount?: number | null;
 }): number {
   if (input.reason !== "nudge") {
     return input.defaultRetryDelayMs;
   }
 
-  return Math.min(input.defaultRetryDelayMs, IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS);
+  const retryFailureCount = Math.max(0, Math.floor(input.retryFailureCount ?? 0));
+  const backoffStep = Math.max(0, retryFailureCount - 1);
+  const exponentialDelay = IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS
+    * (NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER ** backoffStep);
+  return Math.min(input.defaultRetryDelayMs, exponentialDelay);
 }

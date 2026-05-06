@@ -226,7 +226,7 @@ describe("HostedUserRunner alarm routing", () => {
     expect(alarms[0]).toBe("2026-04-27T00:00:01.000Z");
   });
 
-  it("keeps failed immediate nudge retries on the short fallback path", async () => {
+  it("keeps the first failed immediate nudge retry on the short fallback path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner } = createRunnerHarness();
@@ -247,6 +247,50 @@ describe("HostedUserRunner alarm routing", () => {
         details: expect.objectContaining({
           reason: "nudge",
           retryDelayMs: 1000,
+        }),
+        message: "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("backs off failed immediate nudge retries after the first failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("Hosted runner failed after prior nudge retries.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      "UPDATE runner_meta SET retry_failure_count = ? WHERE user_id = ?",
+      1,
+      "member_123",
+    );
+
+    await runner.nudgeHostedRunner();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await flushDetachedRunnerDrive();
+
+    expect(alarms[0]).toBe("2026-04-27T00:00:01.000Z");
+    expect(Date.parse(alarms[1] ?? "") - Date.parse(FIXED_NOW)).toBeGreaterThanOrEqual(2_000);
+    expect(Date.parse(alarms[1] ?? "") - Date.parse(FIXED_NOW)).toBeLessThan(2_100);
+    expect(alarms[2]).toBe(alarms[1]);
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{ retry_failure_count: 2 }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          reason: "nudge",
+          retryDelayMs: 2000,
         }),
         message: "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled.",
         phase: "failed",
@@ -1749,7 +1793,7 @@ function createDeferred<T>() {
 }
 
 async function flushDetachedRunnerDrive(): Promise<void> {
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 25; index += 1) {
     await Promise.resolve();
   }
 }
