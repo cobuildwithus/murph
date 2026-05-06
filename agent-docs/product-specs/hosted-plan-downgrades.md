@@ -25,6 +25,24 @@ The app currently supports only Pulse-to-Edge in-app upgrades.
 
 There is no explicit app-owned Edge-to-Pulse path today.
 
+## First-Version Scope
+
+Keep the first version intentionally narrow.
+
+Build exactly one transition:
+
+- Edge paid subscription to Pulse at renewal.
+
+Do not build:
+
+- a generic plan-transition engine
+- arbitrary `targetPlanCode` routing
+- in-app schedule reversal
+- Customer Portal plan switching
+- local timers or cron-based entitlement changes
+
+Future plan changes can generalize after this path is proven in Stripe test clocks and production.
+
 ## Stripe Constraints
 
 Use Stripe as the source of truth, but do not use Customer Portal plan switching for this plan switch.
@@ -54,7 +72,7 @@ Unsupported transitions:
 - Edge to Edge
 - trial-state switches
 - switches without a Stripe customer and subscription
-- switches while a conflicting Stripe schedule is already attached unless the app is explicitly updating or canceling that schedule
+- switches while a conflicting Stripe schedule is already attached
 
 Downgrade timing:
 
@@ -71,19 +89,13 @@ User-facing language:
 
 ## Backend Design
 
-Add a route:
+Add a single-purpose route:
 
 ```txt
-POST /api/settings/billing/switch-plan
+POST /api/settings/billing/switch-to-pulse
 ```
 
-Request body:
-
-```json
-{
-  "targetPlanCode": "launch_monthly"
-}
-```
+The first version does not need a request body. The route itself is the command.
 
 The route must:
 
@@ -154,19 +166,21 @@ Algorithm:
 5. Retrieve the Stripe subscription with `items.data.price` expanded.
 6. Confirm the subscription customer matches the billing ref customer.
 7. Confirm the canonical Stripe items represent Edge. Price ids should be treated as more authoritative than subscription metadata for plan detection.
-8. If an active compatible schedule already exists for Edge-to-Pulse at the same period end, return `already_scheduled`.
-9. Otherwise create a subscription schedule from the subscription using `from_subscription`.
-10. Update the schedule with two phases:
+8. Inspect the subscription's attached schedule, if any.
+9. If an active compatible schedule already switches Edge to Pulse at the same period end, return `already_scheduled`.
+10. If another active schedule is attached, reject with a safe "billing change already scheduled" error and direct the user to support or Stripe management. Do not merge app intent into an unknown schedule.
+11. Otherwise create a subscription schedule from the subscription using `from_subscription`.
+12. Update the schedule with two phases:
     - current phase: Edge recurring item plus Edge metered usage item, ending at the current period end
     - next phase: Pulse recurring item plus Pulse metered usage item, starting at current period end
-11. Set `end_behavior: "release"`.
-12. Set future phase `proration_behavior: "none"`.
-13. Set future phase metadata:
+13. Set `end_behavior: "release"`.
+14. Set future phase `proration_behavior: "none"`.
+15. Set future phase metadata:
     - `memberId`
     - `billingPlanCode: "launch_monthly"`
     - `checkoutOffer: "standard"`
     - empty values for trial metadata keys that must be cleared
-14. Store the returned schedule id and pending display fields in the local billing read model.
+16. Store the returned schedule id and pending display fields in the local billing read model.
 
 Important schedule rules:
 
@@ -174,7 +188,8 @@ Important schedule rules:
 - Do not set quantity on metered usage items.
 - Do not use `end_behavior: "cancel"` for downgrades.
 - Do not mutate the subscription directly while a schedule owns the pending change.
-- If a later app action supersedes the switch, explicitly release or update the schedule first.
+- While a switch is pending, the first version should reject additional in-app plan changes rather than trying to merge intents.
+- Treat the initial request as scheduling only. It must not call the subscription event reconciler or update current entitlement fields.
 
 ## Local Read Model
 
@@ -249,30 +264,27 @@ Avoid adding a second complex pricing component. A flat row or short muted statu
 
 ## Reversal
 
-The simplest first version can omit an in-app "Keep Edge" reversal and direct users to support or `Manage subscription` only if that is acceptable.
+Do not include in-app reversal in the first version.
 
-If reversal is included:
-
-- label it `Keep Edge`
-- release the Stripe schedule rather than mutating the subscription
-- clear pending display fields only after Stripe confirms schedule release
-- do not create a new subscription update just to cancel the scheduled switch
+If a user wants to keep Edge after scheduling the switch, direct them to support or Stripe management. A later in-app reversal can be added only after the schedule path is proven. That later reversal must release the Stripe schedule and clear local pending display fields only after Stripe confirms the release.
 
 ## Verification
 
 Unit and integration tests:
 
-- route accepts Edge-to-Pulse and rejects unsupported targets
+- route schedules Edge-to-Pulse without accepting arbitrary target plans
 - route preserves CSRF, auth, and suspended-member checks
 - service creates a schedule from the active subscription
 - schedule phases include both recurring and metered usage prices
 - metered item has no quantity
 - future phase metadata sets Pulse and clears trial metadata
-- duplicate request is idempotent or updates the existing schedule
+- duplicate request returns `already_scheduled`
+- conflicting attached schedule rejects without mutation
 - customer mismatch rejects
 - missing Stripe refs reject
 - trial state rejects
 - Stripe provider errors map to safe retryable errors with operation names
+- schedule request does not call subscription reconciliation or write current entitlement fields
 - settings renders Edge, Switch to Pulse, pending switch, and Pulse after reconciliation
 - `customer.subscription.updated` with Pulse price ids updates local current plan to Pulse
 - out-of-order older Stripe events do not overwrite fresher billing state
@@ -299,6 +311,5 @@ Deployment checks:
 ## Open Questions
 
 - Do existing Pulse and Edge usage prices share the same Stripe billing meter, and does test-clock usage rate exactly as expected at the phase boundary?
-- Should the first version include `Keep Edge`, or is schedule reversal through support acceptable?
 - Should existing one-click upgrade be simplified later so webhook reconciliation is the only entitlement write path?
-- Should plan detection be changed globally to prefer Stripe price ids over metadata before implementing scheduled switches?
+- Should plan detection be changed globally to prefer Stripe price ids over metadata as a prerequisite to implementing scheduled switches?
