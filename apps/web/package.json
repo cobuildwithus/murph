@@ -23,6 +23,7 @@
     "prisma:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
     "prisma:migrate:dev": "prisma migrate dev",
     "migrate:production:prebuild": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
+    "billing:backfill-snapshots": "pnpm --dir ../.. exec tsx apps/web/scripts/backfill-hosted-billing-snapshots.ts",
     "verify": "bash scripts/verify-fast.sh",
     "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh"
   },

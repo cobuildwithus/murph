@@ -747,7 +747,7 @@ function readHostedStripeInvoiceBillingReason(invoice: Stripe.Invoice): string |
   return typeof value === "string" ? value : null;
 }
 
-function resolveHostedStripeSubscriptionBillingPlanCode(
+export function resolveHostedStripeSubscriptionBillingPlanCode(
   subscription: Stripe.Subscription,
 ): ReturnType<typeof parseHostedBillingPlanCode> {
   const metadataPlanCode = parseHostedBillingPlanCode(subscription.metadata?.billingPlanCode);
