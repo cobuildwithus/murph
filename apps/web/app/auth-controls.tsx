@@ -10,45 +10,21 @@ import {
 import { cn } from "@/src/lib/utils";
 
 type LandingAuthContext = "nav" | "hero" | "footer";
-type LandingAuthMode = "login" | "signup";
-
-function getLandingAuthDialogCopy(mode: LandingAuthMode) {
-  if (mode === "login") {
-    return {
-      description:
-        "Use the phone number, Telegram account, or email already on your account.",
-      title: "Log in to Murph",
-    };
-  }
-
-  return {
-    description:
-      "Choose the contact method you want to use first. You can add more later.",
-    title: "Create your Murph account",
-  };
-}
 
 function LandingAuthDialogButton({
-  authMode,
   buttonClassName,
   buttonLabel,
-  description,
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
-  title,
 }: {
-  authMode: LandingAuthMode;
   buttonClassName: string;
   buttonLabel: string;
-  description?: string;
   requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
-  title?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const defaultCopy = getLandingAuthDialogCopy(authMode);
 
   return (
     <>
@@ -73,9 +49,6 @@ function LandingAuthDialogButton({
       <AuthDialog
         open={open}
         onOpenChange={setOpen}
-        title={title ?? defaultCopy.title}
-        description={description ?? defaultCopy.description}
-        authMode={authMode}
         requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
         showPassiveLegalNotice={showPassiveLegalNotice}
       />
@@ -153,17 +126,14 @@ export function LandingAuthActions({
     return (
       <div className={styles.container}>
         <LandingAuthDialogButton
-          authMode="signup"
           buttonClassName={cn(
             styles.signup,
             context !== "nav" ? "group gap-2" : null,
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]"
           )}
           buttonLabel={authLabel}
-          description="Discover what actually makes you healthier."
           requireLaunchConsentOnCompletion
           showArrow={context !== "nav"}
-          title="Log in or sign up"
         />
       </div>
     );
@@ -172,7 +142,6 @@ export function LandingAuthActions({
   return (
     <div className={styles.container}>
       <LandingAuthDialogButton
-        authMode="login"
         buttonClassName={cn(
           styles.login,
           "shrink-0"
@@ -181,7 +150,6 @@ export function LandingAuthActions({
         requireLaunchConsentOnCompletion
       />
       <LandingAuthDialogButton
-        authMode="signup"
         buttonClassName={cn(styles.signup, "shrink-0")}
         buttonLabel={signupLabel}
         requireLaunchConsentOnCompletion

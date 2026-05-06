@@ -20,10 +20,8 @@ import { HostedTelegramAuthButton } from "./hosted-telegram-auth-button";
 
 type HostedAuthMethod = "phone" | "telegram" | "email";
 type HostedPrimaryMethod = "phone" | "email";
-type HostedAuthMode = "login" | "signup";
 
 export function HostedAuthPanel({
-  authMode = "signup",
   methods,
   onCompleted,
   onSignOut,
@@ -31,7 +29,6 @@ export function HostedAuthPanel({
   showPassiveLegalNotice,
   size,
 }: {
-  authMode?: HostedAuthMode;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
@@ -45,7 +42,6 @@ export function HostedAuthPanel({
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
-  const disableSignup = authMode === "login";
   const includesPhone = methods.includes("phone");
   const includesTelegram = methods.includes("telegram");
   const includesEmail = methods.includes("email");
@@ -109,7 +105,6 @@ export function HostedAuthPanel({
 
       {primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
-          disableSignup={disableSignup}
           onAuthCompleted={handleAuthCompleted}
           onCodeSent={() => setCodeSent(true)}
           onCompleted={onCompleted}
@@ -124,7 +119,6 @@ export function HostedAuthPanel({
       {primaryMethod === "email" && includesEmail ? (
         <HostedEmailAuthButton
           active
-          disableSignup={disableSignup}
           onCompleted={handleAuthCompleted}
           onActivate={() => {}}
           inline
@@ -142,7 +136,6 @@ export function HostedAuthPanel({
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={telegramActive}
-                disableSignup={disableSignup}
                 onCompleted={handleAuthCompleted}
                 onActivate={() => {
                   setPrimaryMethod("phone");
@@ -154,7 +147,6 @@ export function HostedAuthPanel({
               primaryMethod === "phone" ? (
                 <HostedEmailAuthButton
                   active={false}
-                  disableSignup={disableSignup}
                   onCompleted={handleAuthCompleted}
                   onActivate={() => {
                     setPrimaryMethod("email");

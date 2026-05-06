@@ -213,16 +213,15 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   expect(container.querySelector('input[id="homepage-email-address"]')).toBeNull();
 });
 
-test("HostedAuthPanel passes login mode through as no-signup auth", async () => {
+test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", async () => {
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedAuthPanel, {
-      authMode: "login",
       methods: ["phone", "telegram", "email"],
     }),
   );
   cleanupRender = cleanup;
 
-  expect(container.querySelector('[data-hosted-phone-auth-disable-signup="yes"]')).toBeTruthy();
+  expect(container.querySelector('[data-hosted-phone-auth-disable-signup="no"]')).toBeTruthy();
 
   const [telegramButton, emailButton] = Array.from(
     container.querySelectorAll("button"),
@@ -232,9 +231,7 @@ test("HostedAuthPanel passes login mode through as no-signup auth", async () => 
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.loginWithTelegram).toHaveBeenCalledWith({
-    disableSignup: true,
-  });
+  expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
 
   await act(async () => {
     emailButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -256,14 +253,12 @@ test("HostedAuthPanel passes login mode through as no-signup auth", async () => 
 
   expect(mocks.sendCode).toHaveBeenCalledWith({
     email: "login@example.com",
-    disableSignup: true,
   });
 });
 
 test("HostedAuthPanel can require launch consent after homepage login completion", async () => {
   const { assign, cleanup, container, window } = await renderClientComponent(
     createElement(HostedAuthPanel, {
-      authMode: "login",
       methods: ["phone", "telegram", "email"],
       requireLaunchConsentOnCompletion: true,
     }),
@@ -278,9 +273,7 @@ test("HostedAuthPanel can require launch consent after homepage login completion
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.loginWithTelegram).toHaveBeenCalledWith({
-    disableSignup: true,
-  });
+  expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Hosted legal consent card");
   expect(mocks.legalConsentCardProps).toMatchObject({
