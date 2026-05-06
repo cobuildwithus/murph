@@ -9,6 +9,7 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
+import { Checkbox } from "@/src/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -58,14 +59,12 @@ type DeletionDialogStep = "review" | "confirm";
 type CloudflareCleanupSummary = HostedAccountDeleteResponse["result"]["cloudflare"];
 type ProviderRevocationSummary = HostedAccountDeleteResponse["result"]["providerRevocations"][number];
 
-const VAULT_EXPORT_CONFIRMATION_TEXT = "EXPORT MY VAULT";
 const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
 const VAULT_EXPORT_MIME_TYPE = "application/json; charset=utf-8";
 
 export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [exportPending, setExportPending] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportConfirmationText, setExportConfirmationText] = useState("");
   const [acknowledgedSensitiveDownload, setAcknowledgedSensitiveDownload] = useState(false);
   const [exportDialogError, setExportDialogError] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
@@ -78,8 +77,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [success, setSuccess] = useState<string | null>(null);
   const [deletionSummary, setDeletionSummary] = useState<HostedAccountDeleteResponse["result"] | null>(null);
 
-  const exportPhraseMatches = exportConfirmationText === VAULT_EXPORT_CONFIRMATION_TEXT;
-  const exportReady = acknowledgedSensitiveDownload && exportPhraseMatches && !exportPending;
+  const exportReady = acknowledgedSensitiveDownload && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
   const deleteReady = dialogStep === "confirm"
     && phraseMatches
@@ -163,7 +161,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   }
 
   function openExportDialog() {
-    setExportConfirmationText("");
     setAcknowledgedSensitiveDownload(false);
     setExportDialogError(null);
     setSuccess(null);
@@ -176,7 +173,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     }
 
     setExportDialogOpen(false);
-    setExportConfirmationText("");
     setAcknowledgedSensitiveDownload(false);
     setExportDialogError(null);
   }
@@ -284,7 +280,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
               Export your vault
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Downloads the private browser-vault snapshot used by your dashboard, including records, metrics, timelines, search rows, and summaries.
+              Downloads your account, messaging, wearable, and usage records as JSON.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (
@@ -292,30 +288,14 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
               {exportDialogError}
             </p>
           ) : null}
-          <div className="flex flex-col gap-4">
-            <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
-              <input
-                checked={acknowledgedSensitiveDownload}
-                className="mt-0.5 size-4 shrink-0 accent-current"
-                type="checkbox"
-                onChange={(event) => setAcknowledgedSensitiveDownload(event.target.checked)}
-              />
-              <span>This export may contain sensitive health data and private notes.</span>
-            </label>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="hosted-data-export-phrase">Type <span className="font-mono">{VAULT_EXPORT_CONFIRMATION_TEXT}</span> to confirm</Label>
-              <Input
-                autoComplete="off"
-                className="h-12 text-base"
-                id="hosted-data-export-phrase"
-                inputMode="text"
-                value={exportConfirmationText}
-                onChange={(event) => setExportConfirmationText(event.target.value)}
-                aria-invalid={exportConfirmationText.length > 0 && !exportPhraseMatches}
-                placeholder={VAULT_EXPORT_CONFIRMATION_TEXT}
-              />
-            </div>
-          </div>
+          <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
+            <Checkbox
+              checked={acknowledgedSensitiveDownload}
+              onCheckedChange={setAcknowledgedSensitiveDownload}
+              className="mt-0.5"
+            />
+            <span>This export may contain sensitive health data and private notes.</span>
+          </label>
           <div className="flex flex-col gap-2">
             <Button type="button" size="xl" onClick={() => void handleExportConfirmed()} disabled={!exportReady} className="w-full">
               <DownloadIcon data-icon="inline-start" />
@@ -386,20 +366,18 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
                   />
                 </div>
                 <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
-                  <input
+                  <Checkbox
                     checked={acknowledgedIrreversibleDeletion}
-                    className="mt-0.5 size-4 shrink-0 accent-current"
-                    type="checkbox"
-                    onChange={(event) => setAcknowledgedIrreversibleDeletion(event.target.checked)}
+                    onCheckedChange={setAcknowledgedIrreversibleDeletion}
+                    className="mt-0.5"
                   />
                   <span>This deletion is irreversible.</span>
                 </label>
                 <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
-                  <input
+                  <Checkbox
                     checked={acknowledgedProviderAndBackupLimits}
-                    className="mt-0.5 size-4 shrink-0 accent-current"
-                    type="checkbox"
-                    onChange={(event) => setAcknowledgedProviderAndBackupLimits(event.target.checked)}
+                    onCheckedChange={setAcknowledgedProviderAndBackupLimits}
+                    className="mt-0.5"
                   />
                   <span>Provider records (Stripe, Privy) and backups follow separate retention.</span>
                 </label>
