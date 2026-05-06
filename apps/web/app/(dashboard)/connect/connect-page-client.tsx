@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { Unplug } from "lucide-react";
 
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
@@ -39,6 +40,7 @@ type ConnectSource = {
   connectTarget?: string;
   connected?: boolean;
   description: string;
+  disconnectConnectionId?: string;
   id: string;
   logo: LogoAsset;
   name: string;
@@ -52,6 +54,10 @@ interface HostedDeviceSyncConnectResponse {
   authorizationUrl: string;
 }
 
+interface HostedDeviceSyncDisconnectResponse {
+  warning?: { code: string; message: string };
+}
+
 export type ConnectCallbackInput = {
   connectTarget: string | null;
   connectSource: string | null;
@@ -61,8 +67,9 @@ export type ConnectCallbackInput = {
 } | null;
 
 type ConnectCallbackNotice = {
-  kind: "error" | "success";
+  kind: "error" | "success" | "warning";
   message: string;
+  title: string;
 } | null;
 
 export function ConnectSourcesGrid({
@@ -81,19 +88,27 @@ export function ConnectSourcesGrid({
   );
   const [search, setSearch] = useState("");
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
+  const [pendingDisconnectSourceId, setPendingDisconnectSourceId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{
     message: string;
     sourceId: string;
   } | null>(null);
   const [consentSource, setConsentSource] = useState<ConnectSource | null>(null);
+  const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
+  const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const callbackConnectedSourceId = initialCallback?.status === "connected"
     ? resolveCallbackSourceId(initialCallback, sources)
     : null;
   const displaySources = useMemo(
     () => sortConnectSourcesByConnectionState(
-      markCallbackConnectedSource(sources, callbackConnectedSourceId),
+      markLocallyDisconnectedSources(
+        markCallbackConnectedSource(sources, callbackConnectedSourceId),
+        disconnectedConnectionIds,
+      ),
     ),
-    [callbackConnectedSourceId, sources],
+    [callbackConnectedSourceId, disconnectedConnectionIds, sources],
   );
   const filteredSources = useMemo(
     () => filterConnectSourcesForSearch(displaySources, search),
@@ -139,6 +154,41 @@ export function ConnectSourcesGrid({
     }
   }
 
+  async function disconnectConnection(source: ConnectSource) {
+    const connectionId = source.disconnectConnectionId?.trim();
+    if (!connectionId || pendingDisconnectSourceId) {
+      return;
+    }
+
+    setPendingDisconnectSourceId(source.id);
+    setActionError(null);
+    setNotice(null);
+
+    try {
+      const result = await requestHostedOnboardingJson<HostedDeviceSyncDisconnectResponse>({
+        method: "POST",
+        url: `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/disconnect`,
+      });
+      setDisconnectSource(null);
+      setDisconnectedConnectionIds((current) => new Set([...current, connectionId]));
+      setNotice({
+        kind: result.warning?.message ? "warning" : "success",
+        title: "Source disconnected",
+        message: result.warning?.message
+          ? `Disconnected ${source.name}. Your history is still saved. The provider did not fully confirm, so check that account if you want access removed there too.`
+          : `Disconnected ${source.name}. Your history is still saved.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `We could not disconnect ${source.name} right now.`;
+      setActionError({
+        message,
+        sourceId: source.id,
+      });
+    } finally {
+      setPendingDisconnectSourceId(null);
+    }
+  }
+
   return (
     <section className="flex min-w-0 flex-col gap-4">
       {initialLoadError?.message ? (
@@ -151,7 +201,12 @@ export function ConnectSourcesGrid({
       {notice ? (
         notice.kind === "success" ? (
           <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900">
-            <AlertTitle>Device connected</AlertTitle>
+            <AlertTitle>{notice.title}</AlertTitle>
+            <AlertDescription>{notice.message}</AlertDescription>
+          </Alert>
+        ) : notice.kind === "warning" ? (
+          <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+            <AlertTitle>{notice.title}</AlertTitle>
             <AlertDescription>{notice.message}</AlertDescription>
           </Alert>
         ) : (
@@ -195,7 +250,9 @@ export function ConnectSourcesGrid({
               authenticated={authenticated}
               errorMessage={actionError?.sourceId === source.id ? actionError.message : null}
               pending={pendingSourceId === source.id}
+              pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
+              onDisconnectTargetChange={setDisconnectSource}
               onStartConnection={startConnection}
             />
           ))}
@@ -211,6 +268,20 @@ export function ConnectSourcesGrid({
         }}
         onAccepted={async (source) => {
           await startConnection(source);
+        }}
+      />
+
+      <ConnectDisconnectDialog
+        errorMessage={disconnectSource && actionError?.sourceId === disconnectSource.id
+          ? actionError.message
+          : null}
+        pending={Boolean(disconnectSource && pendingDisconnectSourceId === disconnectSource.id)}
+        source={disconnectSource}
+        onConfirm={disconnectConnection}
+        onOpenChange={(open) => {
+          if (!open && !pendingDisconnectSourceId) {
+            setDisconnectSource(null);
+          }
         }}
       />
 
@@ -240,17 +311,22 @@ function SourceCard({
   authenticated,
   errorMessage,
   pending,
+  pendingDisconnect,
   source,
+  onDisconnectTargetChange,
   onStartConnection,
 }: {
   authenticated: boolean;
   errorMessage: string | null;
   pending: boolean;
+  pendingDisconnect: boolean;
   source: ConnectSource;
+  onDisconnectTargetChange: (source: ConnectSource | null) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
 }) {
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
+  const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-5">
@@ -272,8 +348,29 @@ function SourceCard({
       </div>
 
       {source.connected ? (
-        <div className="mt-auto flex h-10 items-center">
-          <span className="text-sm font-medium text-foreground">Connected</span>
+        <div className="mt-auto flex flex-col gap-2">
+          <div className="flex min-h-10 flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-foreground">Connected</span>
+            {canDisconnect ? (
+              <Button
+                type="button"
+                aria-label={`Disconnect ${source.name}`}
+                disabled={pendingDisconnect}
+                onClick={() => onDisconnectTargetChange(source)}
+                size="xs"
+                variant="outline"
+                className="ml-auto border-border/80 bg-background/70 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <Unplug className="size-3" aria-hidden="true" />
+                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+              </Button>
+            ) : null}
+          </div>
+          {errorMessage ? (
+            <p role="alert" className="text-xs leading-snug text-destructive">
+              {errorMessage}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="mt-auto flex flex-col items-start gap-2">
@@ -398,6 +495,30 @@ function markCallbackConnectedSource(
   return sources.map((source) => source.id === sourceId ? { ...source, connected: true } : source);
 }
 
+function markLocallyDisconnectedSources(
+  sources: readonly ConnectSource[],
+  disconnectedConnectionIds: ReadonlySet<string>,
+): readonly ConnectSource[] {
+  if (disconnectedConnectionIds.size === 0) {
+    return sources;
+  }
+
+  return sources.map((source) => {
+    const connectionId = source.disconnectConnectionId;
+    if (!connectionId || !disconnectedConnectionIds.has(connectionId)) {
+      return source;
+    }
+
+    return {
+      description: source.description,
+      id: source.id,
+      logo: source.logo,
+      name: source.name,
+      ...(source.connectTarget ? { connectTarget: source.connectTarget } : {}),
+    };
+  });
+}
+
 function createConnectCallbackNotice(
   input: ConnectCallbackInput,
   sources: readonly ConnectSource[],
@@ -416,12 +537,14 @@ function createConnectCallbackNotice(
   if (input.status === "connected") {
     return {
       kind: "success",
+      title: "Device connected",
       message: `Connected ${sourceLabel}.`,
     };
   }
 
   return {
     kind: "error",
+    title: "Unable to finish connection",
     message: describeDeviceSyncCallbackError(sourceLabel, input.errorCode),
   };
 }
@@ -529,6 +652,57 @@ function ConnectConsentDialog({
             }}
           />
         ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConnectDisconnectDialog({
+  errorMessage,
+  pending,
+  source,
+  onConfirm,
+  onOpenChange,
+}: {
+  errorMessage: string | null;
+  pending: boolean;
+  source: ConnectSource | null;
+  onConfirm: (source: ConnectSource) => Promise<void>;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+        <DialogHeader className="pr-10">
+          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+            Disconnect {source?.name ?? "source"}?
+          </DialogTitle>
+          <DialogDescription>
+            Murph will stop syncing new data from this connection. Your history is kept.
+          </DialogDescription>
+        </DialogHeader>
+        {errorMessage ? (
+          <p role="alert" className="text-sm leading-relaxed text-destructive">
+            {errorMessage}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap justify-end gap-3">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Keep connected
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => {
+              if (source) {
+                void onConfirm(source);
+              }
+            }}
+            disabled={pending}
+          >
+            {pending ? "Disconnecting..." : "Disconnect"}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

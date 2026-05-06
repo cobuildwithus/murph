@@ -613,6 +613,7 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
     ok: true,
     sources: [
       {
+        connectionId: "dsc_junction_123",
         provider: "junction",
         state: "active",
         upstreamSources: [
@@ -625,6 +626,7 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
         ],
       },
       {
+        connectionId: "dsc_whoop_123",
         provider: "whoop",
         state: "active",
         upstreamSources: [],
@@ -638,10 +640,55 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
   assert.match(markup, /Oura connected/);
   assert.match(markup, /Whoop connected/);
   assert.equal(markup.match(/>Connected<\/span>/gu)?.length, 2);
+  assert.match(markup, /aria-label="Disconnect Oura"/u);
+  assert.match(markup, /aria-label="Disconnect Whoop"/u);
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
   assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Garmin"));
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
+});
+
+test("resolveConnectedConnectSourceConnections carries connection ids for direct and Junction matches", async () => {
+  const { resolveConnectedConnectSourceConnections } = await import("../app/(dashboard)/connect/page");
+  const sources = [
+    { id: "oura" },
+    { id: "whoop" },
+    { id: "garmin" },
+  ];
+
+  assert.deepEqual(
+    resolveConnectedConnectSourceConnections(sources, [
+      {
+        connectionId: "dsc_junction_123",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Oura",
+            resourceCount: 1,
+            sourceProviderSlug: "oura",
+            status: "connected",
+          },
+          {
+            providerLabel: "Garmin",
+            resourceCount: 1,
+            sourceProviderSlug: "garmin",
+            status: "unavailable",
+          },
+        ],
+      },
+      {
+        connectionId: "dsc_whoop_123",
+        provider: "whoop",
+        state: "active",
+        upstreamSources: [],
+      },
+    ]),
+    [
+      { connectionId: "dsc_junction_123", sourceId: "oura" },
+      { connectionId: "dsc_whoop_123", sourceId: "whoop" },
+    ],
+  );
 });
 
 test("ConnectPage ignores stale Junction upstream sources when the parent connection is not active", async () => {
@@ -747,6 +794,137 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
     keepalive: false,
   });
   assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/garmin");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid disconnects a connected source after confirmation", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({});
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        connected: true,
+        description: "Recovery, strain, sleep, and heart rate.",
+        disconnectConnectionId: "dsc_whoop_123",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect Whoop']");
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(disconnectButton.textContent, "Disconnect");
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
+  const dialogButtons = [...rendered.container.querySelectorAll("button")];
+  const confirmButton = dialogButtons.at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(confirmButton.textContent, "Disconnect");
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Disconnected Whoop\. Your history is still saved\./);
+  });
+
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_whoop_123/disconnect");
+  assert.deepEqual(fetch.mock.calls[0]?.[1], {
+    body: undefined,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {},
+    method: "POST",
+    keepalive: false,
+  });
+  assert.match(rendered.container.textContent ?? "", /Whoop not connected/);
+  assert.equal(rendered.container.querySelector("button[aria-label='Connect Whoop']")?.textContent, "Connect");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialog", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      error: {
+        code: "DEVICE_SYNC_DISCONNECT_FAILED",
+        message: "We could not disconnect Whoop right now.",
+      },
+    }, { status: 502 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        connected: true,
+        description: "Recovery, strain, sleep, and heart rate.",
+        disconnectConnectionId: "dsc_whoop_123",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect Whoop']");
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  const confirmButton = [...rendered.container.querySelectorAll("button")].at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    const alert = rendered.container.querySelector("[role='alert']");
+    assert.ok(alert);
+    assert.equal(alert.textContent, "We could not disconnect Whoop right now.");
+  });
+  assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
+  assert.match(rendered.container.textContent ?? "", /Whoop connected/);
+  assert.equal(rendered.container.querySelector("button[aria-label='Connect Whoop']"), null);
 
   await rendered.cleanup();
 });

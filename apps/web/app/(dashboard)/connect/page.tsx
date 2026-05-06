@@ -33,6 +33,7 @@ type ConnectSource = {
   connectTarget?: string;
   connected?: boolean;
   description: string;
+  disconnectConnectionId?: string;
   id: string;
   logo: LogoAsset;
   name: string;
@@ -46,6 +47,12 @@ type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
 
 type ConnectSourceUi = Omit<ConnectSource, "id">;
 type DeviceConnectRoute = (typeof DEVICE_CONNECT_SOURCES)[number]["routes"][number];
+type ConnectSettingsSourceMatch = Pick<
+  HostedDeviceSyncSettingsSource,
+  "provider" | "state" | "upstreamSources"
+> & {
+  connectionId?: string | null;
+};
 
 const CONNECT_SOURCE_UI = {
   whoop: {
@@ -220,6 +227,7 @@ export default async function ConnectPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const auth = await getHostedPageAuthSnapshot();
   const connectedSourceIds = new Set<string>();
+  const disconnectConnectionIdBySourceId = new Map<string, string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
 
   if (auth.authenticatedMember) {
@@ -227,8 +235,12 @@ export default async function ConnectPage({
       const response = await buildHostedDeviceSyncSettingsResponse({
         member: auth.authenticatedMember,
       });
-      for (const sourceId of resolveConnectedConnectSourceIds(CONNECT_SOURCES, response.sources)) {
+      for (const connection of resolveConnectedConnectSourceConnections(CONNECT_SOURCES, response.sources)) {
+        const sourceId = connection.sourceId;
         connectedSourceIds.add(sourceId);
+        if (connection.connectionId) {
+          disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
+        }
       }
     } catch (error) {
       initialLoadError = isHostedOnboardingError(error)
@@ -243,6 +255,7 @@ export default async function ConnectPage({
 
   const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
     connectedSourceIds,
+    disconnectConnectionIdBySourceId,
   });
 
   return (
@@ -289,7 +302,10 @@ function hasHostedConnectRoute(routes: readonly DeviceConnectRoute[]): boolean {
 
 export function resolveConfiguredConnectSources(
   sources: readonly ConnectSource[],
-  options: { connectedSourceIds?: ReadonlySet<string> } = {},
+  options: {
+    connectedSourceIds?: ReadonlySet<string>;
+    disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
+  } = {},
 ): ConnectSource[] {
   const connectTargetBySourceId = new Map(
     listConfiguredDeviceSyncConnectTargets(
@@ -301,11 +317,19 @@ export function resolveConfiguredConnectSources(
     sources.map((source) => {
       const connectTarget = connectTargetBySourceId.get(source.id);
       const connected = options.connectedSourceIds?.has(source.id) === true;
+      const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
 
       return {
         ...source,
         ...(connectTarget ? { connectTarget } : {}),
-        ...(connected ? { connected } : {}),
+        ...(connected
+          ? {
+              connected,
+              ...(disconnectConnectionId
+                ? { disconnectConnectionId }
+                : {}),
+            }
+          : {}),
       };
     }),
   );
@@ -318,7 +342,18 @@ export function resolveConnectedConnectSourceIds(
     "provider" | "state" | "upstreamSources"
   >[],
 ): Set<string> {
+  return new Set(
+    resolveConnectedConnectSourceConnections(sources, settingsSources)
+      .map((connection) => connection.sourceId),
+  );
+}
+
+export function resolveConnectedConnectSourceConnections(
+  sources: readonly Pick<ConnectSource, "id">[],
+  settingsSources: readonly ConnectSettingsSourceMatch[],
+): { connectionId: string | null; sourceId: string }[] {
   const connectedSourceIds = new Set<string>();
+  const connectedConnections: { connectionId: string | null; sourceId: string }[] = [];
   const sourceIdByDirectProvider = new Map<string, string>();
   const sourceIdByJunctionTarget = new Map<string, string>();
 
@@ -338,8 +373,14 @@ export function resolveConnectedConnectSourceIds(
     const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
     if (source.state === "active" && provider) {
       const sourceId = sourceIdByDirectProvider.get(provider);
-      if (sourceId) {
+      if (sourceId && !connectedSourceIds.has(sourceId)) {
         connectedSourceIds.add(sourceId);
+        connectedConnections.push({
+          connectionId: typeof source.connectionId === "string" && source.connectionId.trim()
+            ? source.connectionId
+            : null,
+          sourceId,
+        });
       }
     }
 
@@ -356,13 +397,19 @@ export function resolveConnectedConnectSourceIds(
       const sourceId = sourceProviderSlug
         ? sourceIdByJunctionTarget.get(sourceProviderSlug)
         : null;
-      if (sourceId) {
+      if (sourceId && !connectedSourceIds.has(sourceId)) {
         connectedSourceIds.add(sourceId);
+        connectedConnections.push({
+          connectionId: typeof source.connectionId === "string" && source.connectionId.trim()
+            ? source.connectionId
+            : null,
+          sourceId,
+        });
       }
     }
   }
 
-  return connectedSourceIds;
+  return connectedConnections;
 }
 
 function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): ConnectCallbackInput {
