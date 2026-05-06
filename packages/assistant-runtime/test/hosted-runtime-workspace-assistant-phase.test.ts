@@ -277,63 +277,53 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("preserves an existing workspace wake when active input skips device-sync work", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
     const nextWakeAt = "2026-04-27T00:05:00.000Z";
 
-    try {
-      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        importedCount: 1,
-        reason: "nudge",
-        workspace: {
-          checkpointedAt: "2026-04-27T00:00:00.000Z",
-          createdAt: "2026-04-27T00:00:00.000Z",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          redactedStatus: null,
-          snapshotRef: null,
-          updatedAt: "2026-04-27T00:00:00.000Z",
-          userId: "member_synthetic_phase",
-          version: "8",
-        },
-      }));
-
-      expect(result).toEqual(expect.objectContaining({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "nudge",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
         nextWakeAt,
-        progressed: true,
-      }));
-    } finally {
-      vi.useRealTimers();
-    }
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt,
+      progressed: true,
+    }));
   });
 
   it("schedules a near follow-up wake when active input consumes a due alarm and skips device sync", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-    try {
-      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        importedCount: 1,
-        reason: "alarm",
-        workspace: {
-          checkpointedAt: "2026-04-27T00:00:00.000Z",
-          createdAt: "2026-04-27T00:00:00.000Z",
-          nextWakeAt: "2026-04-26T23:59:59.000Z",
-          nextWakeReason: "assistant",
-          redactedStatus: null,
-          snapshotRef: null,
-          updatedAt: "2026-04-27T00:00:00.000Z",
-          userId: "member_synthetic_phase",
-          version: "8",
-        },
-      }));
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
 
-      expect(result).toEqual(expect.objectContaining({
-        nextWakeAt: "2026-04-27T00:00:30.000Z",
-        progressed: true,
-      }));
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      progressed: true,
+    }));
   });
 
   it("exposes hosted device connect providers and link helper from the platform port", async () => {
@@ -1358,6 +1348,7 @@ describe("hosted runtime log helpers", () => {
 function createPhaseInput(input: {
   importedCount?: number;
   logRequests?: HostedRuntimeLogRequest[];
+  now?: () => string;
   reason?: HostedWorkspaceRuntimeAssistantPhaseInput["request"]["reason"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
@@ -1401,6 +1392,7 @@ function createPhaseInput(input: {
       },
       stateChanged: false,
     },
+    now: input.now,
     platform: {
       artifactStore: {
         get: vi.fn(async () => null),

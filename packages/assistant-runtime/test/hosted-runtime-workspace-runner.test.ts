@@ -233,6 +233,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("assistant");
           assert.equal(input.workspace, null);
           assert.equal(input.initialMailboxImport.checkpoint?.checkpointed, true);
+          assert.equal(input.now?.(), TEST_NOW);
           assert.equal(input.platform.refreshMailboxForActiveTurnInput !== undefined, true);
           return {
             progressed: false,

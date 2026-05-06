@@ -844,6 +844,18 @@ function isHostedProviderCleanupCheckpointDue(
   return Number.isFinite(timestamp) && timestamp <= Date.now();
 }
 
+function resolveHostedAssistantPhaseNowMs(input: {
+  now?: (() => string) | null;
+}): number {
+  const fallbackNowMs = Date.now();
+  if (!input.now) {
+    return fallbackNowMs;
+  }
+
+  const parsed = Date.parse(input.now());
+  return Number.isFinite(parsed) ? parsed : fallbackNowMs;
+}
+
 function buildHostedProviderCleanupRedactedStatus(input: {
   attemptedLinqMessageCount: number;
   deletedLinqMessageCount: number;
@@ -881,12 +893,13 @@ function resolveSkippedDeviceSyncWakeAt(input: {
     return existingWakeAt;
   }
 
-  if (wakeTime > Date.now()) {
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  if (wakeTime > nowMs) {
     return existingWakeAt;
   }
 
   if (input.input.request.reason === "alarm") {
-    return new Date(Date.now() + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString();
+    return new Date(nowMs + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString();
   }
 
   return null;
@@ -1248,7 +1261,7 @@ function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPh
   }
 
   const wakeTime = Date.parse(input.workspace.nextWakeAt);
-  return Number.isFinite(wakeTime) && wakeTime <= Date.now();
+  return Number.isFinite(wakeTime) && wakeTime <= resolveHostedAssistantPhaseNowMs(input);
 }
 
 function resolveHostedWorkspaceDeviceConnectProviders(

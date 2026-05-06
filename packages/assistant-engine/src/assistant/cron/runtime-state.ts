@@ -11,7 +11,12 @@ import {
 const ASSISTANT_CRON_CANONICAL_RUNTIME_STORE_VERSION = 1
 const ASSISTANT_CRON_CANONICAL_RUNTIME_RECORD_SCHEMA =
   'murph.assistant-canonical-cron-runtime-state.v1'
-const ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS = 60 * 60 * 1000
+export const ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS = 60 * 60 * 1000
+
+export interface AssistantCronCanonicalRuntimeNormalizationPolicy {
+  now?: () => string
+  runningStaleAfterMs?: number
+}
 
 const assistantCronCanonicalRuntimeStateSchema = z
   .object({
@@ -61,12 +66,13 @@ export type AssistantCronCanonicalRuntimeStore = z.infer<
 
 export async function readAssistantCronCanonicalRuntimeStore(
   paths: AssistantStatePaths,
+  policy?: AssistantCronCanonicalRuntimeNormalizationPolicy,
 ): Promise<AssistantCronCanonicalRuntimeStore> {
   await ensureAssistantStateDirectory(paths.cronDirectory)
 
   try {
     const raw = await readFile(paths.cronAutomationStatePath, 'utf8')
-    return normalizeAssistantCronCanonicalRuntimeStore(JSON.parse(raw))
+    return normalizeAssistantCronCanonicalRuntimeStore(JSON.parse(raw), policy)
   } catch (error) {
     if (isMissingFileError(error)) {
       return createEmptyAssistantCronCanonicalRuntimeStore()
@@ -85,11 +91,12 @@ export async function readAssistantCronCanonicalRuntimeStore(
 export async function writeAssistantCronCanonicalRuntimeStore(
   paths: AssistantStatePaths,
   store: AssistantCronCanonicalRuntimeStore,
+  policy?: AssistantCronCanonicalRuntimeNormalizationPolicy,
 ): Promise<void> {
   await ensureAssistantStateDirectory(paths.cronDirectory)
   await writeJsonFileAtomic(
     paths.cronAutomationStatePath,
-    normalizeAssistantCronCanonicalRuntimeStore(store),
+    normalizeAssistantCronCanonicalRuntimeStore(store, policy),
   )
 }
 
@@ -163,20 +170,48 @@ function createEmptyAssistantCronCanonicalRuntimeStore(): AssistantCronCanonical
 
 function normalizeAssistantCronCanonicalRuntimeStore(
   value: unknown,
+  policy?: AssistantCronCanonicalRuntimeNormalizationPolicy,
 ): AssistantCronCanonicalRuntimeStore {
   const parsedCurrent = assistantCronCanonicalRuntimeStoreSchema.parse(value)
-  const nowMs = Date.now()
+  const normalizationPolicy = resolveAssistantCronCanonicalRuntimeNormalizationPolicy(policy)
   return {
     ...parsedCurrent,
     jobs: [...parsedCurrent.jobs]
-      .map((record) => normalizeAssistantCronCanonicalRuntimeRecord(record, nowMs))
+      .map((record) =>
+        normalizeAssistantCronCanonicalRuntimeRecord(record, normalizationPolicy)
+      )
       .sort((left, right) => left.jobId.localeCompare(right.jobId)),
   }
 }
 
+function resolveAssistantCronCanonicalRuntimeNormalizationPolicy(
+  policy?: AssistantCronCanonicalRuntimeNormalizationPolicy,
+): {
+  nowMs: number
+  runningStaleAfterMs: number
+} {
+  const fallbackNowMs = Date.now()
+  const parsedNowMs = policy?.now ? Date.parse(policy.now()) : fallbackNowMs
+  return {
+    nowMs: Number.isFinite(parsedNowMs) ? parsedNowMs : fallbackNowMs,
+    runningStaleAfterMs: normalizeRunningStaleAfterMs(policy?.runningStaleAfterMs),
+  }
+}
+
+function normalizeRunningStaleAfterMs(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS
+  }
+
+  return Math.max(0, Math.trunc(value))
+}
+
 function normalizeAssistantCronCanonicalRuntimeRecord(
   record: AssistantCronCanonicalRuntimeRecord,
-  nowMs: number,
+  policy: {
+    nowMs: number
+    runningStaleAfterMs: number
+  },
 ): AssistantCronCanonicalRuntimeRecord {
   if (record.state.runningAt === null) {
     return record
@@ -185,7 +220,7 @@ function normalizeAssistantCronCanonicalRuntimeRecord(
   const runningAtMs = Date.parse(record.state.runningAt)
   const runningClaimIsStale =
     !Number.isFinite(runningAtMs) ||
-    nowMs - runningAtMs > ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS
+    policy.nowMs - runningAtMs > policy.runningStaleAfterMs
 
   if (!runningClaimIsStale) {
     return record

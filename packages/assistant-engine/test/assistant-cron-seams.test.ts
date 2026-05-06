@@ -11,6 +11,7 @@ import {
 } from '../src/assistant/cron/presets.ts'
 import {
   createAssistantCronCanonicalRuntimeRecord,
+  ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS,
   findAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
   removeAssistantCronCanonicalRuntimeRecord,
@@ -246,8 +247,6 @@ describe('assistant cron canonical runtime store seams', () => {
   })
 
   it('clears stale canonical running claims during store normalization', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
     const paths = await createAssistantPaths('murph-assistant-cron-store-stale-')
     const staleRecord = createAssistantCronCanonicalRuntimeRecord({
       jobId: 'stale',
@@ -311,7 +310,9 @@ describe('assistant cron canonical runtime store seams', () => {
       version: 1,
     })
 
-    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
+    await expect(readAssistantCronCanonicalRuntimeStore(paths, {
+      now: () => '2026-04-08T13:00:00.000Z',
+    })).resolves.toEqual({
       jobs: [
         expect.objectContaining({
           jobId: 'fresh',
@@ -325,6 +326,71 @@ describe('assistant cron canonical runtime store seams', () => {
           state: expect.objectContaining({
             runningAt: null,
             runningPid: null,
+          }),
+        }),
+      ],
+      version: 1,
+    })
+  })
+
+  it('uses injected stale-threshold policy for canonical running claim normalization', async () => {
+    const paths = await createAssistantPaths('murph-assistant-cron-store-stale-policy-')
+    const record = createAssistantCronCanonicalRuntimeRecord({
+      jobId: 'threshold',
+      now: '2026-04-08T11:00:00.000Z',
+    })
+
+    await mkdir(path.dirname(paths.cronAutomationStatePath), {
+      recursive: true,
+    })
+    await writeFile(
+      paths.cronAutomationStatePath,
+      JSON.stringify(
+        {
+          jobs: [
+            {
+              ...record,
+              state: {
+                ...record.state,
+                runningAt: '2026-04-08T11:30:00.000Z',
+                runningPid: 123,
+              },
+            },
+          ],
+          version: 1,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+
+    await expect(readAssistantCronCanonicalRuntimeStore(paths, {
+      now: () => '2026-04-08T11:45:00.000Z',
+      runningStaleAfterMs: 10 * 60 * 1000,
+    })).resolves.toEqual({
+      jobs: [
+        expect.objectContaining({
+          jobId: 'threshold',
+          state: expect.objectContaining({
+            runningAt: null,
+            runningPid: null,
+          }),
+        }),
+      ],
+      version: 1,
+    })
+
+    await expect(readAssistantCronCanonicalRuntimeStore(paths, {
+      now: () => '2026-04-08T11:45:00.000Z',
+      runningStaleAfterMs: ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS,
+    })).resolves.toEqual({
+      jobs: [
+        expect.objectContaining({
+          jobId: 'threshold',
+          state: expect.objectContaining({
+            runningAt: '2026-04-08T11:30:00.000Z',
+            runningPid: 123,
           }),
         }),
       ],
