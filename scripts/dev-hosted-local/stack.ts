@@ -61,6 +61,7 @@ import {
   waitForHealthyHttpEndpoint,
 } from "./runtime.ts";
 import {
+  HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
   writeHostedLocalStripeCheckoutDiagnostics,
 } from "./stripe.ts";
 import type {
@@ -207,11 +208,23 @@ export async function startHostedLocalDevStack(input: {
     const pulledEnv = (config.skipVercelPull || providedVercelOidcToken)
       ? {}
       : await readSimpleEnvFile(pulledEnvPath);
+    const localStripeAuthorityEnv = pickHostedLocalStripeAuthorityEnv({
+      inheritedEnv: initialEnv,
+      localEnvFiles: [
+        repoEnv,
+        webEnv,
+        webLocalEnv,
+      ],
+      localStripeEnv,
+    });
+    const localStripeIsolationOverlay =
+      buildHostedLocalStripeBillingIsolationOverlay(localStripeAuthorityEnv);
     const rawVercelEnv: NodeJS.ProcessEnv = {
       ...repoEnv,
       ...pulledEnv,
       ...webEnv,
       ...webLocalEnv,
+      ...localStripeIsolationOverlay,
       ...localStripeEnv,
       ...initialEnv,
     };
@@ -736,6 +749,76 @@ export async function startHostedLocalDevStack(input: {
     }
     throw error;
   }
+}
+
+function pickHostedLocalStripeAuthorityEnv(input: {
+  inheritedEnv: NodeJS.ProcessEnv;
+  localEnvFiles: Array<Record<string, string>>;
+  localStripeEnv: Record<string, string>;
+}): Record<string, string | undefined> {
+  const authorityEnv: Record<string, string | undefined> = {};
+  const keys = [
+    "STRIPE_SECRET_KEY",
+    ...HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
+  ] as const;
+
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(input.localStripeEnv, key)) {
+      authorityEnv[key] = input.localStripeEnv[key];
+      continue;
+    }
+
+    const localEnvValue = input.localEnvFiles
+      .map((envFile) => Object.prototype.hasOwnProperty.call(envFile, key)
+        ? envFile[key]
+        : undefined)
+      .findLast((value) => value !== undefined);
+
+    if (localEnvValue !== undefined) {
+      authorityEnv[key] = localEnvValue;
+      continue;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input.inheritedEnv, key)) {
+      authorityEnv[key] = input.inheritedEnv[key];
+    }
+  }
+
+  return authorityEnv;
+}
+
+function buildHostedLocalStripeBillingIsolationOverlay(
+  authorityEnv: Record<string, string | undefined>,
+): Record<string, undefined> {
+  const hasLocalStripeSecretAuthority =
+    typeof authorityEnv.STRIPE_SECRET_KEY === "string" &&
+    authorityEnv.STRIPE_SECRET_KEY.trim().length > 0;
+  const hasLocalStripePriceAuthority = Object.entries(authorityEnv).some(([key, value]) =>
+    isHostedLocalStripeBillingPriceEnvKey(key) &&
+    typeof value === "string" &&
+    value.trim().length > 0
+  );
+
+  if (!hasLocalStripeSecretAuthority && !hasLocalStripePriceAuthority) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    [
+      "STRIPE_SECRET_KEY",
+      ...HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
+    ]
+      .filter((key) => !Object.prototype.hasOwnProperty.call(authorityEnv, key))
+      .map((key) => [key, undefined]),
+  );
+}
+
+function isHostedLocalStripeBillingPriceEnvKey(
+  key: string,
+): key is (typeof HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS)[number] {
+  return HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS.includes(
+    key as (typeof HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS)[number],
+  );
 }
 
 async function invalidateHostedWebHealthCommonsDevCache(

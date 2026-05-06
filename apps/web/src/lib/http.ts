@@ -66,6 +66,7 @@ const JSON_ERROR_RESPONSE_DETAIL_SAFE_KEYS = new Set([
   "requestIdPresent",
   "retryAfterMs",
   "retryAfterSeconds",
+  "stripeParam",
   "status",
   "statusCode",
   "type",

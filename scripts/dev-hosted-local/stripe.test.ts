@@ -28,7 +28,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
   it("treats placeholder values as missing checkout configuration", () => {
     expect(
       evaluateHostedLocalStripeCheckoutEnv({
-        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_replace_me",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_replace_me",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_replace_me",
         STRIPE_SECRET_KEY: "sk_test_replace_me",
       }),
@@ -36,7 +36,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
       configuredPlanLabels: [],
       missingFlatPriceKeys: [
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-        "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
+        "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
       ],
       missingUsagePriceKeys: [],
       secretMode: "placeholder",
@@ -53,7 +53,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
       }),
     ).toEqual({
       configuredPlanLabels: [],
-      missingFlatPriceKeys: ["HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL"],
+      missingFlatPriceKeys: ["HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY"],
       missingUsagePriceKeys: ["HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY"],
       secretMode: "test",
     });
@@ -66,7 +66,7 @@ describe("writeHostedLocalStripeCheckoutDiagnostics", () => {
 
     const diagnostics = writeHostedLocalStripeCheckoutDiagnostics({
       env: {
-        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_annual_secretish",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_secretish",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_secretish",
         STRIPE_SECRET_KEY: "sk_test_secretish",
       },
@@ -74,12 +74,12 @@ describe("writeHostedLocalStripeCheckoutDiagnostics", () => {
       stripeListenerWillCaptureSecret: true,
     });
 
-    expect(diagnostics.configuredPlanLabels).toEqual(["monthly", "annual"]);
+    expect(diagnostics.configuredPlanLabels).toEqual(["monthly", "edge"]);
     expect(stderrTarget.text()).toContain("Stripe test checkout env ready");
     expect(stderrTarget.text()).toContain("Stripe webhook signing secret will be injected");
     expect(stderrTarget.text()).not.toContain("sk_test_secretish");
     expect(stderrTarget.text()).not.toContain("price_monthly_secretish");
-    expect(stderrTarget.text()).not.toContain("price_annual_secretish");
+    expect(stderrTarget.text()).not.toContain("price_edge_secretish");
   });
 
   it("blocks live Stripe keys by default", () => {

@@ -568,6 +568,7 @@ describe("upgradeHostedBillingPlan", () => {
     const error = new Error("No such subscription");
     Object.assign(error, {
       code: "resource_missing",
+      param: "items[0][price]",
       requestId: "req_123",
       statusCode: 404,
       type: "StripeInvalidRequestError",
@@ -583,6 +584,7 @@ describe("upgradeHostedBillingPlan", () => {
         code: "resource_missing",
         operationName: "subscription.retrieve",
         requestIdPresent: true,
+        stripeParam: "items[0][price]",
         statusCode: 404,
         type: "StripeInvalidRequestError",
       },

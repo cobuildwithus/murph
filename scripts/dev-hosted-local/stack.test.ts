@@ -1365,20 +1365,23 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("loads the local Stripe env overlay after pulled Vercel env and below shell env", async () => {
+  it("loads local Stripe env without mixing pulled Vercel plan prices", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 351 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 352 }));
 
-    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL", "price_shell_annual");
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+      "price_shell_edge_usage",
+    );
 
     const environmentModule = await import("./environment.ts");
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_vercel_edge",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
       STRIPE_SECRET_KEY: "sk_test_vercel",
     });
     vi.mocked(environmentModule.readHostedLocalStripeEnvFile).mockResolvedValueOnce({
-      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_local_annual",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
       STRIPE_SECRET_KEY: "sk_test_local",
     });
@@ -1396,9 +1399,92 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_shell_annual",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
+        HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_shell_edge_usage",
         STRIPE_SECRET_KEY: "sk_test_local",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("isolates pulled Stripe plan prices when apps web local env supplies the Stripe key", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 361 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 362 }));
+
+    const environmentModule = await import("./environment.ts");
+    vi.mocked(environmentModule.readOptionalSimpleEnvFile)
+      .mockResolvedValueOnce({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "local-openai-key",
+      })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        STRIPE_SECRET_KEY: "sk_test_web_local",
+      });
+    vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_vercel_edge",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "web",
+      "pnpm",
+      expect.any(Array),
+      expect.objectContaining({
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: undefined,
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: undefined,
+        STRIPE_SECRET_KEY: "sk_test_web_local",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("isolates a pulled Stripe key when local env supplies only plan prices", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 371 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 372 }));
+
+    const environmentModule = await import("./environment.ts");
+    vi.mocked(environmentModule.readOptionalSimpleEnvFile)
+      .mockResolvedValueOnce({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "local-openai-key",
+      })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_local_edge",
+      });
+    vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
+      STRIPE_SECRET_KEY: "sk_test_vercel",
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "web",
+      "pnpm",
+      expect.any(Array),
+      expect.objectContaining({
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_local_edge",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: undefined,
+        STRIPE_SECRET_KEY: undefined,
       }),
       expect.any(Object),
     );

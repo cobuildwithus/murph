@@ -32,6 +32,7 @@ const HOSTED_ONBOARDING_SAFE_DOMAIN_ERROR_DETAIL_KEYS = new Set([
   "code",
   "operationName",
   "requestIdPresent",
+  "stripeParam",
   "statusCode",
   "type",
 ]);
