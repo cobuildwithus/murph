@@ -1,7 +1,8 @@
-import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
+import { StartPaidPulseButton } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usage-allowance";
 
 interface UsageLimitBannerProps {
@@ -35,10 +36,10 @@ const usageLimitBannerCopy: Record<
     title: "Trial billing is updating",
   },
   trial_usage_limit_reached: {
-    action: "Upgrade",
+    action: "Start Pulse plan",
     body:
-      "Your trial assistant usage is used up. Upgrade to keep Murph replying now.",
-    title: "Trial usage is used up",
+      "Start your Pulse plan now to keep Murph replying.",
+    title: "Trial credits are used up",
   },
 };
 
@@ -66,6 +67,10 @@ export function UsageLimitBanner({ noticeCode }: UsageLimitBannerProps) {
         <UpgradeToEdgeButton presentation="banner">
           {copy.action}
         </UpgradeToEdgeButton>
+      ) : noticeCode === "trial_usage_limit_reached" ? (
+        <StartPaidPulseButton presentation="banner">
+          {copy.action}
+        </StartPaidPulseButton>
       ) : (
         <Link
           href="/settings"

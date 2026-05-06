@@ -18,8 +18,10 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
+    canStartPaidPulse?: boolean;
     canUpgradeToEdge?: boolean;
     currentBillingPhase?: unknown;
+    currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
   }) =>
     React.createElement(
@@ -194,8 +196,10 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
+    canStartPaidPulse: false,
     canUpgradeToEdge: true,
     currentBillingPhase: "paid",
+    currentCheckoutOffer: "standard",
     currentBillingPlanCode: "launch_monthly",
   }), undefined);
   expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({

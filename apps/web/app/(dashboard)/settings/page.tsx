@@ -8,6 +8,7 @@ import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-devic
 import { PageHeader } from "@/src/components/ui/page-header";
 import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
+  canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
 } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -60,6 +61,15 @@ export default async function SettingsPage() {
         </div>
         <HostedBillingSettings
           authenticated={authenticated}
+          canStartPaidPulse={canStartHostedPulseTrialPaidPlan({
+            billingStatus: authenticatedMember?.billingStatus,
+            currentBillingPhase: billingRef?.currentBillingPhase,
+            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+            currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+            stripeCustomerId: billingRef?.stripeCustomerId,
+            stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+            suspendedAt: authenticatedMember?.suspendedAt,
+          })}
           canUpgradeToEdge={canUpgradeHostedBillingPlanToEdge({
             currentBillingPhase: billingRef?.currentBillingPhase,
             currentBillingPlanCode: billingRef?.currentBillingPlanCode,
@@ -74,6 +84,7 @@ export default async function SettingsPage() {
             suspendedAt: authenticatedMember?.suspendedAt,
           })}
           currentBillingPhase={billingRef?.currentBillingPhase}
+          currentCheckoutOffer={billingRef?.currentCheckoutOffer}
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
           currentPeriodEnd={billingRef?.currentPeriodEnd}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
