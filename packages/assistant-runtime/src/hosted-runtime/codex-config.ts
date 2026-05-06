@@ -38,6 +38,7 @@ const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 220_000;
 const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "none";
 const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   "CI",
@@ -331,6 +332,7 @@ export function buildHostedCodexConfigToml(input: {
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
     `model_provider = ${tomlString(input.provider.id)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
+    `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "",
@@ -342,6 +344,9 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "[skills.bundled]",
     "enabled = false",
+    "",
+    "[history]",
+    'persistence = "none"',
     "",
     "[shell_environment_policy]",
     `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,

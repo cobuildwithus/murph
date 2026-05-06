@@ -75,6 +75,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /^model = /mu);
   assert.match(config, /^model_provider = "hosted-openai"$/mu);
   assert.match(config, /model_reasoning_effort = "medium"/u);
+  assert.match(config, /^model_auto_compact_token_limit = 220000$/mu);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
@@ -85,6 +86,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
+  assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "none"/u);
   assert.match(config, /include_only = \[/u);
@@ -754,6 +756,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
     [
       'model_provider = "openai"',
       'model_reasoning_effort = "medium"',
+      "model_auto_compact_token_limit = 220000",
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
       "",
@@ -771,6 +774,9 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       "",
       "[skills.bundled]",
       "enabled = false",
+      "",
+      "[history]",
+      'persistence = "none"',
       "",
       "[shell_environment_policy]",
       'inherit = "none"',
@@ -795,6 +801,7 @@ test("hosted Codex config keeps skill instructions disabled for stable prompt pr
 
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
+  assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.doesNotMatch(config, /include_instructions = true/u);
   assert.doesNotMatch(config, /\[skills\.bundled\]\nenabled = true/u);
   assert.match(config, /break provider prefix caching/u);
