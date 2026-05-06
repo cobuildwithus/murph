@@ -940,6 +940,68 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it("sends active lease headers on proxied workspace checkpoints", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      checkpointed: true,
+      workspace: {
+        checkpointedAt: "2026-04-26T00:00:04.000Z",
+        createdAt: "2026-04-26T00:00:00.000Z",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: {},
+        snapshotRef: null,
+        updatedAt: "2026-04-26T00:00:04.000Z",
+        userId: "member_123",
+        version: "5",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {},
+      snapshotRef: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "workspace checkpoint");
+    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-workspace/checkpoint");
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+    await expect(request.json()).resolves.toMatchObject({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+    });
+  });
+
   it("advances artifact upload lease headers after a successful workspace checkpoint", async () => {
     let currentLease = {
       attemptId: "attempt_1",

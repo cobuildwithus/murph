@@ -922,6 +922,14 @@ function createHostedWebWorkspacePort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted workspace checkpoint",
           fetchImpl: input.fetchImpl,
+          ...(input.workspaceCheckpointBridge
+            ? {
+                headers: await requireHostedRuntimeActiveLeaseHeaders(
+                  input.workspaceCheckpointBridge,
+                  "Hosted workspace checkpoint",
+                ),
+              }
+            : {}),
           path: HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -1023,6 +1031,7 @@ async function fetchHostedWebControlPlaneJson(input: {
   boundUserId: string;
   description: string;
   fetchImpl: typeof fetch;
+  headers?: Headers;
   method?: "GET" | "POST";
   path: string;
   timeoutMs: number;
@@ -1052,6 +1061,7 @@ async function fetchHostedWebControlPlaneJson(input: {
       init: {
         ...(body === undefined ? {} : { body }),
         headers: createHostedWebControlProxyHeaders({
+          headers: input.headers,
           hasJsonBody: body !== undefined,
         }),
         method,
@@ -1120,15 +1130,20 @@ function createHostedWebControlLogPath(path: string): string {
 }
 
 function createHostedWebControlProxyHeaders(input: {
+  headers?: Headers;
   hasJsonBody: boolean;
 }): Headers | undefined {
-  const headers = new Headers();
+  const headers = new Headers(input.headers);
   let hasHeaders = false;
 
   if (input.hasJsonBody) {
     headers.set("content-type", "application/json");
     hasHeaders = true;
   }
+
+  headers.forEach(() => {
+    hasHeaders = true;
+  });
 
   return hasHeaders ? headers : undefined;
 }
