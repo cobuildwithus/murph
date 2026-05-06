@@ -141,7 +141,7 @@ function EmailSettingsCard({
       <ConnectedAccountCard
         value={emailAddress ?? "Not connected"}
         variant={emailAddress ? undefined : "empty"}
-        meta={emailAddress && !verified ? "Unverified" : null}
+        meta={null}
         action={
           <Button type="button" size="sm" variant={emailAddress ? "ghost" : "default"} onClick={onLink}>
             {emailAddress ? (verified ? "Change" : "Verify") : "Link email"}

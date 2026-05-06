@@ -86,13 +86,6 @@ export function UpgradeToEdgeButton(props: {
           {label}
           <ArrowRight className="size-4" aria-hidden="true" />
         </Button>
-        <p
-          role="alert"
-          aria-live="polite"
-          className="min-h-[1rem] max-w-48 text-xs leading-tight text-destructive sm:text-right"
-        >
-          {errorMessage}
-        </p>
         <EdgeUpgradeConfirmationDialog
           errorMessage={errorMessage}
           isUpgrading={isUpgrading}
@@ -109,13 +102,6 @@ export function UpgradeToEdgeButton(props: {
       <Button type="button" onClick={() => setConfirmationOpen(true)} disabled={disabled}>
         {label}
       </Button>
-      <p
-        role="alert"
-        aria-live="polite"
-        className="min-h-[1rem] text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
-      >
-        {errorMessage}
-      </p>
       <EdgeUpgradeConfirmationDialog
         errorMessage={errorMessage}
         isUpgrading={isUpgrading}
@@ -151,7 +137,7 @@ function EdgeUpgradeConfirmationDialog(props: {
         {props.errorMessage ? (
           <p
             role="alert"
-            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
+            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
           >
             {props.errorMessage}
           </p>
