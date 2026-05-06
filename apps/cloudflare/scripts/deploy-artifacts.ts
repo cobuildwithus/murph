@@ -125,11 +125,6 @@ export async function assertPreparedDeployArtifacts(input: {
   if (input.includeSecrets) {
     const workerSecretsPayload = await readJsonObjectFile(input.secretsFilePath, "worker secrets payload");
     assertWorkerSecretsPayloadMatchesCurrentEnvironment(workerSecretsPayload, source);
-    await assertArtifactNotNewerThanManifest({
-      artifactPath: input.secretsFilePath,
-      label: "worker secrets payload",
-      manifestGeneratedAtMs,
-    });
   }
 
   await assertRunnerBundleShape(input.runnerBundleDir, manifest);

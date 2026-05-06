@@ -411,15 +411,13 @@ export function loadGeneratedHealthCommonsCatalog() {
     );
   });
 
-  it("rejects worker secrets rendered after the runner bundle", async () => {
+  it("accepts worker secrets rendered after the runner bundle", async () => {
     const fixture = await createDeployArtifactFixture();
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
 
     await utimes(fixture.secretsFilePath, future, future);
 
-    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
-      "worker secrets payload is newer than the runner bundle",
-    );
+    await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
   });
 
   it("rejects the raw Wrangler scaffold container context", async () => {

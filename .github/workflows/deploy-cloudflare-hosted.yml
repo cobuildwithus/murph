@@ -68,13 +68,13 @@ jobs:
       MURPH_E2E_STREAM_DEV_LOGS: "0"
       MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload Codex cache-prefix E2E logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: cloudflare-hosted-deploy-codex-cache-prefix-logs
           path: |
@@ -147,13 +147,13 @@ jobs:
       MURPH_E2E_STREAM_DEV_LOGS: "0"
       MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -197,7 +197,7 @@ jobs:
 
       - name: Upload Linq delivery E2E logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: cloudflare-hosted-deploy-linq-delivery-logs
           path: |
@@ -226,13 +226,13 @@ jobs:
       MURPH_E2E_STREAM_DEV_LOGS: "0"
       MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -276,7 +276,7 @@ jobs:
 
       - name: Upload Linq scheduled reminder E2E logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: cloudflare-hosted-deploy-linq-scheduled-reminder-logs
           path: |
@@ -304,8 +304,6 @@ jobs:
       group: cloudflare-hosted-${{ inputs.environment }}
       cancel-in-progress: false
     env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ALLOWED_RUNNER_SECRET_KEYS: ${{ vars.CF_ALLOWED_RUNNER_SECRET_KEYS }}
       CF_BUNDLES_BUCKET: ${{ vars.CF_BUNDLES_BUCKET }}
       CF_BUNDLES_PREVIEW_BUCKET: ${{ vars.CF_BUNDLES_PREVIEW_BUCKET }}
@@ -327,7 +325,6 @@ jobs:
       HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: ${{ vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION }}
       HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: ${{ vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM }}
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}
-      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
       HOSTED_CRYPTO_ENV: ${{ vars.HOSTED_CRYPTO_ENV }}
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}
@@ -338,10 +335,6 @@ jobs:
       HOSTED_EMAIL_DOMAIN: ${{ vars.HOSTED_EMAIL_DOMAIN }}
       HOSTED_EMAIL_FROM_ADDRESS: ${{ vars.HOSTED_EMAIL_FROM_ADDRESS }}
       HOSTED_EMAIL_LOCAL_PART: ${{ vars.HOSTED_EMAIL_LOCAL_PART }}
-      HOSTED_EMAIL_SIGNING_SECRET: ${{ secrets.HOSTED_EMAIL_SIGNING_SECRET }}
-      HOSTED_AI_USAGE_REPORTING_SECRET: ${{ secrets.HOSTED_AI_USAGE_REPORTING_SECRET }}
-      HOSTED_LOG_FINGERPRINT_SECRET: ${{ secrets.HOSTED_LOG_FINGERPRINT_SECRET }}
-      HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: ${{ secrets.HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY }}
       HOSTED_AI_USAGE_BILLING_MODE: ${{ vars.HOSTED_AI_USAGE_BILLING_MODE }}
       HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: ${{ vars.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED }}
       HOSTED_ASSISTANT_APPROVAL_POLICY: ${{ vars.HOSTED_ASSISTANT_APPROVAL_POLICY }}
@@ -351,13 +344,8 @@ jobs:
       HOSTED_ASSISTANT_SANDBOX: ${{ vars.HOSTED_ASSISTANT_SANDBOX }}
       HOSTED_WEB_BASE_URL: ${{ vars.HOSTED_WEB_BASE_URL }}
       HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
-      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: ${{ vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID }}
       DEVICE_SYNC_PUBLIC_BASE_URL: ${{ vars.DEVICE_SYNC_PUBLIC_BASE_URL }}
-      DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
-      JUNCTION_API_KEY: ${{ secrets.JUNCTION_API_KEY }}
-      JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.JUNCTION_CLIENT_USER_ID_SECRET }}
-      JUNCTION_WEBHOOK_SECRET: ${{ secrets.JUNCTION_WEBHOOK_SECRET }}
       JUNCTION_ENV: ${{ vars.JUNCTION_ENV }}
       JUNCTION_REGION: ${{ vars.JUNCTION_REGION }}
       JUNCTION_ALLOW_CUSTOM_BASE_URL: ${{ vars.JUNCTION_ALLOW_CUSTOM_BASE_URL }}
@@ -377,8 +365,6 @@ jobs:
       GARMIN_API_BASE_URL: ${{ vars.GARMIN_API_BASE_URL }}
       GARMIN_AUTH_BASE_URL: ${{ vars.GARMIN_AUTH_BASE_URL }}
       GARMIN_BACKFILL_DAYS: ${{ vars.GARMIN_BACKFILL_DAYS }}
-      GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}
-      GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}
       GARMIN_RECONCILE_DAYS: ${{ vars.GARMIN_RECONCILE_DAYS }}
       GARMIN_RECONCILE_INTERVAL_MS: ${{ vars.GARMIN_RECONCILE_INTERVAL_MS }}
       GARMIN_REQUEST_TIMEOUT_MS: ${{ vars.GARMIN_REQUEST_TIMEOUT_MS }}
@@ -386,10 +372,6 @@ jobs:
       OURA_API_BASE_URL: ${{ vars.OURA_API_BASE_URL }}
       OURA_AUTH_BASE_URL: ${{ vars.OURA_AUTH_BASE_URL }}
       OURA_BACKFILL_DAYS: ${{ vars.OURA_BACKFILL_DAYS }}
-      WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
-      WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
-      OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
-      OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
       OURA_RECONCILE_DAYS: ${{ vars.OURA_RECONCILE_DAYS }}
       OURA_RECONCILE_INTERVAL_MS: ${{ vars.OURA_RECONCILE_INTERVAL_MS }}
       OURA_REQUEST_TIMEOUT_MS: ${{ vars.OURA_REQUEST_TIMEOUT_MS }}
@@ -398,9 +380,6 @@ jobs:
       STRAVA_API_BASE_URL: ${{ vars.STRAVA_API_BASE_URL }}
       STRAVA_AUTH_BASE_URL: ${{ vars.STRAVA_AUTH_BASE_URL }}
       STRAVA_BACKFILL_DAYS: ${{ vars.STRAVA_BACKFILL_DAYS }}
-      STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
-      STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
-      STRAVA_WEBHOOK_SIGNING_SECRET: ${{ secrets.STRAVA_WEBHOOK_SIGNING_SECRET }}
       STRAVA_RECONCILE_DAYS: ${{ vars.STRAVA_RECONCILE_DAYS }}
       STRAVA_RECONCILE_INTERVAL_MS: ${{ vars.STRAVA_RECONCILE_INTERVAL_MS }}
       STRAVA_REQUEST_TIMEOUT_MS: ${{ vars.STRAVA_REQUEST_TIMEOUT_MS }}
@@ -414,11 +393,6 @@ jobs:
       WHOOP_SCOPES: ${{ vars.WHOOP_SCOPES }}
       WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS: ${{ vars.WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS }}
       LINQ_API_BASE_URL: ${{ vars.LINQ_API_BASE_URL }}
-      LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
-      LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
-      MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_BOT_USERNAME: ${{ vars.TELEGRAM_BOT_USERNAME }}
       TELEGRAM_API_BASE_URL: ${{ vars.TELEGRAM_API_BASE_URL }}
       TELEGRAM_FILE_BASE_URL: ${{ vars.TELEGRAM_FILE_BASE_URL }}
@@ -432,13 +406,13 @@ jobs:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4
       MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -472,28 +446,64 @@ jobs:
         env:
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
+          JUNCTION_API_KEY: ${{ secrets.JUNCTION_API_KEY }}
+          JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.JUNCTION_CLIENT_USER_ID_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: pnpm --dir apps/cloudflare deploy:preflight
 
       - name: Prepare deploy artifacts
-        run: pnpm --dir apps/cloudflare deploy:artifacts
-
         if: ${{ inputs.deploy_worker }}
+        run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle
+
       - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v1
+        if: ${{ inputs.deploy_worker }}
+        uses: useblacksmith/setup-docker-builder@722e97d12b1d06a961800dd6c05d79d951ad3c80 # v1
 
       - name: Prepare runner base image
         if: ${{ inputs.deploy_worker }}
-        uses: useblacksmith/build-push-action@v2
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
           file: Dockerfile.cloudflare-hosted-runner-base
           load: true
           tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en
 
+      - name: Render Worker secrets
+        if: ${{ inputs.deploy_worker && inputs.sync_worker_secrets }}
+        env:
+          DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
+          GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}
+          GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}
+          HOSTED_AI_USAGE_REPORTING_SECRET: ${{ secrets.HOSTED_AI_USAGE_REPORTING_SECRET }}
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
+          HOSTED_EMAIL_SIGNING_SECRET: ${{ secrets.HOSTED_EMAIL_SIGNING_SECRET }}
+          HOSTED_LOG_FINGERPRINT_SECRET: ${{ secrets.HOSTED_LOG_FINGERPRINT_SECRET }}
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
+          JUNCTION_API_KEY: ${{ secrets.JUNCTION_API_KEY }}
+          JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.JUNCTION_CLIENT_USER_ID_SECRET }}
+          JUNCTION_WEBHOOK_SECRET: ${{ secrets.JUNCTION_WEBHOOK_SECRET }}
+          LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
+          LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
+          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
+          OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          STRAVA_WEBHOOK_SIGNING_SECRET: ${{ secrets.STRAVA_WEBHOOK_SIGNING_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
+          WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
+        run: pnpm --dir apps/cloudflare deploy:secrets:render
+
       - name: Validate generated Worker deploy bundle
         if: ${{ inputs.deploy_worker }}
         shell: bash
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}
         run: |
@@ -556,16 +566,42 @@ jobs:
         run: pnpm --dir apps/cloudflare verify:parallel
 
       - name: Show generated artifact paths
+        if: ${{ inputs.deploy_worker }}
         run: ls -lah apps/cloudflare/.deploy
 
       - name: Deploy Worker
         id: deploy
         if: ${{ inputs.deploy_worker }}
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
+          GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}
+          GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}
           HOSTED_EXECUTION_DEPLOYMENT_MODE: direct
           HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}
+          HOSTED_AI_USAGE_REPORTING_SECRET: ${{ secrets.HOSTED_AI_USAGE_REPORTING_SECRET }}
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
+          HOSTED_EMAIL_SIGNING_SECRET: ${{ secrets.HOSTED_EMAIL_SIGNING_SECRET }}
+          HOSTED_LOG_FINGERPRINT_SECRET: ${{ secrets.HOSTED_LOG_FINGERPRINT_SECRET }}
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
+          JUNCTION_API_KEY: ${{ secrets.JUNCTION_API_KEY }}
+          JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.JUNCTION_CLIENT_USER_ID_SECRET }}
+          JUNCTION_WEBHOOK_SECRET: ${{ secrets.JUNCTION_WEBHOOK_SECRET }}
+          LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
+          LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
+          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
+          OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          STRAVA_WEBHOOK_SIGNING_SECRET: ${{ secrets.STRAVA_WEBHOOK_SIGNING_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
+          WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
         run: pnpm --dir apps/cloudflare deploy:worker:apply -- --config ./.deploy/wrangler.generated.jsonc
 
       - name: Print Wrangler failure log
@@ -618,6 +654,7 @@ jobs:
         if: ${{ inputs.deploy_worker }}
         env:
           HOSTED_EXECUTION_SMOKE_VERSION_ID: ${{ steps.deploy.outputs.smoke_version_id }}
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
         run: pnpm --dir apps/cloudflare deploy:smoke
 
       - name: Publish deployment summary

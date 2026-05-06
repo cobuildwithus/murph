@@ -145,6 +145,30 @@ function findRunCommandsWithGitHubInputInterpolation(
   return findings;
 }
 
+function findMutableActionRefs(workflow: string): Array<{ line: number; ref: string; uses: string }> {
+  const findings: Array<{ line: number; ref: string; uses: string }> = [];
+  const lines = workflow.split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const match = /^\s*-?\s*uses:\s+([^@\s]+)@([^\s#]+)/u.exec(line);
+    if (!match) {
+      continue;
+    }
+
+    const ref = match[2] ?? "";
+    if (!/^[a-f0-9]{40}$/u.test(ref)) {
+      findings.push({
+        line: index + 1,
+        ref,
+        uses: match[1] ?? "",
+      });
+    }
+  }
+
+  return findings;
+}
+
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
     const environment = readHostedDeployAutomationEnvironment({
@@ -478,11 +502,18 @@ describe("hosted deploy automation helpers", () => {
       "--publish 5432:5432",
       "docker exec \"${postgres_container}\" pg_isready -U postgres -d murph_test",
       "name: Stop Postgres",
-      "uses: useblacksmith/setup-docker-builder@v1",
-      "uses: useblacksmith/build-push-action@v2",
+      "uses: useblacksmith/setup-docker-builder@722e97d12b1d06a961800dd6c05d79d951ad3c80 # v1",
+      "uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2",
+      "uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6",
+      "uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5",
+      "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
+      "uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6",
       "file: Dockerfile.cloudflare-hosted-runner-base",
       "load: true",
       "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
+      "name: Render Worker secrets",
+      "if: ${{ inputs.deploy_worker && inputs.sync_worker_secrets }}",
+      "run: pnpm --dir apps/cloudflare deploy:secrets:render",
       "name: Run hosted Codex auth deploy guard",
       'MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"',
       'npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"',
@@ -498,8 +529,9 @@ describe("hosted deploy automation helpers", () => {
       "pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base &",
       "name: Run focused Cloudflare checks",
       "if: ${{ !inputs.deploy_worker }}",
+      "name: Show generated artifact paths",
       "run: pnpm --dir apps/cloudflare verify:parallel",
-      "run: pnpm --dir apps/cloudflare deploy:artifacts",
+      "run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle",
     ]) {
       expect(workflow).toContain(expectedLine);
     }
@@ -510,6 +542,7 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toContain("cache-from: type=gha,scope=cloudflare-runner-base");
     expect(workflow).not.toContain("cache-to: type=gha,mode=max,scope=cloudflare-runner-base");
     expect(workflow).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT");
+    expect(workflow).not.toContain("run: pnpm --dir apps/cloudflare deploy:artifacts");
     const prepareArtifactsStepIndex = workflow.indexOf("- name: Prepare deploy artifacts");
     const hostedCodexAuthGuardStepIndex = workflow.indexOf(
       "- name: Run hosted Codex auth deploy guard",
@@ -535,8 +568,11 @@ describe("hosted deploy automation helpers", () => {
       parallelChecksAndSmokeStepIndex,
     );
     expect(parallelChecksAndSmokeStepIndex).toBeLessThan(deployWorkerStepIndex);
+    expect(workflow).toContain(
+      "- name: Show generated artifact paths\n        if: ${{ inputs.deploy_worker }}\n        run: ls -lah apps/cloudflare/.deploy",
+    );
     expect([
-      ...workflow.matchAll(/run: pnpm --dir apps\/cloudflare deploy:artifacts/gmu),
+      ...workflow.matchAll(/run: pnpm --dir apps\/cloudflare deploy:config:render && pnpm --dir apps\/cloudflare runner:bundle/gmu),
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
@@ -547,7 +583,8 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toContain("services:");
     expect(workflow).toContain('          )"\n          if [[ -z "${latest_log}" ]]; then');
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
-      expect(workflowEnvBindings.get(name)).toBe("secrets");
+      expect(workflowEnvBindings.get(name)).toBeUndefined();
+      expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
     }
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
@@ -556,7 +593,12 @@ describe("hosted deploy automation helpers", () => {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
     for (const name of HOSTED_WORKER_OPTIONAL_SECRET_NAMES) {
-      expect(workflowEnvBindings.get(name)).toBe("secrets");
+      expect(workflowEnvBindings.get(name)).toBeUndefined();
+      expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
+    }
+    for (const name of ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"] as const) {
+      expect(workflowEnvBindings.get(name)).toBeUndefined();
+      expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
     }
     expect(
       [...workflowEnvBindings.keys()].filter((name) => name.startsWith("HOSTED_ASSISTANT_")).sort(),
@@ -576,6 +618,7 @@ describe("hosted deploy automation helpers", () => {
     expect([
       ...workflow.matchAll(/pnpm --dir apps\/cloudflare verify:parallel/gmu),
     ]).toHaveLength(2);
+    expect(findMutableActionRefs(workflow)).toEqual([]);
     expect(findRunCommandsWithGitHubInputInterpolation(workflow)).toEqual([]);
     expect(workflow).toContain("printf -- '- Container max instances: `%s`\\n' \"${CF_CONTAINER_MAX_INSTANCES}\"");
     expect(workflow).toContain(
