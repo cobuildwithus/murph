@@ -16,7 +16,7 @@ import {
   parseHostedMailboxPayloadDecodeRequest,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
-  requireRunnerActiveInvocationLeaseHeaders,
+  requireRunnerActiveInvocationLease,
   RunnerActiveInvocationLeaseError,
 } from "./active-lease.ts";
 import {
@@ -36,6 +36,20 @@ export async function handleRunnerMailboxPayloadDecodeRequest(input: {
     return methodNotAllowed();
   }
 
+  try {
+    await requireRunnerActiveInvocationLease({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+  } catch (error) {
+    if (error instanceof RunnerActiveInvocationLeaseError) {
+      return unauthorized();
+    }
+
+    throw error;
+  }
+
   let request;
   try {
     request = parseHostedMailboxPayloadDecodeRequest(await readJsonObject(input.request, {
@@ -47,16 +61,6 @@ export async function handleRunnerMailboxPayloadDecodeRequest(input: {
 
   if (request.itemRef.userId !== input.userId) {
     return unauthorized();
-  }
-
-  try {
-    requireRunnerActiveInvocationLeaseHeaders(input.request);
-  } catch (error) {
-    if (error instanceof RunnerActiveInvocationLeaseError) {
-      return unauthorized();
-    }
-
-    throw error;
   }
 
   let wake: HostedExecutionWake;

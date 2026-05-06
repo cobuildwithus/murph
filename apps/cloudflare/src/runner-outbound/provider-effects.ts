@@ -31,7 +31,7 @@ import {
 } from "../runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerActiveInvocationLeaseHeaders,
+  requireRunnerActiveInvocationLease,
   RunnerActiveInvocationLeaseError,
 } from "./active-lease.ts";
 import type {
@@ -51,6 +51,19 @@ export async function handleRunnerProviderEffectsRequest(input: {
     return methodNotAllowed();
   }
 
+  try {
+    await requireRunnerActiveInvocationLease({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+  } catch (error) {
+    if (error instanceof RunnerActiveInvocationLeaseError) {
+      return unauthorized();
+    }
+    throw error;
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await readJsonObject(input.request, {
@@ -63,15 +76,6 @@ export async function handleRunnerProviderEffectsRequest(input: {
       || error instanceof RangeError
     ) {
       return jsonError("Malformed provider effect request.", 400);
-    }
-    throw error;
-  }
-
-  try {
-    requireRunnerActiveInvocationLeaseHeaders(input.request);
-  } catch (error) {
-    if (error instanceof RunnerActiveInvocationLeaseError) {
-      return unauthorized();
     }
     throw error;
   }

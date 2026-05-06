@@ -12,6 +12,7 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
+  requireRunnerActiveInvocationLease,
   requireRunnerActiveInvocationLeaseWriteHeaders,
   RunnerActiveInvocationLeaseError,
 } from "./runner-outbound/active-lease.ts";
@@ -259,6 +260,11 @@ async function writeRequestOwnsActiveInvocationLease(input: {
 }): Promise<boolean> {
   try {
     requireRunnerActiveInvocationLeaseWriteHeaders(input.request);
+    await requireRunnerActiveInvocationLease({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
     return true;
   } catch (error) {
     if (error instanceof RunnerActiveInvocationLeaseError) {

@@ -680,7 +680,7 @@ describe("handleRunnerOutboundRequest", () => {
     },
   );
 
-  it("proxies workspace checkpoints without a UserRunner lease round trip", async () => {
+  it("proxies workspace checkpoints after live lease validation", async () => {
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const recordActiveInvocationWorkspaceCheckpoint = vi.fn(async () => ({
@@ -732,10 +732,58 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(getByName).not.toHaveBeenCalled();
+    expect(getByName).toHaveBeenCalledOnce();
     expect(bindUser).not.toHaveBeenCalled();
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
     expect(recordActiveInvocationWorkspaceCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("rejects workspace checkpoints when the live invocation lease is stale", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-workspace/checkpoint", {
+        body: JSON.stringify({
+          attemptId: "attempt_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          snapshotRef: null,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects workspace checkpoints when lease headers do not match the checkpoint body", async () => {
@@ -820,7 +868,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -886,7 +934,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
   });
 
   it("rejects mailbox payload decode requests without active lease headers", async () => {
@@ -919,7 +967,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
   });
 
-  it("does not call the UserRunner when a mailbox payload decode later fails", async () => {
+  it("rejects mailbox payload decode requests when the live invocation lease is stale", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture({
       userId: "member_123",
     });
@@ -949,8 +997,9 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(502);
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(response.status).toBe(401);
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
   it("decodes mailbox payloads through Worker-owned ingress crypto without returning key material", async () => {
@@ -979,7 +1028,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     const decoded = await response.json();
     expect(decoded).toEqual({
       status: "decoded",
@@ -1146,7 +1195,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("routes provider effects without a Durable Object lease round trip", async () => {
+  it("rejects provider effects when the live invocation lease is stale", async () => {
     const ownsActiveInvocationLease = vi.fn(async () => false);
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const getByName = vi.fn(() => ({
@@ -1178,12 +1227,15 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
-    expect(getByName).not.toHaveBeenCalled();
+    expect(response.status).toBe(401);
+    expect(getByName).toHaveBeenCalledOnce();
     expect(bindUser).not.toHaveBeenCalled();
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("authorizes provider effects from active invocation headers without workspace checks", async () => {
@@ -1216,11 +1268,11 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("authorizes email sends from lease headers instead of a UserRunner round trip", async () => {
+  it("authorizes email sends after live lease validation", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
     });
@@ -1253,8 +1305,45 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(emailSendMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects email sends when the live invocation lease is stale", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner({
+      attemptId: "attempt_current",
+    });
+    const emailSendMock = vi.fn(async () => undefined);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          identityId: "assistant@mail.example.test",
+          message: "hello",
+          target: "assistant@example.com",
+          targetKind: "explicit",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: {
+          send: emailSendMock,
+        },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(emailSendMock).not.toHaveBeenCalled();
   });
 
   it("rejects provider effect requests when the invocation proxy token is missing", async () => {
@@ -1330,7 +1419,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Malformed provider effect request.",
     });
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -1862,7 +1951,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("authorizes artifact PUTs from lease headers without a UserRunner round trip", async () => {
+  it("authorizes artifact PUTs after live lease validation", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
@@ -1903,8 +1992,13 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(secondResponse.status).toBe(200);
     expect(firstResponse.status).toBe(200);
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
-    expect(getByName).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
+    expect(getByName).toHaveBeenCalledTimes(2);
     expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
@@ -1953,7 +2047,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(secondResponse.status).toBe(200);
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
@@ -1996,10 +2090,10 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(firstResponse.status).toBe(200);
     expect(secondResponse.status).toBe(200);
-    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
   });
 
-  it("does not call the UserRunner for repeated artifact writes with the same workspace version", async () => {
+  it("live-validates repeated artifact writes with the same workspace version", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const env = createRunnerOutboundEnv({
@@ -2040,7 +2134,7 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
   });
 
   it("rejects missing artifact write lease headers before accepting a later PUT", async () => {
@@ -2087,8 +2181,44 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(deniedResponse.status).toBe(401);
     expect(allowedResponse.status).toBe(200);
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects artifact PUTs when the live invocation lease is stale", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const bindUser = vi.fn(async (userId: string) => ({ userId }));
+    const ownsActiveInvocationLease = vi.fn(async () => false);
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName() {
+          return {
+            bindUser,
+            ownsActiveInvocationLease,
+          };
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sha256 = sha256Hex(bytes);
+
+    const response = await handleRunnerOutboundRequest(
+      createArtifactPutRequest({
+        bytes,
+        sha256,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(bindUser).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects artifact PUTs with missing lease headers before resolving crypto", async () => {
@@ -2127,7 +2257,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("writes browser-vault replicas after checking lease headers", async () => {
+  it("writes browser-vault replicas after live lease validation", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
@@ -2159,8 +2289,41 @@ describe("handleRunnerOutboundRequest", () => {
         sourceBundleHash,
       }),
     });
-    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects browser-vault replica writes when the live invocation lease is stale", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const bindUser = vi.fn(async (userId: string) => ({ userId }));
+    const ownsActiveInvocationLease = vi.fn(async () => false);
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName() {
+          return {
+            bindUser,
+            ownsActiveInvocationLease,
+          };
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaWriteRequest({
+        replica: createBrowserVaultReplica("f".repeat(64)),
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(bindUser).not.toHaveBeenCalled();
+    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects browser-vault replica writes when the invocation proxy token is missing", async () => {
