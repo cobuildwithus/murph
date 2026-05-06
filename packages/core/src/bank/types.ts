@@ -9,6 +9,7 @@ import {
   FRONTMATTER_DOC_TYPES,
   GOAL_HORIZONS as CONTRACT_GOAL_HORIZONS,
   GOAL_STATUSES as CONTRACT_GOAL_STATUSES,
+  type GoalFrontmatter,
   type FoodNutrition,
   REGIMEN_KINDS as CONTRACT_REGIMEN_KINDS,
   REGIMEN_STATUSES as CONTRACT_REGIMEN_STATUSES,
@@ -66,6 +67,7 @@ export const WORKOUT_FORMATS_DIRECTORY = VAULT_LAYOUT.workoutFormatsDirectory;
 
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export type GoalHorizon = (typeof GOAL_HORIZONS)[number];
+export type GoalMetricTarget = NonNullable<GoalFrontmatter["metricTargets"]>[number];
 export type ConditionClinicalStatus = (typeof CONDITION_CLINICAL_STATUSES)[number];
 export type ConditionVerificationStatus = (typeof CONDITION_VERIFICATION_STATUSES)[number];
 export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
@@ -322,6 +324,7 @@ export interface GoalEntity {
   parentGoalId?: string | null;
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
+  metricTargets?: GoalMetricTarget[];
   domains?: string[];
   links: GoalLink[];
 }
@@ -344,6 +347,7 @@ export interface UpsertGoalInput {
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
   links?: GoalLink[];
+  metricTargets?: GoalMetricTarget[];
   domains?: string[];
 }
 

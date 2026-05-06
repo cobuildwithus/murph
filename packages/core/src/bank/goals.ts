@@ -1,6 +1,7 @@
 import {
   extractHealthEntityRegistryLinks,
   goalRegistryEntityDefinition,
+  goalUpsertPatchPayloadSchema,
   type GoalFrontmatter,
 } from "@murphai/contracts";
 
@@ -43,6 +44,7 @@ import type {
   GoalEntity,
   GoalLink,
   GoalLinkType,
+  GoalMetricTarget,
   GoalStoredDocument,
   GoalWindow,
   ReadGoalInput,
@@ -63,6 +65,16 @@ function normalizeGoalWindow(value: unknown, fieldName: string): GoalWindow {
     startAt,
     targetAt,
   });
+}
+
+function normalizeGoalMetricTargets(value: unknown, fieldName: string): GoalMetricTarget[] {
+  const result = goalUpsertPatchPayloadSchema.safeParse({ metricTargets: value });
+
+  if (!result.success || result.data.metricTargets === undefined) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must contain valid metric target objects.`);
+  }
+
+  return result.data.metricTargets;
 }
 
 function parseGoalFrontmatter(attributes: FrontmatterObject): GoalFrontmatter {
@@ -270,6 +282,7 @@ function parseGoalStoredDocument(
     priority: normalizePriority(parsed.priority),
     window: normalizeGoalWindow(parsed.window, "window"),
     ...relations,
+    metricTargets: parsed.metricTargets,
     domains: normalizeDomainList(parsed.domains, "domains"),
   }) as GoalEntity;
 
@@ -302,6 +315,7 @@ function buildAttributes(record: GoalEntity): FrontmatterObject {
     relatedGoalIds: relations.relatedGoalIds,
     relatedExperimentIds: relations.relatedExperimentIds,
     links: frontmatterLinkObjects(relations.links),
+    metricTargets: record.metricTargets,
     domains: record.domains,
   }) as FrontmatterObject;
 }
@@ -411,6 +425,11 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
                   input.relatedExperimentIds !== undefined
                 ? undefined
                 : existingEntity?.links,
+          metricTargets: resolveOptionalUpsertValue(
+            input.metricTargets,
+            existingEntity?.metricTargets,
+            (value) => normalizeGoalMetricTargets(value, "metricTargets"),
+          ),
           domains: resolveOptionalUpsertValue(input.domains, existingEntity?.domains, (value) =>
             normalizeDomainList(value, "domains"),
           ),

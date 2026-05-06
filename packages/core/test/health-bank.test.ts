@@ -36,6 +36,7 @@ import {
   upsertRecipe,
   upsertWorkoutFormat,
   upsertRegimen,
+  type GoalMetricTarget,
 } from "../src/bank/index.ts";
 
 type AuditLikeRecord = {
@@ -218,6 +219,57 @@ test("goal updates can clear shared relation fields without leaving stale links 
   assert.doesNotMatch(read.document.markdown, new RegExp(parent.record.entity.goalId));
   assert.doesNotMatch(read.document.markdown, new RegExp(related.record.entity.goalId));
   assert.doesNotMatch(read.document.markdown, /exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
+});
+
+test("goal upserts preserve metric targets in canonical frontmatter", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-metric-targets");
+  await initializeVault({ vaultRoot });
+  const metricTargets: GoalMetricTarget[] = [
+    {
+      targetId: "fasting-glucose-under-90",
+      kind: "metric",
+      metricKey: "fasting-glucose",
+      biomarkerKey: "biomarker:glucose",
+      comparator: "<=",
+      value: 90,
+      unit: "mg/dL",
+      evaluation: { kind: "latest-lab" },
+      selectionPolicyOverride: {
+        kind: "latest-lab",
+        preferCollectedAt: true,
+        preferFasting: true,
+        staleAfterDays: 120,
+      },
+      startAt: "2026-03-01",
+      targetAt: "2026-06-01",
+      note: "Use fasting lab draws only.",
+    },
+  ];
+
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Lower fasting glucose",
+    window: {
+      startAt: "2026-03-01",
+      targetAt: "2026-06-01",
+    },
+    metricTargets,
+  });
+  const updated = await upsertGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+    status: "paused",
+  });
+  const read = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+
+  assert.equal(updated.created, false);
+  assert.deepEqual(updated.record.entity.metricTargets, metricTargets);
+  assert.deepEqual(read.entity.metricTargets, metricTargets);
+  assert.match(read.document.markdown, /metricTargets:/);
+  assert.match(read.document.markdown, /targetId: fasting-glucose-under-90/);
 });
 
 test("goal reads reject non-canonical frontmatter after the hard cut", async () => {
