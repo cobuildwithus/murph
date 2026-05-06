@@ -333,9 +333,9 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(firstInboundPromptText).toContain(
       "If the user's opener is a greeting or vague request",
     );
-    expect(firstInboundPromptText).toContain(
-      `Conversation so far:\nAssistant:\n${MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE}`,
-    );
+    expect(firstInboundPromptText).toContain("Conversation so far:\nAssistant:");
+    expect(firstInboundPromptText).toContain('"kind":"send_message"');
+    expect(firstInboundPromptText).toContain(MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE);
     expect(firstInboundPromptText).toContain("User message:\nSource: linq");
     expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
     },

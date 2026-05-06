@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -242,6 +242,8 @@ test("hosted Codex runtime config installs a local E2E app-server stub when conf
   assert.match(shimSource, /hosted-e2e-codex-shim/u);
   assert.match(shimSource, /http:\/\/host\.docker\.internal:4123\/v1/u);
   assert.match(shimSource, /const turnDelayMs = 1234;/u);
+  assert.doesNotMatch(shimSource, /thread_hosted_local/u);
+  assert.doesNotMatch(shimSource, /HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS/u);
   const shimMode = (await stat(shimPath)).mode & 0o777;
   assert.equal(shimMode, 0o700);
 });
@@ -289,17 +291,27 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
         type: "item.completed",
       },
     );
-    const continuityLog = await readHostedLocalCodexShimContinuityLog(result.codexHome);
-    const continuityEntries = parseHostedLocalCodexShimContinuityEntries(continuityLog);
+    const threadId = readHostedLocalCodexStubThreadId(messages);
+    assert.match(threadId, /^00000000-0000-4000-8000-[0-9]{12}$/u);
+    const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
+    const continuityEntries = parseHostedLocalCodexShimContinuityEntries(rolloutLog);
     assert.deepEqual(continuityEntries, [
       {
         event: "thread.started",
-        schema: "murph.hosted-e2e-codex-shim-continuity.v1",
-        threadId: "thread_hosted_local_1",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
+      },
+      {
+        assistantText: "shim response",
+        event: "assistant.message",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
       },
     ]);
-    assert.doesNotMatch(continuityLog, /hello hosted local/u);
-    assert.doesNotMatch(continuityLog, /shim response/u);
+    await assert.rejects(readHostedLocalCodexShimContinuityLog(result.codexHome), {
+      code: "ENOENT",
+    });
+    assert.doesNotMatch(rolloutLog, /hello hosted local/u);
   } finally {
     await closeHttpServer(server);
   }
@@ -334,7 +346,7 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    await runHostedLocalCodexStubTurn(child, [
+    const messages = await runHostedLocalCodexStubTurn(child, [
       "first hosted local prompt",
       "second hosted local prompt",
     ]);
@@ -346,23 +358,37 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
       readResponsesRequestInput(requests[1]!),
       /Conversation so far:\nAssistant:\nfirst assistant reply/u,
     );
-    const continuityLog = await readHostedLocalCodexShimContinuityLog(result.codexHome);
-    assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(continuityLog), [
+    const threadId = readHostedLocalCodexStubThreadId(messages);
+    const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
+    assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(rolloutLog), [
       {
         event: "thread.started",
-        schema: "murph.hosted-e2e-codex-shim-continuity.v1",
-        threadId: "thread_hosted_local_1",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
+      },
+      {
+        assistantText: "first assistant reply",
+        event: "assistant.message",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
       },
       {
         event: "thread.resumed",
-        schema: "murph.hosted-e2e-codex-shim-continuity.v1",
-        threadId: "thread_test",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
+      },
+      {
+        assistantText: "second assistant reply",
+        event: "assistant.message",
+        schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+        threadId,
       },
     ]);
-    assert.doesNotMatch(continuityLog, /first hosted local prompt/u);
-    assert.doesNotMatch(continuityLog, /second hosted local prompt/u);
-    assert.doesNotMatch(continuityLog, /first assistant reply/u);
-    assert.doesNotMatch(continuityLog, /second assistant reply/u);
+    await assert.rejects(readHostedLocalCodexShimContinuityLog(result.codexHome), {
+      code: "ENOENT",
+    });
+    assert.doesNotMatch(rolloutLog, /first hosted local prompt/u);
+    assert.doesNotMatch(rolloutLog, /second hosted local prompt/u);
   } finally {
     await closeHttpServer(server);
   }
@@ -382,7 +408,6 @@ test("hosted Codex rollout snapshot restores thread-id resume without SQLite", a
     await mkdir(vaultRoot, { recursive: true });
     const runtimeEnv = {
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
         `${readServerBaseUrl(server)}/v1`,
       NODE_ENV: "test",
@@ -399,7 +424,6 @@ test("hosted Codex rollout snapshot restores thread-id resume without SQLite", a
       env: {
         CODEX_HOME: prepared.runtimeEnv.CODEX_HOME,
         HOME: operatorHomeRoot,
-        HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
         OPENAI_API_KEY: prepared.runtimeEnv.OPENAI_API_KEY,
         PATH: prepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
       },
@@ -453,7 +477,6 @@ test("hosted Codex rollout snapshot restores thread-id resume without SQLite", a
       env: {
         CODEX_HOME: restoredPrepared.runtimeEnv.CODEX_HOME,
         HOME: restored.operatorHomeRoot,
-        HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
         OPENAI_API_KEY: restoredPrepared.runtimeEnv.OPENAI_API_KEY,
         PATH: restoredPrepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
       },
@@ -1144,6 +1167,19 @@ async function readHostedLocalCodexShimContinuityLog(codexHome: string): Promise
   );
 }
 
+async function readHostedLocalCodexShimRolloutLog(
+  codexHome: string,
+  threadId: string,
+): Promise<string> {
+  const rolloutDirectory = path.join(codexHome, "sessions", "2026", "05", "06");
+  const fileNames = await readdir(rolloutDirectory);
+  const rolloutFileName = fileNames.find((fileName) =>
+    fileName.endsWith(`-${threadId}.jsonl`)
+  );
+  assert.ok(rolloutFileName, `Expected rollout file for thread ${threadId}.`);
+  return await readFile(path.join(rolloutDirectory, rolloutFileName), "utf8");
+}
+
 function parseHostedLocalCodexShimContinuityEntries(
   log: string,
 ): Record<string, unknown>[] {
@@ -1186,6 +1222,7 @@ async function runHostedLocalCodexStubTurn(
   const messages: Record<string, unknown>[] = [];
   let stdoutBuffer = "";
   let stderr = "";
+  let activeThreadId: string | null = null;
 
   const completed = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -1233,6 +1270,16 @@ async function runHostedLocalCodexStubTurn(
 
         const parsed = JSON.parse(trimmed) as Record<string, unknown>;
         messages.push(parsed);
+        const parsedId = typeof parsed.id === "number" ? parsed.id : null;
+        if (parsedId === 2) {
+          activeThreadId = readHostedLocalCodexStubThreadId(messages);
+          writeHostedLocalCodexStubTurnStart(
+            childStdin,
+            3,
+            prompts[0]!,
+            activeThreadId,
+          );
+        }
         if (parsed.method === "turn/completed") {
           const completedTurns = messages.filter((message) =>
             message.method === "turn/completed"
@@ -1241,11 +1288,13 @@ async function runHostedLocalCodexStubTurn(
             finish();
             continue;
           }
-          writeHostedLocalCodexStubResume(childStdin, 20 + completedTurns);
+          assert(activeThreadId, "Expected active hosted local Codex thread id.");
+          writeHostedLocalCodexStubResume(childStdin, 20 + completedTurns, activeThreadId);
           writeHostedLocalCodexStubTurnStart(
             childStdin,
             30 + completedTurns,
             prompts[completedTurns]!,
+            activeThreadId,
           );
         }
       }
@@ -1256,7 +1305,6 @@ async function runHostedLocalCodexStubTurn(
     childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({ id: 2, method: "thread/start", params: {} })}\n`);
-    writeHostedLocalCodexStubTurnStart(childStdin, 3, prompts[0]!);
 
     await completed;
     return messages;
@@ -1269,12 +1317,13 @@ async function runHostedLocalCodexStubTurn(
 function writeHostedLocalCodexStubResume(
   childStdin: NonNullable<ReturnType<typeof spawn>["stdin"]>,
   id: number,
+  threadId: string,
 ): void {
   childStdin.write(`${JSON.stringify({
     id,
     method: "thread/resume",
     params: {
-      threadId: "thread_test",
+      threadId,
     },
   })}\n`);
 }
@@ -1283,6 +1332,7 @@ function writeHostedLocalCodexStubTurnStart(
   childStdin: NonNullable<ReturnType<typeof spawn>["stdin"]>,
   id: number,
   prompt: string,
+  threadId: string,
 ): void {
   childStdin.write(`${JSON.stringify({
     id,
@@ -1294,7 +1344,26 @@ function writeHostedLocalCodexStubTurnStart(
           type: "text",
         },
       ],
-      threadId: "thread_test",
+      threadId,
     },
   })}\n`);
+}
+
+function readHostedLocalCodexStubThreadId(messages: readonly Record<string, unknown>[]): string {
+  for (const message of messages) {
+    if (message.id !== 2 || !isRecord(message.result)) {
+      continue;
+    }
+    const thread = message.result.thread;
+    if (!isRecord(thread) || typeof thread.id !== "string") {
+      continue;
+    }
+    return thread.id;
+  }
+
+  throw new Error("Expected hosted local Codex stub thread/start response.");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
