@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ReceiptText } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
@@ -104,21 +104,13 @@ function PulseSwitchConfirmationDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <DialogHeader className="gap-3 pr-10">
-          <div className="flex size-10 items-center justify-center rounded-full border border-[#c4a882]/30 bg-[#c4a882]/15 text-[#736a58]">
-            <ReceiptText className="size-5" aria-hidden="true" />
-          </div>
-          <div className="space-y-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-              Billing change
-            </p>
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              Switch to Pulse at renewal.
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              You will keep Edge until {renewalDate}. Pulse starts after this billing period at {pulsePriceLabel}/month.
-            </DialogDescription>
-          </div>
+        <DialogHeader className="pr-10">
+          <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+            Switch to Pulse
+          </DialogTitle>
+          <DialogDescription className="text-sm leading-6 text-[#736a58]">
+            You keep Edge through {renewalDate}, then Pulse at {pulsePriceLabel}/mo.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="border-y border-[#c4a882]/25 py-2">
@@ -131,10 +123,6 @@ function PulseSwitchConfirmationDialog(props: {
           <PlanPriceRow label="At renewal" name="Pulse" price={pulsePriceLabel} />
         </div>
 
-        <p className="text-sm leading-6 text-[#736a58]">
-          This schedules the change in Stripe. Edge remains active through the current paid period.
-        </p>
-
         {props.errorMessage ? (
           <p
             role="alert"
@@ -144,22 +132,25 @@ function PulseSwitchConfirmationDialog(props: {
           </p>
         ) : null}
 
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="flex flex-col gap-2">
           <Button
             type="button"
-            variant="outline"
-            onClick={() => props.onOpenChange(false)}
+            size="lg"
+            onClick={props.onConfirm}
             disabled={props.isSwitching}
+            className="w-full"
           >
-            Cancel
+            {props.isSwitching ? "Scheduling..." : "Confirm switch"}
           </Button>
           <Button
             type="button"
-            variant="outline"
-            onClick={props.onConfirm}
+            size="lg"
+            variant="ghost"
+            onClick={() => props.onOpenChange(false)}
             disabled={props.isSwitching}
+            className="w-full"
           >
-            {props.isSwitching ? "Scheduling..." : "Confirm switch"}
+            Cancel
           </Button>
         </div>
       </DialogContent>
