@@ -243,12 +243,13 @@ acceptance, and pre-delivery outbox sending state.
 `idle_shutdown` is the compaction boundary for warm-runner wind-down: it maps
 to a full/base snapshot and runs through the ordinary invocation lease shortly
 before container sleep, not in the Cloudflare container shutdown hook.
-Operator-home `.codex-hosted/**` remains full/base snapshot provider
-continuity, not hot-state continuity. Restore applies the base bundle first,
-clears the vault hot-state include paths, leaves operator-home Codex state from
-the base image in place when the hot bundle omits it, then restores the latest
-hot bundle so files deleted by a hot checkpoint cannot resurrect from the base
-image. If no base snapshot exists, the runner may fall back to a full
+Codex provider continuity is the exact active rollout JSONL referenced by live
+assistant session resume state, not the whole `.codex-hosted` tree. Restore
+applies the base bundle first, clears the vault hot-state include paths, then
+restores the latest hot bundle so files deleted by a hot checkpoint cannot
+resurrect from the base image. A hot bundle with Codex native resume state must
+carry the exact matching active rollout JSONL and manifest; otherwise snapshot
+creation fails closed instead of relying on unrelated base continuity. If no base snapshot exists, the runner may fall back to a full
 checkpoint so non-hot workspace content is not lost. Hot checkpoints also carry
 forward the browser-vault replica ref for the current base snapshot explicitly;
 if that continuity is missing or stale, the runner uses a full checkpoint
@@ -286,14 +287,15 @@ the user-message trust boundary is otherwise valid. Hard failures remain
 appropriate for wrong-user authority, invalid auth, undecryptable mailbox
 payloads, mismatched supplied sidecar refs, and lease/CAS conflicts.
 
-Hosted snapshots also preserve safe non-secret Codex home continuity under
-`.codex-hosted/**` by default, while excluding environment files, credential,
-auth, token, key, cert, temp, cache, log, history, lock, pid, socket, and
-secret-looking paths. Checkpoint diagnostics for that tree may expose only
-candidate/included counts, exclusion classes, and keyed hashed relative names
-when the hosted log fingerprint secret is configured; raw Codex home paths,
+Hosted snapshots preserve only active `.codex-hosted/sessions/YYYY/MM/DD/rollout-*.jsonl`
+files referenced by live assistant resume state plus a tiny continuity manifest.
+They do not preserve Codex logs, SQLite metadata, prompt history, cache/temp,
+auth/credential/key/cert material, unreferenced sessions, or archived sessions.
+Checkpoint diagnostics for Codex continuity may expose only thread counts, byte
+totals, missing/invalid counters, and keyed hashed rollout-relative names when
+the hosted log fingerprint secret is configured; raw Codex home paths,
 filenames, prompts, and credentials must not appear in hosted runtime logs.
-Without the fingerprint secret, checkpoint diagnostics stay count/class only.
+Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes.
 
 ## Ownership Rules
 

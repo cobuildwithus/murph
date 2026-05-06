@@ -262,6 +262,9 @@ describe('assistant codex runtime', () => {
   it('executes Codex app-server turns, sanitizes env, and streams assistant output through JSON-RPC', async () => {
     const workingDirectory = await createTempDir('assistant-codex-workdir-')
     const codexHome = await createTempDir('assistant-codex-home-')
+    const threadId = '00000000-0000-4000-8000-000000000001'
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`
     const imageBytes = Buffer.from([0xff, 0xd8, 0xff])
     const onProgress = vi.fn()
     const onTraceEvent = vi.fn()
@@ -308,7 +311,8 @@ describe('assistant codex runtime', () => {
               id: 2,
               result: {
                 thread: {
-                  id: 'thread-1',
+                  id: threadId,
+                  path: path.join(codexHome, rolloutRelativePath),
                 },
               },
             }),
@@ -321,7 +325,7 @@ describe('assistant codex runtime', () => {
             method: 'turn/start',
             params: {
               effort: 'high',
-              threadId: 'thread-1',
+              threadId,
             },
           })
           expect(asRecord(turnStart.params).approvalPolicy).toBeUndefined()
@@ -467,9 +471,10 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       finalMessage: 'Hello world',
       providerActionCount: 1,
-      sessionId: 'thread-1',
+      rolloutRelativePath,
+      sessionId: threadId,
       stderr: 'Retrying after timeout',
-      threadId: 'thread-1',
+      threadId,
       turnId: 'turn-1',
     })
 
@@ -496,7 +501,7 @@ describe('assistant codex runtime', () => {
     )
     expect(onTraceEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        providerSessionId: 'thread-1',
+        providerSessionId: threadId,
         updates: [
           {
             kind: 'assistant',
@@ -704,6 +709,107 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-path',
       threadId: 'thread-path',
       turnId: 'turn-path',
+    })
+  })
+
+  it('captures rollout paths on thread/resume only when they match the resumed thread id', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-resume-rollout-')
+    const codexHome = await createTempDir('assistant-codex-resume-home-')
+    const threadId = '00000000-0000-4000-8000-000000000025'
+    const otherThreadId = '00000000-0000-4000-8000-000000000026'
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`
+    const mismatchedRolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${otherThreadId}.jsonl`
+
+    const queueResumeTurn = (input: {
+      child: MockChildProcess
+      threadPath: string
+    }) => {
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(input.child, 'initialize')
+          input.child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(input.child, 'thread/resume')
+          input.child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: threadId,
+                  path: input.threadPath,
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(input.child, 'turn/start')
+          input.child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-resume-rollout',
+                },
+              },
+            }),
+          )
+          input.child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-resume-rollout',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          input.child.emit('exit', 0, null)
+          input.child.emit('close', 0, null)
+        })()
+      })
+    }
+
+    codexMocks.spawn
+      .mockImplementationOnce(() => {
+        const child = new MockChildProcess()
+        queueResumeTurn({
+          child,
+          threadPath: path.join(codexHome, rolloutRelativePath),
+        })
+        return child
+      })
+      .mockImplementationOnce(() => {
+        const child = new MockChildProcess()
+        queueResumeTurn({
+          child,
+          threadPath: path.join(codexHome, mismatchedRolloutRelativePath),
+        })
+        return child
+      })
+
+    await expect(
+      executeCodexAppServerTurn({
+        codexHome,
+        prompt: 'resume with matching rollout',
+        resumeSessionId: threadId,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      rolloutRelativePath,
+      sessionId: threadId,
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        codexHome,
+        prompt: 'resume with mismatched rollout',
+        resumeSessionId: threadId,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      rolloutRelativePath: null,
+      sessionId: threadId,
     })
   })
 

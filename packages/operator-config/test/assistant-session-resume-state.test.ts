@@ -4,6 +4,9 @@ import { parseAssistantSessionRecord } from '../src/assistant-cli-contracts.js'
 
 const threadInstructionsFingerprint =
   `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`
+const providerSessionId = '00000000-0000-4000-8000-000000000123'
+const codexRolloutRelativePath =
+  `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${providerSessionId}.jsonl`
 
 function createPersistedSessionRecord(overrides: Record<string, unknown> = {}) {
   return {
@@ -57,7 +60,8 @@ describe('assistant session resume state normalization', () => {
     const session = parseAssistantSessionRecord(
       createPersistedSessionRecord({
         resumeState: {
-          providerSessionId: 'provider-session-123',
+          codexRolloutRelativePath: ` ${codexRolloutRelativePath} `,
+          providerSessionId,
           resumeRouteId: 'route-new',
           threadInstructionsFingerprint,
         },
@@ -65,7 +69,8 @@ describe('assistant session resume state normalization', () => {
     )
 
     expect(session.resumeState).toEqual({
-      providerSessionId: 'provider-session-123',
+      codexRolloutRelativePath,
+      providerSessionId,
       resumeRouteId: 'route-new',
       threadInstructionsFingerprint,
     })
@@ -100,6 +105,23 @@ describe('assistant session resume state normalization', () => {
     )
 
     expect(withoutFingerprint.resumeState).toEqual({
+      providerSessionId: 'provider-session-123',
+      resumeRouteId: 'route-new',
+    })
+  })
+
+  it('drops unsafe Codex rollout paths from otherwise resumable state', () => {
+    const session = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          codexRolloutRelativePath: '/tmp/codex/sessions/rollout.jsonl',
+          providerSessionId: 'provider-session-123',
+          resumeRouteId: 'route-new',
+        },
+      }),
+    )
+
+    expect(session.resumeState).toEqual({
       providerSessionId: 'provider-session-123',
       resumeRouteId: 'route-new',
     })

@@ -55,6 +55,7 @@ import {
   buildCodexStdinFailureFallback,
   buildCodexTurnFailedError,
   extractCodexThreadIdFromResult,
+  extractCodexThreadPathFromResult,
   extractCodexTurnErrorMessage,
   extractCodexTurnIdFromMessage,
   extractCodexTurnIdFromResult,
@@ -157,6 +158,7 @@ export interface CodexAppServerTurnResult {
   finalMessage: string
   jsonEvents: unknown[]
   providerActionCount: number
+  rolloutRelativePath: string | null
   sessionId: string | null
   stderr: string
   stdout: string
@@ -297,6 +299,7 @@ async function runCodexAppServerTurn(
   let turnId: string | null = null
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
+  let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
@@ -784,6 +787,11 @@ async function runCodexAppServerTurn(
       providerSessionId ? 'thread/resume' : 'thread/start',
     )
     providerSessionId = extractCodexThreadIdFromResult(threadResult) ?? providerSessionId
+    rolloutRelativePath = resolveCodexRolloutRelativePath({
+      codexHome: input.env.CODEX_HOME,
+      providerSessionId,
+      threadPath: extractCodexThreadPathFromResult(threadResult),
+    })
     emitAppServerTimingTrace(threadTimingStage)
     if (!providerSessionId) {
       throw new VaultCliError(
@@ -846,12 +854,78 @@ async function runCodexAppServerTurn(
     finalMessage,
     jsonEvents,
     providerActionCount,
+    rolloutRelativePath,
     sessionId: providerSessionId,
     stderr: stderr.trim(),
     stdout: stdout.trim(),
     threadId: providerSessionId,
     turnId,
   }
+}
+
+function resolveCodexRolloutRelativePath(input: {
+  codexHome: string | null | undefined
+  providerSessionId: string | null
+  threadPath: string | null
+}): string | null {
+  const codexHome = normalizeNullableString(input.codexHome)
+  const providerSessionId = normalizeNullableString(input.providerSessionId)
+  const threadPath = normalizeNullableString(input.threadPath)
+  if (!codexHome || !providerSessionId || !threadPath) {
+    return null
+  }
+
+  const homeRoot = path.resolve(codexHome)
+  const absoluteThreadPath = path.resolve(threadPath)
+  const relativePath = path.relative(homeRoot, absoluteThreadPath)
+  if (
+    relativePath.length === 0 ||
+    relativePath.startsWith('..') ||
+    path.isAbsolute(relativePath)
+  ) {
+    return null
+  }
+
+  return normalizeCodexRolloutRelativePath(
+    relativePath.split(path.sep).join('/'),
+    providerSessionId,
+  )
+}
+
+const codexRolloutRelativePathPattern =
+  /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/u
+
+function normalizeCodexRolloutRelativePath(
+  value: string,
+  providerSessionId: string,
+): string | null {
+  if (
+    value.length === 0 ||
+    value.startsWith('/') ||
+    value.includes('\\')
+  ) {
+    return null
+  }
+
+  const segments = value.split('/')
+  if (segments.some((segment) =>
+    segment.length === 0 || segment === '.' || segment === '..',
+  )) {
+    return null
+  }
+
+  const match = codexRolloutRelativePathPattern.exec(value)
+  if (
+    !match ||
+    match[1] !== match[4] ||
+    match[2] !== match[5] ||
+    match[3] !== match[6] ||
+    match[7] !== providerSessionId
+  ) {
+    return null
+  }
+
+  return value
 }
 
 function extractCodexProviderActionKey(

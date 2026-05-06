@@ -12,6 +12,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   writeAssistantProviderResumeRouteId,
+  writeAssistantSessionCodexRolloutRelativePath,
   writeAssistantSessionProviderSessionId,
   writeAssistantSessionThreadInstructionsFingerprint,
 } from './provider-state.js'
@@ -31,16 +32,20 @@ export type AssistantProviderResumeStateAction =
   | 'preserve-existing'
 
 export function resolveAssistantResumeStateFromProviderTurn(input: {
+  codexRolloutRelativePath?: string | null
   providerSessionId: string | null
   routeId: string
   threadInstructionsFingerprint?: string | null
 }): AssistantSession['resumeState'] {
-  return writeAssistantSessionThreadInstructionsFingerprint(
-    writeAssistantProviderResumeRouteId(
-      writeAssistantSessionProviderSessionId(null, input.providerSessionId),
-      input.routeId,
+  return writeAssistantSessionCodexRolloutRelativePath(
+    writeAssistantSessionThreadInstructionsFingerprint(
+      writeAssistantProviderResumeRouteId(
+        writeAssistantSessionProviderSessionId(null, input.providerSessionId),
+        input.routeId,
+      ),
+      input.threadInstructionsFingerprint,
     ),
-    input.threadInstructionsFingerprint,
+    input.codexRolloutRelativePath,
   )
 }
 
@@ -121,6 +126,7 @@ export async function persistAssistantTurnAndSession(input: {
     : input.session.providerOptions
   const nextResumeState = resolveAssistantNextResumeState({
     action: input.providerResumeStateAction,
+    codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
     providerSessionId: input.providerResult.providerSessionId,
     routeId: input.providerResult.route.routeId,
     sessionResumeState: input.session.resumeState,
@@ -143,6 +149,7 @@ export async function persistAssistantTurnAndSession(input: {
 
 function resolveAssistantNextResumeState(input: {
   action: AssistantProviderResumeStateAction
+  codexRolloutRelativePath?: string | null
   providerSessionId: string | null
   routeId: string
   sessionResumeState: AssistantSession['resumeState']
@@ -155,6 +162,7 @@ function resolveAssistantNextResumeState(input: {
       return input.sessionResumeState
     case 'persist-from-provider-turn':
       return resolveAssistantResumeStateFromProviderTurn({
+        codexRolloutRelativePath: input.codexRolloutRelativePath,
         providerSessionId: input.providerSessionId,
         routeId: input.routeId,
         threadInstructionsFingerprint: input.threadInstructionsFingerprint,

@@ -69,9 +69,9 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
     () => access(path.join(restored.operatorHomeRoot, ".codex-hosted", "tmp", "poisoned-self-brick-marker")),
     { code: "ENOENT" },
   );
-  assert.equal(
-    await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
-    "not valid hosted codex config\n",
+  await assert.rejects(
+    () => access(path.join(restored.operatorHomeRoot, ".codex-hosted", "config.toml")),
+    { code: "ENOENT" },
   );
 
   const nextCodex = await prepareHostedCodexRuntimeEnvironment({

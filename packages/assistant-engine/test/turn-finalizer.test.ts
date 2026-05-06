@@ -4,13 +4,18 @@ import { resolveAssistantResumeStateFromProviderTurn } from '../src/assistant/tu
 
 describe('resolveAssistantResumeStateFromProviderTurn', () => {
   it('records the route that produced the resumable provider session', () => {
+    const providerSessionId = '00000000-0000-4000-8000-000000000123'
+    const codexRolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${providerSessionId}.jsonl`
     expect(
       resolveAssistantResumeStateFromProviderTurn({
-        providerSessionId: 'provider-session-123',
+        codexRolloutRelativePath,
+        providerSessionId,
         routeId: 'route-new',
       }),
     ).toEqual({
-      providerSessionId: 'provider-session-123',
+      codexRolloutRelativePath,
+      providerSessionId,
       resumeRouteId: 'route-new',
     })
   })

@@ -90,6 +90,8 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.idle_shutdown_snapshot_skipped");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.codex_home_snapshot_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual([
       "nudge",
@@ -838,6 +840,7 @@ describe("hosted runtime control contracts", () => {
       accepted: true,
       alarmScheduled: true,
       alreadyRunning: false,
+      immediateDriveStarted: true,
       inFlight: true,
       nextAlarmAt: "2026-04-26T00:00:05.000Z",
     };

@@ -10,6 +10,42 @@ import { normalizeNullableString } from './shared.js'
 
 const assistantThreadInstructionsFingerprintPattern =
   /^thread-instructions-v1:[a-f0-9]{64}:[a-f0-9]{64}$/u
+const assistantCodexRolloutRelativePathPattern =
+  /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$/u
+
+function normalizeAssistantCodexRolloutRelativePath(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith('/') ||
+    normalized.includes('\\')
+  ) {
+    return null
+  }
+
+  const segments = normalized.split('/')
+  if (segments.some((segment) =>
+    segment.length === 0 || segment === '.' || segment === '..',
+  )) {
+    return null
+  }
+
+  const match = assistantCodexRolloutRelativePathPattern.exec(normalized)
+  if (
+    !match ||
+    match[1] !== match[4] ||
+    match[2] !== match[5] ||
+    match[3] !== match[6]
+  ) {
+    return null
+  }
+
+  return normalized
+}
 
 function normalizeAssistantThreadInstructionsFingerprint(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -34,6 +70,15 @@ export function readAssistantProviderSessionId(input: {
 } | AssistantSession): string | null {
   const resumeState = readAssistantSessionResumeState(input)
   return normalizeNullableString(resumeState?.providerSessionId) ?? null
+}
+
+export function readAssistantCodexRolloutRelativePath(input: {
+  resumeState?: AssistantSessionResumeState | null
+} | AssistantSession): string | null {
+  const resumeState = readAssistantSessionResumeState(input)
+  return normalizeAssistantCodexRolloutRelativePath(
+    resumeState?.codexRolloutRelativePath,
+  )
 }
 
 export function readAssistantSessionResumeState(
@@ -77,6 +122,9 @@ export function writeAssistantSessionProviderSessionId(
   }
 
   return assistantSessionResumeStateSchema.parse({
+    ...(current?.codexRolloutRelativePath
+      ? { codexRolloutRelativePath: current.codexRolloutRelativePath }
+      : {}),
     providerSessionId: normalizedProviderSessionId,
     resumeRouteId: current?.resumeRouteId ?? null,
     ...(current?.threadInstructionsFingerprint
@@ -99,10 +147,37 @@ export function writeAssistantSessionThreadInstructionsFingerprint(
   )
 
   return assistantSessionResumeStateSchema.parse({
+    ...(current.codexRolloutRelativePath
+      ? { codexRolloutRelativePath: current.codexRolloutRelativePath }
+      : {}),
     providerSessionId: current.providerSessionId,
     resumeRouteId: current.resumeRouteId,
     ...(normalizedThreadInstructionsFingerprint
       ? { threadInstructionsFingerprint: normalizedThreadInstructionsFingerprint }
+      : {}),
+  })
+}
+
+export function writeAssistantSessionCodexRolloutRelativePath(
+  resumeState: AssistantSessionResumeState | null | undefined,
+  codexRolloutRelativePath: string | null | undefined,
+): AssistantSessionResumeState | null {
+  const current = normalizeAssistantSessionResumeState(resumeState)
+  if (!current) {
+    return null
+  }
+
+  const normalizedCodexRolloutRelativePath =
+    normalizeAssistantCodexRolloutRelativePath(codexRolloutRelativePath)
+
+  return assistantSessionResumeStateSchema.parse({
+    ...(normalizedCodexRolloutRelativePath
+      ? { codexRolloutRelativePath: normalizedCodexRolloutRelativePath }
+      : {}),
+    providerSessionId: current.providerSessionId,
+    resumeRouteId: current.resumeRouteId,
+    ...(current.threadInstructionsFingerprint
+      ? { threadInstructionsFingerprint: current.threadInstructionsFingerprint }
       : {}),
   })
 }
@@ -116,6 +191,9 @@ export function normalizeAssistantSessionResumeState(
 
   const providerSessionId = normalizeNullableString(value.providerSessionId)
   const resumeRouteId = normalizeNullableString(value.resumeRouteId)
+  const codexRolloutRelativePath = normalizeAssistantCodexRolloutRelativePath(
+    value.codexRolloutRelativePath,
+  )
   const threadInstructionsFingerprint = normalizeAssistantThreadInstructionsFingerprint(
     value.threadInstructionsFingerprint,
   )
@@ -125,6 +203,7 @@ export function normalizeAssistantSessionResumeState(
   }
 
   return assistantSessionResumeStateSchema.parse({
+    ...(codexRolloutRelativePath ? { codexRolloutRelativePath } : {}),
     providerSessionId,
     resumeRouteId,
     ...(threadInstructionsFingerprint
@@ -174,6 +253,9 @@ function writeAssistantSessionResumeRouteId(
   }
 
   return assistantSessionResumeStateSchema.parse({
+    ...(current?.codexRolloutRelativePath
+      ? { codexRolloutRelativePath: current.codexRolloutRelativePath }
+      : {}),
     providerSessionId,
     resumeRouteId: normalizeNullableString(routeId),
     ...(current?.threadInstructionsFingerprint

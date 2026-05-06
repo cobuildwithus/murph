@@ -14,6 +14,7 @@ import {
   sha256HostedBundleHex,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
+  writeHostedBundleTextFile,
   type HostedExecutionBundleRef,
 } from "@murphai/runtime-state/node";
 import {
@@ -34,7 +35,7 @@ import type {
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace restore Codex continuity", () => {
-  test("preserves base Codex provider continuity when hot state omits Codex home", async () => {
+  test("preserves Codex provider continuity when hot state includes its exact rollout", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-restore-"));
 
     try {
@@ -42,20 +43,56 @@ describe("hosted workspace restore Codex continuity", () => {
       const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
       const sourceBaseOperatorHomeRoot = path.join(workspaceRoot, "base-operator-home");
       const sourceHotVaultRoot = path.join(workspaceRoot, "hot-vault");
+      const sourceHotOperatorHomeRoot = path.join(workspaceRoot, "hot-operator-home");
       const baseAssistantRoot = resolveAssistantStatePaths(sourceBaseVaultRoot).assistantStateRoot;
+      const threadId = "00000000-0000-4000-8000-000000000005";
+      const rolloutRelativePath =
+        `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+      const resumeState = {
+        codexRolloutRelativePath: rolloutRelativePath,
+        providerSessionId: threadId,
+        resumeRouteId: "route-latest",
+      };
       await mkdir(path.join(baseAssistantRoot, "outbox"), { recursive: true });
+      await mkdir(path.join(baseAssistantRoot, "sessions"), { recursive: true });
       await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
       await writeFile(
         path.join(baseAssistantRoot, "outbox", "intent-old.json"),
         "{\"intent\":\"old\"}\n",
         "utf8",
       );
-      await mkdir(path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", "sessions"), {
+      await writeFile(
+        path.join(baseAssistantRoot, "sessions", "session-latest.json"),
+        JSON.stringify({
+          resumeState,
+          session: "base",
+        }) + "\n",
+        "utf8",
+      );
+      await mkdir(path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), {
         recursive: true,
       });
+      await mkdir(path.join(sourceBaseOperatorHomeRoot, ".murph"), { recursive: true });
+      const baseRolloutJson = "{\"codex\":\"old\"}\n";
       await writeFile(
-        path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"),
-        "{\"codex\":\"old\"}\n",
+        path.join(sourceBaseOperatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+        baseRolloutJson,
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceBaseOperatorHomeRoot, ".murph", "hosted-codex-continuity.json"),
+        JSON.stringify({
+          schema: "murph.hosted-codex-continuity.v1",
+          threads: [{
+            codexRolloutRelativePath: rolloutRelativePath,
+            providerSessionId: threadId,
+            rolloutBlob: {
+              byteSize: Buffer.byteLength(baseRolloutJson),
+              sha256: sha256HostedBundleHex(Buffer.from(baseRolloutJson)),
+              storage: "hosted-bundle.v1",
+            },
+          }],
+        }) + "\n",
         "utf8",
       );
       const baseBundle = await snapshotHostedBundleRoots({
@@ -78,15 +115,21 @@ describe("hosted workspace restore Codex continuity", () => {
       await writeFile(
         path.join(hotAssistantRoot, "sessions", "session-latest.json"),
         JSON.stringify({
-          resumeState: {
-            providerSessionId: "thread-latest",
-            resumeRouteId: "route-latest",
-          },
+          resumeState,
           session: "latest",
         }) + "\n",
         "utf8",
       );
+      await mkdir(path.join(sourceHotOperatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(sourceHotOperatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+        "{\"codex\":\"latest\"}\n",
+        "utf8",
+      );
       const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+        operatorHomeRoot: sourceHotOperatorHomeRoot,
         vaultRoot: sourceHotVaultRoot,
       });
       const baseHash = sha256HostedBundleHex(baseBundle);
@@ -133,18 +176,21 @@ describe("hosted workspace restore Codex continuity", () => {
           path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"),
           "utf8",
         ),
-        "{\"resumeState\":{\"providerSessionId\":\"thread-latest\",\"resumeRouteId\":\"route-latest\"},\"session\":\"latest\"}\n",
+        JSON.stringify({
+          resumeState,
+          session: "latest",
+        }) + "\n",
       );
       const restoredOperatorHomeRoot = path.join(
         path.dirname(restoredVaultRoot),
         `${path.basename(restoredVaultRoot)}-operator-home`,
       );
       assert.equal(
-        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"), "utf8"),
-        "{\"codex\":\"old\"}\n",
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
+        "{\"codex\":\"latest\"}\n",
       );
       await assert.rejects(
-        readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "latest.json"), "utf8"),
+        readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"), "utf8"),
       );
       assert.deepEqual(flattenLogEntries(logRequests), []);
     } finally {
@@ -186,12 +232,12 @@ describe("hosted workspace restore Codex continuity", () => {
 
       const firstHotSnapshot = await createHotStateSnapshot({
         sessionName: "first",
-        threadId: "thread-first",
+        threadId: "00000000-0000-4000-8000-000000000011",
         workspaceRoot,
       });
       const secondHotSnapshot = await createHotStateSnapshot({
         sessionName: "second",
-        threadId: "thread-second",
+        threadId: "00000000-0000-4000-8000-000000000012",
         workspaceRoot,
       });
       const baseHash = sha256HostedBundleHex(baseBundle);
@@ -256,7 +302,10 @@ describe("hosted workspace restore Codex continuity", () => {
           path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"),
           "utf8",
         ),
-        "{\"resumeState\":{\"providerSessionId\":\"thread-second\",\"resumeRouteId\":\"route-second\"},\"session\":\"second\"}\n",
+        JSON.stringify({
+          resumeState: secondHotSnapshot.resumeState,
+          session: "second",
+        }) + "\n",
       );
       assert.deepEqual(flattenLogEntries(logRequests), []);
 
@@ -264,6 +313,8 @@ describe("hosted workspace restore Codex continuity", () => {
         snapshotRef: secondSnapshotRef,
         vaultRoot: restoredVaultRoot,
       });
+      const rolloutRelativePath = secondHotSnapshot.resumeState.codexRolloutRelativePath;
+      assert.ok(rolloutRelativePath);
       artifactGetCalls.length = 0;
       logRequests.length = 0;
 
@@ -281,9 +332,164 @@ describe("hosted workspace restore Codex continuity", () => {
           path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session-latest.json"),
           "utf8",
         ),
-        "{\"resumeState\":{\"providerSessionId\":\"thread-second\",\"resumeRouteId\":\"route-second\"},\"session\":\"second\"}\n",
+        JSON.stringify({
+          resumeState: secondHotSnapshot.resumeState,
+          session: "second",
+        }) + "\n",
       );
       assert.deepEqual(flattenLogEntries(logRequests), []);
+
+      await writeFile(
+        path.join(
+          path.dirname(restoredVaultRoot),
+          `${path.basename(restoredVaultRoot)}-operator-home`,
+          ".codex-hosted",
+          rolloutRelativePath,
+        ),
+        "{\"session\":\"corrupted\"}\n",
+        "utf8",
+      );
+      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+        snapshotRef: secondSnapshotRef,
+        vaultRoot: restoredVaultRoot,
+      });
+
+      await assert.rejects(
+        restoreHostedWorkspaceRuntimeJobWorkspace({
+          platform,
+          vaultRoot: restoredVaultRoot,
+          workspace: createWorkspaceState({
+            snapshotRef: secondSnapshotRef,
+          }),
+        }),
+        /mismatch/u,
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fails hosted runtime restore when restored Codex rollout fails manifest integrity", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-integrity-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const hotSnapshot = await createHotStateSnapshot({
+        sessionName: "integrity",
+        threadId: "00000000-0000-4000-8000-000000000013",
+        workspaceRoot,
+      });
+      const rolloutRelativePath = hotSnapshot.resumeState.codexRolloutRelativePath;
+      assert.ok(rolloutRelativePath);
+      const tamperedBundle = writeHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        kind: "vault",
+        path: `.codex-hosted/${rolloutRelativePath}`,
+        root: "operator-home",
+        text: "{\"session\":\"tampered\"}\n",
+      });
+      const tamperedHash = sha256HostedBundleHex(tamperedBundle);
+
+      await assert.rejects(
+        restoreHostedWorkspaceRuntimeJobWorkspace({
+          platform: createRestorePlatform({
+            artifactBytesByHash: new Map([[tamperedHash, tamperedBundle]]),
+          }),
+          vaultRoot: restoredVaultRoot,
+          workspace: createWorkspaceState({
+            snapshotRef: createBundleRef({
+              hash: tamperedHash,
+              key: `cloudflare-workspace-hot-state/${tamperedHash}.bundle`,
+              size: tamperedBundle.byteLength,
+            }),
+          }),
+        }),
+        /mismatch/u,
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fails hosted runtime restore cache hit when Codex manifest is missing", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-cache-missing-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
+      await mkdir(sourceBaseVaultRoot, { recursive: true });
+      await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const hotSnapshot = await createHotStateSnapshot({
+        sessionName: "cache-missing",
+        threadId: "00000000-0000-4000-8000-000000000028",
+        workspaceRoot,
+      });
+      const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+      const snapshotRef = buildHostedExecutionLayeredSnapshotRef({
+        base: createBundleRef({
+          hash: baseHash,
+          key: `cloudflare-workspace-base/${baseHash}.bundle`,
+          size: baseBundle.byteLength,
+        }),
+        hot: createBundleRef({
+          hash: hotHash,
+          key: `cloudflare-workspace-hot-state/${hotHash}.bundle`,
+          size: hotSnapshot.bundle.byteLength,
+        }),
+      });
+      const artifactGetCalls: string[] = [];
+      const platform = createRestorePlatform({
+        artifactBytesByHash: new Map([
+          [baseHash, baseBundle],
+          [hotHash, hotSnapshot.bundle],
+        ]),
+        artifactGetCalls,
+      });
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
+        }),
+      });
+      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+        snapshotRef,
+        vaultRoot: restoredVaultRoot,
+      });
+      artifactGetCalls.length = 0;
+
+      const restoredOperatorHomeRoot = path.join(
+        path.dirname(restoredVaultRoot),
+        `${path.basename(restoredVaultRoot)}-operator-home`,
+      );
+      await rm(
+        path.join(restoredOperatorHomeRoot, ".murph", "hosted-codex-continuity.json"),
+        { force: true },
+      );
+
+      await assert.rejects(
+        restoreHostedWorkspaceRuntimeJobWorkspace({
+          platform,
+          vaultRoot: restoredVaultRoot,
+          workspace: createWorkspaceState({
+            snapshotRef,
+          }),
+        }),
+        /manifest is missing/u,
+      );
+      assert.deepEqual(artifactGetCalls, []);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -488,24 +694,47 @@ async function createHotStateSnapshot(input: {
   sessionName: string;
   threadId: string;
   workspaceRoot: string;
-}): ReturnType<typeof snapshotHostedAssistantRuntimeHotState> {
+}): Promise<{
+  bundle: Uint8Array;
+  resumeState: AssistantSessionResumeState;
+}> {
   const sourceHotVaultRoot = path.join(input.workspaceRoot, `hot-vault-${input.sessionName}`);
+  const sourceHotOperatorHomeRoot = path.join(input.workspaceRoot, `hot-operator-home-${input.sessionName}`);
   const hotAssistantRoot = resolveAssistantStatePaths(sourceHotVaultRoot).assistantStateRoot;
+  const rolloutRelativePath =
+    `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${input.threadId}.jsonl`;
+  const resumeState = {
+    codexRolloutRelativePath: rolloutRelativePath,
+    providerSessionId: input.threadId,
+    resumeRouteId: `route-${input.sessionName}`,
+  };
   await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
+  await mkdir(path.join(sourceHotOperatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), {
+    recursive: true,
+  });
   await writeFile(
     path.join(hotAssistantRoot, "sessions", "session-latest.json"),
     JSON.stringify({
-      resumeState: {
-        providerSessionId: input.threadId,
-        resumeRouteId: input.threadId.replace("thread-", "route-"),
-      },
+      resumeState,
       session: input.sessionName,
     }) + "\n",
     "utf8",
   );
-  return await snapshotHostedAssistantRuntimeHotState({
+  await writeFile(
+    path.join(sourceHotOperatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+    JSON.stringify({
+      session: input.sessionName,
+    }) + "\n",
+    "utf8",
+  );
+  const snapshot = await snapshotHostedAssistantRuntimeHotState({
+    operatorHomeRoot: sourceHotOperatorHomeRoot,
     vaultRoot: sourceHotVaultRoot,
   });
+  return {
+    bundle: snapshot.bundle,
+    resumeState,
+  };
 }
 
 function createCodexSessionRecord(input: {

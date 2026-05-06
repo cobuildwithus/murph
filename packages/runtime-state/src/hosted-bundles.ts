@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
+import { createReadStream } from "node:fs";
 import path from "node:path";
-import { lstat, mkdir, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -17,6 +18,7 @@ import {
   isHostedBundleArtifactEntry,
   parseHostedBundleArchive,
   type HostedBundleArtifactRef,
+  writeHostedBundleTextFile,
 } from "./hosted-bundle.ts";
 import {
   materializeHostedBundleArtifacts,
@@ -29,13 +31,17 @@ import {
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
+const HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH =
+  ".murph/hosted-codex-continuity.json";
+const HOSTED_CODEX_CONTINUITY_MANIFEST_SCHEMA =
+  "murph.hosted-codex-continuity.v1";
+const HOSTED_CODEX_ROLLOUT_RELATIVE_PATH_PATTERN =
+  /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/u;
 const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
   WORKSPACE_OPERATOR_HOME_ROOT,
   "vault",
 ]);
 const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
-const HOSTED_CODEX_HOME_INCLUDED_HASH_LIMIT = 16;
-const HOSTED_CODEX_HOME_EXCLUDED_SUMMARY_LIMIT = 16;
 const HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT = 16;
 const HOSTED_HOT_STATE_MAX_FILES = 5_000;
 const HOSTED_HOT_STATE_MAX_INLINE_BYTES = 16 * 1024 * 1024;
@@ -69,10 +75,14 @@ const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_EXCLUDED_PATHS = [
 ] as const;
 
 export interface HostedCodexHomeSnapshotDiagnostics {
-  codexHomeIncludedRelHashes: string[];
-  codexHomeSnapshotCandidateCount: number;
-  codexHomeSnapshotExcludedClassSummary: string[];
-  codexHomeSnapshotIncludedCount: number;
+  codexResumeArchivedUnsupportedCount: number;
+  codexResumeFlushFailed: boolean;
+  codexResumeInvalidPathCount: number;
+  codexResumeMissingRolloutCount: number;
+  codexResumeRolloutBytes: number;
+  codexResumeRolloutFileBytes: number[];
+  codexResumeRolloutRelHashes: string[];
+  codexResumeThreadCount: number;
 }
 
 export interface HostedWorkspaceSnapshotSizeDiagnostics {
@@ -110,6 +120,24 @@ interface HostedAssistantRuntimeHotStateBudgetMetrics {
   minimumBundleBytes: number;
 }
 
+interface HostedCodexContinuityEntry {
+  absolutePath: string;
+  byteSize: number;
+  codexRolloutRelativePath: string;
+  providerSessionId: string;
+  sha256: string;
+}
+
+interface HostedCodexContinuityCollection {
+  archivedUnsupportedCount: number;
+  entries: HostedCodexContinuityEntry[];
+  flushFailed: boolean;
+  invalidPathCount: number;
+  missingRolloutCount: number;
+  requestedThreadCount: number;
+  rolloutRelativePaths: ReadonlySet<string>;
+}
+
 export class HostedAssistantRuntimeHotStateBudgetExceededError extends Error {
   constructor(
     readonly budget: "files" | "inline_bytes" | "bundle_bytes",
@@ -122,9 +150,18 @@ export class HostedAssistantRuntimeHotStateBudgetExceededError extends Error {
 }
 
 export class HostedWorkspaceSnapshotContinuityIncompleteError extends Error {
-  constructor(readonly reason: "codex_home_missing") {
-    super("Hosted workspace snapshot is missing required provider continuity state.");
+  readonly codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+
+  constructor(
+    readonly reason: "codex_flush_failed" | "codex_home_missing",
+    options?: {
+      codexHomeSnapshotDiagnostics?: HostedCodexHomeSnapshotDiagnostics | null;
+      message?: string;
+    },
+  ) {
+    super(options?.message ?? "Hosted workspace snapshot is missing required provider continuity state.");
     this.name = "HostedWorkspaceSnapshotContinuityIncompleteError";
+    this.codexHomeSnapshotDiagnostics = options?.codexHomeSnapshotDiagnostics ?? null;
   }
 }
 
@@ -137,11 +174,21 @@ interface HostedExecutionContextSnapshotInput {
   codexHomeSnapshotHashSecret?: string | null;
   materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot?: string | null;
+  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
   workspaceSnapshotSizeDiagnosticsSink?: (
     diagnostics: HostedWorkspaceSnapshotSizeDiagnostics,
   ) => Promise<void> | void;
+}
+
+export type HostedCodexContinuitySnapshotPreparer = () =>
+  | Promise<readonly HostedCodexContinuitySnapshotPreparedThread[]>
+  | readonly HostedCodexContinuitySnapshotPreparedThread[];
+
+export interface HostedCodexContinuitySnapshotPreparedThread {
+  codexRolloutRelativePath: string;
+  providerSessionId: string;
 }
 
 export async function snapshotHostedExecutionContext(
@@ -189,12 +236,29 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
     createHostedWorkspaceSnapshotSizeDiagnosticsCollector({
       hashSecret: workspaceSnapshotHashSecret,
     });
-  const codexHomeSnapshotDiagnostics = operatorHomeRoot
-    ? await collectHostedCodexHomeSnapshotDiagnostics({
+  const preparedCodexContinuity = await prepareHostedCodexContinuitySnapshot({
+    assistantStateRoot,
+    prepareCodexContinuitySnapshot: input.prepareCodexContinuitySnapshot,
+  });
+  const hostedCodexContinuity = operatorHomeRoot
+    ? await collectHostedCodexContinuity({
+        assistantStateRoot,
         hashSecret: workspaceSnapshotHashSecret,
         operatorHomeRoot,
+        preparedThreads: preparedCodexContinuity.preparedThreads,
       })
-    : null;
+    : await collectMissingHostedCodexContinuity(assistantStateRoot);
+  hostedCodexContinuity.flushFailed ||= preparedCodexContinuity.flushFailed;
+  const codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
+    collection: hostedCodexContinuity,
+    hashSecret: workspaceSnapshotHashSecret,
+  });
+  if (input.enforceProviderContinuity) {
+    assertHostedCodexContinuityComplete(
+      hostedCodexContinuity,
+      codexHomeSnapshotDiagnostics,
+    );
+  }
   const vaultBundle = await snapshotHostedBundleRoots({
     externalizeFile: async (artifact) => {
       const shouldExternalize = Boolean(artifactSink)
@@ -241,7 +305,11 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
               root: operatorHomeRoot!,
               rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
               shouldIncludeRelativePath(relativePath: string) {
-                return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
+                return shouldIncludeHostedOperatorHomeRelativePath({
+                  codexRolloutRelativePaths:
+                    hostedCodexContinuity.rolloutRelativePaths,
+                  relativePath,
+                });
               },
             },
           ]
@@ -255,14 +323,20 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
   if (vaultBundle === null) {
     throw new Error(`Hosted vault bundle could not be created for ${vaultRoot}.`);
   }
-  if (input.enforceProviderContinuity) {
-    assertHostedWorkspaceSnapshotProviderContinuityComplete({
-      bundle: vaultBundle,
-    });
-  }
-
+  const bundleWithCodexContinuityManifest =
+    hostedCodexContinuity.entries.length > 0
+      ? writeHostedBundleTextFile({
+          bytes: vaultBundle,
+          kind: "vault",
+          path: HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
+          root: WORKSPACE_OPERATOR_HOME_ROOT,
+          text: JSON.stringify(createHostedCodexContinuityManifest(
+            hostedCodexContinuity.entries,
+          )) + "\n",
+        })
+      : vaultBundle;
   return {
-    bundle: vaultBundle,
+    bundle: bundleWithCodexContinuityManifest,
     codexHomeSnapshotDiagnostics,
     workspaceSnapshotSizeDiagnostics: workspaceSnapshotSizeDiagnostics.finish(),
   };
@@ -271,14 +345,39 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
 export async function snapshotHostedAssistantRuntimeHotState(input: {
   codexHomeSnapshotHashSecret?: string | null;
   operatorHomeRoot?: string | null;
+  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
   vaultRoot: string;
 }): Promise<HostedAssistantRuntimeHotStateSnapshot> {
   const vaultRoot = path.resolve(input.vaultRoot);
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   await ensureAssistantStateDirectory(assistantStateRoot);
   await assertHostedAssistantRuntimeHotStatePreBundleBudget({
     vaultRoot,
   });
+  const workspaceSnapshotHashSecret =
+    normalizeHostedCodexHomeSnapshotHashSecret(input.codexHomeSnapshotHashSecret);
+  const preparedCodexContinuity = await prepareHostedCodexContinuitySnapshot({
+    assistantStateRoot,
+    prepareCodexContinuitySnapshot: input.prepareCodexContinuitySnapshot,
+  });
+  const hostedCodexContinuity = operatorHomeRoot
+    ? await collectHostedCodexContinuity({
+        assistantStateRoot,
+        hashSecret: workspaceSnapshotHashSecret,
+        operatorHomeRoot,
+        preparedThreads: preparedCodexContinuity.preparedThreads,
+      })
+    : await collectMissingHostedCodexContinuity(assistantStateRoot);
+  hostedCodexContinuity.flushFailed ||= preparedCodexContinuity.flushFailed;
+  const codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
+    collection: hostedCodexContinuity,
+    hashSecret: workspaceSnapshotHashSecret,
+  });
+  assertHostedCodexContinuityComplete(
+    hostedCodexContinuity,
+    codexHomeSnapshotDiagnostics,
+  );
 
   const bundle = await snapshotHostedBundleRoots({
     kind: "vault",
@@ -290,22 +389,50 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
           return shouldIncludeHostedAssistantRuntimeHotStateRelativePath(relativePath);
         },
       },
+      ...(operatorHomeRoot
+        ? [
+            {
+              optional: true,
+              root: operatorHomeRoot,
+              rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
+              shouldIncludeRelativePath(relativePath: string) {
+                return shouldIncludeHostedOperatorHomeRelativePath({
+                  codexRolloutRelativePaths:
+                    hostedCodexContinuity.rolloutRelativePaths,
+                  relativePath,
+                });
+              },
+            },
+          ]
+        : []),
     ],
   });
 
   if (bundle === null) {
     throw new Error(`Hosted assistant runtime hot-state bundle could not be created for ${vaultRoot}.`);
   }
+  const bundleWithCodexContinuityManifest =
+    hostedCodexContinuity.entries.length > 0
+      ? writeHostedBundleTextFile({
+          bytes: bundle,
+          kind: "vault",
+          path: HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
+          root: WORKSPACE_OPERATOR_HOME_ROOT,
+          text: JSON.stringify(createHostedCodexContinuityManifest(
+            hostedCodexContinuity.entries,
+          )) + "\n",
+        })
+      : bundle;
 
-  const metrics = measureHostedAssistantRuntimeHotStateBundle(bundle);
+  const metrics = measureHostedAssistantRuntimeHotStateBundle(bundleWithCodexContinuityManifest);
   assertHostedAssistantRuntimeHotStateBudget({
     ...metrics,
-    bundleBytes: bundle.byteLength,
+    bundleBytes: bundleWithCodexContinuityManifest.byteLength,
   });
   return {
-    bundle,
-    bundleBytes: bundle.byteLength,
-    codexHomeSnapshotDiagnostics: null,
+    bundle: bundleWithCodexContinuityManifest,
+    bundleBytes: bundleWithCodexContinuityManifest.byteLength,
+    codexHomeSnapshotDiagnostics,
     fileCount: metrics.fileCount,
     inlineBytes: metrics.inlineBytes,
   };
@@ -350,6 +477,17 @@ export function hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity(in
   }).hasCodexProviderContinuity;
 }
 
+export async function restoredWorkspaceRequiresHostedCodexProviderContinuity(input: {
+  vaultRoot: string;
+}): Promise<boolean> {
+  const assistantStateRoot = resolveAssistantStatePaths(path.resolve(input.vaultRoot))
+    .assistantStateRoot;
+  const requirements = await readAssistantSessionProviderResumeRequirements(
+    assistantStateRoot,
+  );
+  return requirements.length > 0;
+}
+
 export function assertHostedWorkspaceSnapshotProviderContinuityComplete(input: {
   bundle: Uint8Array | ArrayBuffer;
   createError?: (reason: "codex_home_missing") => Error;
@@ -373,13 +511,21 @@ export function analyzeHostedWorkspaceSnapshotProviderContinuity(input: {
 
   let hasProviderResumeState = false;
   let hasCodexProviderContinuity = false;
+  let hasCodexContinuityManifest = false;
+  const requiredCodexContinuityPaths = new Set<string>();
+  const bundledCodexContinuityPaths = new Set<string>();
   for (const file of archive.files) {
     const normalizedPath = normalizeWorkspaceSnapshotRelativePath(file.path);
     if (
       file.root === WORKSPACE_OPERATOR_HOME_ROOT
-      && isHostedCodexHomeSnapshotRelativePath(normalizedPath)
+      && isHostedCodexResumeContinuitySnapshotRelativePath(normalizedPath)
     ) {
-      hasCodexProviderContinuity = true;
+      if (normalizedPath === HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH) {
+        hasCodexContinuityManifest = true;
+      }
+      if (hasWorkspaceSnapshotPathPrefix(normalizedPath, HOSTED_CODEX_HOME_RELATIVE_PATH)) {
+        bundledCodexContinuityPaths.add(normalizedPath);
+      }
     }
 
     if (
@@ -391,13 +537,24 @@ export function analyzeHostedWorkspaceSnapshotProviderContinuity(input: {
       )
     ) {
       const text = Buffer.from(file.contentsBase64, "base64").toString("utf8");
-      hasProviderResumeState ||= assistantSessionTextContainsProviderResumeState(text);
-    }
-
-    if (hasProviderResumeState && hasCodexProviderContinuity) {
-      break;
+      for (const requirement of readAssistantSessionProviderResumeRequirementsFromText(text)) {
+        hasProviderResumeState = true;
+        if (requirement.codexRolloutRelativePath) {
+          requiredCodexContinuityPaths.add(
+            `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${normalizeWorkspaceSnapshotRelativePath(
+              requirement.codexRolloutRelativePath,
+            )}`,
+          );
+        }
+      }
     }
   }
+  hasCodexProviderContinuity =
+    hasCodexContinuityManifest
+    && requiredCodexContinuityPaths.size > 0
+    && [...requiredCodexContinuityPaths].every((requiredPath) =>
+      bundledCodexContinuityPaths.has(requiredPath),
+    );
 
   return {
     hasCodexProviderContinuity,
@@ -435,6 +592,7 @@ export async function restoreHostedExecutionContext(input: {
       },
       shouldRestoreArtifact: input.shouldRestoreArtifact,
     });
+    await verifyRestoredHostedCodexContinuityManifest(operatorHomeRoot);
   }
 
   return {
@@ -442,6 +600,109 @@ export async function restoreHostedExecutionContext(input: {
     operatorHomeRoot,
     vaultRoot,
   };
+}
+
+export async function verifyRestoredHostedCodexContinuityManifest(
+  operatorHomeRoot: string,
+  options?: {
+    requireManifest?: boolean;
+  },
+): Promise<void> {
+  let rawManifest: string;
+  try {
+    rawManifest = await readFile(
+      path.join(operatorHomeRoot, HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH),
+      "utf8",
+    );
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      if (options?.requireManifest) {
+        throw new Error("Hosted Codex continuity manifest is missing after restore.");
+      }
+      await removeHostedCodexHomeFiles(operatorHomeRoot);
+      return;
+    }
+    throw error;
+  }
+
+  const manifest = parseHostedCodexContinuityManifest(rawManifest);
+  const allowedRolloutRelativePaths = new Set<string>();
+  for (const thread of manifest.threads) {
+    const normalizedPath = normalizeHostedCodexRolloutRelativePathForProvider({
+      providerSessionId: thread.providerSessionId,
+      value: thread.codexRolloutRelativePath,
+    });
+    if (normalizedPath.reason !== null) {
+      throw new Error("Hosted Codex continuity manifest contains an invalid rollout path.");
+    }
+    allowedRolloutRelativePaths.add(normalizedPath.relativePath);
+
+    const absolutePath = path.join(
+      operatorHomeRoot,
+      HOSTED_CODEX_HOME_RELATIVE_PATH,
+      normalizedPath.relativePath,
+    );
+    const entry = await lstat(absolutePath);
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error("Hosted Codex continuity rollout was not restored as a regular file.");
+    }
+    if (entry.size !== thread.rolloutBlob.byteSize) {
+      throw new Error("Hosted Codex continuity rollout byte size mismatch after restore.");
+    }
+    const sha256 = await sha256FileHex(absolutePath);
+    if (sha256 !== thread.rolloutBlob.sha256) {
+      throw new Error("Hosted Codex continuity rollout SHA-256 mismatch after restore.");
+    }
+  }
+  await assertNoUnmanifestedHostedCodexHomeFiles({
+    allowedRolloutRelativePaths,
+    operatorHomeRoot,
+  });
+}
+
+async function removeHostedCodexHomeFiles(operatorHomeRoot: string): Promise<void> {
+  await rm(path.join(operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH), {
+    force: true,
+    recursive: true,
+  });
+}
+
+async function assertNoUnmanifestedHostedCodexHomeFiles(input: {
+  allowedRolloutRelativePaths: ReadonlySet<string>;
+  operatorHomeRoot: string;
+}): Promise<void> {
+  const codexHomeRoot = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH);
+
+  async function visit(directoryPath: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return;
+      }
+      throw error;
+    }
+
+    for (const entry of entries) {
+      const absolutePath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolutePath);
+        continue;
+      }
+
+      const relativePath = normalizeWorkspaceSnapshotRelativePath(
+        path.relative(codexHomeRoot, absolutePath).split(path.sep).join("/"),
+      );
+      if (!input.allowedRolloutRelativePaths.has(relativePath)) {
+        throw new Error(
+          "Hosted Codex continuity restore included an unmanifested Codex home file.",
+        );
+      }
+    }
+  }
+
+  await visit(codexHomeRoot);
 }
 
 export async function materializeHostedExecutionArtifacts(input: {
@@ -855,23 +1116,50 @@ function assertHostedAssistantRuntimeHotStateBudget(input: {
   }
 }
 
-function assistantSessionTextContainsProviderResumeState(text: string): boolean {
+function isHostedCodexResumeContinuitySnapshotRelativePath(relativePath: string): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+  return normalizedRelativePath === HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH
+    || (
+      hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH)
+      && isHostedCodexActiveRolloutSnapshotRelativePath(
+        normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
+          ? ""
+          : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length),
+      )
+    );
+}
+
+function readAssistantSessionProviderResumeRequirementsFromText(text: string): Array<{
+  codexRolloutRelativePath: string | null;
+  providerSessionId: string | null;
+}> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return true;
+    return [{
+      codexRolloutRelativePath: null,
+      providerSessionId: null,
+    }];
   }
 
-  return (
-    recordStringProperty(parsed, "providerSessionId") !== null
-    || recordStringProperty(recordProperty(parsed, "resumeState"), "providerSessionId") !== null
-  );
-}
+  const resumeState = recordProperty(parsed, "resumeState");
+  const providerSessionId =
+    recordStringProperty(resumeState, "providerSessionId")
+    ?? recordStringProperty(parsed, "providerSessionId");
+  if (!providerSessionId) {
+    return [];
+  }
+  const targetAdapter = recordStringProperty(recordProperty(parsed, "target"), "adapter");
+  if (targetAdapter && targetAdapter !== "codex-cli") {
+    return [];
+  }
 
-function isHostedCodexHomeSnapshotRelativePath(relativePath: string): boolean {
-  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
-  return hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH);
+  return [{
+    codexRolloutRelativePath:
+      recordStringProperty(resumeState, "codexRolloutRelativePath"),
+    providerSessionId,
+  }];
 }
 
 function recordProperty(value: unknown, propertyName: string): unknown {
@@ -891,6 +1179,29 @@ function recordStringProperty(value: unknown, propertyName: string): string | nu
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
+function readErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function shouldIncludeWorkspaceSnapshotRuntimeRelativePath(relativePath: string): boolean {
@@ -1063,8 +1374,11 @@ function parseWorkspaceSnapshotArtifactPath(relativePath: string): {
   };
 }
 
-function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
-  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+function shouldIncludeHostedOperatorHomeRelativePath(input: {
+  codexRolloutRelativePaths: ReadonlySet<string>;
+  relativePath: string;
+}): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.relativePath);
 
   if (
     normalizedRelativePath === ".murph"
@@ -1074,213 +1388,475 @@ function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): bool
   }
 
   if (hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, HOSTED_CODEX_HOME_RELATIVE_PATH)) {
-    return shouldIncludeHostedCodexHomeRelativePath(
-      normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
-        ? ""
-        : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length),
-    );
+    const codexHomeRelativePath = normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH
+      ? ""
+      : normalizedRelativePath.slice(`${HOSTED_CODEX_HOME_RELATIVE_PATH}${path.posix.sep}`.length);
+    return shouldIncludeHostedCodexContinuityRelativePath({
+      allowedRolloutRelativePaths: input.codexRolloutRelativePaths,
+      relativePath: codexHomeRelativePath,
+    });
   }
 
   return false;
 }
 
-function shouldIncludeHostedCodexHomeRelativePath(relativePath: string): boolean {
-  return classifyHostedCodexHomeRelativePath(relativePath).include;
+function shouldIncludeHostedCodexContinuityRelativePath(input: {
+  allowedRolloutRelativePaths: ReadonlySet<string>;
+  relativePath: string;
+}): boolean {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.relativePath);
+  if (input.allowedRolloutRelativePaths.size === 0) {
+    return false;
+  }
+  if (normalizedRelativePath.length === 0) {
+    return true;
+  }
+
+  return [...input.allowedRolloutRelativePaths].some((allowedPath) =>
+    normalizedRelativePath === allowedPath
+    || allowedPath.startsWith(`${normalizedRelativePath}${path.posix.sep}`),
+  );
 }
 
-type HostedCodexHomeSnapshotExclusionClass =
-  | "environment"
-  | "root-history"
-  | "sensitive-basename"
-  | "unsafe-container";
-
-type HostedCodexHomeSnapshotDecision =
-  | {
-      include: true;
-    }
-  | {
-      exclusionClass: HostedCodexHomeSnapshotExclusionClass;
-      include: false;
-    };
-
-function classifyHostedCodexHomeRelativePath(relativePath: string): HostedCodexHomeSnapshotDecision {
+function isHostedCodexActiveRolloutSnapshotRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
-  if (normalizedRelativePath.length === 0) {
-    return {
-      include: true,
-    };
-  }
+  const match = HOSTED_CODEX_ROLLOUT_RELATIVE_PATH_PATTERN.exec(normalizedRelativePath);
+  return Boolean(
+    match
+    && match[1] === match[4]
+    && match[2] === match[5]
+    && match[3] === match[6],
+  );
+}
 
-  if (isEnvironmentRelativePath(normalizedRelativePath)) {
-    return {
-      exclusionClass: "environment",
-      include: false,
-    };
-  }
-
-  const segments = normalizedRelativePath
-    .split(path.posix.sep)
-    .map((segment) => segment.toLowerCase());
-  if (
-    segments.some((segment) =>
-      segment === "tmp"
-      || segment === ".tmp"
-      || segment === "auth"
-      || segment === ".auth"
-      || segment === "cache"
-      || segment === ".cache"
-      || segment === "cert"
-      || segment === ".cert"
-      || segment === "certs"
-      || segment === ".certs"
-      || segment === "certificate"
-      || segment === ".certificate"
-      || segment === "certificates"
-      || segment === ".certificates"
-      || segment === "cookie"
-      || segment === ".cookie"
-      || segment === "cookies"
-      || segment === ".cookies"
-      || segment === "credential"
-      || segment === ".credential"
-      || segment === "credentials"
-      || segment === ".credentials"
-      || segment === "key"
-      || segment === ".key"
-      || segment === "keys"
-      || segment === ".keys"
-      || segment === "log"
-      || segment === ".log"
-      || segment === "logs"
-      || segment === ".logs"
-      || segment === "oauth"
-      || segment === ".oauth"
-      || segment === "password"
-      || segment === ".password"
-      || segment === "passwords"
-      || segment === ".passwords"
-      || segment === "secrets"
-      || segment === ".secrets"
-      || segment === "token"
-      || segment === ".token"
-      || segment === "tokens"
-      || segment === ".tokens"
-    )
-  ) {
-    return {
-      exclusionClass: "unsafe-container",
-      include: false,
-    };
-  }
-
-  const basename = path.posix.basename(normalizedRelativePath).toLowerCase();
-  if (isHostedCodexHomeHistoryBasename(basename)) {
-    return {
-      exclusionClass: "root-history",
-      include: false,
-    };
-  }
-
-  if (isHostedCodexHomeSensitiveBasename(basename)) {
-    return {
-      exclusionClass: "sensitive-basename",
-      include: false,
-    };
-  }
-
+function createEmptyHostedCodexContinuityCollection(): HostedCodexContinuityCollection {
   return {
-    include: true,
+    archivedUnsupportedCount: 0,
+    entries: [],
+    flushFailed: false,
+    invalidPathCount: 0,
+    missingRolloutCount: 0,
+    requestedThreadCount: 0,
+    rolloutRelativePaths: new Set(),
   };
 }
 
-async function collectHostedCodexHomeSnapshotDiagnostics(input: {
+async function collectMissingHostedCodexContinuity(
+  assistantStateRoot: string,
+): Promise<HostedCodexContinuityCollection> {
+  const requirements = await readAssistantSessionProviderResumeRequirements(
+    assistantStateRoot,
+  );
+  if (requirements.length === 0) {
+    return createEmptyHostedCodexContinuityCollection();
+  }
+
+  return {
+    archivedUnsupportedCount: 0,
+    entries: [],
+    flushFailed: false,
+    invalidPathCount: 0,
+    missingRolloutCount: requirements.length,
+    requestedThreadCount: requirements.length,
+    rolloutRelativePaths: new Set(),
+  };
+}
+
+async function prepareHostedCodexContinuitySnapshot(input: {
+  assistantStateRoot: string;
+  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
+}): Promise<{
+  flushFailed: boolean;
+  preparedThreads: ReadonlyMap<string, string>;
+}> {
+  if (!input.prepareCodexContinuitySnapshot) {
+    return {
+      flushFailed: false,
+      preparedThreads: new Map(),
+    };
+  }
+
+  const requirements = await readAssistantSessionProviderResumeRequirements(
+    input.assistantStateRoot,
+  );
+  if (requirements.length === 0) {
+    return {
+      flushFailed: false,
+      preparedThreads: new Map(),
+    };
+  }
+
+  let preparedThreads: readonly HostedCodexContinuitySnapshotPreparedThread[];
+  try {
+    preparedThreads = await input.prepareCodexContinuitySnapshot();
+  } catch (error) {
+    throw new HostedWorkspaceSnapshotContinuityIncompleteError("codex_flush_failed", {
+      codexHomeSnapshotDiagnostics: {
+        codexResumeArchivedUnsupportedCount: 0,
+        codexResumeFlushFailed: true,
+        codexResumeInvalidPathCount: 0,
+        codexResumeMissingRolloutCount: 0,
+        codexResumeRolloutBytes: 0,
+        codexResumeRolloutFileBytes: [],
+        codexResumeRolloutRelHashes: [],
+        codexResumeThreadCount: requirements.length,
+      },
+      message: `Hosted Codex continuity snapshot preparation failed: ${readErrorMessage(error)}`,
+    });
+  }
+
+  return {
+    flushFailed: false,
+    preparedThreads: new Map(
+      preparedThreads
+        .map((thread) => [
+          thread.providerSessionId,
+          thread.codexRolloutRelativePath,
+        ] as const),
+    ),
+  };
+}
+
+async function collectHostedCodexContinuity(input: {
+  assistantStateRoot: string;
   hashSecret?: string | null;
   operatorHomeRoot: string;
-}): Promise<HostedCodexHomeSnapshotDiagnostics | null> {
+  preparedThreads: ReadonlyMap<string, string>;
+}): Promise<HostedCodexContinuityCollection> {
+  const requirements = await readAssistantSessionProviderResumeRequirements(
+    input.assistantStateRoot,
+  );
   const codexHomeRoot = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH);
-  try {
-    const entry = await lstat(codexHomeRoot);
-    if (!entry.isDirectory() || entry.isSymbolicLink()) {
-      return null;
+  const entries: HostedCodexContinuityEntry[] = [];
+  let archivedUnsupportedCount = 0;
+  let invalidPathCount = 0;
+  let missingRolloutCount = 0;
+
+  for (const requirement of requirements) {
+    const normalizedPath = normalizeHostedCodexRolloutRelativePathForProvider({
+      providerSessionId: requirement.providerSessionId,
+      value:
+        requirement.codexRolloutRelativePath
+        ?? input.preparedThreads.get(requirement.providerSessionId)
+        ?? null,
+    });
+    if (normalizedPath.reason === "archived") {
+      archivedUnsupportedCount += 1;
+      continue;
     }
-  } catch {
+    if (normalizedPath.reason !== null) {
+      invalidPathCount += 1;
+      continue;
+    }
+
+    const absolutePath = path.join(codexHomeRoot, normalizedPath.relativePath);
+    let fileStats;
+    try {
+      fileStats = await lstat(absolutePath);
+    } catch {
+      missingRolloutCount += 1;
+      continue;
+    }
+    if (!fileStats.isFile() || fileStats.isSymbolicLink()) {
+      missingRolloutCount += 1;
+      continue;
+    }
+
+    entries.push({
+      absolutePath,
+      byteSize: fileStats.size,
+      codexRolloutRelativePath: normalizedPath.relativePath,
+      providerSessionId: requirement.providerSessionId,
+      sha256: await sha256FileHex(absolutePath),
+    });
+  }
+
+  return {
+    archivedUnsupportedCount,
+    entries,
+    flushFailed: false,
+    invalidPathCount,
+    missingRolloutCount,
+    requestedThreadCount: requirements.length,
+    rolloutRelativePaths: new Set(entries.map((entry) => entry.codexRolloutRelativePath)),
+  };
+}
+
+function createHostedCodexContinuityDiagnostics(input: {
+  collection: HostedCodexContinuityCollection;
+  hashSecret?: string | null;
+}): HostedCodexHomeSnapshotDiagnostics | null {
+  if (
+    input.collection.requestedThreadCount === 0
+    && input.collection.entries.length === 0
+    && !input.collection.flushFailed
+    && input.collection.missingRolloutCount === 0
+    && input.collection.invalidPathCount === 0
+    && input.collection.archivedUnsupportedCount === 0
+  ) {
     return null;
   }
 
-  const includedRelHashes: string[] = [];
-  const excludedClassCounts = new Map<HostedCodexHomeSnapshotExclusionClass, number>();
   const hashSecret = normalizeHostedCodexHomeSnapshotHashSecret(input.hashSecret);
-  let candidateCount = 0;
-  let includedCount = 0;
+  return {
+    codexResumeArchivedUnsupportedCount: input.collection.archivedUnsupportedCount,
+    codexResumeFlushFailed: input.collection.flushFailed,
+    codexResumeInvalidPathCount: input.collection.invalidPathCount,
+    codexResumeMissingRolloutCount: input.collection.missingRolloutCount,
+    codexResumeRolloutBytes: input.collection.entries.reduce(
+      (total, entry) => total + entry.byteSize,
+      0,
+    ),
+    codexResumeRolloutFileBytes: input.collection.entries
+      .slice(0, HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT)
+      .map((entry) => entry.byteSize),
+    codexResumeRolloutRelHashes: hashSecret
+      ? input.collection.entries
+          .slice(0, HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT)
+          .map((entry) => fingerprintHostedCodexContinuityRelativePath({
+            hashSecret,
+            relativePath: entry.codexRolloutRelativePath,
+          }))
+      : [],
+    codexResumeThreadCount: input.collection.requestedThreadCount,
+  };
+}
 
-  async function visit(relativeDirectory: string): Promise<void> {
-    const absoluteDirectory = relativeDirectory
-      ? path.join(codexHomeRoot, relativeDirectory)
-      : codexHomeRoot;
-    const entries = await readdir(absoluteDirectory, { withFileTypes: true });
+function assertHostedCodexContinuityComplete(
+  collection: HostedCodexContinuityCollection,
+  diagnostics: HostedCodexHomeSnapshotDiagnostics | null,
+): void {
+  if (
+    collection.flushFailed
+    || collection.archivedUnsupportedCount > 0
+    || collection.invalidPathCount > 0
+    || collection.missingRolloutCount > 0
+    || collection.entries.length !== collection.requestedThreadCount
+  ) {
+    throw new HostedWorkspaceSnapshotContinuityIncompleteError(
+      collection.flushFailed ? "codex_flush_failed" : "codex_home_missing",
+      {
+        codexHomeSnapshotDiagnostics: diagnostics,
+        message: collection.flushFailed
+          ? "Hosted Codex continuity snapshot preparation failed."
+          : "Hosted Codex continuity snapshot is missing required rollout state.",
+      },
+    );
+  }
+}
+
+function createHostedCodexContinuityManifest(entries: HostedCodexContinuityEntry[]): {
+  schema: typeof HOSTED_CODEX_CONTINUITY_MANIFEST_SCHEMA;
+  threads: Array<{
+    codexRolloutRelativePath: string;
+    providerSessionId: string;
+    rolloutBlob: {
+      byteSize: number;
+      sha256: string;
+      storage: "hosted-bundle.v1";
+    };
+  }>;
+} {
+  return {
+    schema: HOSTED_CODEX_CONTINUITY_MANIFEST_SCHEMA,
+    threads: entries
+      .map((entry) => ({
+        codexRolloutRelativePath: entry.codexRolloutRelativePath,
+        providerSessionId: entry.providerSessionId,
+        rolloutBlob: {
+          byteSize: entry.byteSize,
+          sha256: entry.sha256,
+          storage: "hosted-bundle.v1" as const,
+        },
+      }))
+      .sort((left, right) =>
+        left.providerSessionId.localeCompare(right.providerSessionId)
+        || left.codexRolloutRelativePath.localeCompare(right.codexRolloutRelativePath),
+      ),
+  };
+}
+
+function parseHostedCodexContinuityManifest(rawManifest: string): {
+  threads: Array<{
+    codexRolloutRelativePath: string;
+    providerSessionId: string;
+    rolloutBlob: {
+      byteSize: number;
+      sha256: string;
+      storage: "hosted-bundle.v1";
+    };
+  }>;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawManifest);
+  } catch {
+    throw new Error("Hosted Codex continuity manifest is not valid JSON.");
+  }
+
+  if (
+    !isRecord(parsed)
+    || parsed.schema !== HOSTED_CODEX_CONTINUITY_MANIFEST_SCHEMA
+    || !Array.isArray(parsed.threads)
+  ) {
+    throw new Error("Hosted Codex continuity manifest schema mismatch.");
+  }
+
+  return {
+    threads: parsed.threads.map((thread) => {
+      if (!isRecord(thread) || !isRecord(thread.rolloutBlob)) {
+        throw new Error("Hosted Codex continuity manifest thread entry is invalid.");
+      }
+      const providerSessionId = recordStringProperty(thread, "providerSessionId");
+      const codexRolloutRelativePath = recordStringProperty(
+        thread,
+        "codexRolloutRelativePath",
+      );
+      const byteSize = thread.rolloutBlob.byteSize;
+      const sha256 = recordStringProperty(thread.rolloutBlob, "sha256");
+      const storage = recordStringProperty(thread.rolloutBlob, "storage");
+      if (
+        !providerSessionId
+        || !codexRolloutRelativePath
+        || typeof byteSize !== "number"
+        || !Number.isSafeInteger(byteSize)
+        || byteSize < 0
+        || !sha256
+        || storage !== "hosted-bundle.v1"
+      ) {
+        throw new Error("Hosted Codex continuity manifest thread entry is invalid.");
+      }
+      return {
+        codexRolloutRelativePath,
+        providerSessionId,
+        rolloutBlob: {
+          byteSize,
+          sha256,
+          storage,
+        },
+      };
+    }),
+  };
+}
+
+async function readAssistantSessionProviderResumeRequirements(
+  assistantStateRoot: string,
+): Promise<Array<{
+  codexRolloutRelativePath: string | null;
+  providerSessionId: string;
+}>> {
+  const sessionsRoot = path.join(assistantStateRoot, "sessions");
+  const requirements: Array<{
+    codexRolloutRelativePath: string | null;
+    providerSessionId: string;
+  }> = [];
+  let visitedFiles = 0;
+
+  async function visit(directoryPath: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
 
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      const relativePath = relativeDirectory
-        ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
-        : entry.name;
-      const decision = classifyHostedCodexHomeRelativePath(relativePath);
-
-      if (!decision.include) {
-        candidateCount += 1;
-        excludedClassCounts.set(
-          decision.exclusionClass,
-          (excludedClassCounts.get(decision.exclusionClass) ?? 0) + 1,
-        );
-        continue;
+      if (visitedFiles > HOSTED_HOT_STATE_MAX_FILES) {
+        return;
       }
 
+      const absolutePath = path.join(directoryPath, entry.name);
       if (entry.isDirectory()) {
-        await visit(path.join(relativeDirectory, entry.name));
+        await visit(absolutePath);
         continue;
       }
-
       if (!entry.isFile()) {
         continue;
       }
 
-      candidateCount += 1;
-      includedCount += 1;
-      if (hashSecret && includedRelHashes.length < HOSTED_CODEX_HOME_INCLUDED_HASH_LIMIT) {
-        includedRelHashes.push(fingerprintHostedCodexHomeRelativePath({
-          hashSecret,
-          relativePath,
-        }));
+      visitedFiles += 1;
+      const text = await readFile(absolutePath, "utf8");
+      for (const requirement of readAssistantSessionProviderResumeRequirementsFromText(text)) {
+        if (requirement.providerSessionId) {
+          requirements.push({
+            codexRolloutRelativePath: requirement.codexRolloutRelativePath,
+            providerSessionId: requirement.providerSessionId,
+          });
+        }
       }
     }
   }
 
-  await visit("");
+  await visit(sessionsRoot);
+  return requirements;
+}
+
+function normalizeHostedCodexRolloutRelativePathForProvider(input: {
+  providerSessionId: string;
+  value: string | null;
+}):
+  | {
+      reason: null;
+      relativePath: string;
+    }
+  | {
+      reason: "archived" | "invalid";
+      relativePath?: never;
+} {
+  const rawValue = input.value?.trim() ?? "";
+  if (rawValue.length === 0 || rawValue.startsWith("/") || rawValue.includes("\\")) {
+    return { reason: "invalid" };
+  }
+  const normalized = normalizeWorkspaceSnapshotRelativePath(rawValue);
+  if (
+    normalized === "archived_sessions"
+    || normalized.startsWith(`archived_sessions${path.posix.sep}`)
+  ) {
+    return { reason: "archived" };
+  }
+  if (!isHostedCodexActiveRolloutSnapshotRelativePath(normalized)) {
+    return { reason: "invalid" };
+  }
+
+  const segments = normalized.split(path.posix.sep);
+  if (segments.some((segment) =>
+    segment.length === 0 || segment === "." || segment === "..",
+  )) {
+    return { reason: "invalid" };
+  }
+
+  const match = HOSTED_CODEX_ROLLOUT_RELATIVE_PATH_PATTERN.exec(normalized);
+  if (
+    !match ||
+    match[1] !== match[4] ||
+    match[2] !== match[5] ||
+    match[3] !== match[6] ||
+    match[7] !== input.providerSessionId
+  ) {
+    return { reason: "invalid" };
+  }
 
   return {
-    codexHomeIncludedRelHashes: includedRelHashes,
-    codexHomeSnapshotCandidateCount: candidateCount,
-    codexHomeSnapshotExcludedClassSummary:
-      summarizeHostedCodexHomeSnapshotExclusionClasses(excludedClassCounts),
-    codexHomeSnapshotIncludedCount: includedCount,
+    reason: null,
+    relativePath: normalized,
   };
 }
 
-function summarizeHostedCodexHomeSnapshotExclusionClasses(
-  counts: ReadonlyMap<HostedCodexHomeSnapshotExclusionClass, number>,
-): string[] {
-  return [...counts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .slice(0, HOSTED_CODEX_HOME_EXCLUDED_SUMMARY_LIMIT)
-    .map(([exclusionClass, count]) => `${exclusionClass}:${count}`);
+async function sha256FileHex(absolutePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(absolutePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
 }
 
-function fingerprintHostedCodexHomeRelativePath(input: {
+function fingerprintHostedCodexContinuityRelativePath(input: {
   hashSecret: string;
   relativePath: string;
 }): string {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.relativePath);
   const hash = createHmac("sha256", input.hashSecret)
-    .update(`codex_home_rel:${normalizedRelativePath}`, "utf8")
+    .update(`codex_continuity_rel:${normalizedRelativePath}`, "utf8")
     .digest("hex");
   return `h1_${hash.slice(0, 24)}`;
 }

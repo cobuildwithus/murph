@@ -61,6 +61,9 @@ import {
 import {
   readHostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
+import {
+  redactHostedRuntimeDiagnosticText,
+} from "./hosted-runtime-redaction.ts";
 type HostedWorkspaceRuntimeBridgeImportItem =
   HostedWorkspaceRuntimeJobOptions["importItem"];
 type HostedWorkspaceRuntimeBridgeImportItemInput =
@@ -238,9 +241,24 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const mode = resolveHostedWorkspaceCheckpointSnapshotMode(input.request.reason);
-  return mode === "hot"
-    ? await createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(input)
-    : await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
+  if (mode === "hot") {
+    return await createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(input);
+  }
+
+  try {
+    return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
+  } catch (error) {
+    if (
+      input.request.reason === "idle_shutdown"
+      && error instanceof HostedWorkspaceSnapshotContinuityIncompleteError
+    ) {
+      return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
+        ...input,
+        error,
+      });
+    }
+    throw error;
+  }
 }
 
 async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(input: {
@@ -335,27 +353,38 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     },
     request: input.request,
     snapshotWorkspace: async () => {
-      const snapshot = await snapshotHostedExecutionContext({
-        artifactSink: async (artifact) => {
-          externalArtifactPutCount += 1;
-          externalArtifactPutBytes += artifact.bytes.byteLength;
-          await input.platform.artifactStore.put({
-            bytes: artifact.bytes,
-            sha256: artifact.ref.sha256,
-          });
-        },
-        codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
-        operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-        vaultRoot: input.vaultRoot,
-        workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
-          workspaceSnapshotSizeDiagnostics = diagnostics;
-          await writeHostedCheckpointSnapshotSizeDiagnosticLog({
-            diagnostics,
-            platform: input.platform,
-            request: input.request,
-          });
-        },
-      });
+      let snapshot: Awaited<ReturnType<typeof snapshotHostedExecutionContext>>;
+      try {
+        snapshot = await snapshotHostedExecutionContext({
+          artifactSink: async (artifact) => {
+            externalArtifactPutCount += 1;
+            externalArtifactPutBytes += artifact.bytes.byteLength;
+            await input.platform.artifactStore.put({
+              bytes: artifact.bytes,
+              sha256: artifact.ref.sha256,
+            });
+          },
+          codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
+          operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+          vaultRoot: input.vaultRoot,
+          workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
+            workspaceSnapshotSizeDiagnostics = diagnostics;
+            await writeHostedCheckpointSnapshotSizeDiagnosticLog({
+              diagnostics,
+              platform: input.platform,
+              request: input.request,
+            });
+          },
+        });
+      } catch (error) {
+        await writeHostedCodexHomeSnapshotFailureLog({
+          error,
+          platform: input.platform,
+          request: input.request,
+          snapshotMode: "full",
+        });
+        throw error;
+      }
       await writeHostedCodexHomeSnapshotDiagnosticLog({
         diagnostics: snapshot.codexHomeSnapshotDiagnostics,
         platform: input.platform,
@@ -496,11 +525,22 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshot(input: {
     },
     request: input.request,
     snapshotWorkspace: async () => {
-      const snapshot = await snapshotHostedAssistantRuntimeHotState({
-        codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
-        operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-        vaultRoot: input.vaultRoot,
-      });
+      let snapshot: Awaited<ReturnType<typeof snapshotHostedAssistantRuntimeHotState>>;
+      try {
+        snapshot = await snapshotHostedAssistantRuntimeHotState({
+          codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
+          operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+          vaultRoot: input.vaultRoot,
+        });
+      } catch (error) {
+        await writeHostedCodexHomeSnapshotFailureLog({
+          error,
+          platform: input.platform,
+          request: input.request,
+          snapshotMode: "hot-state",
+        });
+        throw error;
+      }
       hotStateBundleBytes = snapshot.bundleBytes;
       hotStateFileCount = snapshot.fileCount;
       hotStateInlineBytes = snapshot.inlineBytes;
@@ -559,6 +599,7 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
 }): Promise<{
   baseSnapshotRef: HostedExecutionBundleRef | null;
   browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"] | null;
+  snapshotRef: HostedExecutionSnapshotRef | null;
 }> {
   if (!input.platform.workspacePort?.read) {
     throw new TypeError(
@@ -570,6 +611,36 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
   return {
     baseSnapshotRef: readHostedExecutionSnapshotBaseRef(currentWorkspace.workspace?.snapshotRef ?? null),
     browserVaultReplicaRef: currentWorkspace.workspace?.browserVaultReplicaRef ?? null,
+    snapshotRef: currentWorkspace.workspace?.snapshotRef ?? null,
+  };
+}
+
+async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
+  codexHomeSnapshotHashSecret: string | null;
+  error: HostedWorkspaceSnapshotContinuityIncompleteError;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
+  request: HostedWorkspaceCheckpointRequest;
+  userId: string;
+  vaultRoot: string;
+}): Promise<{
+  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  snapshotRef: HostedExecutionSnapshotRef;
+}> {
+  const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
+  if (!currentRefs.snapshotRef) {
+    throw input.error;
+  }
+
+  await writeHostedCheckpointIdleShutdownSkippedLog({
+    error: input.error,
+    platform: input.platform,
+    request: input.request,
+  });
+
+  return {
+    browserVaultReplicaRef: currentRefs.browserVaultReplicaRef,
+    snapshotRef: currentRefs.snapshotRef,
   };
 }
 
@@ -738,6 +809,17 @@ async function writeHostedCheckpointFullFallbackContinuityFailedLog(params: {
     return;
   }
 
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointReason: params.request.reason,
+    continuityReason: params.error.reason,
+    errorMessage: redactHostedRuntimeDiagnosticText(params.error.message),
+    errorName: params.error.name,
+  };
+  appendHostedCodexHomeSnapshotDiagnostics(
+    redactedJson,
+    params.error.codexHomeSnapshotDiagnostics,
+  );
+
   try {
     await params.platform.logPort.write({
       entries: [
@@ -749,17 +831,113 @@ async function writeHostedCheckpointFullFallbackContinuityFailedLog(params: {
           leaseGeneration: params.request.leaseGeneration,
           level: "error",
           phase: "checkpoint",
-          redactedJson: {
-            checkpointReason: params.request.reason,
-            continuityReason: params.error.reason,
-            errorName: params.error.name,
-          },
+          redactedJson,
           workspaceVersion: params.request.expectedWorkspaceVersion,
         },
       ],
     });
   } catch (error) {
     console.warn("Hosted checkpoint full fallback continuity failure log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+async function writeHostedCheckpointIdleShutdownSkippedLog(params: {
+  error: HostedWorkspaceSnapshotContinuityIncompleteError;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+}): Promise<void> {
+  console.warn("Hosted idle-shutdown checkpoint snapshot skipped.", {
+    continuityReason: params.error.reason,
+    errorName: params.error.name,
+  });
+  if (!params.platform.logPort) {
+    return;
+  }
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointReason: params.request.reason,
+    continuityReason: params.error.reason,
+    errorMessage: redactHostedRuntimeDiagnosticText(params.error.message),
+    errorName: params.error.name,
+    skipReason: "codex_continuity_incomplete",
+  };
+  appendHostedCodexHomeSnapshotDiagnostics(
+    redactedJson,
+    params.error.codexHomeSnapshotDiagnostics,
+  );
+
+  try {
+    await params.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: params.request.attemptId,
+          component: "workspace",
+          eventCode: "checkpoint.idle_shutdown_snapshot_skipped",
+          leaseGeneration: params.request.leaseGeneration,
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: params.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted idle-shutdown checkpoint skip log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+async function writeHostedCodexHomeSnapshotFailureLog(input: {
+  error: unknown;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+  snapshotMode: "full" | "hot-state";
+}): Promise<void> {
+  if (!(input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError)) {
+    return;
+  }
+  const diagnostics = input.error.codexHomeSnapshotDiagnostics;
+  const errorMessage = redactHostedRuntimeDiagnosticText(readHostedSnapshotErrorMessage(input.error));
+  const errorName = input.error.name;
+
+  console.warn("Hosted Codex home snapshot failed.", {
+    errorName,
+    snapshotMode: input.snapshotMode,
+  });
+  if (!input.platform.logPort) {
+    return;
+  }
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointReason: input.request.reason,
+    errorMessage,
+    errorName,
+    snapshotMode: input.snapshotMode,
+  };
+  appendHostedCodexHomeSnapshotDiagnostics(redactedJson, diagnostics);
+
+  try {
+    await input.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: input.request.attemptId,
+          component: "workspace",
+          eventCode: "workspace.codex_home_snapshot_failed",
+          leaseGeneration: input.request.leaseGeneration,
+          level: "error",
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: input.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted Codex home snapshot failure log write failed.", {
       errorName: error instanceof Error ? error.name : typeof error,
     });
   }
@@ -917,6 +1095,32 @@ function appendHostedWorkspaceSnapshotSizeDiagnostics(
     diagnostics.workspaceSnapshotMaxFileClass;
 }
 
+function appendHostedCodexHomeSnapshotDiagnostics(
+  redactedJson: HostedRuntimeRedactedJson,
+  diagnostics: HostedCodexHomeSnapshotDiagnostics | null,
+): void {
+  if (!diagnostics) {
+    return;
+  }
+
+  redactedJson.codexResumeArchivedUnsupportedCount =
+    diagnostics.codexResumeArchivedUnsupportedCount;
+  redactedJson.codexResumeFlushFailed =
+    diagnostics.codexResumeFlushFailed;
+  redactedJson.codexResumeInvalidPathCount =
+    diagnostics.codexResumeInvalidPathCount;
+  redactedJson.codexResumeMissingRolloutCount =
+    diagnostics.codexResumeMissingRolloutCount;
+  redactedJson.codexResumeRolloutBytes =
+    diagnostics.codexResumeRolloutBytes;
+  redactedJson.codexResumeRolloutFileBytes =
+    diagnostics.codexResumeRolloutFileBytes;
+  redactedJson.codexResumeRolloutRelHashes =
+    diagnostics.codexResumeRolloutRelHashes;
+  redactedJson.codexResumeThreadCount =
+    diagnostics.codexResumeThreadCount;
+}
+
 async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
   diagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -926,15 +1130,8 @@ async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
     return;
   }
 
-  const redactedJson: HostedRuntimeRedactedJson = {
-    codexHomeIncludedRelHashes: input.diagnostics.codexHomeIncludedRelHashes,
-    codexHomeSnapshotCandidateCount:
-      input.diagnostics.codexHomeSnapshotCandidateCount,
-    codexHomeSnapshotExcludedClassSummary:
-      input.diagnostics.codexHomeSnapshotExcludedClassSummary,
-    codexHomeSnapshotIncludedCount:
-      input.diagnostics.codexHomeSnapshotIncludedCount,
-  };
+  const redactedJson: HostedRuntimeRedactedJson = {};
+  appendHostedCodexHomeSnapshotDiagnostics(redactedJson, input.diagnostics);
 
   try {
     await input.platform.logPort.write({
@@ -956,6 +1153,20 @@ async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
     console.warn("Hosted Codex home snapshot diagnostic log write failed.", {
       errorName: error instanceof Error ? error.name : typeof error,
     });
+  }
+}
+
+function readHostedSnapshotErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
   }
 }
 
