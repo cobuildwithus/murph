@@ -1730,6 +1730,76 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("does not retry a committed idle-shutdown checkpoint when cleanup alarm deletion fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-cleanup-delete-fail"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const idleInvoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      idleShutdownCheckpointed: true,
+      status: "idle",
+    }));
+    const cleanupError = new Error("alarm delete unavailable after checkpoint");
+    const { runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke: idleInvoke,
+      onDeleteAlarm: () => {
+        throw cleanupError;
+      },
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({
+      dueWake: true,
+      idleCheckpointWorkspaceVersion: "4",
+      reason: "idle_shutdown_checkpoint",
+    })).resolves.toMatchObject({
+      idleShutdownCheckpointed: true,
+      status: "idle",
+    });
+
+    expect(idleInvoke).toHaveBeenCalledOnce();
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                last_error_code,
+                next_wake_at,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      last_error_code: null,
+      next_wake_at: null,
+      retry_failure_count: 0,
+    }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: cleanupError,
+        level: "warn",
+        message: "Hosted idle-shutdown checkpoint committed but cleanup failed.",
+      }),
+    );
+  });
+
   it("does not schedule a normal drain when post-checkpoint container destroy fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2296,6 +2366,7 @@ function createRunnerCryptoContextHarness(
 	    destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
 	    invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
 	    maxEventAttempts?: number;
+	    onDeleteAlarm?(input: { alarmCount: number }): Promise<void> | void;
 	    onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
 	    usageGateResponse?: Record<string, unknown>;
 	    usageGateStatus?: number;
@@ -2309,6 +2380,7 @@ function createRunnerCryptoContextHarness(
       return values.delete(key);
     },
     async deleteAlarm() {
+      await options.onDeleteAlarm?.({ alarmCount: alarms.length + 1 });
       alarms.push("deleted");
     },
     async get<T>(key: string) {
