@@ -28,8 +28,8 @@ jobs:
       npm_tag: ${{ steps.tag_metadata.outputs.npm_tag }}
       is_prerelease: ${{ steps.tag_metadata.outputs.is_prerelease }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
 
@@ -80,13 +80,13 @@ jobs:
     needs: tag-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           registry-url: "https://registry.npmjs.org"
@@ -110,7 +110,7 @@ jobs:
         run: node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json
 
       - name: Upload npm package artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: npm-tarballs
           path: |
@@ -125,9 +125,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: npm-tarballs
           path: dist/npm
@@ -145,7 +145,7 @@ jobs:
           echo "path=${notes_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ needs.tag-check.outputs.version }}
           tag_name: ${{ github.ref_name }}
@@ -162,10 +162,10 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           registry-url: "https://registry.npmjs.org"
@@ -174,7 +174,7 @@ jobs:
       - name: Update npm
         run: npm install -g npm@latest
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: npm-tarballs
           path: dist/npm

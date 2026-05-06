@@ -6,6 +6,30 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const releaseWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'release.yml')
 
+function findMutableActionRefs(workflow: string): Array<{ line: number; ref: string; uses: string }> {
+  const findings: Array<{ line: number; ref: string; uses: string }> = []
+  const lines = workflow.split('\n')
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const match = /^\s*-?\s*uses:\s+([^@\s]+)@([^\s#]+)/u.exec(line)
+    if (!match) {
+      continue
+    }
+
+    const ref = match[2] ?? ''
+    if (!/^[a-f0-9]{40}$/u.test(ref)) {
+      findings.push({
+        line: index + 1,
+        ref,
+        uses: match[1] ?? '',
+      })
+    }
+  }
+
+  return findings
+}
+
 describe('release workflow guards', () => {
   it('validates the git tag against the manifest-defined publish set', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
@@ -71,5 +95,21 @@ describe('release workflow guards', () => {
     expect(publishHelper).toContain('Skipping ${entry.name}@${entry.version}; version already published.')
     expect(publishHelper).toContain('npm trusted publishing is configured per package on npm')
     expect(publishHelper).toContain('node scripts/configure-trusted-publishing.mjs')
+  })
+
+  it('pins every action ref used by the npm release path', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8')
+
+    expect(findMutableActionRefs(workflow)).toEqual([])
+    for (const expectedLine of [
+      'uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6',
+      'uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6',
+      'uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5',
+      'uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6',
+      'uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7',
+      'uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2',
+    ]) {
+      expect(workflow).toContain(expectedLine)
+    }
   })
 })
