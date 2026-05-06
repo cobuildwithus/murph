@@ -149,3 +149,29 @@ test("HomePage shows a usage-limit upgrade banner when assistant usage is exhaus
   assert.match(markup, /Upgrade to Edge/);
   assert.match(markup, /type="button"/);
 });
+
+test("HomePage shows Start Pulse directly when trial credits are exhausted", async () => {
+  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 2_500_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-05-08T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-05-08T00:00:00.000Z"),
+    spentUsdMicros: 2_500_000n,
+    userNotice: {
+      code: "trial_usage_limit_reached",
+      message: "Your trial credits are used up.",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Trial credits are used up/);
+  assert.match(markup, /Start Pulse plan/);
+  assert.doesNotMatch(markup, /href="\/settings"/);
+});

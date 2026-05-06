@@ -196,6 +196,26 @@ export function canSwitchHostedBillingPlanToPulse(input: {
     input.stripeSubscriptionId.length > 0;
 }
 
+export function canStartHostedPulseTrialPaidPlan(input: {
+  billingStatus?: unknown;
+  currentBillingPhase?: unknown;
+  currentBillingPlanCode?: unknown;
+  currentCheckoutOffer?: unknown;
+  stripeCustomerId?: unknown;
+  stripeSubscriptionId?: unknown;
+  suspendedAt?: unknown;
+}): boolean {
+  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
+    parseHostedBillingPhase(input.currentBillingPhase) === "trial" &&
+    parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
+    input.billingStatus === "active" &&
+    !(input.suspendedAt instanceof Date) &&
+    typeof input.stripeCustomerId === "string" &&
+    input.stripeCustomerId.length > 0 &&
+    typeof input.stripeSubscriptionId === "string" &&
+    input.stripeSubscriptionId.length > 0;
+}
+
 export function requireHostedPulseTrialPolicy(
   policyVersion: string | null | undefined,
 ): HostedPulseTrialPolicy | null {

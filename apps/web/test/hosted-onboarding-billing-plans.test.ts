@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatHostedLandingPricingLongSummary,
   formatHostedLandingPricingShortSummary,
+  canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
   getHostedBillingPlanDefinition,
@@ -114,6 +115,41 @@ describe("hosted billing launch plan Stripe configuration", () => {
       billingStatus: "past_due",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(false);
+  });
+
+  it("keeps Start Pulse eligibility tied to active Pulse Trial and Stripe refs", () => {
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "active",
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(true);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "active",
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(false);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(false);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "past_due",
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     })).toBe(false);

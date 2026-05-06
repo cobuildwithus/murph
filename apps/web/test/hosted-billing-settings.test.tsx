@@ -95,19 +95,43 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
-  test("shows a simple free trial note below the billing action", async () => {
+  test("shows the Pulse trial plan and start action for Pulse trial members", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
+      canStartPaidPulse: true,
       canUpgradeToEdge: false,
       currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_monthly",
+    }));
+
+    assert.match(markup, /Manage subscription/);
+    assert.match(markup, /Pulse trial/);
+    assert.match(markup, /Then \$8 \/ month/);
+    assert.match(markup, /Start Pulse plan/);
+    assert.match(markup, /Start Pulse when trial credits are used up\./);
+    assert.doesNotMatch(markup, /Upgrade to Edge/);
+  });
+
+  test("does not render Pulse trial affordances for a non-Pulse trial-shaped phase", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: false,
+      canUpgradeToEdge: false,
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
     }));
 
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Pulse/);
-    assert.match(markup, /You&#x27;re on a free trial/);
+    assert.doesNotMatch(markup, /Pulse trial/);
+    assert.doesNotMatch(markup, /Start Pulse plan/);
+    assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
   test("renders the free trial note beneath the billing action row", async () => {
@@ -252,6 +276,62 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
+  test("posts the Start Pulse request without a body and refreshes on success", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+    const { StartPaidPulseButton } = await import("@/src/components/settings/hosted-start-paid-pulse-button");
+    const rendered = await renderClientComponent(createElement(StartPaidPulseButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    assert.match(rendered.window.document.body.textContent ?? "", /Start Pulse plan/);
+    assert.match(rendered.window.document.body.textContent ?? "", /Your trial ends now/);
+    assert.match(rendered.window.document.body.textContent ?? "", /\$8 \/ month/);
+
+    const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse plan", rendered.window);
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      url: "/api/settings/billing/start-paid-pulse",
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.equal(rendered.assign.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("redirects to the hosted invoice when Start Pulse needs payment confirmation", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://invoice.stripe.test/in_123",
+      status: "payment_required",
+    });
+    const { StartPaidPulseButton } = await import("@/src/components/settings/hosted-start-paid-pulse-button");
+    const rendered = await renderClientComponent(createElement(StartPaidPulseButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse plan", rendered.window);
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    assert.deepEqual(rendered.assign.mock.calls[0], [
+      "https://invoice.stripe.test/in_123",
+    ]);
+
+    await rendered.cleanup();
+  });
+
   test("redirects to Stripe Billing Portal when the upgrade needs payment confirmation", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       billingPlanCode: "launch_monthly",
@@ -322,6 +402,18 @@ function findButtonByText(
 ): HTMLButtonElement {
   const button = [...document.querySelectorAll("button")]
     .find((candidate) => candidate.textContent?.includes(text));
+  assert.ok(button instanceof window.HTMLButtonElement);
+  return button;
+}
+
+function findLastButtonByText(
+  document: Document,
+  text: string,
+  window: Window & typeof globalThis,
+): HTMLButtonElement {
+  const button = [...document.querySelectorAll("button")]
+    .filter((candidate) => candidate.textContent?.includes(text))
+    .at(-1);
   assert.ok(button instanceof window.HTMLButtonElement);
   return button;
 }

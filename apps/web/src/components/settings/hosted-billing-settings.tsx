@@ -1,5 +1,7 @@
 import {
+  HOSTED_PULSE_TRIAL_OFFER,
   getHostedBillingPlanDefinition,
+  parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -9,9 +11,11 @@ import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 export function HostedBillingSettings(props: {
   authenticated: boolean;
+  canStartPaidPulse?: boolean;
   canSwitchToPulse?: boolean;
   canUpgradeToEdge?: boolean;
   currentBillingPhase?: unknown;
+  currentCheckoutOffer?: unknown;
   currentBillingPlanCode?: unknown;
   currentPeriodEnd?: Date | null;
   scheduledBillingEffectiveAt?: Date | null;
@@ -29,6 +33,7 @@ export function HostedBillingSettings(props: {
   const currentPlanCode = parseHostedBillingPlanCode(props.currentBillingPlanCode);
   const currentPlan = currentPlanCode ? getHostedBillingPlanDefinition(currentPlanCode) : null;
   const currentBillingPhase = parseHostedBillingPhase(props.currentBillingPhase);
+  const currentCheckoutOffer = parseHostedBillingCheckoutOffer(props.currentCheckoutOffer);
   const scheduledPlanCode = parseHostedBillingPlanCode(props.scheduledBillingPlanCode);
   const scheduledPlan = scheduledPlanCode ? getHostedBillingPlanDefinition(scheduledPlanCode) : null;
   const scheduledBillingEffectiveAt =
@@ -39,8 +44,12 @@ export function HostedBillingSettings(props: {
     currentPlanCode === "launch_edge_monthly" &&
     scheduledPlanCode === "launch_monthly" &&
     scheduledBillingEffectiveAt !== null;
+  const isPulseTrial =
+    currentPlanCode === "launch_monthly" &&
+    currentBillingPhase === "trial" &&
+    currentCheckoutOffer === HOSTED_PULSE_TRIAL_OFFER;
   const currentPlanPrice = currentPlan
-    ? `$${Math.round(currentPlan.recurringAmountUsdCents / 100)} / month`
+    ? `${isPulseTrial ? "Then " : ""}$${Math.round(currentPlan.recurringAmountUsdCents / 100)} / month`
     : "Syncing";
   const pendingPulseSwitchDate = hasPendingPulseSwitch
     ? formatHostedBillingDate(scheduledBillingEffectiveAt)
@@ -50,8 +59,8 @@ export function HostedBillingSettings(props: {
     : null;
   const billingActionHelperText = hasPendingPulseSwitch
     ? "Want to keep Edge? Contact support and we'll help."
-    : currentBillingPhase === "trial"
-    ? "You're on a free trial"
+    : isPulseTrial
+    ? "Start Pulse when trial credits are used up."
     : null;
 
   return (
@@ -62,7 +71,7 @@ export function HostedBillingSettings(props: {
         </p>
         <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <p className="font-serif text-3xl font-normal tracking-tight text-foreground">
-            {currentPlan?.displayName ?? "Plan syncing"}
+            {isPulseTrial ? "Pulse trial" : currentPlan?.displayName ?? "Plan syncing"}
           </p>
           <p className="text-sm text-muted-foreground">
             {currentPlanPrice}
@@ -85,6 +94,7 @@ export function HostedBillingSettings(props: {
         currentPeriodEnd={props.currentPeriodEnd?.toISOString() ?? null}
         helperText={billingActionHelperText}
         showSwitchToPulse={props.canSwitchToPulse === true && !hasPendingPulseSwitch}
+        showStartPaidPulse={props.canStartPaidPulse === true && !hasPendingPulseSwitch}
         showUpgrade={props.canUpgradeToEdge === true}
       />
     </div>
