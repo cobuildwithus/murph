@@ -40,7 +40,6 @@ The export includes:
 - Device connection, token audit, sync signal, and agent session metadata with internal identifiers and provider metadata replaced by presence flags.
 - Hosted workspace metadata with object keys and bundle hashes replaced by presence flags.
 - AI usage rows with environment, gateway, session, turn, and Stripe metering internals replaced by presence flags.
-- Hosted runtime diagnostics with diagnostic JSON and outbox intent refs omitted.
 - Per-store row limits and truncation metadata. Each multi-row export query returns at most 250 rows for this MVP.
 
 The export explicitly omits:
@@ -55,6 +54,7 @@ The export explicitly omits:
 - Arbitrary decoded mailbox payload bodies.
 - Hosted workspace snapshot/browser-replica object keys and bundle hashes.
 - API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
+- Hosted runtime log rows, diagnostics, and runtime-log counts.
 
 ## Deletion workflow
 
@@ -80,7 +80,7 @@ The export explicitly omits:
 | `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |
 | `prisma.hosted_workspace` | Live delete | Metadata/counts | Deletes workspace checkpoint refs, browser vault replica refs, wake state, and redacted status. |
-| `prisma.hosted_runtime_log` | Live delete | Metadata/counts | Deletes member-scoped runtime logs and redacted runtime JSON. |
+| `prisma.hosted_runtime_log` | Live delete | Documented only | Deletes member-scoped runtime logs and redacted runtime JSON. Export omits runtime log rows and counts. |
 | `prisma.hosted_user_crypto_envelope` | Live delete | Metadata/counts | Deletes signed domain root envelopes. Export reports counts only. |
 | `prisma.hosted_user_crypto_audit` | Live delete | Metadata/counts | Deletes hosted crypto provisioning audit rows. Export reports counts only. |
 | `prisma.hosted_ai_usage` | Live delete | Metadata/counts | Deletes local AI usage rows. Already-submitted vendor metering may remain externally. |
@@ -141,7 +141,7 @@ The MVP deletes Murph live stores and local references. Provider/vendor erasure 
 - rejection of lowercase, whitespace-mutated, or incomplete confirmation payloads;
 - uniqueness and completeness of the store-coverage matrix for every high-value store listed above;
 - non-empty notes plus valid deletion/export modes for each store.
-- high-value data export contents, bounded/truncated export metadata, omitted mailbox payload bodies, and redaction of lookup keys, token hashes, invite codes, API key environment names, and workspace object refs.
+- high-value data export contents, bounded/truncated export metadata, omitted mailbox payload bodies, omitted runtime logs, and redaction of lookup keys, token hashes, invite codes, API key environment names, and workspace object refs.
 - deletion ordering that keeps Cloudflare cleanup after Prisma commit and skips Cloudflare cleanup when the transaction fails.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.
