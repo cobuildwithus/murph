@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, test, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
   acquireAssistantAutomationRunLock,
@@ -18,6 +19,8 @@ import {
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
+  readAssistantAutomationState,
+  saveAssistantAutomationState,
 } from '../src/assistant/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createDeferred, createTempVaultContext } from './test-helpers.js'
@@ -127,6 +130,55 @@ test('assistant transcript appends wait behind the shared runtime write lock', a
     (await listAssistantTranscriptEntries(vaultRoot, 'session-lock-test'))[0]?.text,
     'hello after lock',
   )
+})
+
+test('assistant automation state writes wait behind the shared runtime write lock', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-automation-state-write-lock-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const held = createDeferred<void>()
+  const release = createDeferred<void>()
+  const events: string[] = []
+  const state: AssistantAutomationState = {
+    autoReply: [
+      {
+        channel: 'telegram',
+        enabledAt: '2026-04-08T00:11:00.000Z',
+        eligibleAfter: {
+          createdAt: null,
+          inputId: 'capture-auto-reply',
+          occurredAt: '2026-04-08T00:11:00.000Z',
+          sourceKind: 'inbox-capture',
+        },
+      },
+    ],
+    updatedAt: '2026-04-08T00:11:00.000Z',
+    version: 1,
+  }
+
+  const writer = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    events.push('lock:start')
+    held.resolve()
+    await release.promise
+    events.push('lock:end')
+  })
+
+  await held.promise
+  let saveCompleted = false
+  const save = saveAssistantAutomationState(vaultRoot, state).then((saved) => {
+    saveCompleted = true
+    events.push(`save:${saved.autoReply.length}`)
+  })
+
+  await Promise.resolve()
+  assert.equal(saveCompleted, false)
+  release.resolve()
+  await Promise.all([writer, save])
+
+  assert.deepEqual(events, ['lock:start', 'lock:end', 'save:1'])
+  assert.deepEqual(await readAssistantAutomationState(vaultRoot), state)
 })
 
 test('assistant runtime write lock surfaces held external metadata as a VaultCliError', async () => {
