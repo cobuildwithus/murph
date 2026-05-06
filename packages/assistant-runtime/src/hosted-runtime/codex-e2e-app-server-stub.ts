@@ -46,6 +46,7 @@ const readline = require("node:readline");
 
 const assistantProviderBaseUrl = ${JSON.stringify(input.assistantProviderBaseUrl)};
 const turnDelayMs = ${JSON.stringify(turnDelayMs)};
+const useUuidThreads = process.env.HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS === "1";
 let threadCounter = 0;
 let turnCounter = 0;
 let activeTurn = null;
@@ -68,6 +69,74 @@ function writeRpcError(id, message) {
 function readCodexHome() {
   const value = process.env.CODEX_HOME;
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function buildUuidThreadId(counter) {
+  return "00000000-0000-4000-8000-" + String(counter).padStart(12, "0");
+}
+
+function buildRolloutRelativePath(threadId) {
+  return path.join(
+    "sessions",
+    "2026",
+    "05",
+    "06",
+    "rollout-2026-05-06T01-02-03-" + threadId + ".jsonl",
+  );
+}
+
+function readRolloutPath(threadId) {
+  const codexHome = readCodexHome();
+  if (!codexHome || !useUuidThreads) {
+    return null;
+  }
+  return path.join(codexHome, buildRolloutRelativePath(threadId));
+}
+
+function appendThreadRolloutEvent(threadId, event) {
+  const rolloutPath = readRolloutPath(threadId);
+  if (!rolloutPath) {
+    return null;
+  }
+
+  fs.mkdirSync(path.dirname(rolloutPath), {
+    mode: 0o700,
+    recursive: true,
+  });
+  fs.appendFileSync(
+    rolloutPath,
+    JSON.stringify({
+      schema: "murph.hosted-e2e-codex-shim-rollout.v1",
+      threadId,
+      ...event,
+    }) + "\\n",
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  fs.chmodSync(rolloutPath, 0o600);
+  return rolloutPath;
+}
+
+function loadThreadHistoryFromRollout(threadId) {
+  const rolloutPath = readRolloutPath(threadId);
+  if (!rolloutPath || !fs.existsSync(rolloutPath)) {
+    return [];
+  }
+
+  return fs.readFileSync(rolloutPath, "utf8")
+    .trim()
+    .split(/\\r?\\n/u)
+    .flatMap((line) => {
+      if (!line.trim()) {
+        return [];
+      }
+      const parsed = JSON.parse(line);
+      return typeof parsed.assistantText === "string" && parsed.assistantText.trim()
+        ? [parsed.assistantText.trim()]
+        : [];
+    });
 }
 
 function writeProviderContinuityEvent(event) {
@@ -109,7 +178,10 @@ function readTextInput(params) {
 
 function readThreadAssistantHistory(threadId) {
   const history = threadAssistantHistory.get(threadId);
-  return Array.isArray(history) ? history : [];
+  if (Array.isArray(history)) {
+    return history;
+  }
+  return loadThreadHistoryFromRollout(threadId);
 }
 
 function appendThreadAssistantMessage(threadId, text) {
@@ -117,10 +189,12 @@ function appendThreadAssistantMessage(threadId, text) {
     return;
   }
 
-  threadAssistantHistory.set(
-    threadId,
-    readThreadAssistantHistory(threadId).concat([text.trim()]).slice(-8),
-  );
+  const nextHistory = readThreadAssistantHistory(threadId).concat([text.trim()]).slice(-8);
+  threadAssistantHistory.set(threadId, nextHistory);
+  appendThreadRolloutEvent(threadId, {
+    assistantText: text.trim(),
+    event: "assistant.message",
+  });
 }
 
 function buildThreadHistoryPrompt(threadId) {
@@ -249,7 +323,20 @@ async function handleRpc(message) {
     const requestedThreadId = typeof params.threadId === "string" && params.threadId.trim()
       ? params.threadId.trim()
       : null;
-    const threadId = requestedThreadId ?? "thread_hosted_local_" + (++threadCounter);
+    const threadId = requestedThreadId
+      ?? (useUuidThreads ? buildUuidThreadId(++threadCounter) : "thread_hosted_local_" + (++threadCounter));
+    if (useUuidThreads && method === "thread/resume") {
+      const rolloutPath = readRolloutPath(threadId);
+      if (!rolloutPath || !fs.existsSync(rolloutPath)) {
+        writeRpcError(id, "no rollout found for thread id " + threadId);
+        return;
+      }
+    }
+    const threadPath = useUuidThreads
+      ? appendThreadRolloutEvent(threadId, {
+        event: method === "thread/resume" ? "thread.resumed" : "thread.started",
+      })
+      : null;
     try {
       writeProviderContinuityEvent({
         event: method === "thread/resume" ? "thread.resumed" : "thread.started",
@@ -264,6 +351,7 @@ async function handleRpc(message) {
       result: {
         thread: {
           id: threadId,
+          ...(threadPath ? { path: threadPath } : {}),
         },
       },
     });

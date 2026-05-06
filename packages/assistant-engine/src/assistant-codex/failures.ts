@@ -18,6 +18,16 @@ export function extractCodexThreadIdFromResult(result: unknown): string | null {
   )
 }
 
+export function extractCodexThreadPathFromResult(result: unknown): string | null {
+  const record = asRecord(result)
+  const thread = asRecord(record?.thread)
+  return (
+    normalizeNullableString(asString(thread?.path)) ??
+    normalizeNullableString(asString(record?.path)) ??
+    null
+  )
+}
+
 export function extractCodexTurnIdFromResult(result: unknown): string | null {
   const record = asRecord(result)
   const turn = asRecord(record?.turn)

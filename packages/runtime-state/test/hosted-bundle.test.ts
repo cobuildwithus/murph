@@ -793,6 +793,30 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "attachments",
       "report.pdf",
     );
+    const activeCodexThreadId = "00000000-0000-4000-8000-000000000001";
+    const activeCodexRolloutRelativePath =
+      `sessions/2026/05/05/rollout-2026-05-05T01-02-03-${activeCodexThreadId}.jsonl`;
+    const activeCodexRolloutJson = "{\"rollout\":\"active\"}\n";
+    const activeAssistantSessionJson = JSON.stringify({
+      resumeState: {
+        codexRolloutRelativePath: activeCodexRolloutRelativePath,
+        providerSessionId: activeCodexThreadId,
+        resumeRouteId: "route-test",
+      },
+      session: "saved",
+    }) + "\n";
+    const activeCodexContinuityManifestJson = JSON.stringify({
+      schema: "murph.hosted-codex-continuity.v1",
+      threads: [{
+        codexRolloutRelativePath: activeCodexRolloutRelativePath,
+        providerSessionId: activeCodexThreadId,
+        rolloutBlob: {
+          byteSize: Buffer.byteLength(activeCodexRolloutJson),
+          sha256: sha256HostedBundleHex(Buffer.from(activeCodexRolloutJson)),
+          storage: "hosted-bundle.v1",
+        },
+      }],
+    }) + "\n";
     await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".git", "objects"), { recursive: true });
@@ -827,6 +851,8 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "keys"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "log"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "archived_sessions", "2026", "05", "04"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "state"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "threads", "thread_1"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "tmp"), { recursive: true });
@@ -901,7 +927,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, "quarantine", "secrets", "session_1.json"), "{\"secret\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "receipts", "turn_1.json"), "{\"receipt\":\"saved\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "runtime-budgets.json"), "{\"remainingMs\":1000}\n");
-    await writeFile(path.join(assistantRuntimeRoot, "sessions", "session_1.json"), "{\"session\":\"saved\"}\n");
+    await writeFile(
+      path.join(assistantRuntimeRoot, "sessions", "session_1.json"),
+      activeAssistantSessionJson,
+    );
     await writeFile(path.join(assistantRuntimeRoot, "state", "secrets", "token.json"), "{\"secret\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "state", ".quarantine", "payload.json"), "{\"repair\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "state", ".locks", "owner.json"), "{\"pid\":1234}\n");
@@ -925,10 +954,38 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "rollout_index.jsonl"), "{\"rollout\":\"rollout_1\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1", "state.json"), "{\"rollout\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "{\"thread\":\"thread_1\"}\n");
+    await writeFile(
+      path.join(
+        operatorHomeRoot,
+        ".codex-hosted",
+        "sessions",
+        "2026",
+        "05",
+        "05",
+        path.basename(activeCodexRolloutRelativePath),
+      ),
+      activeCodexRolloutJson,
+    );
+    await writeFile(
+      path.join(
+        operatorHomeRoot,
+        ".codex-hosted",
+        "archived_sessions",
+        "2026",
+        "05",
+        "04",
+        "rollout-2026-05-04T01-02-03-00000000-0000-4000-8000-000000000002.jsonl",
+      ),
+      "{\"rollout\":\"archived\"}\n",
+    );
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl"), "{\"turn\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl.db-wal"), "history wal\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.history.jsonl.db-shm"), "history shm\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "{\"thread\":\"thread_1\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "state_11.sqlite"), "state db\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "state_11.sqlite-wal"), "state wal\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "state_11.sqlite-shm"), "state shm\n");
+    await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "logs_11.sqlite"), "logs db\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "state", "lookup.json"), "{\"lookup\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", "threads", "thread_1", "state.json"), "{\"thread\":\"kept\"}\n");
     await writeFile(path.join(operatorHomeRoot, ".codex-hosted", ".env"), "SHOULD_NOT_APPEAR=1\n");
@@ -971,16 +1028,17 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     });
 
     expect(snapshot.codexHomeSnapshotDiagnostics).toEqual({
-      codexHomeIncludedRelHashes: expect.arrayContaining([
+      codexResumeArchivedUnsupportedCount: 0,
+      codexResumeFlushFailed: false,
+      codexResumeInvalidPathCount: 0,
+      codexResumeMissingRolloutCount: 0,
+      codexResumeRolloutBytes: Buffer.byteLength(activeCodexRolloutJson),
+      codexResumeRolloutFileBytes: [Buffer.byteLength(activeCodexRolloutJson)],
+      codexResumeRolloutRelHashes: expect.arrayContaining([
         expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
       ]),
-      codexHomeSnapshotCandidateCount: expect.any(Number),
-      codexHomeSnapshotExcludedClassSummary: expect.arrayContaining([
-        expect.stringMatching(/^(environment|root-history|sensitive-basename|unsafe-container):[0-9]+$/u),
-      ]),
-      codexHomeSnapshotIncludedCount: expect.any(Number),
+      codexResumeThreadCount: 1,
     });
-    assert.ok(snapshot.codexHomeSnapshotDiagnostics?.codexHomeSnapshotIncludedCount ?? 0 >= 7);
     assert.ok(JSON.stringify(snapshot.codexHomeSnapshotDiagnostics).includes(".codex-hosted") === false);
 
     assertHostedBundleTextEntries(snapshot.bundle, [
@@ -1002,7 +1060,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "vault",
       },
       {
-        expected: "{\"session\":\"saved\"}\n",
+        expected: activeAssistantSessionJson,
         path: ".runtime/operations/assistant/sessions/session_1.json",
         root: "vault",
       },
@@ -1073,14 +1131,29 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       },
       { expected: "{\"schema\":\"cfg\"}\n", path: ".murph/config.json", root: "operator-home" },
       { expected: null, path: ".murph/hosted/user-env.json", root: "operator-home" },
-      { expected: "model = \"gpt-test\"\n", path: ".codex-hosted/config.toml", root: "operator-home" },
-      { expected: "{\"rollout\":\"rollout_1\"}\n", path: ".codex-hosted/rollout_index.jsonl", root: "operator-home" },
       {
-        expected: "{\"rollout\":\"kept\"}\n",
+        expected: activeCodexContinuityManifestJson,
+        path: ".murph/hosted-codex-continuity.json",
+        root: "operator-home",
+      },
+      { expected: null, path: ".codex-hosted/config.toml", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/rollout_index.jsonl", root: "operator-home" },
+      {
+        expected: null,
         path: ".codex-hosted/rollouts/rollout_1/state.json",
         root: "operator-home",
       },
-      { expected: "{\"thread\":\"thread_1\"}\n", path: ".codex-hosted/session_index.jsonl", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/session_index.jsonl", root: "operator-home" },
+      {
+        expected: activeCodexRolloutJson,
+        path: `.codex-hosted/${activeCodexRolloutRelativePath}`,
+        root: "operator-home",
+      },
+      {
+        expected: null,
+        path: ".codex-hosted/archived_sessions/2026/05/04/rollout-2026-05-04T01-02-03-00000000-0000-4000-8000-000000000002.jsonl",
+        root: "operator-home",
+      },
       {
         expected: null,
         path: ".codex-hosted/sessions/thread_1/history.jsonl",
@@ -1097,13 +1170,13 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "operator-home",
       },
       {
-        expected: "{\"thread\":\"thread_1\"}\n",
+        expected: null,
         path: ".codex-hosted/sessions/thread_1/rollout.json",
         root: "operator-home",
       },
-      { expected: "{\"lookup\":\"kept\"}\n", path: ".codex-hosted/state/lookup.json", root: "operator-home" },
+      { expected: null, path: ".codex-hosted/state/lookup.json", root: "operator-home" },
       {
-        expected: "{\"thread\":\"kept\"}\n",
+        expected: null,
         path: ".codex-hosted/threads/thread_1/state.json",
         root: "operator-home",
       },
@@ -1239,7 +1312,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "sessions", "session_1.json"), "utf8"),
-      "{\"session\":\"saved\"}\n",
+      activeAssistantSessionJson,
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "transcripts", "session_1.jsonl"), "utf8"),
@@ -1310,23 +1383,30 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "{\"schema\":\"cfg\"}\n",
     );
     assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
-      "model = \"gpt-test\"\n",
-    );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "rollout_index.jsonl"), "utf8"),
-      "{\"rollout\":\"rollout_1\"}\n",
+      await readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted-codex-continuity.json"), "utf8"),
+      activeCodexContinuityManifestJson,
     );
     assert.equal(
       await readFile(
+        path.join(restored.operatorHomeRoot, ".codex-hosted", activeCodexRolloutRelativePath),
+        "utf8",
+      ),
+      activeCodexRolloutJson,
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "config.toml"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "rollout_index.jsonl"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(
         path.join(restored.operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1", "state.json"),
         "utf8",
       ),
-      "{\"rollout\":\"kept\"}\n",
     );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "utf8"),
-      "{\"thread\":\"thread_1\"}\n",
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "session_index.jsonl"), "utf8"),
     );
     await assert.rejects(
       readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "history.jsonl"), "utf8"),
@@ -1337,20 +1417,17 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "turn.history.jsonl.db-shm"), "utf8"),
     );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "utf8"),
-      "{\"thread\":\"thread_1\"}\n",
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1", "rollout.json"), "utf8"),
     );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "state", "lookup.json"), "utf8"),
-      "{\"lookup\":\"kept\"}\n",
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "state", "lookup.json"), "utf8"),
     );
-    assert.equal(
-      await readFile(
+    await assert.rejects(
+      readFile(
         path.join(restored.operatorHomeRoot, ".codex-hosted", "threads", "thread_1", "state.json"),
         "utf8",
       ),
-      "{\"thread\":\"kept\"}\n",
     );
     assert.equal(
       (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted"))).mode & 0o777,
@@ -1361,11 +1438,15 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       ASSISTANT_STATE_DIRECTORY_MODE,
     );
     assert.equal(
-      (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "thread_1"))).mode & 0o777,
+      (
+        await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05"))
+      ).mode & 0o777,
       ASSISTANT_STATE_DIRECTORY_MODE,
     );
     assert.equal(
-      (await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted", "config.toml"))).mode & 0o777,
+      (
+        await lstat(path.join(restored.operatorHomeRoot, ".codex-hosted", activeCodexRolloutRelativePath))
+      ).mode & 0o777,
       ASSISTANT_STATE_FILE_MODE,
     );
     assert.deepEqual(
@@ -1634,13 +1715,16 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
   }
 });
 
-test("hosted assistant hot-state snapshots exclude Codex home state", async () => {
+test("hosted assistant hot-state snapshots include only exact Codex rollout continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-"));
 
   try {
     const vaultRoot = path.join(workspaceRoot, "vault");
     const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
     const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000010";
+    const rolloutRelativePath =
+      `sessions/2026/05/05/rollout-2026-05-05T01-02-03-${threadId}.jsonl`;
     await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05"), {
       recursive: true,
@@ -1648,11 +1732,17 @@ test("hosted assistant hot-state snapshots exclude Codex home state", async () =
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "logs"), { recursive: true });
     await writeFile(
       path.join(assistantRoot, "sessions", "session.json"),
-      "{\"providerSessionId\":\"thread-test\"}\n",
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }) + "\n",
       "utf8",
     );
     await writeFile(
-      path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05", "rollout.jsonl"),
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
       "{\"type\":\"provider-owned\"}\n",
       "utf8",
     );
@@ -1669,15 +1759,15 @@ test("hosted assistant hot-state snapshots exclude Codex home state", async () =
 
     assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
       bundle: snapshot.bundle,
-    }), false);
+    }), true);
     assert.equal(
       readHostedBundleTextFile({
         bytes: snapshot.bundle,
         expectedKind: "vault",
-        path: ".codex-hosted/sessions/2026/05/05/rollout.jsonl",
+        path: `.codex-hosted/${rolloutRelativePath}`,
         root: "operator-home",
       }),
-      null,
+      "{\"type\":\"provider-owned\"}\n",
     );
     assert.equal(
       readHostedBundleTextFile({
@@ -1695,7 +1785,7 @@ test("hosted assistant hot-state snapshots exclude Codex home state", async () =
 
     assert.equal(
       await readFile(
-        path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05", "rollout.jsonl"),
+        path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
         "utf8",
       ),
       "{\"type\":\"provider-owned\"}\n",
@@ -1705,7 +1795,7 @@ test("hosted assistant hot-state snapshots exclude Codex home state", async () =
   }
 });
 
-test("hosted assistant hot-state snapshots leave rollout-only Codex continuity to full snapshots", async () => {
+test("hosted assistant hot-state snapshots reject non-Codex-layout rollout continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-rollout-"));
 
   try {
@@ -1732,22 +1822,12 @@ test("hosted assistant hot-state snapshots leave rollout-only Codex continuity t
       "utf8",
     );
 
-    const snapshot = await snapshotHostedAssistantRuntimeHotState({
-      operatorHomeRoot,
-      vaultRoot,
-    });
-
-    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-      bundle: snapshot.bundle,
-    }), false);
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".codex-hosted/rollouts/rollout.jsonl",
-        root: "operator-home",
+    await assert.rejects(
+      snapshotHostedAssistantRuntimeHotState({
+        operatorHomeRoot,
+        vaultRoot,
       }),
-      null,
+      /missing required rollout state/u,
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -1820,6 +1900,118 @@ test("hosted assistant hot-state snapshots exclude Codex home without provider r
   }
 });
 
+test("hosted snapshots ignore non-Codex provider resume handles", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-non-codex-resume-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: "non-codex-provider-session",
+          resumeRouteId: "route-test",
+        },
+        target: {
+          adapter: "other-provider",
+        },
+      }) + "\n",
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedAssistantRuntimeHotState({
+      vaultRoot,
+    });
+
+    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: snapshot.bundle,
+    }), false);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".murph/hosted-codex-continuity.json",
+        root: "operator-home",
+      }),
+      null,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted restore rejects unmanifested Codex home files", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-restore-stray-"));
+
+  try {
+    const sourceOperatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const sourceVaultRoot = path.join(workspaceRoot, "vault");
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    const threadId = "00000000-0000-4000-8000-000000000027";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    const rolloutJson = "{\"rollout\":\"kept\"}\n";
+    await mkdir(path.join(sourceOperatorHomeRoot, ".murph"), { recursive: true });
+    await mkdir(path.join(sourceOperatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), {
+      recursive: true,
+    });
+    await mkdir(sourceVaultRoot, { recursive: true });
+    await writeFile(path.join(sourceVaultRoot, "note.md"), "vault\n", "utf8");
+    await writeFile(
+      path.join(sourceOperatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      rolloutJson,
+      "utf8",
+    );
+    await writeFile(
+      path.join(sourceOperatorHomeRoot, ".codex-hosted", "auth.json"),
+      "{\"token\":\"redacted-fixture\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(sourceOperatorHomeRoot, ".murph", "hosted-codex-continuity.json"),
+      JSON.stringify({
+        schema: "murph.hosted-codex-continuity.v1",
+        threads: [{
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          rolloutBlob: {
+            byteSize: Buffer.byteLength(rolloutJson),
+            sha256: sha256HostedBundleHex(Buffer.from(rolloutJson)),
+            storage: "hosted-bundle.v1",
+          },
+        }],
+      }) + "\n",
+      "utf8",
+    );
+
+    const bundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [
+        {
+          root: sourceVaultRoot,
+          rootKey: "vault",
+        },
+        {
+          root: sourceOperatorHomeRoot,
+          rootKey: "operator-home",
+        },
+      ],
+    });
+
+    await assert.rejects(
+      restoreHostedExecutionContext({
+        bundle,
+        workspaceRoot: restoreRoot,
+      }),
+      /unmanifested Codex home file/u,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted workspace snapshot repair strips legacy Codex resume handles only", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-repair-"));
 
@@ -1870,7 +2062,7 @@ test("hosted workspace snapshot repair strips legacy Codex resume handles only",
   }
 });
 
-test("hosted assistant hot-state snapshots allow resume state to rely on base Codex continuity", async () => {
+test("hosted assistant hot-state snapshots reject resume state without rollout continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-missing-"));
 
   try {
@@ -1883,28 +2075,18 @@ test("hosted assistant hot-state snapshots allow resume state to rely on base Co
       "utf8",
     );
 
-    const snapshot = await snapshotHostedAssistantRuntimeHotState({
-      vaultRoot,
-    });
-
-    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-      bundle: snapshot.bundle,
-    }), false);
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/sessions/session.json",
-        root: "vault",
+    await assert.rejects(
+      snapshotHostedAssistantRuntimeHotState({
+        vaultRoot,
       }),
-      "{\"providerSessionId\":\"thread-test\"}\n",
+      /missing required rollout state/u,
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
-test("hosted assistant hot-state snapshots exclude config-only Codex home continuity", async () => {
+test("hosted assistant hot-state snapshots reject config-only Codex home continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-config-only-"));
 
   try {
@@ -1929,29 +2111,19 @@ test("hosted assistant hot-state snapshots exclude config-only Codex home contin
       "utf8",
     );
 
-    const snapshot = await snapshotHostedAssistantRuntimeHotState({
-      operatorHomeRoot,
-      vaultRoot,
-    });
-
-    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-      bundle: snapshot.bundle,
-    }), false);
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".codex-hosted/config.toml",
-        root: "operator-home",
+    await assert.rejects(
+      snapshotHostedAssistantRuntimeHotState({
+        operatorHomeRoot,
+        vaultRoot,
       }),
-      null,
+      /missing required rollout state/u,
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
 
-test("hosted full snapshots accept config-only Codex home continuity", async () => {
+test("hosted full snapshots reject config-only Codex home continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-full-codex-missing-"));
 
   try {
@@ -1971,22 +2143,100 @@ test("hosted full snapshots accept config-only Codex home continuity", async () 
       "utf8",
     );
 
-    const snapshot = await snapshotHostedExecutionContext({
-      operatorHomeRoot,
-      vaultRoot,
+    await assert.rejects(
+      snapshotHostedExecutionContext({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      HostedWorkspaceSnapshotContinuityIncompleteError,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted snapshots reject invalid and archived live Codex rollout paths", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-invalid-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000024";
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06", "auth"), {
+      recursive: true,
+    });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "archived_sessions", "2026", "05", "06"), {
+      recursive: true,
     });
 
-    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-      bundle: snapshot.bundle,
-    }), true);
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: snapshot.bundle,
-        expectedKind: "vault",
-        path: ".codex-hosted/config.toml",
-        root: "operator-home",
+    const invalidRolloutRelativePath =
+      `sessions/2026/05/06/auth/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", invalidRolloutRelativePath),
+      "{\"rollout\":\"invalid\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: invalidRolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
       }),
-      "model = \"gpt-test\"\n",
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedAssistantRuntimeHotState({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      /missing required rollout state/u,
+    );
+    await assert.rejects(
+      snapshotHostedExecutionContext({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      HostedWorkspaceSnapshotContinuityIncompleteError,
+    );
+
+    const archivedRolloutRelativePath =
+      `archived_sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", archivedRolloutRelativePath),
+      "{\"rollout\":\"archived\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: archivedRolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }),
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedAssistantRuntimeHotState({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      /missing required rollout state/u,
+    );
+    await assert.rejects(
+      snapshotHostedExecutionContext({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      HostedWorkspaceSnapshotContinuityIncompleteError,
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
@@ -2036,17 +2286,32 @@ test("hosted full snapshots require explicit fixture policy to ignore dangling C
   }
 });
 
-test("hosted Codex home diagnostics omit relative-path hashes without a hash secret", async () => {
+test("hosted Codex continuity diagnostics omit relative-path hashes without a hash secret", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-"));
 
   try {
     const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
     const vaultRoot = path.join(workspaceRoot, "vault");
-    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "state"), { recursive: true });
-    await mkdir(vaultRoot, { recursive: true });
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000003";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
     await writeFile(
-      path.join(operatorHomeRoot, ".codex-hosted", "state", "lookup.json"),
-      "{\"lookup\":\"kept\"}\n",
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      "{\"rollout\":\"kept\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }),
       "utf8",
     );
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n", "utf8");
@@ -2057,11 +2322,110 @@ test("hosted Codex home diagnostics omit relative-path hashes without a hash sec
     });
 
     expect(snapshot.codexHomeSnapshotDiagnostics).toEqual({
-      codexHomeIncludedRelHashes: [],
-      codexHomeSnapshotCandidateCount: 1,
-      codexHomeSnapshotExcludedClassSummary: [],
-      codexHomeSnapshotIncludedCount: 1,
+      codexResumeArchivedUnsupportedCount: 0,
+      codexResumeFlushFailed: false,
+      codexResumeInvalidPathCount: 0,
+      codexResumeMissingRolloutCount: 0,
+      codexResumeRolloutBytes: "{\"rollout\":\"kept\"}\n".length,
+      codexResumeRolloutFileBytes: ["{\"rollout\":\"kept\"}\n".length],
+      codexResumeRolloutRelHashes: [],
+      codexResumeThreadCount: 1,
     });
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted Codex continuity prepare hook supplies missing rollout paths", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-prepare-"));
+
+  try {
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000033";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      "{\"rollout\":\"prepared\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }),
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      prepareCodexContinuitySnapshot: async () => [{
+        codexRolloutRelativePath: rolloutRelativePath,
+        providerSessionId: threadId,
+      }],
+      vaultRoot,
+    });
+
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${rolloutRelativePath}`,
+        root: "operator-home",
+      }),
+      "{\"rollout\":\"prepared\"}\n",
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted Codex continuity prepare hook failures fail closed", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-prepare-fail-"));
+
+  try {
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted"), { recursive: true });
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: "00000000-0000-4000-8000-000000000034",
+          resumeRouteId: "route-test",
+        },
+      }),
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedExecutionContext({
+        operatorHomeRoot,
+        prepareCodexContinuitySnapshot: async () => {
+          throw new Error("flush queue did not drain");
+        },
+        vaultRoot,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof HostedWorkspaceSnapshotContinuityIncompleteError);
+        assert.equal(error.reason, "codex_flush_failed");
+        assert.equal(
+          error.codexHomeSnapshotDiagnostics?.codexResumeFlushFailed,
+          true,
+        );
+        assert.match(error.message, /flush queue did not drain/u);
+        return true;
+      },
+    );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }

@@ -710,6 +710,14 @@ export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeR
       record.alreadyRunning,
       "Hosted runner nudge result alreadyRunning",
     ),
+    ...(record.immediateDriveStarted === undefined
+      ? {}
+      : {
+          immediateDriveStarted: requireBoolean(
+            record.immediateDriveStarted,
+            "Hosted runner nudge result immediateDriveStarted",
+          ),
+        }),
     inFlight: requireBoolean(record.inFlight, "Hosted runner nudge result inFlight"),
     ...(record.nextAlarmAt === undefined
       ? {}

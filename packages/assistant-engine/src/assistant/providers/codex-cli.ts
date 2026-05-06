@@ -382,6 +382,7 @@ export async function executeCodexAssistantTurnAttempt(
       stderr: result.stderr,
       stdout: result.stdout,
       rawEvents: result.jsonEvents,
+      codexRolloutRelativePath: result.rolloutRelativePath,
       usage,
     },
   }

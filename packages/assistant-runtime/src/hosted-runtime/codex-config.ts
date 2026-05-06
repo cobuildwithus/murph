@@ -39,6 +39,7 @@ const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 220_000;
+const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "none";
 const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   "CI",
@@ -333,6 +334,7 @@ export function buildHostedCodexConfigToml(input: {
     `model_provider = ${tomlString(input.provider.id)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
+    `log_dir = ${tomlString(DEFAULT_HOSTED_CODEX_LOG_DIR)}`,
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "",

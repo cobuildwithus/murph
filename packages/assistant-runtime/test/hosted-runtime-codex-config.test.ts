@@ -15,6 +15,10 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
+  restoreHostedExecutionContext,
+  snapshotHostedExecutionContext,
+} from "@murphai/runtime-state/node";
+import {
   buildHostedRuntimeForwardedEnv,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
@@ -76,6 +80,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^model_provider = "hosted-openai"$/mu);
   assert.match(config, /model_reasoning_effort = "medium"/u);
   assert.match(config, /^model_auto_compact_token_limit = 220000$/mu);
+  assert.match(config, /^log_dir = "\/tmp\/murph-codex-log"$/mu);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
@@ -363,13 +368,117 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
   }
 });
 
+test("hosted Codex rollout snapshot restores thread-id resume without SQLite", async () => {
+  const workspaceRoot = await createTemporaryDirectory();
+  const vaultRoot = path.join(workspaceRoot, "vault");
+  const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseTexts: ["first restored reply", "second restored reply"],
+  });
+
+  try {
+    await mkdir(vaultRoot, { recursive: true });
+    const runtimeEnv = {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+        `${readServerBaseUrl(server)}/v1`,
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "secret-openai-key",
+      PATH: process.env.PATH ?? "",
+    };
+    const prepared = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv,
+    });
+    const firstResult = await executeCodexAppServerTurn({
+      approvalPolicy: "never",
+      codexHome: prepared.runtimeEnv.CODEX_HOME,
+      env: {
+        CODEX_HOME: prepared.runtimeEnv.CODEX_HOME,
+        HOME: operatorHomeRoot,
+        HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
+        OPENAI_API_KEY: prepared.runtimeEnv.OPENAI_API_KEY,
+        PATH: prepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
+      },
+      prompt: "first prompt before teardown",
+      sandbox: "danger-full-access",
+      workingDirectory: vaultRoot,
+    });
+    assert.equal(firstResult.finalMessage, "first restored reply");
+    assert.ok(firstResult.threadId);
+    assert.ok(firstResult.rolloutRelativePath);
+
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: firstResult.rolloutRelativePath,
+          providerSessionId: firstResult.threadId,
+          resumeRouteId: "route-test",
+        },
+        target: {
+          adapter: "codex-cli",
+        },
+      }),
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+    const restoredWorkspaceRoot = await createTemporaryDirectory();
+    const restored = await restoreHostedExecutionContext({
+      bundle: snapshot.bundle,
+      workspaceRoot: restoredWorkspaceRoot,
+    });
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", "state_1.sqlite"), "utf8"),
+      { code: "ENOENT" },
+    );
+
+    const restoredPrepared = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot: restored.operatorHomeRoot,
+      runtimeEnv,
+    });
+    const secondResult = await executeCodexAppServerTurn({
+      approvalPolicy: "never",
+      codexHome: restoredPrepared.runtimeEnv.CODEX_HOME,
+      env: {
+        CODEX_HOME: restoredPrepared.runtimeEnv.CODEX_HOME,
+        HOME: restored.operatorHomeRoot,
+        HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_UUID_THREADS: "1",
+        OPENAI_API_KEY: restoredPrepared.runtimeEnv.OPENAI_API_KEY,
+        PATH: restoredPrepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
+      },
+      prompt: "second prompt after restore",
+      resumeSessionId: firstResult.threadId,
+      sandbox: "danger-full-access",
+      workingDirectory: restored.vaultRoot,
+    });
+
+    assert.equal(secondResult.finalMessage, "second restored reply");
+    assert.equal(secondResult.threadId, firstResult.threadId);
+    assert.match(readResponsesRequestInput(requests[1]!), /first restored reply/u);
+    assert.match(readResponsesRequestInput(requests[1]!), /second prompt after restore/u);
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
 testHostedCodexAuthE2e(
   "hosted Codex runtime authenticates but the legacy built-in OpenAI config fails",
   async () => {
     const operatorHomeRoot = await createTemporaryDirectory();
     const requests: string[] = [];
     const authorizationHeaders: string[] = [];
-    const expectedAuthorization = "Bearer hosted-auth-regression-key";
+    const expectedAuthorization = ["Bearer", "hosted-auth-regression-key"].join(" ");
     const server = await startResponsesStubServer({
       authorizationHeaders,
       requiredAuthorization: expectedAuthorization,
@@ -757,6 +866,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'model_provider = "openai"',
       'model_reasoning_effort = "medium"',
       "model_auto_compact_token_limit = 220000",
+      'log_dir = "/tmp/murph-codex-log"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
       "",
@@ -849,7 +959,7 @@ async function startResponsesStubServer(input: {
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
           error: {
-            message: "Missing Bearer auth for hosted Codex regression.",
+            message: "Missing bearer auth for hosted Codex regression.",
             type: "invalid_request_error",
           },
         }));

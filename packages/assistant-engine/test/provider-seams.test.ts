@@ -32,11 +32,13 @@ import {
 } from '../src/assistant/provider-binding.ts'
 import {
   normalizeAssistantSessionResumeState,
+  readAssistantCodexRolloutRelativePath,
   readAssistantProviderResumeRouteId,
   readAssistantProviderSessionId,
   readAssistantSessionResumeState,
   serializeAssistantSessionForPersistence,
   writeAssistantProviderResumeRouteId,
+  writeAssistantSessionCodexRolloutRelativePath,
   writeAssistantSessionProviderSessionId,
   writeAssistantSessionThreadInstructionsFingerprint,
 } from '../src/assistant/provider-state.ts'
@@ -49,6 +51,9 @@ const threadInstructionsFingerprint =
   `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`
 const nextThreadInstructionsFingerprint =
   `thread-instructions-v1:${'c'.repeat(64)}:${'d'.repeat(64)}`
+const codexProviderSessionId = '00000000-0000-4000-8000-000000000123'
+const codexRolloutRelativePath =
+  `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${codexProviderSessionId}.jsonl`
 
 afterEach(async () => {
   await Promise.all(
@@ -264,16 +269,19 @@ describe('assistant provider seam helpers', () => {
     const persisted = serializeAssistantSessionForPersistence({
       ...createAssistantSession(),
       resumeState: {
-        providerSessionId: 'provider_session_resume',
+        codexRolloutRelativePath: ` ${codexRolloutRelativePath} `,
+        providerSessionId: codexProviderSessionId,
         resumeRouteId: 'route-resume',
         threadInstructionsFingerprint,
       },
     })
     expect(persisted.resumeState).toEqual({
-      providerSessionId: 'provider_session_resume',
+      codexRolloutRelativePath,
+      providerSessionId: codexProviderSessionId,
       resumeRouteId: 'route-resume',
       threadInstructionsFingerprint,
     })
+    expect(readAssistantCodexRolloutRelativePath(persisted)).toBe(codexRolloutRelativePath)
 
     expect(normalizeAssistantSessionResumeState(null)).toBeNull()
     expect(readAssistantSessionResumeState(null)).toBeNull()
@@ -289,24 +297,41 @@ describe('assistant provider seam helpers', () => {
     expect(
       writeAssistantSessionThreadInstructionsFingerprint(
         {
-          providerSessionId: 'provider_session_resume',
+          codexRolloutRelativePath,
+          providerSessionId: codexProviderSessionId,
           resumeRouteId: 'route-resume',
         },
         ` ${nextThreadInstructionsFingerprint} `,
       ),
     ).toEqual({
-      providerSessionId: 'provider_session_resume',
+      codexRolloutRelativePath,
+      providerSessionId: codexProviderSessionId,
       resumeRouteId: 'route-resume',
       threadInstructionsFingerprint: nextThreadInstructionsFingerprint,
     })
     expect(
+      writeAssistantSessionCodexRolloutRelativePath(
+        {
+          providerSessionId: codexProviderSessionId,
+          resumeRouteId: 'route-resume',
+        },
+        codexRolloutRelativePath,
+      ),
+    ).toEqual({
+      codexRolloutRelativePath,
+      providerSessionId: codexProviderSessionId,
+      resumeRouteId: 'route-resume',
+    })
+    expect(
       resolveAssistantResumeStateFromProviderTurn({
-        providerSessionId: 'provider_session_resume',
+        codexRolloutRelativePath,
+        providerSessionId: codexProviderSessionId,
         routeId: 'route-resume',
         threadInstructionsFingerprint,
       }),
     ).toEqual({
-      providerSessionId: 'provider_session_resume',
+      codexRolloutRelativePath,
+      providerSessionId: codexProviderSessionId,
       resumeRouteId: 'route-resume',
       threadInstructionsFingerprint,
     })

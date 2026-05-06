@@ -284,9 +284,18 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
       recursive: true,
     });
+    const threadId = "00000000-0000-4000-8000-000000000021";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
     await writeFile(
       path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
-      "{\"providerSessionId\":\"thread-ready\"}\n",
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-ready",
+        },
+      }) + "\n",
       "utf8",
     );
     const operatorHomeRoot = path.join(
@@ -297,8 +306,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions"), {
       recursive: true,
     });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), {
+      recursive: true,
+    });
     await writeFile(
       path.join(operatorHomeRoot, ".codex-hosted", "sessions", "thread.jsonl"),
+      "{\"thread\":\"ready\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
       "{\"thread\":\"ready\"}\n",
       "utf8",
     );
@@ -366,6 +383,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       sha256: snapshotRef.hot?.hash,
     }));
     const hotBundle = putArtifacts[0]?.bytes ?? null;
+    expect(readHostedBundleTextFile({
+      bytes: hotBundle,
+      expectedKind: "vault",
+      path: `.codex-hosted/${rolloutRelativePath}`,
+      root: "operator-home",
+    })).toBe("{\"thread\":\"ready\"}\n");
     expect(readHostedBundleTextFile({
       bytes: hotBundle,
       expectedKind: "vault",
@@ -841,7 +864,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit")))
-      .rejects.toThrow("missing required provider continuity state");
+      .rejects.toThrow("missing required rollout state");
 
     expect(writeLog).not.toHaveBeenCalledWith(expect.objectContaining({
       entries: [
@@ -850,7 +873,130 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         }),
       ],
     }));
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          attemptId: "attempt_1",
+          component: "workspace",
+          eventCode: "workspace.codex_home_snapshot_failed",
+          leaseGeneration: "4",
+          level: "error",
+          phase: "checkpoint",
+          redactedJson: {
+            checkpointReason: "canonical_runtime_commit",
+            codexResumeArchivedUnsupportedCount: 0,
+            codexResumeFlushFailed: false,
+            codexResumeInvalidPathCount: 1,
+            codexResumeMissingRolloutCount: 0,
+            codexResumeRolloutBytes: 0,
+            codexResumeRolloutFileBytes: [],
+            codexResumeRolloutRelHashes: [],
+            codexResumeThreadCount: 1,
+            errorMessage: "Hosted Codex continuity snapshot is missing required rollout state.",
+            errorName: "HostedWorkspaceSnapshotContinuityIncompleteError",
+            snapshotMode: "full",
+          },
+          workspaceVersion: "8",
+        }),
+      ],
+    });
     expect(putArtifact).not.toHaveBeenCalled();
+  });
+
+  it("skips idle shutdown full snapshots that have dangling Codex resume state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: "00000000-0000-4000-8000-000000000031",
+          resumeRouteId: "route-ready",
+        },
+      }),
+      "utf8",
+    );
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const baseSnapshotRef = createBundleRef("d");
+    const browserVaultReplicaRef = createBrowserVaultReplicaRef(baseSnapshotRef.hash);
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            browserVaultReplicaRef,
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: baseSnapshotRef,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "8",
+          },
+        }),
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "8",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "idle_shutdown_checkpoint",
+        userId: "member_1",
+        workspaceVersion: "8",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .resolves.toEqual({
+        browserVaultReplicaRef,
+        snapshotRef: baseSnapshotRef,
+      });
+
+    expect(putArtifact).not.toHaveBeenCalled();
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          attemptId: "attempt_1",
+          component: "workspace",
+          eventCode: "checkpoint.idle_shutdown_snapshot_skipped",
+          leaseGeneration: "4",
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson: {
+            checkpointReason: "idle_shutdown",
+            codexResumeArchivedUnsupportedCount: 0,
+            codexResumeFlushFailed: false,
+            codexResumeInvalidPathCount: 1,
+            codexResumeMissingRolloutCount: 0,
+            codexResumeRolloutBytes: 0,
+            codexResumeRolloutFileBytes: [],
+            codexResumeRolloutRelHashes: [],
+            codexResumeThreadCount: 1,
+            continuityReason: "codex_home_missing",
+            errorMessage: "Hosted Codex continuity snapshot is missing required rollout state.",
+            errorName: "HostedWorkspaceSnapshotContinuityIncompleteError",
+            skipReason: "codex_continuity_incomplete",
+          },
+          workspaceVersion: "8",
+        }),
+      ],
+    });
   });
 
   it("keeps outbox sending checkpoints on the hot path without provider continuity", async () => {
@@ -1150,12 +1296,27 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     const operatorHomeRoot = `${vaultRoot}-operator-home`;
-    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "rollouts"), { recursive: true });
+    const threadId = "00000000-0000-4000-8000-000000000004";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), { recursive: true });
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
     await writeFile(
-      path.join(operatorHomeRoot, ".codex-hosted", "rollouts", "rollout_1.json"),
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
       "{\"rollout\":\"kept\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }),
       "utf8",
     );
     await writeFile(
@@ -1209,21 +1370,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           level: "info",
           phase: "checkpoint",
           redactedJson: {
-            codexHomeIncludedRelHashes: [
+            codexResumeArchivedUnsupportedCount: 0,
+            codexResumeFlushFailed: false,
+            codexResumeInvalidPathCount: 0,
+            codexResumeMissingRolloutCount: 0,
+            codexResumeRolloutBytes: "{\"rollout\":\"kept\"}\n".length,
+            codexResumeRolloutFileBytes: ["{\"rollout\":\"kept\"}\n".length],
+            codexResumeRolloutRelHashes: [
               expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
             ],
-            codexHomeSnapshotCandidateCount: 3,
-            codexHomeSnapshotExcludedClassSummary: expect.arrayContaining([
-              "environment:1",
-              "unsafe-container:1",
-            ]),
-            codexHomeSnapshotIncludedCount: 1,
+            codexResumeThreadCount: 1,
           },
           workspaceVersion: "7",
         }),
       ],
     });
-    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("rollout_1");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain(threadId);
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("SHOULD_NOT_APPEAR");
   });
 
@@ -1328,7 +1490,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         workspaceSnapshotExternalArtifactBytes: rawArtifactBytes,
         workspaceSnapshotExternalArtifactCount: 1,
         workspaceSnapshotFingerprintStatus: "enabled",
-        workspaceSnapshotIncludedFileCount: 4,
+        workspaceSnapshotIncludedFileCount: 3,
         workspaceSnapshotLargestFiles: expect.arrayContaining([
           expect.stringMatching(
             /^class=raw,root=vault,bytes=307200,external=1,ext=\.bin,depth=3,relHash=h1_[a-f0-9]{24}$/u,

@@ -156,6 +156,7 @@ export type AssistantProviderRequestOutcome =
   | 'succeeded'
 
 export interface AssistantProviderTurnExecutionResult {
+  codexRolloutRelativePath?: string | null
   provider: AssistantChatProvider
   providerContinuation?: AssistantProviderContinuation
   providerSessionId: string | null

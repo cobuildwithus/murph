@@ -12,6 +12,10 @@ import {
   ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
 
+const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
+const HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH =
+  ".murph/hosted-codex-continuity.json";
+
 export interface LegacyHostedWorkspaceSnapshotProviderContinuityRepair {
   bundle: Uint8Array | ArrayBuffer;
   removedMalformedSessionCount: number;
@@ -34,11 +38,22 @@ export function repairLegacyHostedWorkspaceSnapshotProviderContinuity(input: {
   let removedMalformedSessionCount = 0;
   let scrubbedSessionCount = 0;
   const files = archive.files.flatMap((file) => {
+    const normalizedPath = normalizeWorkspaceSnapshotRelativePath(file.path);
+    if (
+      file.root === "operator-home" &&
+      (
+        hasWorkspaceSnapshotPathPrefix(normalizedPath, HOSTED_CODEX_HOME_RELATIVE_PATH) ||
+        normalizedPath === HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH
+      )
+    ) {
+      return [];
+    }
+
     if (
       file.root !== "vault"
       || isHostedBundleArtifactEntry(file)
       || !hasWorkspaceSnapshotPathPrefix(
-        normalizeWorkspaceSnapshotRelativePath(file.path),
+        normalizedPath,
         `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/sessions`,
       )
     ) {
