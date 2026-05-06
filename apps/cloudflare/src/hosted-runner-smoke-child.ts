@@ -39,6 +39,8 @@ const execFileAsync = promisify(execFile);
 const FINNISH_DRY_SAUNA_KEY =
   "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
+const CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS = 20_000;
+const CODEX_SHELL_ENV_PROBE_TIMEOUT_MS = 30_000;
 const PDF_SMOKE_EXPECTED_TEXT = "Murph hosted PDF smoke fixture";
 const PDF_SMOKE_RELATIVE_PATH = "raw/smoke/hosted-runner.pdf";
 
@@ -162,7 +164,7 @@ async function runSmokeChecks(input: {
     codexCommandDiscovered: true,
     codexHostedConfigShellEnvironmentPolicyAllowlisted:
       hostedCodexConfig.shellEnvironmentPolicyAllowlisted,
-    codexHostedShellMurphHelpBytes: hostedCodexConfig.murphHelpBytes,
+    codexHostedShellMurphPathBytes: hostedCodexConfig.murphPathBytes,
     codexHostedShellPythonVersion: hostedCodexConfig.pythonVersion,
     codexHostedShellVaultCliLlmsBytes: hostedCodexConfig.vaultCliLlmsBytes,
     codexVersion: codexPreflight.version,
@@ -532,7 +534,7 @@ async function runPythonToolchainSmoke(): Promise<string> {
 async function runHostedCodexConfigShellEnvironmentPolicySmoke(
   workspaceRoot: string,
 ): Promise<{
-  murphHelpBytes: number;
+  murphPathBytes: number;
   pythonVersion: string;
   shellEnvironmentPolicyAllowlisted: boolean;
   vaultCliLlmsBytes: number;
@@ -586,7 +588,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
   });
 
   return {
-    murphHelpBytes: shellProbe.murphHelpBytes,
+    murphPathBytes: shellProbe.murphPathBytes,
     pythonVersion: shellProbe.pythonVersion,
     shellEnvironmentPolicyAllowlisted: true,
     vaultCliLlmsBytes: shellProbe.vaultCliLlmsBytes,
@@ -619,7 +621,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   runtimeEnv: Record<string, string>;
   vaultRoot: string;
 }): Promise<{
-  murphHelpBytes: number;
+  murphPathBytes: number;
   pythonVersion: string;
   vaultCliLlmsBytes: number;
 }> {
@@ -646,7 +648,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   let settled = false;
 
   const completed = new Promise<{
-    murphHelpBytes: number;
+    murphPathBytes: number;
     pythonVersion: string;
     vaultCliLlmsBytes: number;
   }>((resolve, reject) => {
@@ -654,12 +656,12 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       reject(new Error(
         `Timed out waiting for Codex app-server shell env probe. stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
       ));
-    }, 10_000);
+    }, CODEX_SHELL_ENV_PROBE_TIMEOUT_MS);
 
     const finish = (
       error?: Error,
       result?: {
-        murphHelpBytes: number;
+        murphPathBytes: number;
         pythonVersion: string;
         vaultCliLlmsBytes: number;
       },
@@ -752,22 +754,26 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
             "if [ -z \"$murph_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-murph'; exit 127; fi",
             "if [ -z \"$python_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-python'; exit 127; fi",
             "if [ -z \"$python3_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-python3'; exit 127; fi",
-            "vault_cli_manifest=$(\"$vault_cli_path\" --llms --format json) || { status=$?; printf '%s\\n' 'probe_step_failed:vault-cli-llms'; exit \"$status\"; }",
-            "murph_help=$(\"$murph_path\" --help) || { status=$?; printf '%s\\n' 'probe_step_failed:murph-help'; exit \"$status\"; }",
+            "probe_tmp=$(mktemp -d)",
+            "vault_cli_manifest_path=\"$probe_tmp/vault-cli-llms.json\"",
+            "\"$vault_cli_path\" --llms --format json > \"$vault_cli_manifest_path\" || { status=$?; printf '%s\\n' 'probe_step_failed:vault-cli-llms'; exit \"$status\"; }",
+            "vault_cli_manifest_bytes=$(wc -c < \"$vault_cli_manifest_path\" | tr -d '[:space:]')",
+            "murph_path_bytes=${#murph_path}",
+            "rm -rf \"$probe_tmp\"",
             "python_version=$(\"$python3_path\" --version) || { status=$?; printf '%s\\n' 'probe_step_failed:python3-version'; exit \"$status\"; }",
             "\"$python_path\" -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' || { status=$?; printf '%s\\n' 'probe_step_failed:python-major'; exit \"$status\"; }",
             "printf '%s\\n' \"$vault_cli_path\"",
             "printf '%s\\n' \"$murph_path\"",
             "printf '%s\\n' \"$python_path\"",
             "printf '%s\\n' \"$python3_path\"",
-            "printf '%s\\n' \"${#vault_cli_manifest}\"",
-            "printf '%s\\n' \"${#murph_help}\"",
+            "printf '%s\\n' \"$vault_cli_manifest_bytes\"",
+            "printf '%s\\n' \"$murph_path_bytes\"",
             "printf '%s\\n' \"$python_version\"",
             "printf '%s\\n' \"${VAULT:-}\"",
             "printf '%s\\n' \"${OPENAI_API_KEY:-}\"",
           ].join("; "),
         ],
-        timeoutMs: 5_000,
+        timeoutMs: CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS,
       },
     })}\n`);
     return await completed;
@@ -810,7 +816,7 @@ function assertCodexShellEnvironmentProbeResult(input: {
   };
   vaultRoot: string;
 }): {
-  murphHelpBytes: number;
+  murphPathBytes: number;
   pythonVersion: string;
   vaultCliLlmsBytes: number;
 } {
@@ -828,7 +834,7 @@ function assertCodexShellEnvironmentProbeResult(input: {
     pythonPath,
     python3Path,
     vaultCliLlmsBytesText,
-    murphHelpBytesText,
+    murphPathBytesText,
     pythonVersion,
     vaultRoot,
     providerCredential,
@@ -849,7 +855,7 @@ function assertCodexShellEnvironmentProbeResult(input: {
     vaultCliLlmsBytesText,
     "vault-cli --llms --format json",
   );
-  const murphHelpBytes = parsePositiveByteCount(murphHelpBytesText, "murph --help");
+  const murphPathBytes = parsePositiveByteCount(murphPathBytesText, "murph path resolution");
   if (!pythonVersion || !/^Python\s+3\./u.test(pythonVersion)) {
     throw new Error("Codex app-server shell env probe did not execute python3 --version.");
   }
@@ -863,7 +869,7 @@ function assertCodexShellEnvironmentProbeResult(input: {
   }
 
   return {
-    murphHelpBytes,
+    murphPathBytes,
     pythonVersion,
     vaultCliLlmsBytes,
   };

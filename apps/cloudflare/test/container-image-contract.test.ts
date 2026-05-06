@@ -574,7 +574,7 @@ describe("hosted runner container image contract", () => {
     );
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
     expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
-    expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphHelpBytes=");
+    expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphPathBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellPythonVersion=");
     expect(runnerDockerSmokeScript).toContain("pythonVersion=");
     expect(runnerPythonPathScript).toContain('const IMAGE_TAG = "murph-cloudflare-runner"');

@@ -38,6 +38,14 @@ function cloudflareNodePattern(pattern: string): string {
 }
 
 function createCloudflareNodeProject(name: string, fileNames: readonly string[]) {
+  const concurrency =
+    name === "cloudflare-node-platform"
+      ? {
+        ...cloudflareNodeVitestConcurrency,
+        fileParallelism: false,
+      }
+      : cloudflareNodeVitestConcurrency;
+
   return defineProject({
     resolve: {
       alias: cloudflareNodeAliases,
@@ -48,7 +56,7 @@ function createCloudflareNodeProject(name: string, fileNames: readonly string[])
         : murphVitestNoTimeouts),
       name,
       environment: "node",
-      ...cloudflareNodeVitestConcurrency,
+      ...concurrency,
       include: fileNames.map(cloudflareNodePattern),
     },
   });
