@@ -1,7 +1,10 @@
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { HostedBillingSettingsAction } from "./hosted-billing-settings-action";
 
-export function HostedBillingSettings(props: { authenticated: boolean }) {
+export function HostedBillingSettings(props: {
+  authenticated: boolean;
+  currentBillingPlanCode?: string | null;
+}) {
   if (!props.authenticated) {
     return (
       <HostedSettingsSessionState
@@ -16,7 +19,9 @@ export function HostedBillingSettings(props: { authenticated: boolean }) {
       <p className="text-sm text-muted-foreground">
         Manage your plan and payment details.
       </p>
-      <HostedBillingSettingsAction />
+      <HostedBillingSettingsAction
+        showUpgrade={props.currentBillingPlanCode === "launch_monthly"}
+      />
     </div>
   );
 }

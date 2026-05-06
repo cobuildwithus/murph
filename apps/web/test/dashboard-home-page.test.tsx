@@ -7,6 +7,7 @@ import { beforeEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
+  routerRefresh: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
 }));
 
@@ -27,6 +28,12 @@ vi.mock("next/link", () => ({
       props.children,
     );
   },
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: mocks.routerRefresh,
+  }),
 }));
 
 vi.mock("@/src/components/home/upload-labs-action", () => ({
@@ -140,5 +147,5 @@ test("HomePage shows a usage-limit upgrade banner when assistant usage is exhaus
 
   assert.match(markup, /You are out of included usage/);
   assert.match(markup, /Upgrade to Edge/);
-  assert.match(markup, /href="\/settings"/);
+  assert.match(markup, /type="button"/);
 });
