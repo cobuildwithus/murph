@@ -40,6 +40,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-04-22 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over existing hosted billing and hosted AI usage allowance primitives. | Hosted billing/product spec | High | 2026-05-05 |
+| `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Planned exhausted Pulse Trial conversion to paid Pulse by ending the Stripe trial and billing the existing Pulse subscription. | Hosted billing/product spec | High | 2026-05-06 |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Stripe Subscription Schedule plan for Edge-to-Pulse switches at renewal, with hosted billing read-model and settings UX expectations. | Hosted billing/product spec | High | 2026-05-06 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons product boundary for wiki-like pages, generated catalogs, aggregate outcome summaries, revisions, and artifact manifests. | Health Commons behavior | High | 2026-04-30 |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Health Commons protocol card copy | High | 2026-04-30 |
