@@ -7,6 +7,10 @@ import {
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
+import {
+  canonicalLogicalResource,
+  withCanonicalResourceLocks,
+} from "../operations/index.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
@@ -351,6 +355,7 @@ const goalRegistryApi = createMarkdownRegistryApi<GoalStoredDocument>({
     summary: (_created, recordId) => `Upserted goal ${recordId}.`,
   },
 });
+const goalRegistryResource = canonicalLogicalResource("bank/goals", GOALS_DIRECTORY);
 
 function ensureGoalLinks(record: GoalEntity): GoalEntity {
   return {
@@ -360,6 +365,14 @@ function ensureGoalLinks(record: GoalEntity): GoalEntity {
 }
 
 export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResult> {
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vaultRoot,
+    resources: [goalRegistryResource],
+    run: () => upsertGoalWithLatestRecord(input),
+  });
+}
+
+async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<UpsertGoalResult> {
   const normalizedGoalId = normalizeId(input.goalId, "goalId", "goal");
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const existingRecord = await goalRegistryApi.resolveExistingRecord({
