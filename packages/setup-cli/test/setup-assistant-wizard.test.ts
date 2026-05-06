@@ -26,15 +26,16 @@ test('setup assistant wizard provider lists and indices normalize to Codex defau
 
   assert.deepEqual(
     allProviders.map((option) => option.provider),
-    ['codex-cloud', 'codex-local', 'skip'],
+    ['codex-cloud', 'codex-local', 'venice', 'skip'],
   )
   assert.deepEqual(
     selectableProviders.map((option) => option.provider),
-    ['codex-cloud', 'codex-local'],
+    ['codex-cloud', 'codex-local', 'venice'],
   )
   assert.equal(findSetupWizardAssistantProviderIndex('codex-cloud'), 0)
   assert.equal(findSetupWizardAssistantProviderIndex('codex-local'), 1)
-  assert.equal(findSetupWizardAssistantProviderIndex('skip'), 2)
+  assert.equal(findSetupWizardAssistantProviderIndex('venice'), 2)
+  assert.equal(findSetupWizardAssistantProviderIndex('skip'), 3)
   assert.equal(findSetupAssistantWizardProviderIndex('skip'), 0)
   assert.equal(
     findSetupWizardAssistantProviderIndex(
@@ -53,6 +54,22 @@ test('setup assistant wizard infers Codex cloud, local, and skip selections', ()
       oss: false,
     }),
     'codex-cloud',
+  )
+  assert.equal(
+    inferSetupWizardAssistantProvider({
+      preset: 'codex',
+      modelProvider: 'venice',
+      oss: false,
+    }),
+    'venice',
+  )
+  assert.equal(
+    inferSetupWizardAssistantProvider({
+      preset: 'codex',
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+    }),
+    'vercel-ai-gateway',
   )
   assert.equal(
     inferSetupWizardAssistantProvider({
@@ -79,6 +96,22 @@ test('setup assistant wizard infers Codex cloud, local, and skip selections', ()
   assert.equal(
     inferSetupWizardAssistantMethod({
       preset: 'codex',
+      provider: 'venice',
+      oss: false,
+    }),
+    'venice',
+  )
+  assert.equal(
+    inferSetupWizardAssistantMethod({
+      preset: 'codex',
+      provider: 'vercel-ai-gateway',
+      oss: false,
+    }),
+    'vercel-ai-gateway',
+  )
+  assert.equal(
+    inferSetupWizardAssistantMethod({
+      preset: 'codex',
       provider: 'codex-local',
       oss: false,
     }),
@@ -97,6 +130,7 @@ test('setup assistant wizard infers Codex cloud, local, and skip selections', ()
 test('setup assistant wizard method helpers are pass-through for Codex-only flows', () => {
   assert.equal(doesSetupWizardAssistantProviderRequireMethod('codex-cloud'), false)
   assert.equal(doesSetupWizardAssistantProviderRequireMethod('codex-local'), false)
+  assert.equal(doesSetupWizardAssistantProviderRequireMethod('venice'), false)
   assert.equal(doesSetupWizardAssistantProviderRequireMethod('skip'), false)
   assert.deepEqual(listSetupWizardAssistantMethodOptions('codex-cloud'), [])
   assert.deepEqual(listSetupWizardAssistantMethodOptions('codex-local'), [])
@@ -107,6 +141,20 @@ test('setup assistant wizard method helpers are pass-through for Codex-only flow
   assert.equal(
     findSetupWizardAssistantMethodIndex('codex-local', 'codex-cloud'),
     1,
+  )
+  assert.equal(
+    resolveSetupWizardAssistantMethodForProvider({
+      currentMethod: 'codex-cloud',
+      provider: 'venice',
+    }),
+    'venice',
+  )
+  assert.equal(
+    resolveSetupWizardAssistantMethodForProvider({
+      currentMethod: 'codex-cloud',
+      provider: 'vercel-ai-gateway',
+    }),
+    'vercel-ai-gateway',
   )
   assert.equal(
     resolveSetupWizardAssistantMethodForProvider({
@@ -133,6 +181,7 @@ test('setup assistant wizard resolves provider selections into Codex setup choic
     {
       detail: 'Murph will leave your current assistant settings alone for now.',
       methodLabel: null,
+      modelProvider: null,
       oss: null,
       preset: 'skip',
       providerLabel: 'Skip for now',
@@ -148,6 +197,7 @@ test('setup assistant wizard resolves provider selections into Codex setup choic
     {
       detail: 'Murph will ask which local model id to save next.',
       methodLabel: null,
+      modelProvider: null,
       oss: true,
       preset: 'codex',
       providerLabel: 'Codex local model',
@@ -163,10 +213,42 @@ test('setup assistant wizard resolves provider selections into Codex setup choic
     {
       detail: 'Murph will use your saved Codex / ChatGPT sign-in.',
       methodLabel: null,
+      modelProvider: null,
       oss: false,
       preset: 'codex',
       providerLabel: 'ChatGPT / Codex sign-in',
       summary: 'ChatGPT / Codex sign-in',
+    },
+  )
+
+  assert.deepEqual(
+    resolveSetupWizardAssistantSelection({
+      provider: 'venice',
+      method: 'venice',
+    }),
+    {
+      detail: 'Murph will ask which Venice model id to save next.',
+      methodLabel: null,
+      modelProvider: 'venice',
+      oss: false,
+      preset: 'codex',
+      providerLabel: 'Venice.ai',
+      summary: 'Venice.ai',
+    },
+  )
+  assert.deepEqual(
+    resolveSetupWizardAssistantSelection({
+      provider: 'vercel-ai-gateway',
+      method: 'vercel-ai-gateway',
+    }),
+    {
+      detail: 'Murph will ask which model id to save next.',
+      methodLabel: null,
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+      preset: 'codex',
+      providerLabel: 'Vercel AI Gateway',
+      summary: 'Vercel AI Gateway',
     },
   )
 })
@@ -188,6 +270,13 @@ test('setup assistant wizard badges reflect Codex kind and current selections', 
       provider: 'codex-local',
     }),
     [{ label: 'local', tone: 'accent' }],
+  )
+  assert.deepEqual(
+    buildSetupWizardAssistantProviderBadges({
+      currentProvider: 'codex-cloud',
+      provider: 'venice',
+    }),
+    [{ label: 'api key', tone: 'accent' }],
   )
   assert.deepEqual(
     buildSetupWizardAssistantProviderBadges({

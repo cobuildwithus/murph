@@ -2,6 +2,9 @@ import { createInterface } from 'node:readline'
 import { prepareSetupPromptInput } from './setup-prompt-io.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
+  resolveAssistantCodexModelProviderConfig,
+} from './assistant/target-runtime.js'
+import {
   type SetupChannel,
   type SetupConfiguredWearable,
   type SetupWearable,
@@ -47,6 +50,7 @@ export interface SetupWizardRuntimeStatus {
 export interface SetupRuntimeEnvResolver {
   getCurrentEnv(): NodeJS.ProcessEnv
   promptForMissing(input: {
+    assistantModelProvider?: string | null
     channels: readonly SetupChannel[]
     env: NodeJS.ProcessEnv
     helpText?: readonly string[]
@@ -273,12 +277,24 @@ export function describeSelectedSetupWearables(input: {
 }
 
 function collectSetupPromptKeys(input: {
+  assistantModelProvider?: string | null
   channels: readonly SetupChannel[]
   env: NodeJS.ProcessEnv
   wearables: readonly SetupWearable[]
 }): string[] {
   const keys: string[] = []
   const seen = new Set<string>()
+  const modelProviderConfig = resolveAssistantCodexModelProviderConfig(
+    input.assistantModelProvider,
+  )
+
+  if (
+    modelProviderConfig &&
+    !hasAnyEnv(input.env, [modelProviderConfig.envKey])
+  ) {
+    seen.add(modelProviderConfig.envKey)
+    keys.push(modelProviderConfig.envKey)
+  }
 
   for (const channel of input.channels) {
     for (const key of resolveSetupChannelMissingEnv(channel, input.env)) {

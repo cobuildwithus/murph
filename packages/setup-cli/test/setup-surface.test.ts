@@ -693,6 +693,95 @@ test('interactive onboard lets the wizard switch a local Codex flag back to clou
   ])
 })
 
+test('interactive onboard resolves Venice model provider before prompting for provider keys', async () => {
+  const order: string[] = []
+  const promptCalls: Array<Record<string, unknown>> = []
+
+  await runSetupCli(
+    ['onboard', '--vault', './assistant-venice-vault'],
+    {
+      assistantSetup: {
+        async resolve(input) {
+          order.push('assistant')
+          assert.equal(input.options.assistantModelProvider, 'venice')
+          return {
+            account: null,
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: null,
+            detail: 'configured',
+            enabled: true,
+            model: 'venice-model',
+            modelProvider: 'venice',
+            oss: false,
+            preset: input.preset,
+            profile: null,
+            provider: 'codex-cli',
+            reasoningEffort: 'medium',
+            sandbox: 'danger-full-access',
+          }
+        },
+      },
+      commandName: 'murph',
+      runtimeEnv: {
+        getCurrentEnv() {
+          return {}
+        },
+        async promptForMissing(input) {
+          order.push('env')
+          promptCalls.push({
+            assistantModelProvider: input.assistantModelProvider,
+            channels: [...input.channels],
+            env: { ...input.env },
+            wearables: [...input.wearables],
+          })
+          return {
+            VENICE_API_KEY: 'test-venice-key',
+          }
+        },
+      },
+      services: {
+        async setupHost(input) {
+          return makeSetupResult(input.vault, {
+            assistant: input.assistant,
+          })
+        },
+        async setupMacos(input) {
+          return makeSetupResult(input.vault, {
+            assistant: input.assistant,
+          })
+        },
+      } satisfies NonNullable<SetupCliOptions['services']>,
+      terminal: {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+      wizard: {
+        async run() {
+          return {
+            assistantModelProvider: 'venice',
+            assistantOss: false,
+            assistantPreset: 'codex',
+            channels: [],
+            scheduledUpdates: [],
+            wearables: [],
+          }
+        },
+      },
+    },
+  )
+
+  assert.deepEqual(order, ['assistant', 'env'])
+  assert.deepEqual(promptCalls, [
+    {
+      assistantModelProvider: 'venice',
+      channels: [],
+      env: {},
+      wearables: [],
+    },
+  ])
+})
+
 test('setup CLI helper exports keep interactive and post-launch decisions stable', () => {
   const successContext = {
     agent: false,

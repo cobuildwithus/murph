@@ -15,11 +15,10 @@ import {
   buildSetupWizardAssistantProviderBadges,
   doesSetupWizardAssistantProviderRequireMethod,
   findSetupWizardAssistantMethodIndex,
-  findSetupWizardAssistantProviderIndex,
   inferSetupWizardAssistantMethod,
   inferSetupWizardAssistantProvider,
   listSetupWizardAssistantMethodOptions,
-  listSetupWizardAssistantProviderOptions,
+  listSetupWizardAssistantProviderOptionsForCurrent,
   resolveSetupWizardAssistantMethodForProvider,
   resolveSetupWizardAssistantSelection,
   type SetupWizardAssistantMethod,
@@ -77,6 +76,7 @@ import {
 } from './setup-wizard-ui.js'
 
 type SetupWizardAppResult = {
+  assistantModelProvider?: string | null
   assistantOss?: boolean | null
   assistantPreset?: SetupAssistantPreset
   channels: SetupChannel[]
@@ -89,6 +89,7 @@ export interface SetupWizardAppProps {
   commandName: string
   defaultScheduledUpdateIds: ReadonlySet<string>
   deviceSyncLocalBaseUrl?: string | null
+  initialAssistantModelProvider?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset: SetupAssistantPreset
   initialChannels: SetupChannel[]
@@ -119,6 +120,7 @@ export function SetupWizardApp(
   const createElement = React.createElement
   const { exit } = useApp()
   const initialAssistantProvider = inferSetupWizardAssistantProvider({
+    modelProvider: input.initialAssistantModelProvider,
     oss: input.initialAssistantOss,
     preset: input.initialAssistantPreset,
   })
@@ -127,9 +129,14 @@ export function SetupWizardApp(
     preset: input.initialAssistantPreset,
     provider: initialAssistantProvider,
   })
+  const assistantProviderOptions =
+    listSetupWizardAssistantProviderOptionsForCurrent(initialAssistantProvider)
   const [step, setStep] = React.useState<SetupWizardStep>('intro')
   const [assistantProviderIndex, setAssistantProviderIndex] = React.useState(
-    findSetupWizardAssistantProviderIndex(initialAssistantProvider),
+    findAssistantProviderOptionIndex(
+      assistantProviderOptions,
+      initialAssistantProvider,
+    ),
   )
   const [assistantMethodIndex, setAssistantMethodIndex] = React.useState(
     findSetupWizardAssistantMethodIndex(
@@ -154,7 +161,6 @@ export function SetupWizardApp(
   const [selectedWearables, setSelectedWearables] = React.useState<
     SetupWearable[]
   >(input.initialWearables)
-  const assistantProviderOptions = listSetupWizardAssistantProviderOptions()
   const assistantSelection = resolveSetupWizardAssistantSelection({
     method: selectedAssistantMethod,
     provider: selectedAssistantProvider,
@@ -487,6 +493,7 @@ export function SetupWizardApp(
 
       if (key.return || value === ' ') {
         input.onComplete({
+          assistantModelProvider: latestAssistantRef.current.modelProvider,
           assistantOss: latestAssistantRef.current.oss,
           assistantPreset: latestAssistantRef.current.preset,
           channels: sortSetupWizardChannels(latestChannelsRef.current),
@@ -961,4 +968,12 @@ export function SetupWizardApp(
     createElement(Text, null, ''),
     hintRow,
   )
+}
+
+function findAssistantProviderOptionIndex(
+  options: readonly { provider: SetupWizardAssistantProvider }[],
+  provider: SetupWizardAssistantProvider,
+): number {
+  const index = options.findIndex((option) => option.provider === provider)
+  return index >= 0 ? index : 0
 }

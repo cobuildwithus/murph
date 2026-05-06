@@ -100,6 +100,7 @@ export interface SetupWizardRunner {
     channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
     commandName: string
     deviceSyncLocalBaseUrl?: string | null
+    initialAssistantModelProvider?: string | null
     initialAssistantOss?: boolean | null
     initialAssistantPreset?: SetupAssistantPreset
     initialChannels: readonly SetupChannel[]
@@ -164,6 +165,8 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     let selectedWearables: SetupWearable[] | null = null
     let selectedAssistantPreset: SetupAssistantPreset | null = null
     let selectedAssistantOss: boolean | undefined = context.options.assistantOss
+    let selectedAssistantModelProvider: string | null | undefined =
+      context.options.assistantModelProvider
     let envOverrides: NodeJS.ProcessEnv | undefined
 
     if (interactiveWizard) {
@@ -173,6 +176,8 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         commandName,
         deviceSyncLocalBaseUrl:
           resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
+        initialAssistantModelProvider:
+          context.options.assistantModelProvider ?? null,
         initialAssistantOss: context.options.assistantOss ?? null,
         initialAssistantPreset:
           inferSetupAssistantPresetFromOptions(context.options) ??
@@ -203,29 +208,16 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       if ('assistantOss' in wizardResult) {
         selectedAssistantOss = wizardResult.assistantOss ?? false
       }
-
-      const publicUrlHelpText = buildSetupWizardPublicUrlHelpText({
-        review: buildSetupWizardPublicUrlReview({
-          channels: selectedChannels,
-          wearables: selectedWearables,
-          publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
-          deviceSyncLocalBaseUrl:
-            resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
-        }),
-      })
-      envOverrides = await runtimeEnv.promptForMissing({
-        channels: selectedChannels,
-        env: currentEnv,
-        helpText: publicUrlHelpText,
-        wearables: selectedWearables,
-      })
-      applySetupRuntimeEnvOverridesToProcess(envOverrides)
+      if ('assistantModelProvider' in wizardResult) {
+        selectedAssistantModelProvider = wizardResult.assistantModelProvider ?? null
+      }
     } else if (hasExplicitSetupAssistantOptions(context.options)) {
       selectedAssistantPreset = inferSetupAssistantPresetFromOptions(context.options)
     }
 
     const resolvedAssistantOptions = {
       ...context.options,
+      assistantModelProvider: selectedAssistantModelProvider ?? undefined,
       assistantOss: selectedAssistantOss,
     }
 
@@ -238,6 +230,27 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
             options: resolvedAssistantOptions,
             preset: selectedAssistantPreset,
           })
+
+    if (interactiveWizard) {
+      const currentEnv = runtimeEnv.getCurrentEnv()
+      const publicUrlHelpText = buildSetupWizardPublicUrlHelpText({
+        review: buildSetupWizardPublicUrlReview({
+          channels: selectedChannels ?? [],
+          wearables: selectedWearables ?? [],
+          publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
+          deviceSyncLocalBaseUrl:
+            resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
+        }),
+      })
+      envOverrides = await runtimeEnv.promptForMissing({
+        assistantModelProvider: selectedAssistant?.modelProvider ?? null,
+        channels: selectedChannels ?? [],
+        env: currentEnv,
+        helpText: publicUrlHelpText,
+        wearables: selectedWearables ?? [],
+      })
+      applySetupRuntimeEnvOverridesToProcess(envOverrides)
+    }
 
     const setupHost =
       'setupHost' in services && typeof services.setupHost === 'function'

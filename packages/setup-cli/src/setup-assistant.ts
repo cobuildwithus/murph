@@ -2,6 +2,11 @@ import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
 import { normalizeNullableString } from '@murphai/operator-config/assistant/shared'
 import {
+  normalizeAssistantCodexModelProvider,
+  resolveAssistantCodexLocalOnboardingProviderConfig,
+  resolveAssistantCodexModelProviderConfig,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   createSetupAssistantAccountResolver,
   formatSetupAssistantAccountLabel,
   type SetupAssistantAccountResolver,
@@ -16,6 +21,7 @@ import {
   type SetupCommandOptions,
   type SetupConfiguredAssistant,
 } from '@murphai/operator-config/setup-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.5'
@@ -137,6 +143,31 @@ export function createSetupAssistantResolver(
 
         case 'codex': {
           const useLocalModel = resolutionInput.options.assistantOss === true
+          const modelProvider = resolveSetupAssistantModelProvider(
+            resolutionInput.options.assistantModelProvider,
+          )
+          const localProviderConfig =
+            resolveAssistantCodexLocalOnboardingProviderConfig(modelProvider)
+
+          if (useLocalModel && modelProvider) {
+            throw new VaultCliError(
+              'invalid_option',
+              '--assistant-model-provider cannot be used with --assistant-oss.',
+            )
+          }
+
+          if (
+            !resolutionInput.allowPrompt &&
+            modelProvider &&
+            localProviderConfig?.defaultModel === null &&
+            !normalizeNullableString(resolutionInput.options.assistantModel)
+          ) {
+            throw new VaultCliError(
+              'invalid_option',
+              `--assistant-model is required when --assistant-model-provider ${modelProvider} is selected.`,
+            )
+          }
+
           const selectedCodexHome = await resolveCodexHome({
             allowPrompt: resolutionInput.allowPrompt,
             currentCodexHome:
@@ -154,24 +185,26 @@ export function createSetupAssistantResolver(
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
               normalizeNullableString(resolutionInput.options.assistantModel) ??
-              (useLocalModel
-                ? DEFAULT_SETUP_CODEX_OSS_MODEL
-                : DEFAULT_SETUP_CODEX_MODEL),
+              (localProviderConfig
+                ? localProviderConfig.defaultModel
+                : useLocalModel
+                  ? DEFAULT_SETUP_CODEX_OSS_MODEL
+                  : DEFAULT_SETUP_CODEX_MODEL),
             input,
             output,
-            prompt: useLocalModel
-              ? 'Local model id to use with Codex'
-              : 'Model id to use with Codex',
+            prompt:
+              localProviderConfig?.modelPrompt ??
+              (useLocalModel
+                ? 'Local model id to use with Codex'
+                : 'Model id to use with Codex'),
           })
-          const modelProvider =
-            normalizeNullableString(resolutionInput.options.assistantModelProvider) ??
-            null
+          const normalizedModel = normalizeSetupAssistantModelId(model)
 
           resolvedAssistant = {
             preset: 'codex',
             enabled: true,
             provider: 'codex-cli',
-            model,
+            model: normalizedModel,
             modelProvider,
             codexCommand:
               normalizeNullableString(
@@ -191,7 +224,7 @@ export function createSetupAssistantResolver(
             account: null,
             detail: buildCodexAssistantDetail({
               codexHome: selectedCodexHome.codexHome,
-              model,
+              model: normalizedModel,
               modelProvider,
               oss: useLocalModel,
             }),
@@ -200,9 +233,11 @@ export function createSetupAssistantResolver(
         }
       }
 
-      const detectedAccount = await assistantAccount.resolve({
-        assistant: resolvedAssistant,
-      })
+      const detectedAccount = shouldDetectSetupAssistantAccount(resolvedAssistant)
+        ? await assistantAccount.resolve({
+            assistant: resolvedAssistant,
+          })
+        : null
 
       return detectedAccount === null
         ? resolvedAssistant
@@ -218,9 +253,62 @@ export function createSetupAssistantResolver(
   }
 }
 
+function shouldDetectSetupAssistantAccount(
+  assistant: SetupConfiguredAssistant,
+): boolean {
+  return (
+    assistant.enabled &&
+    assistant.provider === 'codex-cli' &&
+    assistant.modelProvider === null &&
+    assistant.oss !== true
+  )
+}
+
+function resolveSetupAssistantModelProvider(
+  value: string | null | undefined,
+): string | null {
+  const raw = normalizeNullableString(value)
+  if (!raw) {
+    return null
+  }
+
+  const normalized = normalizeAssistantCodexModelProvider(raw)
+  if (
+    !normalized ||
+    !resolveAssistantCodexModelProviderConfig(normalized) ||
+    !resolveAssistantCodexLocalOnboardingProviderConfig(normalized)
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Unknown Codex model provider: ${raw}.`,
+    )
+  }
+
+  return normalized
+}
+
+function normalizeSetupAssistantModelId(value: string): string {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Assistant model id is required.',
+    )
+  }
+
+  if (/[\r\n\p{Cc}]/u.test(normalized)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Assistant model id must be a single line without control characters.',
+    )
+  }
+
+  return normalized
+}
+
 async function resolvePromptedValue(input: {
   allowPrompt: boolean
-  defaultValue: string
+  defaultValue: string | null
   input: NodeJS.ReadableStream
   output: NodeJS.WritableStream
   prompt: string

@@ -1822,6 +1822,46 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
 
+  it('adds the Venice runtime hint when invalid-output fallback fails', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.7.output: Invalid input"}}',
+    )
+    const fallbackError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'fallback failed',
+    )
+
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(expectedError)
+      .mockRejectedValueOnce(fallbackError)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      jsonEvents: [{ method: 'turn/completed' }],
+      providerActionCount: 0,
+      providerSessionId: 'corrupt-venice-thread',
+      providerTurnId: 'turn-invalid-output',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        modelProvider: 'venice',
+      }),
+      resumeProviderSessionId: 'corrupt-venice-thread',
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) {
+      throw new Error('expected failed provider attempt')
+    }
+    expect(attempt.error).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      message: expect.stringContaining('Venice via Codex Responses failed.'),
+    })
+  })
+
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {
     const expectedError = new Error('provider crashed')
 

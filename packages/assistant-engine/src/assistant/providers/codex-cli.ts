@@ -17,6 +17,9 @@ import {
   DEFAULT_CODEX_MODELS,
 } from './catalog.js'
 import {
+  VENICE_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   extractCodexAssistantProviderUsage,
   mergeCodexConfigOverrides,
   resolveAssistantProviderPrompt,
@@ -160,6 +163,8 @@ export async function executeCodexAssistantTurnAttempt(
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides: mergeCodexConfigOverrides({
+      modelProvider: providerConfig.target.modelProvider,
+      modelProviderConfig: providerConfig.target.modelProviderConfig,
       showThinkingTraces: input.showThinkingTraces ?? false,
     }),
     env: prepareAssistantDirectCliEnv(input.env),
@@ -287,7 +292,10 @@ export async function executeCodexAssistantTurnAttempt(
             resumeProviderSessionId: input.resumeProviderSessionId,
           }),
         })
-        throw fallbackError
+        throw addCodexModelProviderFailureHint({
+          error: fallbackError,
+          modelProvider: providerConfig.target.modelProviderConfig?.id ?? null,
+        })
       }
 
       emitCodexInvalidOutputTraceEvent({
@@ -311,8 +319,12 @@ export async function executeCodexAssistantTurnAttempt(
             rawEvents,
           })
         : null
-      return {
+      const surfacedError = addCodexModelProviderFailureHint({
         error,
+        modelProvider: providerConfig.target.modelProviderConfig?.id ?? null,
+      })
+      return {
+        error: surfacedError,
         metadata: {
           activityLabels: [],
           executedToolCount: 0,
@@ -360,6 +372,45 @@ export async function executeCodexAssistantTurnAttempt(
     },
   }
   return attemptResult
+}
+
+const VENICE_CODEX_FAILURE_HINT =
+  'Venice via Codex Responses failed. Check VENICE_API_KEY, the Venice model id, account balance/rate limits, and whether this key/model has Venice Responses API Alpha access.'
+
+function addCodexModelProviderFailureHint(input: {
+  error: unknown
+  modelProvider: string | null
+}): unknown {
+  if (input.modelProvider !== VENICE_CODEX_MODEL_PROVIDER_ID) {
+    return input.error
+  }
+
+  if (
+    input.error instanceof Error &&
+    input.error.message.includes(VENICE_CODEX_FAILURE_HINT)
+  ) {
+    return input.error
+  }
+
+  if (input.error instanceof VaultCliError) {
+    return new VaultCliError(
+      input.error.code,
+      `${input.error.message} ${VENICE_CODEX_FAILURE_HINT}`,
+      input.error.context,
+    )
+  }
+
+  if (input.error instanceof Error) {
+    return new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      `${input.error.message} ${VENICE_CODEX_FAILURE_HINT}`,
+    )
+  }
+
+  return new VaultCliError(
+    'ASSISTANT_CODEX_FAILED',
+    VENICE_CODEX_FAILURE_HINT,
+  )
 }
 
 function hasCodexAssistantProviderUsageData(

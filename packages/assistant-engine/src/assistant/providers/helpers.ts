@@ -8,6 +8,12 @@ import {
   supportsAssistantNativeResume,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
+import {
+  isCodexReservedModelProviderId,
+  normalizeAssistantCodexModelProvider,
+  type AssistantCodexModelProviderConfig,
+} from '@murphai/operator-config/assistant/target-runtime'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
@@ -204,18 +210,69 @@ export function resolveAssistantProviderPrompt(
 }
 
 export function mergeCodexConfigOverrides(input: {
+  modelProvider?: string | null
+  modelProviderConfig?: AssistantCodexModelProviderConfig | null
   showThinkingTraces: boolean
 }): readonly string[] | undefined {
   const overrides: string[] = []
+  const modelProvider = normalizeNullableString(input.modelProvider)
+  const modelProviderConfig = input.modelProviderConfig ?? null
+
+  if (modelProvider && !modelProviderConfig) {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      `Unknown Codex model provider: ${modelProvider}.`,
+    )
+  }
+  if (
+    modelProvider &&
+    modelProviderConfig &&
+    normalizeAssistantCodexModelProvider(modelProvider) !== modelProviderConfig.id
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      `Codex model provider config mismatch: ${modelProvider}.`,
+    )
+  }
+
+  if (
+    modelProviderConfig &&
+    !isCodexReservedModelProviderId(modelProviderConfig.id)
+  ) {
+    upsertCodexConfigOverride(
+      overrides,
+      `model_providers.${formatCodexTomlString(modelProviderConfig.id)}.name`,
+      formatCodexTomlString(modelProviderConfig.name),
+    )
+    upsertCodexConfigOverride(
+      overrides,
+      `model_providers.${formatCodexTomlString(modelProviderConfig.id)}.base_url`,
+      formatCodexTomlString(modelProviderConfig.baseUrl),
+    )
+    upsertCodexConfigOverride(
+      overrides,
+      `model_providers.${formatCodexTomlString(modelProviderConfig.id)}.env_key`,
+      formatCodexTomlString(modelProviderConfig.envKey),
+    )
+    upsertCodexConfigOverride(
+      overrides,
+      `model_providers.${formatCodexTomlString(modelProviderConfig.id)}.wire_api`,
+      formatCodexTomlString(modelProviderConfig.wireApi),
+    )
+  }
 
   if (!input.showThinkingTraces) {
-    return undefined
+    return overrides.length > 0 ? overrides : undefined
   }
 
   upsertCodexConfigOverride(overrides, 'model_reasoning_summary', '"auto"')
   upsertCodexConfigOverride(overrides, 'hide_agent_reasoning', 'false')
 
   return overrides
+}
+
+function formatCodexTomlString(value: string): string {
+  return JSON.stringify(value)
 }
 
 function upsertCodexConfigOverride(

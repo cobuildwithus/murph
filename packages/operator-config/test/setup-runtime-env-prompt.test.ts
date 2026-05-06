@@ -71,6 +71,54 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
   assert.match(stderrWrites.join(''), /Leave a prompt blank to skip/u)
 })
 
+test('setup runtime resolver derives a selected provider credential from provider config', async () => {
+  const prompts: string[] = []
+  const answers = [' venice-secret-test ']
+
+  vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+  readlineMock.createInterface.mockImplementation(() => ({
+    close() {},
+    once() {},
+    question(question: string, callback: (answer: string) => void) {
+      prompts.push(question)
+      callback(answers.shift() ?? '')
+    },
+    removeListener() {},
+  }))
+  const resolver = createSetupRuntimeEnvResolver()
+
+  const overrides = await resolver.promptForMissing({
+    assistantModelProvider: 'venice',
+    channels: [],
+    env: {},
+    wearables: [],
+  })
+
+  assert.deepEqual(prompts, [
+    'Enter VENICE_API_KEY for this setup run (leave blank to skip): ',
+  ])
+  assert.deepEqual(overrides, {
+    VENICE_API_KEY: 'venice-secret-test',
+  })
+})
+
+test('setup runtime resolver skips provider credential prompt when env already has it', async () => {
+  const resolver = createSetupRuntimeEnvResolver()
+
+  const overrides = await resolver.promptForMissing({
+    assistantModelProvider: 'venice',
+    channels: [],
+    env: {
+      VENICE_API_KEY: 'present',
+    },
+    wearables: [],
+  })
+
+  assert.deepEqual(overrides, {})
+  assert.equal(readlineMock.createInterface.mock.calls.length, 0)
+})
+
 test('setup runtime resolver turns SIGINT prompt cancellation into a setup_cancelled error', async () => {
   let cancelPrompt: (() => void) | null = null
 

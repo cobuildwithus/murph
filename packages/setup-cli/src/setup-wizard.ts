@@ -29,6 +29,7 @@ import {
 export {
   getDefaultSetupWizardAssistantPreset,
   inferSetupWizardAssistantProvider,
+  listSetupWizardAssistantProviderOptions,
   runSetupAssistantWizard,
   type SetupAssistantWizardInput,
   type SetupAssistantWizardResult,
@@ -58,6 +59,7 @@ export {
 } from './setup-wizard-options.js'
 
 export interface SetupWizardResult {
+  assistantModelProvider?: string | null
   assistantOss?: boolean | null
   assistantPreset?: SetupAssistantPreset
   channels: SetupChannel[]
@@ -69,6 +71,7 @@ export interface SetupWizardInput {
   channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
   commandName?: string
   deviceSyncLocalBaseUrl?: string | null
+  initialAssistantModelProvider?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
   initialChannels?: readonly SetupChannel[]
@@ -122,6 +125,7 @@ export async function runSetupWizard(
         defaultScheduledUpdateIds,
         deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
         initialAssistantOss: input.initialAssistantOss,
+        initialAssistantModelProvider: input.initialAssistantModelProvider,
         initialAssistantPreset,
         initialChannels,
         initialScheduledUpdates,

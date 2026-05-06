@@ -7,7 +7,9 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '../src/assistant/provider-config.ts'
 import {
+  VENICE_CODEX_MODEL_PROVIDER_CONFIG,
   VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+  resolveAssistantCodexLocalOnboardingProviderConfig,
 } from '../src/assistant/target-runtime.ts'
 
 describe('assistant provider config runtime resolution', () => {
@@ -69,6 +71,41 @@ describe('assistant provider config runtime resolution', () => {
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
       modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+    })
+  })
+
+  it('normalizes Venice as a Codex Responses model provider with local onboarding metadata', () => {
+    const normalized = normalizeAssistantProviderConfig({
+      provider: 'codex-cli',
+      model: ' venice-model ',
+      modelProvider: ' Venice ',
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+    })
+
+    expect(normalized).toMatchObject({
+      target: {
+        kind: 'codex-cli',
+        model: 'venice-model',
+        modelProvider: 'venice',
+        modelProviderConfig: VENICE_CODEX_MODEL_PROVIDER_CONFIG,
+      },
+    })
+    expect(VENICE_CODEX_MODEL_PROVIDER_CONFIG).toEqual({
+      id: 'venice',
+      name: 'Venice.ai',
+      baseUrl: 'https://api.venice.ai/api/v1',
+      envKey: 'VENICE_API_KEY',
+      wireApi: 'responses',
+    })
+    expect(resolveAssistantCodexLocalOnboardingProviderConfig('venice')).toEqual({
+      defaultModel: null,
+      description: 'Use Codex with a Venice API key.',
+      label: 'Venice.ai',
+      modelPrompt: 'Venice model id to use with Codex',
+      providerId: 'venice',
+      selectableInLocalOnboarding: true,
     })
   })
 

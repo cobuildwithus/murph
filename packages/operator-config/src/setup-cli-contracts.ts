@@ -192,7 +192,7 @@ export const setupCommandOptionsSchema = z.object({
     .string()
     .min(1)
     .optional()
-    .describe('Optional Codex model provider id to save during setup, such as vercel-ai-gateway.'),
+    .describe('Optional Codex model provider id to save during setup, such as venice or vercel-ai-gateway.'),
   assistantModel: z
     .string()
     .min(1)

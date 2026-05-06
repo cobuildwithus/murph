@@ -25,8 +25,27 @@ export interface AssistantCodexModelProviderConfig {
   wireApi: AssistantCodexModelProviderWireApi
 }
 
+export interface AssistantCodexLocalOnboardingProviderConfig {
+  defaultModel: string | null
+  description: string
+  label: string
+  modelPrompt: string
+  providerId: string
+  selectableInLocalOnboarding: boolean
+}
+
 export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID = 'vercel-ai-gateway'
 export const OPENAI_CODEX_MODEL_PROVIDER_ID = 'openai'
+export const VENICE_CODEX_MODEL_PROVIDER_ID = 'venice'
+
+export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+  'ollama',
+  'lmstudio',
+] as const
+const CODEX_RESERVED_MODEL_PROVIDER_ID_SET = new Set<string>(
+  CODEX_RESERVED_MODEL_PROVIDER_IDS,
+)
 
 export const OPENAI_CODEX_MODEL_PROVIDER_CONFIG = {
   id: OPENAI_CODEX_MODEL_PROVIDER_ID,
@@ -44,18 +63,59 @@ export const VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG = {
   wireApi: 'responses',
 } as const satisfies AssistantCodexModelProviderConfig
 
+export const VENICE_CODEX_MODEL_PROVIDER_CONFIG = {
+  id: VENICE_CODEX_MODEL_PROVIDER_ID,
+  name: 'Venice.ai',
+  baseUrl: 'https://api.venice.ai/api/v1',
+  envKey: 'VENICE_API_KEY',
+  wireApi: 'responses',
+} as const satisfies AssistantCodexModelProviderConfig
+
 export const ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS = [
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+  VENICE_CODEX_MODEL_PROVIDER_CONFIG,
 ] as const satisfies readonly AssistantCodexModelProviderConfig[]
 
 export const ASSISTANT_CODEX_MODEL_PROVIDER_IDS =
   ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.id)
 
+export const LOCAL_SETUP_CODEX_PROVIDER_CONFIGS = [
+  {
+    defaultModel: 'gpt-5.5',
+    description: 'Use Codex through Vercel AI Gateway.',
+    label: 'Vercel AI Gateway',
+    modelPrompt: 'Model id to use with Codex',
+    providerId: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+    selectableInLocalOnboarding: false,
+  },
+  {
+    defaultModel: null,
+    description: 'Use Codex with a Venice API key.',
+    label: 'Venice.ai',
+    modelPrompt: 'Venice model id to use with Codex',
+    providerId: VENICE_CODEX_MODEL_PROVIDER_ID,
+    selectableInLocalOnboarding: true,
+  },
+] as const satisfies readonly AssistantCodexLocalOnboardingProviderConfig[]
+
+export const LOCAL_SETUP_CODEX_PROVIDER_IDS =
+  LOCAL_SETUP_CODEX_PROVIDER_CONFIGS.map((config) => config.providerId)
+
 const ASSISTANT_CODEX_MODEL_PROVIDER_CONFIG_MAP = new Map<
   string,
   AssistantCodexModelProviderConfig
 >(ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => [config.id, config]))
+
+const LOCAL_SETUP_CODEX_PROVIDER_CONFIG_MAP = new Map<
+  string,
+  AssistantCodexLocalOnboardingProviderConfig
+>(
+  LOCAL_SETUP_CODEX_PROVIDER_CONFIGS.map((config) => [
+    config.providerId,
+    config,
+  ]),
+)
 
 export class UnsupportedAssistantRuntimeTargetError extends Error {
   readonly code = 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED'
@@ -195,6 +255,28 @@ export function resolveAssistantCodexModelProviderConfig(
   return normalized
     ? ASSISTANT_CODEX_MODEL_PROVIDER_CONFIG_MAP.get(normalized) ?? null
     : null
+}
+
+export function resolveAssistantCodexLocalOnboardingProviderConfig(
+  value: string | null | undefined,
+): AssistantCodexLocalOnboardingProviderConfig | null {
+  const normalized = normalizeAssistantCodexModelProvider(value)
+  return normalized
+    ? LOCAL_SETUP_CODEX_PROVIDER_CONFIG_MAP.get(normalized) ?? null
+    : null
+}
+
+export function isAssistantCodexLocalOnboardingProvider(
+  value: string | null | undefined,
+): boolean {
+  return resolveAssistantCodexLocalOnboardingProviderConfig(value) !== null
+}
+
+export function isCodexReservedModelProviderId(
+  value: string | null | undefined,
+): boolean {
+  const normalized = normalizeAssistantCodexModelProvider(value)
+  return normalized !== null && CODEX_RESERVED_MODEL_PROVIDER_ID_SET.has(normalized)
 }
 
 function buildAssistantContinuityFingerprint(
