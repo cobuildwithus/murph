@@ -125,6 +125,54 @@ beforeEach(() => {
 });
 
 describe("hosted workspace assistant diagnostics detail logs", () => {
+  it("keeps local send timing details durable with parser-safe keys", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [{
+        component: "runtime.provider",
+        level: "info",
+        message: "Hosted assistant local-message timing captured.",
+        phase: "wake.running",
+        redacted: {
+          localSendDeliveryRequested: true,
+          localSendElapsedMs: 321,
+          localSendHosted: true,
+          localSendQueueOnly: true,
+          localSendTimingStage: "delivery-finished",
+          localSendTimingTraceType: "local-send",
+          localSendTotalElapsedMs: 654,
+          providerTraceKind: "local_message.timing",
+          schema: "murph.assistant-local-message-timing.v1",
+        },
+      }],
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+
+    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      redactedJson: expect.objectContaining({
+        localSendDeliveryRequested: true,
+        localSendElapsedMs: 321,
+        localSendHosted: true,
+        localSendQueueOnly: true,
+        localSendTimingStage: "delivery-finished",
+        localSendTimingTraceType: "local-send",
+        localSendTotalElapsedMs: 654,
+        providerTraceKind: "local_message.timing",
+        schema: "murph.assistant-local-message-timing.v1",
+      }),
+    }));
+    expect(JSON.stringify(logRequests)).not.toContain("localMessage");
+  });
+
   it("revalidates Codex resume-failure diagnostics before durable logging", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({

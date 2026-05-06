@@ -567,6 +567,72 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("captures hosted local send timing with parser-safe diagnostic keys", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_local_send_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_local_send_timing",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        providerSessionId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-local-message-timing.v1",
+          type: "assistant.local_message.timing",
+          cwd: "/tmp/raw-path",
+          localSendDeliveryRequested: true,
+          localSendElapsedMs: 321,
+          localSendHosted: true,
+          localSendQueueOnly: true,
+          localSendTimingStage: "delivery-finished",
+          localSendTotalElapsedMs: 654,
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_local_send_timing",
+      level: "info",
+      message: "Hosted assistant local-message timing captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        localSendDeliveryRequested: true,
+        localSendElapsedMs: 321,
+        localSendHosted: true,
+        localSendQueueOnly: true,
+        localSendTimingStage: "delivery-finished",
+        localSendTimingTraceType: "local-send",
+        localSendTotalElapsedMs: 654,
+        providerTraceKind: "local_message.timing",
+        requestId: "req_123",
+        schema: "murph.assistant-local-message-timing.v1",
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("localMessage");
+  });
+
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
