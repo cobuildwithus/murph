@@ -43,7 +43,7 @@ Responsibilities:
 - Support `--dry-run` as the typed replacement for the current JSON `experiment plan --input` validation flow.
 - Fail with typed missing-field errors when required safety, logistics, windows, or measurement fields are absent.
 
-Protocol-backed starts may omit `--title` and `--hypothesis` when `--from-protocol` can hydrate clear defaults. Custom starts must opt in with `--custom` and provide enough typed fields to avoid creating another incomplete active run. `experiment start` without either `--from-protocol` or `--custom` fails.
+Protocol-backed starts may omit `--title` and `--hypothesis` when `--from-protocol` can hydrate clear defaults. Custom starts must opt in with `--custom` and provide enough typed fields to avoid creating another incomplete active run. `experiment start` without either `--from-protocol` or `--custom` fails. The lower-level plan payload must also carry a `source.kind` discriminator so raw create/start paths cannot accidentally blur Health Commons protocol-backed runs with intentionally custom runs.
 
 Assistant prompt examples should use the smallest normal form, then add only explicit user answers or overrides:
 

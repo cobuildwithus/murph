@@ -658,6 +658,9 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
   return jsonObjectSchema.parse(
     compactRecord({
       schemaVersion: 'murph.experiment-plan.v1',
+      source: {
+        kind: protocol === undefined ? 'custom' : 'health_commons_protocol',
+      },
       experiment: compactRecord({
         slug: input.slug,
         title: input.options.title ?? protocol?.title ?? input.slug,
@@ -1081,22 +1084,28 @@ export function registerExperimentCommands(
         .string()
         .min(1)
         .optional()
-        .describe('Health Commons protocol_variant key or experiment route id.'),
+        .describe(
+          'Health Commons protocol_variant key or experiment route id. Choose this instead of --custom; experiment start requires exactly one source.',
+        ),
       custom: z
         .boolean()
         .optional()
-        .describe('Start an intentionally unlinked custom experiment.'),
+        .describe(
+          'Start an intentionally unlinked custom experiment. Choose this instead of --from-protocol; experiment start requires exactly one source.',
+        ),
       testPlanId: z
         .string()
         .min(1)
         .optional()
-        .describe('Chosen Health Commons test plan id for this run.'),
+        .describe(
+          'Chosen Health Commons test plan id for this run. Only valid with --from-protocol.',
+        ),
       pageRevisionId: sha256RevisionOptionSchema
         .optional()
-        .describe('Protocol page content revision id override.'),
+        .describe('Protocol page content revision id override. Only valid with --from-protocol.'),
       runSpecRevisionId: sha256RevisionOptionSchema
         .optional()
-        .describe('Protocol run spec revision id override.'),
+        .describe('Protocol run spec revision id override. Only valid with --from-protocol.'),
       baselineStart: localDateSchema.optional().describe('Baseline window start date.'),
       baselineEnd: localDateSchema.optional().describe('Baseline window end date.'),
       baselineDays: z

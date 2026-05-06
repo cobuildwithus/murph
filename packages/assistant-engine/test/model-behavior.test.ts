@@ -497,6 +497,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('vault-cli experiment start <slug>')
     expect(prompt).toContain('--from-protocol <key-or-route>')
     expect(prompt).toContain('vault-cli experiment start <slug> --custom')
+    expect(prompt).not.toContain('vault-cli experiment start <slug> --protocol-key')
     expect(prompt).toContain('vault-cli experiment edit <id>')
     expect(prompt).toContain('--dry-run --format json')
     expect(prompt).toContain('using typed flags only')

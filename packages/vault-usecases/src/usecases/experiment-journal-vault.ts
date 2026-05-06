@@ -335,10 +335,18 @@ const experimentPlanDecisionSchema = z
   })
   .strict()
 
+const experimentPlanSourceSchema = z
+  .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('custom') }).strict(),
+    z.object({ kind: z.literal('health_commons_protocol') }).strict(),
+    z.object({ kind: z.literal('private_protocol') }).strict(),
+  ])
+
 const experimentPlanPayloadSchema = z
   .object({
     schemaVersion: z.literal('murph.experiment-plan.v1').optional(),
     planId: z.string().min(1).optional(),
+    source: experimentPlanSourceSchema,
     experiment: z
       .object({
         slug: slugSchema,
@@ -361,6 +369,60 @@ const experimentPlanPayloadSchema = z
   })
   .strict()
   .superRefine((payload, context) => {
+    if (
+      payload.source.kind === 'custom' &&
+      (payload.commonsProtocolRef !== undefined ||
+        payload.protocol !== undefined ||
+        payload.protocolRef !== undefined ||
+        payload.effectiveProtocolSnapshot !== undefined)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Custom experiment plans must not include protocol references or protocol snapshots.',
+        path: ['source', 'kind'],
+      })
+    }
+
+    if (payload.source.kind === 'health_commons_protocol') {
+      if (payload.commonsProtocolRef === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Health Commons protocol-backed experiment plans require commonsProtocolRef.',
+          path: ['commonsProtocolRef'],
+        })
+      }
+      if (payload.protocol !== undefined || payload.protocolRef !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Health Commons protocol-backed experiment plans must not include private protocol inputs.',
+          path: ['source', 'kind'],
+        })
+      }
+    }
+
+    if (
+      payload.source.kind === 'private_protocol' &&
+      payload.protocol === undefined &&
+      payload.protocolRef === undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Private protocol-backed experiment plans require protocol or protocolRef.',
+        path: ['source', 'kind'],
+      })
+    }
+
+    if (
+      payload.source.kind !== 'health_commons_protocol' &&
+      payload.commonsProtocolRef !== undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'commonsProtocolRef is only valid for Health Commons protocol-backed experiment plans.',
+        path: ['commonsProtocolRef'],
+      })
+    }
+
     if (payload.protocol !== undefined && payload.protocolRef !== undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

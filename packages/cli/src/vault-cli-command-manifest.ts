@@ -1152,7 +1152,8 @@ export const vaultCliCommandDescriptors = [
     leafCommands: [
       {
         path: ['experiment', 'start'],
-        description: 'Start a typed experiment run, hydrating protocol defaults when a Health Commons protocol key is supplied.',
+        description:
+          'Start a typed experiment run from a Health Commons protocol or as an explicit custom experiment.',
       },
       {
         path: ['experiment', 'show'],

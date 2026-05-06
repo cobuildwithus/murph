@@ -9402,26 +9402,26 @@
                           "minLength": 1
                         },
                         "fromProtocol": {
-                          "description": "Health Commons protocol_variant key or experiment route id.",
+                          "description": "Health Commons protocol_variant key or experiment route id. Choose this instead of --custom; experiment start requires exactly one source.",
                           "type": "string",
                           "minLength": 1
                         },
                         "custom": {
-                          "description": "Start an intentionally unlinked custom experiment.",
+                          "description": "Start an intentionally unlinked custom experiment. Choose this instead of --from-protocol; experiment start requires exactly one source.",
                           "type": "boolean"
                         },
                         "testPlanId": {
-                          "description": "Chosen Health Commons test plan id for this run.",
+                          "description": "Chosen Health Commons test plan id for this run. Only valid with --from-protocol.",
                           "type": "string",
                           "minLength": 1
                         },
                         "pageRevisionId": {
-                          "description": "Protocol page content revision id override.",
+                          "description": "Protocol page content revision id override. Only valid with --from-protocol.",
                           "type": "string",
                           "pattern": "^sha256:[a-f0-9]{64}$"
                         },
                         "runSpecRevisionId": {
-                          "description": "Protocol run spec revision id override.",
+                          "description": "Protocol run spec revision id override. Only valid with --from-protocol.",
                           "type": "string",
                           "pattern": "^sha256:[a-f0-9]{64}$"
                         },

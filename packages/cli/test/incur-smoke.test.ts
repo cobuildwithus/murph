@@ -440,6 +440,25 @@ test('generic health descriptor manifest uses import-json for hard-cut registry 
   }
 })
 
+test('experiment descriptor describes the explicit start source choice', () => {
+  const descriptor = vaultCliCommandDescriptors.find(
+    (candidate) => candidate.id === 'experiment',
+  )
+
+  if (!descriptor || !('leafCommands' in descriptor) || !descriptor.leafCommands) {
+    throw new Error('The experiment descriptor is missing leaf commands.')
+  }
+
+  const startCommand = descriptor.leafCommands.find(
+    (leafCommand) => leafCommand.path.join(' ') === 'experiment start',
+  )
+
+  assert.notEqual(startCommand, undefined, 'expected experiment start descriptor')
+  assert.match(startCommand?.description ?? '', /Health Commons protocol/u)
+  assert.match(startCommand?.description ?? '', /custom experiment/u)
+  assert.doesNotMatch(startCommand?.description ?? '', /protocol key is supplied/u)
+})
+
 test('workout descriptor does not expose the removed workout measurement alias', () => {
   const workoutDescriptor = vaultCliCommandDescriptors.find(
     (descriptor) => descriptor.id === 'workout',
