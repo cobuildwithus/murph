@@ -253,6 +253,164 @@ describe("json route helper factory", () => {
     });
   });
 
+  it("logs sanitized safe mapped response details for domain errors", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      matchers: [
+        (error) => error === "known"
+          ? httpModule.mapDomainJsonError({
+              code: "BILLING_DOWN",
+              details: {
+                code: "resource_missing",
+                inviteCode: "invite-code",
+                operationName: "subscription.update.plan-items",
+                requestId: "req_unlogged",
+                requestIdPresent: true,
+                statusCode: 400,
+                type: "StripeInvalidRequestError from https://billing.example.test/raw",
+              },
+              httpStatus: 502,
+              message: "Billing is unavailable.",
+              retryable: true,
+            })
+          : null,
+      ],
+    });
+
+    const response = helpers.jsonError("known");
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "BILLING_DOWN",
+        details: {
+          code: "resource_missing",
+          inviteCode: "invite-code",
+          operationName: "subscription.update.plan-items",
+          requestId: "req_unlogged",
+          requestIdPresent: true,
+          statusCode: 400,
+          type: "StripeInvalidRequestError from https://billing.example.test/raw",
+        },
+        message: "Billing is unavailable.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("route failed", {
+      errorResponseCode: "BILLING_DOWN",
+      errorResponseDetails: {
+        code: "resource_missing",
+        operationName: "subscription.update.plan-items",
+        requestIdPresent: true,
+        statusCode: 400,
+        type: "StripeInvalidRequestError from <redacted-url>",
+      },
+      errorResponseRetryable: true,
+      errorResponseStatus: 502,
+      errorType: "string",
+      errorValue: "known",
+      internalMessage: "route failed unexpectedly",
+    });
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("invite-code");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("req_unlogged");
+  });
+
+  it("lets explicit mapped log details replace generic response detail logging", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      matchers: [
+        (error) => error === "known"
+          ? {
+              ...httpModule.mapDomainJsonError({
+                code: "BILLING_DOWN",
+                details: {
+                  code: "resource_missing",
+                  operationName: "subscription.update.plan-items",
+                },
+                httpStatus: 502,
+                message: "Billing is unavailable.",
+                retryable: true,
+              }),
+              log: {
+                details: {
+                  errorDetails: {
+                    operationName: "subscription.update.plan-items",
+                  },
+                },
+              },
+            }
+          : null,
+      ],
+    });
+
+    const response = helpers.jsonError("known");
+
+    expect(response.status).toBe(502);
+    expect(errorSpy).toHaveBeenCalledWith("route failed", {
+      errorDetails: {
+        operationName: "subscription.update.plan-items",
+      },
+      errorResponseCode: "BILLING_DOWN",
+      errorResponseRetryable: true,
+      errorResponseStatus: 502,
+      errorType: "string",
+      errorValue: "known",
+      internalMessage: "route failed unexpectedly",
+    });
+    expect(errorSpy.mock.calls[0]?.[1]).not.toHaveProperty("errorResponseDetails");
+  });
+
+  it("lets explicit errorResponseDetails replace generic response detail logging", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      matchers: [
+        (error) => error === "known"
+          ? {
+              ...httpModule.mapDomainJsonError({
+                code: "BILLING_DOWN",
+                details: {
+                  code: "resource_missing",
+                  operationName: "subscription.update.plan-items",
+                },
+                httpStatus: 502,
+                message: "Billing is unavailable.",
+                retryable: true,
+              }),
+              log: {
+                details: {
+                  errorResponseDetails: {
+                    operationName: "subscription.update.plan-items",
+                  },
+                },
+              },
+            }
+          : null,
+      ],
+    });
+
+    const response = helpers.jsonError("known");
+
+    expect(response.status).toBe(502);
+    expect(errorSpy).toHaveBeenCalledWith("route failed", {
+      errorResponseCode: "BILLING_DOWN",
+      errorResponseRetryable: true,
+      errorResponseStatus: 502,
+      errorResponseDetails: {
+        operationName: "subscription.update.plan-items",
+      },
+      errorType: "string",
+      errorValue: "known",
+      internalMessage: "route failed unexpectedly",
+    });
+    expect(errorSpy.mock.calls[0]?.[1]).not.toHaveProperty("errorDetails");
+  });
+
   it("includes optional sanitized log details for unexpected errors", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
