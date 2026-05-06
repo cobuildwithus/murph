@@ -53,6 +53,7 @@ export async function snapshotHostedBundleRoots(input: {
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   kind: HostedExecutionBundleKind;
   materializedPreservedArtifactPaths?: ReadonlySet<string>;
+  onBeforeSerialize?: () => Promise<void> | void;
   preservedArtifacts?: readonly HostedBundleArtifactLocation[];
   roots: readonly HostedBundleSnapshotRootInput[];
   shouldIncludePreservedArtifact?: (
@@ -143,6 +144,8 @@ export async function snapshotHostedBundleRoots(input: {
     });
     includedPaths.add(preservedPathKey);
   }
+
+  await input.onBeforeSerialize?.();
 
   return serializeHostedBundleArchive({
     files,

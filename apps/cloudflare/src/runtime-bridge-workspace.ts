@@ -35,6 +35,7 @@ import {
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedExecutionContext,
   type HostedCodexHomeSnapshotDiagnostics,
+  type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 
 import {
@@ -326,6 +327,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
   let externalArtifactPutCount = 0;
   let bundlePutBytes = 0;
   let leaseCheckCount = 0;
+  let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
   const snapshotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle({
     readCurrentLease: async () => {
       leaseCheckCount += 1;
@@ -345,12 +347,21 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
         codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
         operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
         vaultRoot: input.vaultRoot,
+        workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
+          workspaceSnapshotSizeDiagnostics = diagnostics;
+          await writeHostedCheckpointSnapshotSizeDiagnosticLog({
+            diagnostics,
+            platform: input.platform,
+            request: input.request,
+          });
+        },
       });
       await writeHostedCodexHomeSnapshotDiagnosticLog({
         diagnostics: snapshot.codexHomeSnapshotDiagnostics,
         platform: input.platform,
         request: input.request,
       });
+      workspaceSnapshotSizeDiagnostics = snapshot.workspaceSnapshotSizeDiagnostics;
 
       return snapshot.bundle;
     },
@@ -385,6 +396,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     platform: input.platform,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
+    workspaceSnapshotSizeDiagnostics,
   });
 
   let replica: Awaited<ReturnType<typeof createHostedBrowserVaultReplicaForSnapshot>>;
@@ -530,6 +542,7 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshot(input: {
     platform: input.platform,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
+    workspaceSnapshotSizeDiagnostics: null,
   });
 
   return {
@@ -791,6 +804,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
   snapshotElapsedMs: number;
+  workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
@@ -810,6 +824,12 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
     snapshotElapsedMs: input.snapshotElapsedMs,
     snapshotMode: input.mode === "hot" ? "hot-state" : "full",
   };
+  if (input.workspaceSnapshotSizeDiagnostics) {
+    appendHostedWorkspaceSnapshotSizeDiagnostics(
+      redactedJson,
+      input.workspaceSnapshotSizeDiagnostics,
+    );
+  }
 
   try {
     await input.platform.logPort.write({
@@ -832,6 +852,69 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
       errorName: error instanceof Error ? error.name : typeof error,
     });
   }
+}
+
+async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
+  diagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+}): Promise<void> {
+  if (!input.platform.logPort) {
+    return;
+  }
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointPolicy: "full",
+    checkpointReason: input.request.reason,
+    snapshotMode: "full",
+  };
+  appendHostedWorkspaceSnapshotSizeDiagnostics(redactedJson, input.diagnostics);
+
+  try {
+    await input.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: input.request.attemptId,
+          component: "workspace",
+          eventCode: "checkpoint.snapshot_size_progress",
+          leaseGeneration: input.request.leaseGeneration,
+          level: "info",
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: input.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted checkpoint snapshot size diagnostic log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+function appendHostedWorkspaceSnapshotSizeDiagnostics(
+  redactedJson: HostedRuntimeRedactedJson,
+  diagnostics: HostedWorkspaceSnapshotSizeDiagnostics,
+): void {
+  redactedJson.workspaceSnapshotClassSummary =
+    diagnostics.workspaceSnapshotClassSummary;
+  redactedJson.workspaceSnapshotExternalArtifactBytes =
+    diagnostics.workspaceSnapshotExternalArtifactBytes;
+  redactedJson.workspaceSnapshotExternalArtifactCount =
+    diagnostics.workspaceSnapshotExternalArtifactCount;
+  redactedJson.workspaceSnapshotFingerprintStatus =
+    diagnostics.workspaceSnapshotFingerprintStatus;
+  redactedJson.workspaceSnapshotIncludedFileCount =
+    diagnostics.workspaceSnapshotIncludedFileCount;
+  redactedJson.workspaceSnapshotInlineBytes =
+    diagnostics.workspaceSnapshotInlineBytes;
+  redactedJson.workspaceSnapshotLargestFiles =
+    diagnostics.workspaceSnapshotLargestFiles;
+  redactedJson.workspaceSnapshotMaxFileBytes =
+    diagnostics.workspaceSnapshotMaxFileBytes;
+  redactedJson.workspaceSnapshotMaxFileClass =
+    diagnostics.workspaceSnapshotMaxFileClass;
 }
 
 async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {

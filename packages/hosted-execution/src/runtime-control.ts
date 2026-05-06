@@ -404,6 +404,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.hot_state_fallback",
   "checkpoint.optional_sidecar_degraded",
   "checkpoint.snapshot_finished",
+  "checkpoint.snapshot_size_progress",
   "assistant.device_connect",
   "assistant.automation_detail",
   "assistant.pass_finished",
@@ -478,6 +479,7 @@ export interface HostedRunnerNudgeResult {
   accepted: boolean;
   alarmScheduled: boolean;
   alreadyRunning: boolean;
+  immediateDriveStarted?: boolean;
   inFlight: boolean;
   nextAlarmAt?: string | null;
 }
