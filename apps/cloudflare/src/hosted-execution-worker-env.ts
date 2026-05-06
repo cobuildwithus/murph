@@ -88,9 +88,7 @@ export function readHostedExecutionWorkerEnvironment(
         rejectHttpLoopbackInProduction: isProduction,
       },
     ),
-    // Temporary production hotfix: full idle-shutdown checkpoints currently
-    // exceed the stateless Worker artifact proxy memory budget on large workspaces.
-    idleShutdownCheckpointsEnabled: false,
+    idleShutdownCheckpointsEnabled: true,
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
       3,
