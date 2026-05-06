@@ -9,6 +9,11 @@ import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
+  DEFAULT_WEB_PORT,
+  DEFAULT_WORKER_PERSIST_DIR,
+  DEFAULT_WORKER_PORT,
+  HOSTED_WEB_DEV_DIST_DIR,
+  HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
@@ -24,6 +29,7 @@ import {
   buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
   resolveHostedLocalDatabaseUrl,
+  resolveHostedLocalPersistentCryptoStatePath,
   readOptionalSimpleEnvFile,
   readHostedLocalStripeEnvFile,
   readSimpleEnvFile,
@@ -70,9 +76,6 @@ import {
 } from "./vercel.ts";
 
 const HOSTED_WEB_HEALTH_PATH = "/api/internal/health";
-const HOSTED_WEB_HEALTH_COMMONS_DEV_CACHE_PATHS = [
-  path.join(webDir, ".next-dev", "dev", "cache", "fetch-cache"),
-];
 const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
   path.join(webDir, "src", "lib", "health-commons", "biomarker-detail.ts"),
   path.join(webDir, "src", "lib", "health-commons", "experiment-browse.ts"),
@@ -121,6 +124,7 @@ export async function startHostedLocalDevStack(input: {
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
+  assertHostedLocalE2eIsolation(initialEnv, config);
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = initialEnv.VERCEL_OIDC_TOKEN?.trim() || null;
   const hostedRunnerLocalBuildId = buildHostedRunnerLocalBuildId(
@@ -270,6 +274,20 @@ export async function startHostedLocalDevStack(input: {
     if (workerRuntimeEnv !== null) {
       const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
       const hostedLocalStateEnvText = `${buildHostedLocalStateEnvFileText(cloudflareDevVars)}\n`;
+      const persistentCryptoStatePath =
+        resolveHostedLocalPersistentCryptoStatePath(runtimeEnv);
+      const shouldLinkGlobalCloudflareDevVars = shouldUseGlobalCloudflareDevVarsSymlink(runtimeEnv);
+      if (persistentCryptoStatePath !== null) {
+        await mkdir(path.dirname(persistentCryptoStatePath), {
+          mode: 0o700,
+          recursive: true,
+        });
+        await writeFile(persistentCryptoStatePath, hostedLocalStateEnvText, {
+          encoding: "utf8",
+          mode: 0o600,
+        });
+        await chmod(persistentCryptoStatePath, 0o600);
+      }
       await writeFile(workerEnvPath, workerEnvText, {
         encoding: "utf8",
         mode: 0o600,
@@ -300,21 +318,23 @@ export async function startHostedLocalDevStack(input: {
         },
       );
       await chmod(workerConfigPath, 0o600);
-      try {
-        await rename(cloudflareDevVarsPath, workerDevVarsBackupPath);
-        hadExistingCloudflareDevVars = true;
-      } catch (error) {
-        if (
-          typeof error !== "object"
-          || error === null
-          || !("code" in error)
-          || error.code !== "ENOENT"
-        ) {
-          throw error;
+      if (shouldLinkGlobalCloudflareDevVars) {
+        try {
+          await rename(cloudflareDevVarsPath, workerDevVarsBackupPath);
+          hadExistingCloudflareDevVars = true;
+        } catch (error) {
+          if (
+            typeof error !== "object"
+            || error === null
+            || !("code" in error)
+            || error.code !== "ENOENT"
+          ) {
+            throw error;
+          }
         }
+        restoreCloudflareDevVars = true;
+        await symlink(workerDevVarsPath, cloudflareDevVarsPath);
       }
-      restoreCloudflareDevVars = true;
-      await symlink(workerDevVarsPath, cloudflareDevVarsPath);
     }
 
     requireEnvValue(
@@ -373,7 +393,7 @@ export async function startHostedLocalDevStack(input: {
         env: runtimeEnv,
         name: "setup",
       });
-      await invalidateHostedWebHealthCommonsDevCache(input.stderrTarget);
+      await invalidateHostedWebHealthCommonsDevCache(runtimeEnv, input.stderrTarget);
     }
 
     if (workerRuntimeEnv !== null) {
@@ -543,9 +563,8 @@ export async function startHostedLocalDevStack(input: {
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true });
         if (hadExistingCloudflareDevVars) {
-          await rm(workerDevVarsBackupPath, { force: true });
+          await rename(workerDevVarsBackupPath, cloudflareDevVarsPath);
         }
-        await rename(hostedLocalStateDevVarsPath, cloudflareDevVarsPath);
       }
       await rm(workerConfigPath, { force: true });
       if (!tempDirOverride) {
@@ -720,11 +739,12 @@ export async function startHostedLocalDevStack(input: {
 }
 
 async function invalidateHostedWebHealthCommonsDevCache(
+  env: NodeJS.ProcessEnv,
   stderrTarget: NodeJS.WritableStream | undefined,
 ): Promise<void> {
   let invalidated = 0;
 
-  for (const cachePath of HOSTED_WEB_HEALTH_COMMONS_DEV_CACHE_PATHS) {
+  for (const cachePath of resolveHostedWebHealthCommonsDevCachePaths(env)) {
     try {
       await rm(cachePath, { force: true, recursive: true });
       invalidated += 1;
@@ -760,6 +780,89 @@ async function invalidateHostedWebHealthCommonsDevCache(
       "[setup] Invalidated hosted web Health Commons dev cache.\n",
     );
   }
+}
+
+function assertHostedLocalE2eIsolation(
+  env: NodeJS.ProcessEnv,
+  config: HostedLocalDevConfig,
+): void {
+  if (!requiresHostedLocalE2eIsolation(env)) {
+    return;
+  }
+
+  const failures: string[] = [];
+
+  if (!config.skipWeb && config.webPort === DEFAULT_WEB_PORT) {
+    failures.push("MURPH_DEV_WEB_PORT must not use the interactive default");
+  }
+  if (config.workerPort === DEFAULT_WORKER_PORT) {
+    failures.push("MURPH_DEV_WORKER_PORT must not use the interactive default");
+  }
+  if (config.workerPersistDir === DEFAULT_WORKER_PERSIST_DIR) {
+    failures.push("MURPH_DEV_CF_PERSIST_DIR must not use the interactive default");
+  }
+  if (!config.skipWeb && env.NEXT_DIST_DIR_MODE !== "smoke") {
+    failures.push("NEXT_DIST_DIR_MODE must be smoke");
+  }
+  if (!config.skipWeb && !env.NEXT_DIST_DIR_SUFFIX?.trim()) {
+    failures.push("NEXT_DIST_DIR_SUFFIX must be set");
+  }
+  if (!config.skipStripeListen) {
+    failures.push("MURPH_DEV_SKIP_STRIPE_LISTEN must be 1");
+  }
+  if (config.linqWebhookTunnelMode !== "disabled") {
+    failures.push("MURPH_DEV_LINQ_WEBHOOK_TUNNEL must be disabled");
+  }
+  if (!config.skipLinqWebhookRegister) {
+    failures.push("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER must be 1");
+  }
+
+  if (failures.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Hosted-local E2E isolation is required, but this stack would overlap the interactive dev lane:",
+      ...failures.map((failure) => `- ${failure}`),
+    ].join("\n"),
+  );
+}
+
+function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
+  const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
+  return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
+}
+
+function shouldUseGlobalCloudflareDevVarsSymlink(env: NodeJS.ProcessEnv): boolean {
+  return !requiresHostedLocalE2eIsolation(env);
+}
+
+function resolveHostedWebHealthCommonsDevCachePaths(env: NodeJS.ProcessEnv): string[] {
+  const distDirName = resolveHostedWebDevDistDirName(env);
+  return [
+    path.join(webDir, distDirName, "dev", "cache", "fetch-cache"),
+  ];
+}
+
+function resolveHostedWebDevDistDirName(env: NodeJS.ProcessEnv): string {
+  const baseDistDir = env.NEXT_DIST_DIR_MODE === "smoke"
+    ? HOSTED_WEB_SMOKE_DIST_DIR
+    : HOSTED_WEB_DEV_DIST_DIR;
+  const configuredSuffix = env.NEXT_DIST_DIR_SUFFIX?.trim();
+
+  if (!configuredSuffix) {
+    return baseDistDir;
+  }
+
+  const normalizedSuffix = configuredSuffix.toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalizedSuffix)) {
+    throw new Error("NEXT_DIST_DIR_SUFFIX must use lowercase letters, digits, and hyphens only.");
+  }
+
+  return `${baseDistDir}-${normalizedSuffix}`;
 }
 
 function writeHostedWebHealthCommonsInvalidationWarning(

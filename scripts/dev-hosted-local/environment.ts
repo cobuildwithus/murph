@@ -6,6 +6,7 @@ import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
   DEFAULT_STRIPE_ENV_FILE,
+  HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -51,8 +52,22 @@ export async function resolveCloudflareLocalEnv(input: {
   oidcIdentity: HostedExecutionOidcIdentity;
   overrides?: Record<string, string | undefined>;
 }): Promise<Record<string, string>> {
+  const normalizedOverrides = normalizeOptionalEnvOverrides(input.overrides);
+  const useRemoteHostedCryptoKeys = isTruthy(normalizedOverrides[USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]);
   const originalContents = await readHostedLocalDevVarsText(cloudflareDevVarsPath);
   const existing = originalContents === null ? {} : parseEnvText(originalContents);
+  if (!useRemoteHostedCryptoKeys) {
+    stripHostedLocalGeneratedStateEnv(existing);
+  }
+  const persistentCryptoStatePath = resolveHostedLocalPersistentCryptoStatePath(
+    normalizedOverrides,
+  );
+  const persistentCryptoStateText = persistentCryptoStatePath === null
+    ? null
+    : await tryReadTextFile(persistentCryptoStatePath);
+  if (persistentCryptoStateText !== null) {
+    Object.assign(existing, parseEnvText(persistentCryptoStateText));
+  }
 
   return mergeCloudflareLocalEnv({
     config: input.config,
@@ -60,6 +75,16 @@ export async function resolveCloudflareLocalEnv(input: {
     oidcIdentity: input.oidcIdentity,
     overrides: input.overrides,
   });
+}
+
+export function resolveHostedLocalPersistentCryptoStatePath(
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  if (isHostedLocalE2eEnvironment(env)) {
+    return null;
+  }
+
+  return path.join(repoRoot, HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE);
 }
 
 export async function readHostedLocalDevVarsText(
@@ -393,6 +418,15 @@ function stripHostedLocalGeneratedStateEnv(env: Record<string, string | undefine
 
 function isTruthy(value: string | undefined): boolean {
   return value === "1" || value?.toLowerCase() === "true";
+}
+
+function isHostedLocalE2eEnvironment(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const profile = normalizeOptionalString(env.MURPH_HOSTED_LOCAL_PROFILE);
+  return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
 }
 
 function buildCallbackSigningPublicKeyringJson(input: {

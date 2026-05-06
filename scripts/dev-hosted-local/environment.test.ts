@@ -17,6 +17,7 @@ import {
   parseEnvText,
   readHostedLocalDevVarsText,
   resolveHostedLocalDatabaseUrl,
+  resolveHostedLocalPersistentCryptoStatePath,
   resolveHostedLocalStripeEnvFilePath,
   shouldSyncLocalDatabaseSchema,
 } from "./environment.ts";
@@ -655,6 +656,23 @@ describe("readHostedLocalDevVarsText", () => {
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
+  });
+});
+
+describe("resolveHostedLocalPersistentCryptoStatePath", () => {
+  it("uses an ignored interactive-dev crypto state file for normal pnpm dev", () => {
+    expect(resolveHostedLocalPersistentCryptoStatePath({
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+    })).toContain(".tmp/hosted-local-dev-crypto-state.dev.vars");
+  });
+
+  it("does not persist generated crypto state for E2E profiles", () => {
+    expect(resolveHostedLocalPersistentCryptoStatePath({
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+    })).toBeNull();
+    expect(resolveHostedLocalPersistentCryptoStatePath({
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+    })).toBeNull();
   });
 });
 

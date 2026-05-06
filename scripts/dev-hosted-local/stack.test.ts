@@ -1,4 +1,4 @@
-import { rename, symlink, writeFile } from "node:fs/promises";
+import { rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
 
@@ -245,6 +245,17 @@ vi.mock("./environment.ts", () => ({
     HOSTED_CRYPTO_ENV: "development",
     NODE_ENV: input.overrides?.NODE_ENV,
   })),
+  resolveHostedLocalPersistentCryptoStatePath: vi.fn((env: Record<string, string | undefined>) => {
+    const profile = env.MURPH_HOSTED_LOCAL_PROFILE;
+    if (
+      env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+      || profile === "e2e:stub"
+      || profile === "e2e:live"
+    ) {
+      return null;
+    }
+    return "/tmp/murph-dev-crypto-state.dev.vars";
+  }),
   warnForMissingEnv: vi.fn(),
 }));
 
@@ -437,12 +448,20 @@ describe("hosted local dev stack", () => {
         mode: 0o600,
       },
     );
-    expect(vi.mocked(rename)).toHaveBeenCalledWith(
-      "/tmp/murph-dev-env-test/hosted-local-state.dev.vars",
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      "/tmp/murph-dev-crypto-state.dev.vars",
+      'HOSTED_CRYPTO_ENV="local"\n',
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+    expect(vi.mocked(symlink)).toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars",
       expect.stringContaining("apps/cloudflare/.dev.vars"),
     );
     expect(vi.mocked(rename)).not.toHaveBeenCalledWith(
-      "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars.backup",
+      "/tmp/murph-dev-env-test/hosted-local-state.dev.vars",
       expect.stringContaining("apps/cloudflare/.dev.vars"),
     );
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(2);
@@ -462,6 +481,77 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("rejects E2E isolation when a stack would overlap interactive dev defaults", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+    })).rejects.toThrow(/MURPH_DEV_WEB_PORT must not use the interactive default/u);
+
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+  });
+
+  it("allows E2E isolation when ports, persist dir, and web artifacts are isolated", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "web",
+      expect.any(String),
+      expect.arrayContaining(["31001"]),
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(rm).toHaveBeenCalledWith(
+      expect.stringContaining("apps/web/.next-smoke-e2e-fixture/dev/cache/fetch-cache"),
+      { force: true, recursive: true },
+    );
+    expect(symlink).not.toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/cloudflare-worker.dev.vars",
+      expect.stringContaining("apps/cloudflare/.dev.vars"),
+    );
+    expect(writeFile).not.toHaveBeenCalledWith(
+      "/tmp/murph-dev-crypto-state.dev.vars",
+      expect.any(String),
+      expect.any(Object),
+    );
   });
 
   it("signals all child processes during stop before waiting for the first one to exit", async () => {
