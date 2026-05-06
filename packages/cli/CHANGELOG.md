@@ -2,6 +2,1388 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.1.0] - 2026-05-06
+
+### Added
+- add contact support action
+- add hosted mailbox payload decoder
+- add pulse trial checkout offer
+- harden AI usage allowance gate
+- add AI usage allowance gate
+- store stripe checkout email hint
+- welcome recent settings email links
+- send hosted signup welcome email
+- support linq email handles
+- route device connect through hosted runtime bridge
+- add mailbox lag sweeper
+- center verify/consent stages and use compact consent
+- add Tabata signal estimates
+- add hosted-local Codex bridge
+- add vitamin d3 expected signal metadata
+- add browser-vault biomarker panel
+- biomarker library page + filter dropdown polish
+- redesign biomarker detail page
+- add connect health source logos
+- mock private trend data for biomarker design iteration
+- shared RouteTabs with sliding olive indicator
+- add composable sample csv profiling
+- replace About column eyebrows with custom Quiver icons
+- redesign biomarker detail page with Overview/Research tabs
+- add daily step floor hero image
+- run health commons watcher in root dev
+- add health commons generate watch command
+- add hosted legal consent workflow
+- build out experiment Results tab with summary, schedule, and trend bands
+- gate experiment start with auth
+- split experiment tabs into dedicated routes
+- add auth button wrapper
+- admit active turn input before delivery
+- add active turn input journal scaffold
+- add high protein intake research package
+- redesign experiment detail page
+- add alcohol abstinence research package
+- empty-state ConnectedAccountCard parity and layout-stable status notes for phone+email
+- align email card with ConnectedAccountCard pattern
+- mask phone, drop Privy status row, unify phone/telegram identity card, tighten billing-portal error
+- add commons protocol exploration
+- add GitHub star counter to sticky nav
+- add hosted workspace runtime groundwork
+- add hosted conversation mailbox import adapter
+- add typed save parity batch
+- add typed experiment onboarding command
+- hard cut source evidence shape
+- hard cut source appraisals
+- add source identity indexes
+- land tabata interval training research
+- add health commons assistant tools
+- add /security marketing page
+- add cold plunge header media
+- land cold plunge package
+- land vo2 max and spo2 biomarker bundle
+- add hrv rmssd biomarker page
+- persist conversation onboarding lifecycle
+
+### Fixed
+- preserve preferred input cursor order
+- use IPC for runner child results
+- skip projection cleanup checkpoints
+- restore device sync on dirty nudges
+- back off failed nudge retries
+- preserve full stateful checkpoints
+- send ai usage notices reliably
+- link usage limit upgrade path
+- retry failed nudges quickly
+- record active invocation heartbeats
+- nudge runner in one durable object call
+- skip resumed CLI bootstrap regeneration
+- preserve local send timing logs
+- authorize proxied checkpoints
+- keep heartbeat wake compatible
+- avoid runner object calls on hot path
+- drain queued auto replies in same pass
+- skip runner bind on outbound hot path
+- avoid provider effect lease round trips
+- trim hosted auto-reply scan hot path
+- atomically write health commons artifacts
+- skip active-turn refresh on live sends
+- skip status refresh before live sends
+- keep hosted runner warm during live replies
+- unblock immediate deploy without email bind
+- speed active nudge replies
+- reuse hot restore state for nudge replies
+- skip device sync for nudge replies
+- skip device sync on active text input
+- keep hosted runner warm through checkpoint failures
+- reuse warm hosted runner restore roots
+- align hosted deploy workflow env
+- raise hosted Linq daily text limit
+- fetch hosted mailbox after restore
+- prune legacy hosted checkpoint reasons
+- raise hosted bundle compressed cap
+- keep outbox delivery off base snapshots
+- keep Codex home out of hot checkpoints
+- stabilize release checks
+- remove delegated gateway usage metering
+- replay transcript on fresh session resume
+- truncate biomarker metric footer labels
+- keep biomarker trend source labels accurate
+- swap connect source ordering
+- stop hosted Linq typing effects
+- keep Junction source instance ids
+- use source imports for loopback auth
+- publicize Junction wearable sources
+- trace structural codex resume failures
+- require OpenAI key for hosted runner deploy
+- avoid asking for connected wearable data
+- contract hosted platform env authority
+- stabilize hosted Codex cwd
+- avoid inline source links in replies
+- fail closed on hosted mailbox decode wiring
+- harden pulse trial phase handling
+- accept Gateway model ids for allowance pricing
+- add per-biomarker expected directions
+- harden junction dirty execution
+- recover invalid codex resume threads
+- isolate e2e runner cleanup
+- preserve hosted runtime failure diagnostics
+- stabilize runner e2e gates
+- expose missing hosted codex diagnostics
+- harden runner bundle packing
+- avoid parallel pg queries in linq webhook
+- preserve hosted codex failure diagnostics
+- recover stale local crypto state
+- refresh vulnerable npm packages
+- clamp dirty ack revision
+- allow local codex provider bridge hosts
+- clean up dev stack teardown
+- make Go home the primary CTA on device connect completion
+- link welcome email contact routes
+- clean up device connect completion page
+- format welcome email phone route
+- make dirty rollout deploy compatible
+- coalesce hosted webhook dirty work
+- guard reusable crypto state
+- clear stale checkpoint replica sidecars
+- load local env before dev db guard
+- fail fast on missing database url
+- satisfy raw log guard
+- keep reply intent after cleanup failure
+- degrade optional checkpoint sidecars
+- add hot-state checkpoints
+- allow checkpoint without browser replica
+- checkpoint browser vault replicas
+- auth-gate home lab sync CTA
+- auth-gate home lab sync CTA
+- avoid caching runner stubs
+- skip empty commit-barrier checkpoints
+- cache runner artifact path
+- stabilize hosted provider cwd
+- defer mailbox projection checkpoint
+- stabilize hosted usage JSON replay
+- route device connects through completion page
+- bound hosted runner retries
+- harden hosted mailbox fetch retry
+- harden hosted device account list
+- hide completed device onboarding
+- place connect URLs at message end
+- accept omitted optional fields
+- point Go home link to /home
+- reuse retry receipt snapshot
+- record retry exhaustion explicitly
+- cap auto-reply retry loops
+- preserve validation diagnostics
+- require experiment/logging step before marking onboarding complete
+- show loading state on invite send-code button while Privy initializes
+- send Linq read receipt after direct nudge
+- tolerate ignored next env stub
+- log post-checkpoint effect errors
+- bound CLI bridge connect requests
+- reject local-codex hosted assistant provider
+- harden hosted cli device connect bridge
+- remove connected-source consent gate
+- keep phone verify loading until consent
+- warm hosted inbox enrichment cache
+- make auto-reply prompts event-first
+- replace phone verification loader with disabled button
+- show sidebar logout failure
+- restore metric series raw alias
+- hide sidebar account label
+- reject unnormalized rolling goal windows
+- harden metric sample browser vault projection
+- harden browser vault selections
+- harden hosted gcp kms errors
+- trust explicit hosted onboarding dev origins
+- complete sample metric point shape
+- direct hosted webhook runner nudge
+- harden metric point extraction
+- harden mailbox lag sweeper
+- bound linq webhook payload handling
+- keep fresh mailbox retry blockers covered
+- provision hosted identity control root
+- drain retained wake queue
+- dedupe browser-vault storage key ids
+- group caffeine curfew research sources
+- cover selected research groups
+- cover tabata research groups
+- tighten hosted crypto greenfield APIs
+- harden hosted raw email storage
+- harden browser vault session parsing
+- align biomarker protocol signals
+- provision crypto roots in harness
+- update catalog hash after percentage-points → % unit change
+- persist generated dev vars on shutdown
+- restore cloudflare dev vars after stack
+- use workflow lazy discovery in dev
+- delay pending nudge continuation alarm
+- harden web runtime context config
+- make mailbox nudge workflow-owned
+- validate parser toolchain launch spec
+- keep Junction defaults default-enabled
+- keep Stripe webhook workflow pointer-only
+- fail closed empty Junction Link filters
+- add device-sync nudge workflow fallback
+- add email nudge workflow fallback
+- prevent junction summary id collisions
+- make hosted runtime credential union native
+- require hosted webhook runner nudge
+- keep floating cgm timestamps raw-only
+- build prompts from input metadata
+- remove Junction base URL override
+- preserve junction grouped source attribution
+- harden Junction sync handling
+- retry unknown junction webhooks
+- remove junction concurrency config knobs
+- drain runner nudges through durable object
+- expose junction sources as connect targets
+- use github link context
+- preserve libre floating junction timestamps
+- update daily step floor signal cards
+- instrument device connect diagnostics
+- refresh app verification expectations
+- update HBOT expected signals
+- update prolonged fasting signal metadata
+- update biomarker copy assertions
+- update red-light glasses signal metadata
+- polish biomarker layouts
+- restore hosted app verification
+- harden biomarker metric bindings
+- make join success return silent
+- harden hosted web dev cache refresh
+- expose sample summary subpath
+- use router replace for checkout success
+- hide alt auth methods after code sent, align join header with dashboard style
+- recover orphaned local daemon
+- remove em dash from invite feature copy
+- relax experiment prompt default
+- recover stale hosted web dev listener
+- use existing history for onboarding baselines
+- hide native health connect sources
+- use replacement connect logo assets
+- replace collapsed connect logos
+- remove manual connect source
+- show connect source status dots
+- show connect grid four columns at xl
+- normalize reported source participant counts
+- normalize sauna cohort participant counts
+- polish legal consent card
+- gate checkout with legal consent
+- bump experiment tab content top padding by ~8px
+- tab baseline respects content padding instead of full-bleed
+- align RouteTabs indicator with full-width baseline
+- redirect signup success to home
+- rename settings phone message CTA
+- tighten hosted privacy confirmation export
+- harden hosted privacy export deletion
+- stabilize hosted inbox e2e
+- normalize health commons signal labels
+- align health commons projection tests
+- scrub remaining health commons public copy fields
+- keep norwegian 4x4 title
+- stabilize app verification
+- align hosted health commons checks
+- restore hosted assistant checks
+- refresh health commons generated artifacts in dev
+- make auto-reply evidence authoritative
+- reuse healthy local worker
+- use code icon for open source trust item
+- rename intermittent fasting protocol
+- update checkout trust copy
+- restore experiment artwork
+- update above-fold images to preload
+- restore caffeine curfew artwork
+- split homepage nav auth actions
+- default hosted local web to localhost
+- tune hosted checkout card spacing
+- narrow hosted invite UI revert
+- dedupe local linq channel guard
+- split homepage signup CTA
+- refine experiment prompt guidance
+- tighten health commons prompt wording
+- pass experiment contact defaults to results
+- harden assistant state permissions
+- polish experiment detail empty states and login modal copy
+- wire hosted device connect capability
+- harden research ChatGPT tab ownership
+- align review-gpt profile audit
+- preserve runner image cache
+- stabilize hosted codex runner
+- restore hosted-local codex stub replies
+- keep research lanes in existing browser windows
+- keep research lanes in existing browser windows
+- guard research sends against reused chat tabs
+- clean up share-pack deletion residue
+- clean up share-pack deletion residue
+- unblock detail redesign merge
+- show safe assistant auth failures
+- preserve hosted assistant continuity
+- add footer medical disclaimer
+- bubble hosted runtime failure details
+- pass hosted mailbox env through platform runtime
+- serialize mac host package build
+- align release coverage gates
+- reject absolute web-control routes
+- align disconnected settings rows
+- allow workspace read proxy route
+- align prepared runtime smoke subpaths
+- bootstrap first workspace crypto
+- preserve idle runner nudges
+- prevent background review-gpt target creation
+- harden side-input checkpoint paths
+- sync telegram settings in background
+- keep research browser lanes backgrounded
+- sequence onboarding toward experiments
+- clarify first-run onboarding guidance
+- default codex model to gpt-5.5
+- hard cut cloudflare hosted control client
+- surface prompt cache diagnostics
+- keep assistant audit rows out of replay
+- apply hosted default target to sessions
+- gate OpenAI response resume ids
+- prefer platform env profile
+- mirror pnpm release-age policy in runner bundle
+- restore release app and cli shards
+- update research scaffold expectations
+- remove legacy findings prompt tokens
+- remove Linq ingress typing bursts
+- harden harvest helpers
+- clean up vault sync retention
+- stop typing before committed delivery
+- reject unsafe production hosted origins
+- hard-cut reply alias route keys
+- summarize json attachment evidence
+- clarify auto-reply revision progress
+- summarize tabular attachment evidence
+- send codex app-server sandbox modes
+- add inline Linq ingress typing burst diagnostic
+- allow larger text attachment outputs
+- clarify wearable callback guidance
+- add Linq ingress typing burst diagnostic
+- add Linq ingress typing diagnostic
+- make invite phone target explicit
+- restore gradual container rollout
+- restore masked invite phone shortcut
+- initialize workspace lock state before recursion
+- await workspace lock child exit
+- mask join invite phone prefill
+- use edge bundle validation paths
+- validate runner output at edge
+- update wearable-optional copy
+- pin research harvests to send browser lane
+- remove wearable-required product copy
+- recycle invalid runner output containers
+- gate linq participant sendability
+- use checklist onboarding prompt
+- stop invalid bundle alarm loop
+- soften hosted signup welcome prompt
+- keep onboarding oriented before troubleshooting
+- avoid advisory lock query rows
+- harden assistant-facing vault errors
+- pin profile wake endpoint
+- tighten signup welcome copy
+- refresh signup welcome copy
+- green repo acceptance and land pending worktree
+- lazy-load public seams
+- align query runtime seams
+- normalize connector namespace accounts
+- snapshot persisted attachment bytes
+- simplify parser write paths
+- harden hosted device-sync runtime validation
+- revoke orphaned Oura grants
+- retry duplicate stripe webhook reconciliation
+- align memory ids and frontmatter
+- align WHOOP refresh token rotation
+- prewire research prompts to harvested downloads
+- preserve telegram cleanup metadata
+- harden telegram cleanup follow-ups
+- make pending cleanup persistence best effort
+- scope telegram cleanup retargeting
+- delete pending cleanup sidecars
+- route telegram business cleanup deletes
+- tighten hosted run observability privacy
+- sanitize hosted run redacted summaries
+- make research QA read page-builder artifacts
+- harden vault sync and device sync boundaries
+- add estimated vo2 max wearable typing
+- harden vault sync imports
+- serialize scheduled log occurrence replay
+- harden research thread wake recovery
+- harden research workspace packaging
+
+### Changed
+- prepare verified 1.1 state
+- Add Edge upgrade confirmation dialog
+- Remove hosted billing backfill tooling
+- Fix Stripe Edge upgrade payload
+- Fix hosted billing period snapshots
+- redeplouy
+- Use dedicated billing backfill secret
+- Add live hosted runner lease checks
+- Fix hosted Stripe Edge plan upgrades
+- Add hosted billing snapshot backfill route
+- Verify inbox daemon PID ownership before stop
+- Add hosted lease validation latency probe
+- Remove review-gpt research CLI
+- Fix canonical cron stale claims
+- Fix concurrent goal upserts
+- fix hosted-local tunnel cleanup scope
+- Fix goal metric target upserts
+- Add hosted Edge billing upgrade
+- fix regimen registry write locking
+- fix assistant automation state write locking
+- fix health commons study url scheme validation
+- Clean warm runner orphan processes
+- remove stale vault sync example
+- Pin release workflow actions
+- Pin deploy workflow actions and scope secrets
+- Unify hosted auth modal
+- Clean up usage banner and narrow join invite form
+- Harden deploy workflow input handling
+- remove temporary latency diagnostics
+- Make hosted AI usage notices one-shot
+- ignore deepsec workspace
+- remove hosted base refresh plan
+- expose linq webhook outcome logs
+- trace provider turn latency
+- trace assistant automation pass latency
+- accept runner idle ttl deploy override
+- Add hosted restore timing logs
+- Fix device sync secret lifecycle
+- Make snapshot stress use Linq webhook latency
+- Fix hosted device-sync disconnect race
+- align hosted refresh ledger
+- refine hosted base refresh plan
+- plan hosted base refresh
+- Enforce callback nonce minimum
+- Harden Strava webhook signature verification
+- Fix Linq webhook idempotency
+- Harden Cloudflare callback timestamp window
+- Add hosted snapshot stress e2e
+- add custom entrypoint matchers
+- reproduce hosted Codex checkpoint fallback
+- Fix hosted runner lease version drift
+- fix hosted local stub openai env test
+- fix hosted runner container rollout recovery
+- Move home icons import and bump icon size
+- Update auth dialog UI and pricing copy
+- align hosted runtime coverage
+- Prefer hosted assistant runtime env target
+- Add hosted Codex auth deploy guard
+- fix hosted OpenAI Codex auth
+- archive completed active plans
+- Update Wrangler deploy diagnostics
+- Redesign biomarker pages: recharts trend, browse card cleanup, ApoB/sleep-quality content
+- Simplify hosted assistant error logging
+- Fix Pulse Trial activation without period fields
+- Simplify hosted local Codex provider handoff
+- Log redacted hosted assistant errors
+- Fix hosted local Codex provider routing
+- Persist redacted hosted error diagnostics
+- Ignore generated Cloudflare deploy artifacts in crypto guard
+- cover hosted usage allowance pricing
+- Add Codex resume failure diagnostics
+- Fix hosted OpenAI usage snapshot pricing
+- Harden Privy completion user fallback
+- Add Codex invalid-output resume diagnostics
+- Fix runtime-state loopback auth export
+- Avoid Node init in hosted Worker deploy
+- Send Codex resume instruction overrides
+- Fix hosted Telegram link sync race
+- Seed hosted runner alarm test provider env
+- Use Codex builtin OpenAI provider
+- Complete hosted web local proxy env support
+- Switch hosted assistant to OpenAI
+- Harden hosted Linq recovery effects
+- Add hosted provider effects bridge
+- Update hosted Codex snapshot policy
+- Fix hosted local Codex shim continuity
+- Implement hosted mailbox latency cleanup
+- clean up hosted codex continuity seams
+- Add consumption lookup prompt guidance
+- make hosted continuity fixture policy explicit
+- add hosted mailbox decode phase plan
+- repair legacy hosted codex continuity
+- forbid env pull inspection
+- Fix Linq quota notice delivery
+- Harden first-session prep automation prompt
+- fix hosted codex continuity checkpoints
+- Refine experiment CLI typed surface
+- Add first-session prep reminder guidance
+- Add hosted runner static secret invariant test
+- harden codex continuity plan
+- revise codex continuity plan
+- Refine Pulse Trial implementation shape
+- Stress-test Pulse Trial implementation spec
+- Add Pulse Trial checkout offer spec
+- plan codex continuity architecture
+- note Codex CLI checkout location
+- raise local verify concurrency defaults
+- improve verification timing output
+- Hydrate Junction provider in hosted runtime
+- require deployment concerns handoff
+- hard cut dirty runtime protocol
+- trim hosted deploy e2e gates
+- fail fast on hosted runner errors
+- export hosted workspace checkpoint seed
+- improve welcome email wording
+- let immediate deploy skip e2e gates
+- update welcome next step
+- record protocol deploy compatibility rule
+- Fix hosted midnight reminder scheduler
+- cover degraded active-turn refresh
+- close connect and hot-state plans
+- require finish-task for active plans
+- stabilize repo check repairs
+- Guard local Linq inbound handling
+- Run web migrations on production deploys
+- Route Prisma migrations through direct database URL
+- assert liveness with degraded runner lanes
+- Disable web build migration hook
+- guard shared branch reconciliation
+- cover checkpoint replica compatibility
+- fix hosted execution barrel export
+- cover checkpoint replica compatibility
+- guard production builds with prisma migrations
+- cover invite email verification UI
+- add blacksmith deploy e2e gates
+- close browser vault replica checkpoint plan
+- gate deploy on codex cache prefix e2e
+- update device connect route docs
+- assert codex cache prefix fingerprint
+- close prompt cache gateway e2e
+- guard hosted codex skill prompts
+- add codex gateway prefix diagnostic
+- Persist Junction source rows on callback
+- Add WHOOP day strain metric policy
+- Fix hosted device connect completion flow
+- fix hosted device sync wake import recovery
+- Update connect success copy
+- Hide SDK-only connect sources
+- Sort connect sources by connection and popularity
+- Fix Codex resumed usage extraction
+- sanitize real Codex e2e failures
+- Add hosted checkpoint baseline e2e
+- Fix hosted Codex usage cache aggregation
+- Clear hosted Codex resume ledger row
+- Fix hosted Codex resume continuity
+- prove artifact lease rejection skips crypto
+- align hosted codex self-brick regression
+- Update runner-outbound.test.ts
+- rm hacky cache
+- Close runner crypto context cache plan
+- Harden hosted Codex session snapshot filter
+- improvements
+- save .codex
+- Fix hosted device OAuth callback metadata
+- more fixes
+- Cache hosted runtime crypto envelopes
+- Preserve hosted inbox failure reasons
+- Add provider plan diagnostics
+- Mark unsupported parser attachment evidence
+- Tighten hosted Codex resume and usage proof
+- Update assistant-local-service-runtime.test.ts
+- fix token consumption bug
+- redeploy after stale runner cleanup
+- redeploy stale runner cleanup env
+- run stale runner cleanup every minute
+- close stale runner cleanup ledger
+- cover stale runner cleanup cron route
+- vercel cron
+- clear hosted mailbox retry ledger
+- retries
+- mark attachment prompt wording handoff
+- fix bugs
+- finalize onboarding cli surface
+- Update assistant-store-runtime.test.ts
+- fixes
+- Update assistant-command-coverage.test.ts
+- Update assistant-command-coverage.test.ts
+- fix onboarding guidance
+- clear cli surface fallback ledger row
+- close cli surface fallback plan
+- fixes
+- onboarding injection
+- Revert "fix(web): hide completed device onboarding"
+- fixes
+- Update assistant-cli-contracts.ts
+- fingerprint and fixxit!
+- fix assistant finalizer preserve provider config
+- align messaging return copy
+- Update route.ts
+- Close hosted projection effect result plan
+- more fixes
+- Land provider thread scope hard cut
+- runtime provider testts
+- Preserve importer validation causes
+- Add compact assistant protocol index
+- Improve sanitized device-sync validation logging
+- Redirect checkout success to home
+- align release shard expectations
+- device sync fallback
+- Remove confirmationPrompt from all protocol files
+- Reduce experiment onboarding verbosity and remove mandatory confirmation gate
+- Harden homepage auth when DB unavailable
+- Fix hosted-local runner CLI bundle
+- Log redacted hosted assistant failures
+- Start Linq typing after direct nudge
+- linq read
+- fix local stack
+- more cleanup
+- close CLI bridge env constants plan
+- more cleanup
+- Preserve hosted CLI device return target
+- Tighten assistant attachment evidence
+- Harden Cloudflare container health test
+- more cleanup
+- Land inbox attachment evidence hard cut
+- hard cut codex app-server bridge
+- close hosted cli device connect plan
+- Land assistant attachment evidence foundation
+- plan hosted cli device connect bridge
+- Fix queued phone verification sends
+- Add hosted device-sync failure logs
+- clear completed ci runner ledger row
+- move off blacksmith for now its expensive
+- better codex logging
+- Remove saved invite phone setup gate
+- Always keep accepted consent visible
+- Move Linq read receipts into webhook workflow
+- Gate browser vault loads on client auth
+- Keep join consent UI stable during handoff
+- remove auto-reply naming cleanup ledger row
+- fixes
+- remove closed auto-reply ledger row
+- close auto-reply event admission plan
+- test updates
+- add safety pill icons for better visual differentiation
+- tighten 1-10 scale wording
+- improvements
+- fix stop conditions and tips to be more readable
+- update good practices tips
+- tighten protocol tips
+- update tips for alcohol-abstinence, meditation, tabata, post-meal walking, zone-2
+- refresh good-practice protocol tips
+- tips update
+- update prolonged fasting tips
+- close e2e tests green plan
+- add more debug logs
+- Move connect consent recovery into dialog
+- Move Privy warmup into join layout
+- Keep settings display app-session sourced
+- require root-cause bug investigations
+- Consolidate auth dialog + phone country code providers into root layout
+- Remove unused HeartbeatButton component
+- Keep hosted invite auth app-session only
+- expected direction
+- close homepage auth preload plan
+- Close hosted web session hygiene cron plan
+- metrics cleanups
+- Harden billing success app-session auth
+- Close hosted app session hardening plan
+- app settings
+- clear metric sample patch ledger row
+- Revert hero video background — not loading reliably
+- Update vault-source.ts
+- metric fixes
+- update signed-out connect auth assertion
+- fix health metric daily aggregate unit handling
+- more fixes
+- Close metric selector patch ledger
+- metric patches
+- refine sidebar logo heartbeat: subtler scale, animated opacity on outer rings
+- close vercel build oom plan
+- Fix hero headline line-height: tighter on desktop, roomier on mobile
+- more measurement fixes
+- new auth
+- Update schemas.ts
+- Update zod.ts
+- Update constants.ts
+- more metric improvements
+- Exercise rolling metric goal target-date anchor
+- Fix rolling metric goal anchor test dates
+- Fix rolling metric goal target-date anchoring
+- Update query.ts
+- big metrics fix
+- Replace "Loading sign in..." text with skeleton matching the auth UI layout
+- tighten hosted crypto token scope coverage
+- Fix metric catalog follow-up coverage
+- Close hosted-local Linq diagnostics plan
+- Fix hosted-local Linq webhook registration idempotency
+- close metric patch ledger row
+- Close biomarkers dashboard route plan
+- more metrics fixes
+- Close Privy provider boundary plan
+- privy splitting
+- final fixes
+- more schema fixes
+- Complete Linq robustness patch
+- land patches
+- Close MetricPoint hard cut ledger row
+- Finalize MetricPoint hard cut coverage
+- align mailbox retry import log assertion
+- more fixes
+- close hosted linq mailbox robustness ledger
+- land hosted linq mailbox retry robustness
+- more fixes
+- more metric fixes
+- improve metric points
+- land new query metrics
+- clear local Linq tunnel ledger row
+- docs/tests: close local Linq tunnel harness follow-up
+- update safe route logging expectations
+- linq webhook fixes
+- local linq webhook tunnel
+- mark local e2e verification complete
+- close wearable metric points plan
+- test biomarker private metric wiring
+- Update hosted-onboarding-linq-dispatch.test.ts
+- some final fixes
+- metricpoint landing
+- copy + mobile fixes
+- mobile fixes and polish
+- refresh stale app assertions
+- fix bug
+- Populate Health Commons source metadata
+- Land final hosted crypto cleanup patch
+- finish five protocol research grouping
+- Group medium Health Commons research artifacts
+- cover hosted crypto primitives
+- group bryan johnson sauna research
+- Close almost-done research group plan
+- copy fixes
+- more fixes
+- root key id fixes
+- Update index.ts
+- content updates
+- Require browser vault runtime root key id
+- Fix Health Commons research group coverage
+- Fix hosted workflow step registration
+- crypto followups
+- Fail production hosted web loopback config
+- guard hosted platform private key env
+- test + crypto fixes
+- clear completed crypto cleanup ledger
+- prune stale execution plans
+- archive closed mailbox migration plan
+- speed up hosted local runner bundle
+- compact root agent router
+- refresh greenfield architecture metadata
+- close Cloudflare greenfield plan
+- keep legacy field rejection fail closed
+- improvements
+- document vault-usecases owner
+- Refresh Greenfield architecture docs
+- add whyItWorks and mechanismChain copy guidelines to page-builder prompt
+- document hosted R2 namespace boundary
+- Drain retained Cloudflare runner wake queue
+- Bridge hosted crypto deploy env names
+- Fix browser vault abort test typecheck
+- Get hosted local and acceptance gates green
+- project biomarker protocol images
+- Tighten hosted mailbox root handling
+- test fixes
+- encryption hardening
+- new vault work
+- Land device connect source cleanup
+- Close greenfield cleanup patch plan
+- new data
+- new encryption
+- Harden hosted crypto hard-cut tests
+- encryption patch
+- cover markdown protocol mechanisms
+- Add silent meditation session shape
+- Fix hosted crypto hard-cut follow-ups
+- pr 1-4
+- copy updates
+- Remove tautological protocol outcome signals
+- Land Norwegian 4x4 mechanism copy
+- fix markers
+- update biomarker range guidance
+- tighten protocol signal descriptions
+- markdown
+- close gcp kms plan ledger
+- align hosted crypto domain-root coverage
+- Update domain-root-store.ts
+- Update hosted-crypto-gcp-kms.test.ts
+- Update gcp-kms.ts
+- more encryption cutover
+- tighten norwegian 4x4 signal copy
+- land hard cut
+- Remove base commit from review-gpt prompt
+- Harden Junction webhook and floating-time imports
+- Route hosted-local commands through harness
+- cover wake-only runner alarms
+- Land Junction webhook cleanup
+- Cover hosted crypto context domain selection
+- Finish hosted GCP KMS crypto landing
+- encryption improvements
+- Close hosted-local final fixes plan
+- Close Codex authority plan
+- land encryption changes
+- Simplify hosted runner nudge drain
+- align hosted assistant input migration guide
+- Land Codex authority hard cut
+- close telegram fallback plan
+- close bounded nudge retry landing
+- land patches
+- Close hosted parser toolchain plan
+- new cleanup
+- Remove projection retry schema shim
+- Harden join invite server islands
+- Fix idle hosted runner nudge fallback
+- Remove legacy startup recovery capture fallback
+- Simplify hosted webhook nudge workflow
+- Stop storing hosted email attachment filenames
+- Close hosted provider-config hydration ledger
+- Fix hosted provider-config token API guards
+- commit
+- Guard hosted email placeholder auto-replies
+- Make hosted parser profile semantic
+- Simplify hosted projection retry state
+- Remove Cloudflare runner wake queue
+- Remove Cloudflare runner wake queue
+- Deduplicate Junction provider filter ownership
+- Hard-cut assistant input event ids
+- Fail closed on assistant input metadata replay changes
+- Harden hosted parser toolchain projection
+- Update junction.ts
+- more fixes
+- Remove direct Garmin device provider
+- cover junction serializable secrets
+- validate provider capabilities
+- guard provider-config token sentinel shape
+- finish provider handler cleanup
+- Simplify hosted runner nudge wake path
+- Checkpoint hosted mailbox projection after staging
+- Harden assistant-input accepted input refs
+- push account credentials into union
+- Fix hosted assistant input identity
+- Add Python to hosted runner
+- fix hosted whisper env preservation
+- Split hosted invite verification state
+- Add silent meditation signal metadata
+- Land biomarker browser vault final fixes
+- Fix hosted Linq welcome identity
+- Update dry sauna expected signals
+- Update collagen peptide signal metadata
+- update caffeine curfew signal metadata
+- update alcohol abstinence signals
+- revise omega-3 protocol signals
+- update high protein signal metadata
+- update no added sugar signals
+- update creatine signal metadata
+- Update Bryan Johnson sauna signal metadata
+- add pneumatic compression signal metadata
+- update pre-sleep resonance signals
+- Fix hosted device connect key id fixture
+- update static stretching signal cards
+- tighten itbs signal cards
+- Update psyllium cholesterol signal metadata
+- update cold plunge signal metadata
+- Update Digital Sunset signal metadata
+- Land morning light signal metadata
+- update red yeast rice signal cards
+- Update post-meal walking signal metadata
+- refine skin PBM signal cards
+- Keep Junction callback reconciliation weak
+- Update consistent wake time signal metadata
+- Harden Junction final audit fixes
+- Add hosted Linq duplicate welcome repro
+- refine whole-body pbm signals
+- update TRE signal metadata
+- Land Zone 2 aerobic signal metadata
+- Guard wearable connect link truthfulness
+- Update Norwegian 4x4 expected signals
+- Add Junction source-aware wearable policy
+- Vertically center sidebar nav between logo and account menu
+- Update Health Commons signal prompt guidance
+- Tighten biomarker explainer card copy
+- prune legacy hosted execution notes
+- restore hosted workflow checks
+- Add Junction webhook handling
+- Route authenticated 404 back link home
+- Wire biomarker about content from Health Commons
+- Add Junction device sync primitives
+- Fix biomarker skeleton layout jump by matching empty state dimensions
+- Improve biomarker trend loading skeleton and revert consent skeleton
+- Redesign biomarker empty state and simplify consent loading
+- Use PageHeader on biomarker detail, increase section spacing
+- remove legacy vault sync paths
+- update review-gpt to 0.5.86
+- Polish connect page copy and auth dialog UI
+- Clean up security page copy
+- Simplify legal and subprocessors page styling
+- Improve connect provider logos
+- Wire Junction deploy env
+- Simplify assistant input admission
+- Fix sample telemetry storage bloat
+- fold junction fixes into plan
+- clarify junction implementation fixes
+- remove superseded junction plans
+- update junction primitive plan
+- plan junction parallel execution
+- capture biomarker patterns in DESIGN.md and PRODUCT.md
+- plan junction device sync provider
+- Log hosted inbox parser failures
+- update accepted input journal expectations
+- Simplify assistant input delivery authority
+- Remove home memory copy
+- Polish onboarding UI, copy, and sidebar mobile tap targets
+- Make homepage signup CTA single button
+- Add sample smoke scenarios
+- Simplify assistant input admission spine
+- Gate dashboard CTAs with auth buttons
+- Rewrite assistant system prompts to GPT-5.5 conventions
+- simplify assistant input spine
+- Use Hey Murph email subject
+- Fix Murph mailto subject encoding
+- Prefill Telegram upload labs drafts
+- Route upload labs through Murph contact
+- finalize biomarker card with square-stretched image
+- biomarker card with match top-right + duration/burden columns
+- Resolve hosted Murph contact routing
+- polish biomarker experiment card stat band
+- biomarker-personal experiment card with match % + signal band
+- Add hosted assistant input hard cut plan
+- Add home page with onboarding cards and polish sidebar navigation
+- Add durable assistant input store
+- replace biomarker breadcrumb with top-right back link
+- move biomarker eyebrow + title + summary into shared layout
+- align biomarker page padding with experiment page
+- Add assistant input source contract
+- Add hosted assistant input parallel execution plan
+- Add hosted assistant input migration guide
+- Wire hosted onboarding monthly pricing
+- Polish join page: copy updates, audit fixes, and design token cleanup
+- Simplify device sync read paths
+- Redesign join page with 3-tier pricing and updated copy
+- Tighten browser experiment results projection
+- Fix local device sync daemon credential errors
+- trim biomarker About column prose to scannable length
+- Decouple hosted inbox capture from runtime launch
+- merge biomarker overview hero with About + 2-col experiments
+- Fix hosted legal consent recovery
+- Handle hosted wearable connect links
+- Update security-teaser-section.tsx
+- Update murph-finnish-standard-3x-week.md
+- update protocols
+- Update pneumatic compression pants artwork
+- Update intermittent fasting artwork
+- Land Finnish sauna biomarker estimates
+- update summaries
+- add target-aware review gpt protocol packaging
+- Land hosted export delete final fixes
+- prevent source-key leakage in research prompts
+- exclude protocol generated commons artifacts
+- isolate hosted local e2e databases
+- Restore Linq webhook read receipts
+- prove hosted reset replay
+- Fix hosted local dev teardown on Ctrl-C
+- add review-gpt protocol bundle
+- Add confirmed settings data export
+- fix hosted local runner control url
+- Remove Health Commons source-key prose leaks
+- Simplify Health Commons projection loaders
+- Speed up dashboard sidebar auth
+- Fix BrowserVault experiment schedule edge cases
+- stop tracking local temp artifacts
+- Mark HBNR docs landing complete
+- restore hosted invite checkout UI
+- land provider fixes
+- Add Health Commons experiment projections
+- Land final privacy policy adjustments
+- Land final legal adjustment notes
+- Fix hosted auto-reply replay evidence
+- Land consumer health data privacy policy
+- Add Health Commons research tab projection
+- Hard-cut dead assistant runtime code
+- Land Health Commons route bundles
+- wire local Stripe checkout env
+- document local Stripe test checkout
+- polish experiment channel picker
+- Harden hosted local dev startup
+- Align health legal terms
+- Harden health privacy policy
+- Make experiment start CTA route contacts
+- Expose hosted PDF parser toolchain
+- add hosted device connect smoke
+- Align hosted security copy with privacy policy
+- Move settings into account menu
+- Refine cold plunge reducer landing
+- Add hosted HIPAA firewall copy
+- Wire real experiment results data
+- Align assistant prompt with Codex-only runtime
+- Expose runner heartbeat on worker stub
+- Remove legacy assistant runtime seams
+- Remove native Codex PDF file rollback residue
+- Repair CLI deploy type contracts
+- Align active turn admission call sites
+- Restore active turn input type seam
+- test hosted codex self brick recovery
+- Simplify active-turn admission ordering
+- Simplify active-turn admission ordering
+- Remove Codex app-server file input support
+- Fix Codex provider capability contract
+- Fold hosted input into active turns
+- Fix hosted runner login shell PATH
+- Land cold plunge research package
+- Add hosted runner CLI shell smoke proof
+- Land completed Health Commons research packages
+- add real Codex PDF e2e check
+- Simplify Cloudflare runner scheduling
+- Add experiment results parallel batch prompts
+- Narrow experiment schedule plan
+- Add native Codex PDF file injection
+- Clarify experiment results selector contract
+- Tighten experiment schedule hard cut plan
+- Set hosted Codex smoke sandbox
+- Simplify experiment results MVP plan
+- Refine experiment results data plan
+- Harden hosted Codex shell smoke
+- Keep successful Cloudflare runners warm
+- Plan real experiment results data wiring
+- Fix hosted Codex shell env policy
+- fix hosted parser drain before assistant
+- fix hosted mailbox cleanup checkpoint ordering
+- fix hosted attachment checkpoint resilience
+- fix hosted attachment parser resilience
+- stress-test best-effort attachment runtime plan
+- plan best-effort attachment runtime
+- cover silent preservation retry pass
+- cover hosted pdf preservation init boundary
+- Send Linq read receipts on webhook ingress
+- use published review-gpt 0.5.85
+- Use queue-backed Cloudflare runner wake
+- Fix runner whisper smoke portability
+- Simplify research runner lane flow
+- Unify hosted auth flow
+- Restyle sidebar logged-out auth panel
+- Route Murph links to experiments
+- Fix Health Commons protocol artwork metadata
+- Fix Health Commons protocol artwork metadata
+- Fix active plan ledger alignment
+- Fix hosted web verification warnings
+- Update Health Commons experiment library metadata
+- Address final Codex hard-cut audit findings
+- Complete Codex app-server hard cut
+- Hard cut assistant runtime to Codex app server
+- simplify protocol signal copy
+- add protocol signal mechanisms
+- add protocol signal descriptions
+- Strengthen Codex worker subagent prompts
+- Plan Codex app-server hard cut
+- Fix Vercel gateway model setup
+- delete share packs
+- Fix review-gpt packaging warning output
+- mock Vercel gateway Linq fast reply
+- Harden active turn checkpoint rejection
+- Add Linq mark-read activity
+- consolidate cloudflare local e2e scripts
+- Tighten active turn admission followups
+- Prune review-gpt upload bundles
+- fix tests
+- Unify active turn input admission controller
+- Fix hosted Linq delivery wake handling
+- Harden hosted active turn checkpoint metadata
+- Complete active turn input hardening
+- Add aerobic base and caffeine timing workflows
+- Add prolonged fasting health commons research
+- fix hosted active turn input port gating
+- Fix active turn steering boundaries
+- Fix host support CI expectations
+- redesign safety section, polish mobile layout
+- Resume pending work and run requested deploy sweep
+- Fix hosted runner checkpoint lease state
+- Remove completed meditation research ledger row
+- Finish pre-sleep silent meditation cleanup
+- Add pre-sleep silent meditation research
+- Simplify hosted phone auth recovery copy
+- Fix hosted phone auth recovery UX
+- cover workspace crypto bootstrap branches
+- Fix hosted invite server auth gate
+- add immediate Cloudflare deploy shortcut
+- shorten hosted deploy smoke retry delay
+- instrument hosted runtime logs
+- avoid runner package tar stdout overflow
+- update Cloudflare deploy workflow contract
+- tighten hosted observability logs
+- Migrate workflows to Blacksmith
+- fixes
+- add more logs
+- protocol tab simplify pass
+- fix bug
+- Remove hosted onboarding advisory locks
+- Remove hosted mailbox advisory lock
+- fix experiment notifs
+- Log hosted Stripe reconciliation diagnostics
+- Fix hosted web browser-vault client bundle
+- Fix deploy verification gates
+- experiment progress fixes
+- Show routed Murph SMS number in settings
+- Polish settings messaging account cards
+- Fix hosted Privy no-account sign-in UX
+- Fix stale device-sync daemon recovery
+- hard-cut thin runner semantics
+- Make scheduled-log own recurring food auto-logs
+- Treat supplement as regimen facade
+- Pace experiment onboarding questions
+- Suppress raw experiment identifiers in onboarding
+- Fix hosted runner bundle build boundary
+- Hard cut hosted runtime to mailbox checkpoints
+- Hard cut typed CLI edit commands
+- Hard-cut CLI JSON import escape hatches
+- Fix hosted web dev refresh
+- remove obsolete command capability taxonomy
+- Land cholesterol Health Commons research
+- Land pre-sleep downshift Health Commons content
+- add static stretching flexibility research
+- Hard-cut CLI JSON imports to typed surfaces
+- hard cut health registry JSON upserts
+- add typed incur parity for write commands
+- drop unsupported legacy upsert config flag
+- Fix hosted Responses poison receipt recovery
+- Hard cut private protocol model
+- keep research qa single-pass
+- tighten hosted runtime migration guide
+- add hosted runtime hard cut migration guide
+- Document research harvest lane rebalancing
+- test update
+- Fix Cloudflare node runner summary assertions
+- Add typed health save CLI commands
+- adopt review-gpt snapshot attachment alias
+- Move hosted provider cleanup into runtime
+- Add vitamin D and no-added-sugar commons research
+- Use continuity fingerprint for assistant session refresh
+- Fix Responses history replay mode
+- stabilize assistant prompt cache prefix
+- Add Linq typing API repro harness
+- Revert "Delete hosted Linq messages after send"
+- Add Health Commons measurement methods
+- isolate Linq webhook e2e members
+- Add current-thread reminder helper
+- Delete hosted Linq messages after send
+- Persist assistant audit replay entries
+- Default hosted signup timezone fallback to New York
+- Fix hosted iMessage reminder route context
+- Centralize Health Commons wildcard filters
+- Fix settings email link flow
+- Capture hosted signup timezone for vault bootstrap
+- Add Health Commons wildcard coverage
+- Simplify hosted typing lifecycle
+- Add container body cap regression tests
+- Upgrade Incur to 0.4.4
+- Land collagen and omega-3 research protocols
+- Fix browser vault replica ownership checks
+- Harden container entrypoint control token
+- align smoke output flag with current incur
+- Stop hosted Telegram cleanup from deleting messages
+- Fix assistant self-target vault default classification
+- Return device OAuth links to messaging
+- Fix settings email verification input handling
+- archive hosted email alias plan
+- tighten onboarding follow-up wording
+- remove hosted revnet issuance
+- avoid built device-syncd artifact in coverage
+- remove linq typing diagnostic route
+- avoid built dist in entrypoint coverage
+- remove legacy linq control plane
+- Allow SMS activation without inbound invite autoreply
+- Add Health Commons runner sauna smoke diagnostics
+- Gate Linq first contact replies to iMessage
+- stabilize health commons protocol list assertion
+- remove brittle system prompt phrase specs
+- Harden hosted email route tokens
+- Land digital sunset health commons content
+- Require authenticated hosted email sender proof
+- Harden vault sync pairing window
+- harden hosted run log redaction
+- Add hosted Linq typing diagnostic route
+- Record digital sunset research package status
+- Hard-cut wearable CLI sleep semantics
+- Remove hosted device-sync dev auth fallback
+- Clarify auto-reply revision terminal logging
+- Lower hosted web control timeout
+- Raise hosted runner timeout budget
+- Add hosted assistant context diagnostics
+- Broaden assistant fenced-block guidance
+- Avoid fenced text blocks for assistant links
+- Parallelize Cloudflare deploy prechecks
+- Enrich HBOT source metadata
+- Speed up Cloudflare deploy smoke staging
+- add root-cause guidance for agents
+- Fix CI workspace source resolution
+- Harden hosted Health Commons bundle validation
+- Add skin PBM quantitative biomarkers
+- Fix hosted Stripe invoice activation freshness
+- Harden hosted Health Commons runtime access
+- Add hosted device-sync error observability
+- Avoid Markdown emphasis in assistant messaging prompts
+- Map hosted device connect-link setup failures
+- Add hosted runner-output validation regressions
+- mark whole-body PBM field-testing
+- add whole-body PBM onboarding
+- Document research lane instant-model fallback
+- make hosted e2e stubs queue faithful
+- Warn Health Commons research skill about shallow Pro replies
+- Remove tracked Health Commons generated catalog
+- Treat Health Commons generated catalog as build artifact
+- Add security privacy completion audit
+- Promote complete protocols to field testing
+- cover invalid hosted bundle observability
+- Improve hosted bundle observability
+- Restore join invite phone prefill
+- Upgrade AI SDK provider packages
+- name GPT-5.5 Pro in homepage FAQ
+- remove peer reviewed homepage claim
+- add shared metadata defaults
+- cover web metadata cleanup
+- remove stranded sauna protocol page
+- Land skin photobiomodulation research package
+- restore hbot protocol defaults
+- Add consistent wake time health commons protocol
+- Wait for Cloudflare container rollout in deploy smoke
+- Use versioned deploy smoke container object
+- Harden deploy smoke container freshness
+- Add IT band return-to-run health commons protocol
+- Fix deploy smoke manifest path
+- Harden Cloudflare hosted deploy safety
+- Fix Cloudflare runner deploy lifecycle safety
+- Add creatine monohydrate Health Commons package
+- harden hbot qa classifications
+- Fix Cloudflare deploy artifact validation
+- Harden Cloudflare hosted runner rollout
+- split design memory into PRODUCT.md and DESIGN.md
+- Land morning outdoor light Health Commons protocol
+- Revert "fix(web): remove wearable-required product copy"
+- Add checkout success support timeout
+- Fix hosted onboarding activation recovery
+- Speed up host support release checks
+- land hbot health commons package
+- Remove accepted inbound assistant authority
+- shorten hosted setup estimate copy
+- summarize hosted provider request logs
+- bump review-gpt thinking-failed fix
+- Update Docker deploy actions for Node 24
+- Log hosted provider request bodies
+- Improve hosted provider logging and stale runner recovery
+- preserve long-running Pro research threads
+- Speed up Cloudflare runner container tests
+- Add hosted provider observability
+- route research browser lane to hercules
+- Improve hosted notification observability
+- Speed up Cloudflare runner image deploys
+- Fix Linq first-contact delivery routing
+- Add repo-local work-with-pro skill
+- Add hosted runner container diagnostics
+- Launch review-gpt browsers in background
+- mark whole-body pbm landing plan complete
+- land whole-body pbm research package
+- Document stale security review triage
+- Further speed up Cloudflare bundle assembly
+- restore repo acceptance checks
+- record Tabata and IT-band research setup
+- Speed up Cloudflare deploy artifact assembly
+- bump review-gpt to 0.5.77
+- more fixes
+- split high-value composability seams
+- Harden runtime artifact security boundaries
+- Harden hosted onboarding privacy boundaries
+- Hard-cut greenfield legacy cleanup
+- Harden gateway route token contracts
+- speed up hosted local e2e
+- Disable hosted AI usage billing by default
+- Disable hosted AI usage billing by default
+- speed up hosted web verify
+- Add named-lane research run command
+- speed up acceptance verification scheduling
+- Share review-gpt browser profile defaults
+- Clean up review-gpt browser lane wrapper
+- Fix review-gpt profile launcher restarts
+- fix setup-cli acceptance drift
+- cover linq cleanup gaps
+- align manifest boundary expectation
+- Create 2026-04-24-assistant-runtime-device-syncd-subpath-boundary.md
+- many more fixes
+- archive stranded active plans
+- Fix hosted snapshot cleanup recovery
+- Harden parser toolchain resolution and cleanup
+- Fix inboxd canonical evidence authority
+- push inbox backfill into inboxd and use core promotion ids
+- Harden Linq webhook auth checks
+- Harden Linq minimization and path redaction
+- fence expired job leases
+- Harden messaging-ingress trust boundaries
+- Fail closed on non-raw parser attachment paths
+- Validate health-library frontmatter
+- Drop unrelated query changes from relatedIds cleanup
+- Align nested knowledge links and upserts
+- Fix inbox bootstrap doctor all-connectors checks
+- dedupe Linq part minimizer docs
+- Remove legacy event relatedIds adapters
+- Fix inboxd replay identity and no-op mutation cursors
+- Fix inbox document promotion metadata reconciliation
+- Adjust core event link utility assertions
+- Normalize core event relation link compatibility
+- Harden hosted Stripe billing and metering flows
+- Revert unrelated event link normalization hunks
+- Fix event evidence retention and staging cleanup
+- fix core write-batch delete prep and lock reentrancy
+- Align contracts schema artifacts and vault layout doc
+- Remove dead local Linq connector surfaces
+- Tighten CLI and package boundary ownership seams
+- Harden hosted snapshot preserved refs and portable queues
+- Harden hosted blind-index rotation lookups
+- Adjust runner env test expectations
+- Harden hosted child env boundary
+- Fix core raw manifest and history idempotency
+- Reject pathful hosted public/control base URLs
+- canonicalize root export owners
+- Hide Oura account identifiers in hosted device sync
+- Remove local Linq inbox and setup support
+- Fix legacy Linq recipient fallback
+- Fix hosted local heartbeat clobbering
+- Fix Oura webhook prune ownership boundary
+- Hard-cut local assistant Linq routes
+- Derive device-sync schema test sentinel
+- Remove device-sync schema v2 wording
+- Collapse device-sync schema to greenfield v1
+- Harden device-sync hydration and vault import conflicts
+- Clean up hosted runtime and CLI follow-ups
+- clarify research profile lanes
+- Add seam audit prompt pack
+- Minimize Linq capture raw persistence
+- Thread hosted Telegram reply-context preview through minimized captures
+- clarify parallel harvest guidance for research
+- split research seams into send and harvest
+- Minimize Telegram raw persistence while preserving reply context
+- fix assistant-engine telegram partial-send ambiguity
+- Fix Codex app-server sandbox and setup probe stdin handling
+- drop research schema QA seam
+- upgrade review-gpt export recovery
+- Fix assistant onboarding follow-up continuity
+- Land REM sleep sources and biomarker page updates
+- Close Cloudflare runner typecheck fix task
+- disable repomix for research runs
+- add zero-retention cleanup for Linq and Telegram
+- Add hosted-local Linq voice memo E2E coverage
+- Harden Codex app-server approval and runtime handling
+- fix hosted linq typing teardown timing
+- Restore hosted-local Linq seed imports and add typing diagnostics
+- Harden research runner artifact contracts
+- Harden hosted vault-sync import validation
+- Land deep sleep biomarker page
+- Fix hosted Linq voice memo reply hydration
+- Fix canonical lock races in food auto-log and vault sync
+- Add blood glucose biomarker and browser glucose projection
+- hard-cut Codex to app-server
+- Fix hosted-local Linq typing env resolution
+- Tighten Telegram webhook secret checks
+- Remove unrelated ledger rows from REM landing
+- Add REM sleep biomarker content
+- add health commons research skill
+- define repo-owned repomix ignore paths
+- fix cloudflare rollout step validation
+- Collapse hosted-web Prisma migrations into one baseline
+
 ## [1.0.0] - 2026-04-23
 
 ### Added
