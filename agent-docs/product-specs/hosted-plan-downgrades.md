@@ -40,6 +40,8 @@ Do not build:
 - in-app schedule reversal
 - Customer Portal plan switching
 - local timers or cron-based entitlement changes
+- switch-request entitlement, current plan, usage allowance, usage period, or
+  runner-state updates
 
 Future plan changes can generalize after this path is proven in Stripe test clocks and production.
 
@@ -166,26 +168,48 @@ Algorithm:
 4. Load Stripe plan config for Edge and Pulse, including recurring and usage price ids.
 5. Retrieve the Stripe subscription with `items.data.price` expanded.
 6. Confirm the subscription customer matches the billing ref customer.
-7. Reject if the Stripe subscription is not active, has `cancel_at_period_end`, has a pending update, or lacks a valid future current-period end.
-8. Confirm the canonical Stripe items represent exactly the v1 hosted Edge subscription shape. Price ids should be treated as more authoritative than subscription metadata for plan detection.
-9. Inspect the subscription's attached schedule, if any.
-10. If an active app-authored schedule already switches the same subscription from Edge to Pulse at the same period end with the expected phases, persist any missing pending display fields and return `already_scheduled`.
-11. If another active schedule is attached, reject with a safe "billing change already scheduled" error and direct the user to support. Do not update, release, or reinterpret Dashboard-created, Portal-created, or otherwise unknown schedules in the first version.
-12. Otherwise create a subscription schedule from the subscription using `from_subscription`.
-13. Retrieve the created schedule.
-14. Update the schedule with all current and future phases required by Stripe:
-    - current phase: Edge recurring item plus Edge metered usage item, ending at the current period end
-    - next phase: Pulse recurring item plus Pulse metered usage item, starting at current period end
-15. Preserve current phase or default fields from Stripe that must remain set.
-16. Set `end_behavior: "release"`.
-17. Set top-level schedule update `proration_behavior: "none"`.
-18. Set future phase `proration_behavior: "none"`.
-19. Set future phase metadata:
-    - `memberId`
-    - `billingPlanCode: "launch_monthly"`
-    - `checkoutOffer: "standard"`
-    - empty values for trial metadata keys that must be cleared
-20. Store the returned schedule id and pending display fields in the local billing read model only after Stripe returns the updated schedule.
+7. Reject if Stripe shows:
+   - subscription status is not `active`
+   - subscription is trialing, paused, unpaid, past due, incomplete,
+     incomplete expired, or canceled
+   - subscription has `cancel_at_period_end`
+   - subscription has a pending update
+   - subscription current period end is missing, invalid, or not in the future
+   - subscription attached schedule is present but is not the same compatible
+     app-authored switch
+8. Confirm the canonical Stripe items represent exactly the v1 hosted Edge
+   subscription shape. Use configured Stripe price ids for this service and for
+   the central subscription reconciliation path that writes
+   `currentBillingPlanCode`.
+9. If `subscription.schedule` is present, retrieve it.
+10. Return `already_scheduled` only if the attached schedule is active,
+    app-authored, attached to the same subscription, targets Pulse at the same
+    current period end, and has the expected Edge current phase plus Pulse future
+    phase. Persist any missing pending display fields before returning.
+11. Reject all other attached schedules with a safe "billing change already
+    scheduled" conflict and direct the user to support. Do not update, release,
+    or reinterpret Dashboard-created, Portal-created, or otherwise unknown
+    schedules in the first version.
+12. Otherwise create or idempotently recover a subscription schedule from the
+    subscription using `from_subscription`.
+13. Retrieve the schedule after creation.
+14. Update the schedule by passing all current and future phases required by
+    Stripe.
+15. Current phase:
+    - start from the current phase returned by Stripe
+    - preserve non-plan phase/default fields that must remain set
+    - keep Edge recurring and Edge metered usage prices
+    - end exactly at the subscription current period end
+16. Future phase:
+    - start exactly at subscription current period end
+    - use Pulse recurring and Pulse metered usage prices
+    - last one billing interval
+    - set phase `proration_behavior` to `none`
+    - set metadata for Pulse and clear trial-shaped metadata keys
+17. Set top-level schedule update `proration_behavior` to `none`.
+18. Set `end_behavior` to `release`.
+19. Store the returned schedule id and pending display fields in the local
+    billing read model only after Stripe returns the updated schedule.
 
 Important schedule rules:
 
@@ -194,7 +218,11 @@ Important schedule rules:
 - Do not use `end_behavior: "cancel"` for downgrades.
 - Do not mutate the subscription directly while a schedule owns the pending change.
 - While a switch is pending, the first version should reject additional in-app plan changes rather than trying to merge intents.
-- Treat the initial request as scheduling only. It must not call the subscription event reconciler or update current entitlement fields.
+- Treat the initial request as scheduling only. It must not call the subscription
+  event reconciler or update current entitlement, current plan, usage allowance,
+  usage period, or runner state. Entitlement changes, usage allowance reduction,
+  and runner nudges happen only after subscription reconciliation observes
+  Stripe's applied Pulse prices.
 
 First version supports only canonical hosted subscriptions with exactly the known hosted plan items:
 
@@ -224,9 +252,13 @@ Add only Stripe-derived pending display fields to `HostedMemberBillingRef`:
 - `scheduledBillingPlanCode`
 - `scheduledBillingEffectiveAt`
 
-These fields are not the source of billing truth. They exist so settings can show scheduled state without querying Stripe on every request.
+These fields are pending-display and reconciliation hints only. They are not
+entitlement state.
 
-Clear all four fields when the matching schedule is released, completed, canceled, aborted, no longer attached, no longer compatible, or when subscription reconciliation writes the current plan as Pulse.
+Clear all four fields when the schedule is released, completed, canceled,
+aborted, no longer attached, no longer compatible, or when subscription
+reconciliation writes the current plan as Pulse. Discard the encrypted schedule
+id after release.
 
 The current entitlement source remains:
 
@@ -235,15 +267,17 @@ The current entitlement source remains:
 - current period fields
 - current billing phase
 
-Do not add a local downgrade timer, cron, or app-owned transition state machine.
+Do not add a local schedule status enum, downgrade timer, cron, or app-owned
+transition state machine.
 
 ## Webhooks And Reconciliation
 
 Entitlement changes must come from Stripe subscription reconciliation, not from the switch request.
 
-Keep `customer.subscription.updated` and invoice reconciliation as the path that changes current plan and usage allowance.
+Keep `customer.subscription.updated` and invoice reconciliation as the path that
+changes current plan and usage allowance.
 
-Add subscription schedule event handling only for matching pending display cleanup and refresh:
+Schedule webhooks are for pending display cleanup and refresh only:
 
 - `subscription_schedule.released`, `subscription_schedule.completed`, `subscription_schedule.canceled`, and `subscription_schedule.aborted`: clear pending fields only when the schedule lookup key matches the local pending schedule.
 - `subscription_schedule.updated`: refresh pending fields only when the lookup key already matches and the schedule still represents the same Edge-to-Pulse switch; otherwise clear pending fields.
@@ -257,11 +291,12 @@ When the scheduled phase starts and Stripe updates the subscription to Pulse:
 - usage allowance resolves to Pulse
 - runner nudges happen after committed entitlement change, not during the initial schedule request
 
-Plan detection should prefer configured Stripe price ids over subscription metadata. Metadata is useful correlation, but price ids should decide the current paid plan when both are available.
-
 Do not create local pending state from a schedule webhook based only on Stripe metadata.
 
-This feature should update only the central subscription reconciliation needed to detect Pulse from configured recurring and usage price ids after the scheduled phase applies, even if metadata is missing or stale. Do not do a broad global plan-detection refactor in this feature.
+This feature updates only the central subscription reconciliation needed to
+detect Pulse from configured recurring and usage price ids after the scheduled
+phase applies, even if metadata is missing or stale. Do not do a broad global
+plan-detection refactor in this feature.
 
 ## Settings UI
 
@@ -302,46 +337,47 @@ Do not expose `Manage subscription` as the reversal path. Do not add a `Keep Edg
 
 ## Verification
 
-Unit and integration tests:
+Required tests:
 
-- route schedules Edge-to-Pulse without accepting arbitrary target plans
-- route preserves CSRF, auth, and suspended-member checks
-- service creates a schedule from the active subscription
-- schedule phases include both recurring and metered usage prices
-- metered item has no quantity
-- future phase metadata sets Pulse and clears trial metadata
-- duplicate request returns `already_scheduled`
-- conflicting attached schedule rejects without mutation
-- customer mismatch rejects
-- missing Stripe refs reject
-- trial state rejects
-- non-active Stripe subscription states reject
-- `cancel_at_period_end` rejects
-- pending update rejects
-- missing, duplicate, unknown, or mismatched subscription items reject
-- Stripe provider errors map to safe retryable errors with operation names
-- schedule request does not call subscription reconciliation or write current entitlement fields
+- route preserves origin, app session, suspended-member, and active-member checks
+- route has no generic target body and schedules only Edge-to-Pulse
+- local paid Edge eligibility passes
+- trial, non-paid, inactive, suspended, and missing Stripe refs reject
+- service rejects customer mismatch
+- service rejects non-active Stripe subscription states
+- service rejects `cancel_at_period_end`
+- service rejects pending update
+- service rejects existing foreign schedule
+- service rejects missing, duplicate, unknown, or mismatched subscription items
 - service creates schedule from subscription with deterministic idempotency key
 - service updates phases with Edge current prices and Pulse future prices
+- both phases include recurring and metered usage prices
+- metered usage item has no quantity
 - top-level and future phase proration behavior are `none`
+- future phase metadata sets Pulse and clears trial metadata
+- duplicate request returns `already_scheduled`
 - retry after schedule-created/local-write-failed self-heals
-- pending display fields are written only after successful schedule update
+- pending display fields are written after successful schedule update
 - schedule lifecycle webhooks clear or refresh only matching pending fields
-- settings renders Edge, Switch to Pulse, pending switch, and Pulse after reconciliation
-- `customer.subscription.updated` with Pulse price ids updates local current plan to Pulse
-- usage allowance remains Edge before phase start and becomes Pulse after reconciliation
+- `customer.subscription.updated` with Pulse price ids updates current plan to Pulse and clears pending fields
+- usage allowance remains Edge before phase start and becomes Pulse only after subscription reconciliation
+- settings renders Edge, Switch to Pulse, pending switch, and reconciled Pulse
+
+Do not add broad out-of-order older Stripe event handling to this feature unless
+it is scoped specifically to matching schedule pending fields. Global webhook
+freshness belongs in the reconciliation system, not this plan switch.
 
 Stripe sandbox acceptance:
 
-- create a canonical Edge test subscription with exactly Edge recurring and Edge metered usage items
-- schedule switch to Pulse at period end
+- create canonical Edge subscription with exactly Edge recurring and Edge metered usage items
+- schedule switch to Pulse at current period end
 - verify schedule has two phases and `end_behavior: "release"`
-- verify no duplicate base or usage items
-- verify current-period usage bills under Edge pricing
-- advance with Stripe Test Clock
-- verify next period starts with Pulse recurring and Pulse usage prices
+- verify no duplicate recurring or usage items
+- verify current-period usage remains on Edge usage price
+- advance Test Clock to the phase boundary
+- verify subscription now has Pulse recurring and Pulse usage prices
 - verify schedule releases or completes and the subscription continues as Pulse
-- verify webhook replay converges local settings, billing ref, and allowance
+- replay webhooks and verify settings, billing ref, and usage allowance converge
 
 Deployment checks:
 
@@ -354,4 +390,3 @@ Deployment checks:
 ## Open Questions
 
 - Do existing Pulse and Edge usage prices share the same Stripe billing meter, and does test-clock usage rate exactly as expected at the phase boundary?
-- Should existing one-click upgrade be simplified later so webhook reconciliation is the only entitlement write path?
