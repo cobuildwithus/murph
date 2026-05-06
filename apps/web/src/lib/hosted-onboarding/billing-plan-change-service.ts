@@ -115,7 +115,7 @@ export async function upgradeHostedBillingPlan(input: {
     billingPlanCode: targetPlanCode,
   });
   const stripe = targetConfig.stripe;
-  const subscription = await callHostedStripePlanUpgradeOperation(() =>
+  const subscription = await callHostedStripePlanUpgradeOperation("subscription.retrieve", () =>
     stripe.subscriptions.retrieve(stripeSubscriptionId, {
       expand: ["items.data.price"],
     })
@@ -164,28 +164,26 @@ export async function upgradeHostedBillingPlan(input: {
     targetPriceId: targetConfig.priceId,
     targetUsagePriceId: targetConfig.usagePriceId,
   });
-  const updatedSubscription = await callHostedStripePlanUpgradeOperation(() =>
-    stripe.subscriptions.update(stripeSubscriptionId, {
-      expand: ["items.data.price", "latest_invoice.payment_intent"],
-      items: updateItems,
-      metadata: buildHostedBillingPlanUpgradeSubscriptionMetadata({
-        memberId: input.memberId,
-        targetPlanCode,
-      }),
-      payment_behavior: "pending_if_incomplete",
-      proration_behavior: "always_invoice",
-    }, {
-      idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
-        currentPlanCode: transition.currentPlanCode,
-        currentPriceId: currentConfig.priceId,
-        currentUsagePriceId: currentConfig.usagePriceId,
-        memberId: input.memberId,
-        stripeSubscriptionId,
-        targetPlanCode,
-        targetPriceId: targetConfig.priceId,
-        targetUsagePriceId: targetConfig.usagePriceId,
-      }),
-    })
+  const updatedSubscription = await callHostedStripePlanUpgradeOperation(
+    "subscription.update.plan-items",
+    () =>
+      stripe.subscriptions.update(stripeSubscriptionId, {
+        expand: ["items.data.price"],
+        items: updateItems,
+        payment_behavior: "pending_if_incomplete",
+        proration_behavior: "always_invoice",
+      }, {
+        idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
+          currentPlanCode: transition.currentPlanCode,
+          currentPriceId: currentConfig.priceId,
+          currentUsagePriceId: currentConfig.usagePriceId,
+          memberId: input.memberId,
+          stripeSubscriptionId,
+          targetPlanCode,
+          targetPriceId: targetConfig.priceId,
+          targetUsagePriceId: targetConfig.usagePriceId,
+        }),
+      })
   );
 
   if (!isHostedStripeSubscriptionAppliedPlan({
@@ -203,12 +201,20 @@ export async function upgradeHostedBillingPlan(input: {
     };
   }
 
+  const appliedSubscription = await normalizeAppliedHostedBillingPlanUpgradeSubscription({
+    memberId: input.memberId,
+    stripe,
+    stripeSubscriptionId,
+    subscription: updatedSubscription,
+    targetPlanCode,
+  });
+
   await reconcileAppliedHostedBillingPlanUpgrade({
     memberId: input.memberId,
     now,
     prisma,
     stripeSubscriptionId,
-    subscription: updatedSubscription,
+    subscription: appliedSubscription,
     targetPlanCode,
   });
   await nudgeHostedRunnerUserBestEffortResult({
@@ -346,20 +352,22 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
     return input.subscription;
   }
 
-  return callHostedStripePlanUpgradeOperation(() =>
-    input.stripe.subscriptions.update(input.stripeSubscriptionId, {
-      expand: ["items.data.price"],
-      metadata: buildHostedBillingPlanUpgradeSubscriptionMetadata({
-        memberId: input.memberId,
-        targetPlanCode: input.targetPlanCode,
-      }),
-    }, {
-      idempotencyKey: buildHostedBillingPlanUpgradeMetadataRepairIdempotencyKey({
-        memberId: input.memberId,
-        stripeSubscriptionId: input.stripeSubscriptionId,
-        targetPlanCode: input.targetPlanCode,
-      }),
-    })
+  return callHostedStripePlanUpgradeOperation(
+    "subscription.update.metadata",
+    () =>
+      input.stripe.subscriptions.update(input.stripeSubscriptionId, {
+        expand: ["items.data.price"],
+        metadata: buildHostedBillingPlanUpgradeSubscriptionMetadata({
+          memberId: input.memberId,
+          targetPlanCode: input.targetPlanCode,
+        }),
+      }, {
+        idempotencyKey: buildHostedBillingPlanUpgradeMetadataRepairIdempotencyKey({
+          memberId: input.memberId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          targetPlanCode: input.targetPlanCode,
+        }),
+      })
   );
 }
 
@@ -477,11 +485,13 @@ async function createHostedBillingPlanUpgradePortalUrl(input: {
   stripeCustomerId: string;
 }): Promise<string> {
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-  const session = await callHostedStripePlanUpgradeOperation(() =>
-    input.stripe.billingPortal.sessions.create({
-      customer: input.stripeCustomerId,
-      return_url: new URL("/home", publicBaseUrl).toString(),
-    })
+  const session = await callHostedStripePlanUpgradeOperation(
+    "billingPortal.sessions.create",
+    () =>
+      input.stripe.billingPortal.sessions.create({
+        customer: input.stripeCustomerId,
+        return_url: new URL("/home", publicBaseUrl).toString(),
+      })
   );
 
   if (!session.url) {
@@ -517,6 +527,7 @@ function buildHostedBillingPlanUpgradeMetadataRepairIdempotencyKey(input: {
 }
 
 async function callHostedStripePlanUpgradeOperation<T>(
+  operationName: string,
   operation: () => Promise<T>,
 ): Promise<T> {
   try {
@@ -524,7 +535,10 @@ async function callHostedStripePlanUpgradeOperation<T>(
   } catch (error) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
-      details: describeSafeStripePlanChangeError(error),
+      details: {
+        operationName,
+        ...describeSafeStripePlanChangeError(error),
+      },
       httpStatus: 502,
       message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
       retryable: true,

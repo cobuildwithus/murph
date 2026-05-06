@@ -600,6 +600,7 @@ describe("hosted onboarding routes", () => {
         details: {
           code: "resource_missing",
           inviteCode: "invite-code",
+          operationName: "subscription.retrieve",
           requestIdPresent: true,
           statusCode: 404,
           type: "StripeInvalidRequestError",
@@ -617,6 +618,7 @@ describe("hosted onboarding routes", () => {
         details: {
           code: "resource_missing",
           inviteCode: "invite-code",
+          operationName: "subscription.retrieve",
           requestIdPresent: true,
           statusCode: 404,
           type: "StripeInvalidRequestError",
@@ -629,6 +631,7 @@ describe("hosted onboarding routes", () => {
       errorCode: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
       errorDetails: {
         code: "resource_missing",
+        operationName: "subscription.retrieve",
         requestIdPresent: true,
         statusCode: 404,
         type: "StripeInvalidRequestError",
