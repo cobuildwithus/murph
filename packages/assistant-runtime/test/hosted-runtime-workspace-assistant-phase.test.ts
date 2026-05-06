@@ -868,7 +868,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
 
-    expect(result.checkpointReason).toBe("maintenance");
+    expect(result.checkpointReason).toBe("system_mailbox_receipt");
     expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
       "mailbox.system_processed",
     ]);
@@ -976,6 +976,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("uses a full bootstrap checkpoint reason for member activation work", async () => {
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: {
+          assistantConfigStatus: "hosted-env",
+          assistantConfigured: true,
+          assistantProvider: "codex-cli",
+          assistantSeeded: true,
+          emailAutoReplyEnabled: false,
+          linqAutoReplyEnabled: true,
+          telegramAutoReplyEnabled: false,
+          vaultCreated: true,
+        },
+        conversationMetrics: null,
+        mailboxLane: "member-activated",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(result.checkpointReason).toBe("activation_bootstrap");
+  });
+
   it("drains dirty device-sync work alongside non-device system mailbox items", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
@@ -1081,7 +1108,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "system_mailbox_receipt",
+      checkpointReason: "provider_cleanup",
       redactedStatus: expect.objectContaining({
         hostedProviderCleanupAttemptedLinqItems: 1,
         hostedProviderCleanupDeletedLinqItems: 1,
@@ -1193,7 +1220,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
-  it("runs pending provider cleanup after a maintenance checkpoint even without delivery effects", async () => {
+  it("uses a hot provider cleanup checkpoint for cleanup-only progress", async () => {
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
       nextWakeAt: null,
     });
@@ -1207,7 +1234,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
 
     expect(result.progressed).toBe(true);
-    expect(result.checkpointReason).toBe("maintenance");
+    expect(result.checkpointReason).toBe("provider_cleanup");
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).not.toHaveBeenCalled();
@@ -1222,11 +1249,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "maintenance",
+      checkpointReason: "provider_cleanup",
       redactedStatus: expect.objectContaining({
         hostedProviderCleanupAttemptedLinqItems: 1,
         hostedProviderCleanupDeletedLinqItems: 1,
         hostedProviderCleanupFailedLinqItems: 0,
+      }),
+    }));
+  });
+
+  it("uses a hot assistant runtime checkpoint for dirty ack-only progress", async () => {
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: {
+        connectionId: "dsc_dirty_ack_only",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: null,
+        processedRevision: "43",
+      },
+      progressed: false,
+      redactedLogEntries: [],
+    });
+    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
+      nextWakeAt: null,
+      recorded: true,
+      stillDirty: false,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(result.progressed).toBe(true);
+    expect(result.checkpointReason).toBe("assistant_runtime_commit");
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
+      record: {
+        connectionId: "dsc_dirty_ack_only",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: null,
+        processedRevision: "43",
+      },
+      runtime: expect.any(Object),
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      redactedStatus: expect.objectContaining({
+        hostedDeviceSyncDirtyAckRecorded: true,
+        hostedDeviceSyncDirtyStillPending: false,
       }),
     }));
   });
@@ -1246,6 +1318,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
 
     expect(result.progressed).toBe(true);
+    expect(result.checkpointReason).toBe("provider_cleanup");
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
@@ -1271,7 +1344,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "maintenance",
+      checkpointReason: "provider_cleanup",
       redactedStatus: expect.objectContaining({
         hostedProviderCleanupAttemptedLinqItems: 1,
         hostedProviderCleanupDeletedLinqItems: 1,

@@ -29,7 +29,6 @@ import type {
   HostedWorkspaceInvocationRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  HostedAssistantRuntimeHotStateIncompleteError,
   HostedAssistantRuntimeHotStateBudgetExceededError,
   HostedWorkspaceSnapshotContinuityIncompleteError,
   sha256HostedBundleHex,
@@ -273,6 +272,11 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(in
     || !currentRefs.browserVaultReplicaRef
     || currentRefs.browserVaultReplicaRef.sourceBundleHash !== currentRefs.baseSnapshotRef.hash
   ) {
+    await writeHostedCheckpointHotStateUnavailableFallbackLog({
+      fallbackReason: resolveHostedCheckpointHotStateUnavailableFallbackReason(currentRefs),
+      platform: input.platform,
+      request: input.request,
+    });
     return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
   }
 
@@ -283,10 +287,7 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(in
       browserVaultReplicaRef: currentRefs.browserVaultReplicaRef,
     });
   } catch (error) {
-    if (
-      error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
-      || error instanceof HostedAssistantRuntimeHotStateIncompleteError
-    ) {
+    if (error instanceof HostedAssistantRuntimeHotStateBudgetExceededError) {
       await writeHostedCheckpointHotStateFallbackLog({
         error,
         platform: input.platform,
@@ -612,7 +613,7 @@ async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
 }
 
 async function writeHostedCheckpointHotStateFallbackLog(params: {
-  error: HostedAssistantRuntimeHotStateBudgetExceededError | HostedAssistantRuntimeHotStateIncompleteError;
+  error: HostedAssistantRuntimeHotStateBudgetExceededError;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
 }): Promise<void> {
@@ -626,19 +627,10 @@ async function writeHostedCheckpointHotStateFallbackLog(params: {
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: params.request.reason,
     errorName: params.error.name,
-    fallbackReason:
-      params.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
-        ? "budget_exceeded"
-        : "continuity_incomplete",
-    ...(params.error instanceof HostedAssistantRuntimeHotStateBudgetExceededError
-      ? {
-          budgetActual: params.error.actual,
-          budgetClass: params.error.budget,
-          budgetLimit: params.error.limit,
-        }
-      : {
-          continuityReason: params.error.reason,
-        }),
+    fallbackReason: "budget_exceeded",
+    budgetActual: params.error.actual,
+    budgetClass: params.error.budget,
+    budgetLimit: params.error.limit,
   };
 
   try {
@@ -659,6 +651,63 @@ async function writeHostedCheckpointHotStateFallbackLog(params: {
     });
   } catch (error) {
     console.warn("Hosted checkpoint hot-state fallback log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+type HostedCheckpointHotStateUnavailableFallbackReason =
+  | "missing_base"
+  | "missing_replica"
+  | "stale_replica";
+
+function resolveHostedCheckpointHotStateUnavailableFallbackReason(
+  currentRefs: Awaited<ReturnType<typeof readHostedWorkspaceCurrentCheckpointRefs>>,
+): HostedCheckpointHotStateUnavailableFallbackReason {
+  if (!currentRefs.baseSnapshotRef) {
+    return "missing_base";
+  }
+  if (!currentRefs.browserVaultReplicaRef) {
+    return "missing_replica";
+  }
+  return "stale_replica";
+}
+
+async function writeHostedCheckpointHotStateUnavailableFallbackLog(params: {
+  fallbackReason: HostedCheckpointHotStateUnavailableFallbackReason;
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+}): Promise<void> {
+  console.warn("Hosted checkpoint hot-state unavailable fallback triggered.", {
+    fallbackReason: params.fallbackReason,
+  });
+  if (!params.platform.logPort) {
+    return;
+  }
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointReason: params.request.reason,
+    fallbackReason: params.fallbackReason,
+  };
+
+  try {
+    await params.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: params.request.attemptId,
+          component: "workspace",
+          eventCode: "checkpoint.hot_state_fallback",
+          leaseGeneration: params.request.leaseGeneration,
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: params.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted checkpoint hot-state unavailable fallback log write failed.", {
       errorName: error instanceof Error ? error.name : typeof error,
     });
   }
@@ -710,14 +759,18 @@ function resolveHostedWorkspaceCheckpointSnapshotMode(
 ): HostedWorkspaceCheckpointSnapshotMode {
   switch (reason) {
     case "idle_shutdown":
+    case "activation_bootstrap":
+    case "canonical_runtime_commit":
     case "maintenance":
-    case "system_mailbox_receipt":
       return "full";
     case "active_turn_acceptance":
     case "active_turn_input":
+    case "assistant_runtime_commit":
     case "import":
     case "outbox_receipt":
     case "outbox_sending":
+    case "provider_cleanup":
+    case "system_mailbox_receipt":
       return "hot";
   }
 

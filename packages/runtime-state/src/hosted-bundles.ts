@@ -115,14 +115,6 @@ export class HostedWorkspaceSnapshotContinuityIncompleteError extends Error {
   }
 }
 
-export class HostedAssistantRuntimeHotStateIncompleteError
-  extends HostedWorkspaceSnapshotContinuityIncompleteError {
-  constructor(reason: "codex_home_missing") {
-    super(reason);
-    this.name = "HostedAssistantRuntimeHotStateIncompleteError";
-  }
-}
-
 export type HostedWorkspaceArtifactResolver = (
   input: HostedBundleArtifactRestoreInput,
 ) => Promise<Uint8Array | ArrayBuffer>;

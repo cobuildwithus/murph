@@ -1087,6 +1087,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase() {
             assistantPhaseCalled = true;
             return {
+              checkpointReason: "canonical_runtime_commit",
               progressed: true,
             };
           },
@@ -2607,10 +2608,10 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "mailbox.fetch",
-        "snapshot:maintenance:0",
+        "snapshot:canonical_runtime_commit:0",
         "workspace.checkpoint",
       ]);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), ["maintenance"]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), ["canonical_runtime_commit"]);
       assert.equal(checkpointRequests[0]?.nextWakeAt, null);
       assert.deepEqual(result, {
         nextWakeAt: null,

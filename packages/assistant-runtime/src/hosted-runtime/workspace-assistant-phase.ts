@@ -5,6 +5,7 @@ import {
   type HostedExecutionRedactedLogEntry,
 } from "@murphai/hosted-execution";
 import type {
+  HostedWorkspaceCheckpointReason,
   HostedRuntimeRedactedJson,
   HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
@@ -415,7 +416,7 @@ export async function runHostedWorkspaceAssistantPhase(
                       baseNextWakeAt: statusNextWakeAt,
                       checkpointReason: systemMailboxDeliveryEffects.length > 0
                         ? "outbox_receipt"
-                        : "system_mailbox_receipt",
+                        : "provider_cleanup",
                       input,
                       providerCleanupCheckpoint,
                       redactedStatus: {
@@ -454,7 +455,7 @@ export async function runHostedWorkspaceAssistantPhase(
                       systemMailboxWakeAt,
                       dirtyPostCheckpointWakeAt,
                     ),
-                    checkpointReason: "maintenance",
+                    checkpointReason: "provider_cleanup",
                     input,
                     providerCleanupCheckpoint,
                     redactedStatus: dirtyPostCheckpoint
@@ -469,7 +470,7 @@ export async function runHostedWorkspaceAssistantPhase(
 
                 if (dirtyPostCheckpoint) {
                   return {
-                    checkpointReason: "maintenance",
+                    checkpointReason: "assistant_runtime_commit",
                     nextWakeAt: dirtyPostCheckpoint.nextWakeAt,
                     nextWakeReason: dirtyPostCheckpoint.nextWakeAt ? "assistant" : null,
                     redactedStatus: {
@@ -484,11 +485,11 @@ export async function runHostedWorkspaceAssistantPhase(
               },
             }
           : {}),
-        checkpointReason: shouldRecordSystemMailbox
-          ? systemMailboxDeliveryEffects.length > 0
-            ? "outbox_sending"
-            : "system_mailbox_receipt"
-          : "maintenance",
+        checkpointReason: resolveHostedSystemMailboxCheckpointReason({
+          shouldRecordSystemMailbox,
+          systemMailboxDeliveryEffectCount: systemMailboxDeliveryEffects.length,
+          systemMailboxPreparation,
+        }),
         ...(nextWakeAt ? { nextWakeAt } : {}),
         progressed: true,
         redactedStatus: buildHostedWorkspaceAssistantPhaseRedactedStatus({
@@ -596,21 +597,29 @@ export async function runHostedWorkspaceAssistantPhase(
         progressed,
         systemMailboxWakeAt,
       });
+      const phaseProgressed = progressed || providerCleanupDue;
+      const redactedStatus = {
+        ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
+          deliveryEffectCount: deliveryEffects.length,
+          nextWakeAt,
+          outboxTerminalizedSendingCount: 0,
+          progressed: phaseProgressed,
+          systemMailboxPrepared: 0,
+          systemMailboxRetryableFailed: 0,
+        }),
+        ...(postDelivery.redactedStatus ?? {}),
+      };
+      if (!phaseProgressed) {
+        return {
+          progressed: false,
+          redactedStatus,
+        };
+      }
       return {
         checkpointReason: postDelivery.checkpointReason,
-        ...(progressed || providerCleanupDue ? { nextWakeAt } : {}),
-        progressed: progressed || providerCleanupDue,
-        redactedStatus: {
-          ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
-            deliveryEffectCount: deliveryEffects.length,
-            nextWakeAt,
-            outboxTerminalizedSendingCount: 0,
-            progressed: progressed || providerCleanupDue,
-            systemMailboxPrepared: 0,
-            systemMailboxRetryableFailed: 0,
-          }),
-          ...(postDelivery.redactedStatus ?? {}),
-        },
+        nextWakeAt,
+        progressed: true,
+        redactedStatus,
       };
     }
 
@@ -650,6 +659,22 @@ export async function runHostedWorkspaceAssistantPhase(
       || terminalLinqCleanupDue
       || (assistantMetrics.postCheckpointRecord ?? null) !== null;
 
+    const phaseProgressed = progressed || providerCleanupDue;
+    const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
+      deliveryEffectCount: deliveryEffects.length,
+      nextWakeAt,
+      outboxTerminalizedSendingCount: 0,
+      progressed: phaseProgressed,
+      systemMailboxPrepared: 0,
+      systemMailboxRetryableFailed: 0,
+    });
+    if (!phaseProgressed) {
+      return {
+        progressed: false,
+        redactedStatus,
+      };
+    }
+
     return {
       ...(hasPostCommitProviderCleanup
         ? {
@@ -668,7 +693,7 @@ export async function runHostedWorkspaceAssistantPhase(
                 && !terminalLinqCleanupDue
               ) {
                 return {
-                  checkpointReason: "maintenance",
+                  checkpointReason: "assistant_runtime_commit",
                   nextWakeAt: deviceSyncNextWakeAt,
                   nextWakeReason: deviceSyncNextWakeAt ? "assistant" : null,
                   redactedStatus: {
@@ -687,7 +712,7 @@ export async function runHostedWorkspaceAssistantPhase(
                   ),
                   deviceSyncNextWakeAt,
                 ),
-                checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "maintenance",
+                checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
                 input,
                 providerCleanupCheckpoint,
                 redactedStatus: deviceSyncPostCheckpoint
@@ -703,17 +728,18 @@ export async function runHostedWorkspaceAssistantPhase(
         : {}),
       checkpointReason: deliveryEffects.length > 0
         ? "outbox_sending"
-        : "maintenance",
-      ...(progressed || providerCleanupDue ? { nextWakeAt } : {}),
-      progressed: progressed || providerCleanupDue,
-      redactedStatus: buildHostedWorkspaceAssistantPhaseRedactedStatus({
-        deliveryEffectCount: deliveryEffects.length,
-        nextWakeAt,
-        outboxTerminalizedSendingCount: 0,
-        progressed: progressed || providerCleanupDue,
-        systemMailboxPrepared: 0,
-        systemMailboxRetryableFailed: 0,
-      }),
+        : resolveHostedAssistantTimerCheckpointReason({
+            assistantMetrics: {
+              ...assistantMetrics,
+              nextWakeAt,
+            },
+            consumedScheduledWake: consumedScheduledWorkspaceWake(input),
+            providerCleanupDue,
+            terminalLinqCleanupDue,
+          }),
+      nextWakeAt,
+      progressed: true,
+      redactedStatus,
     };
   } finally {
     typingAbortController.abort();
@@ -1425,6 +1451,62 @@ function assistantMetricsProgressed(
     || metrics.parserProcessed > 0
     || (metrics.postCheckpointRecord ?? null) !== null
   );
+}
+
+function assistantMetricsCanonicalRuntimeProgressed(
+  metrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>,
+): boolean {
+  return (
+    metrics.deviceSyncProcessed > 0
+    || metrics.nextWakeAt !== null
+    || metrics.parserProcessed > 0
+  );
+}
+
+function resolveHostedAssistantTimerCheckpointReason(input: {
+  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+  consumedScheduledWake: boolean;
+  providerCleanupDue: boolean;
+  terminalLinqCleanupDue: boolean;
+}): HostedWorkspaceCheckpointReason {
+  if (
+    assistantMetricsCanonicalRuntimeProgressed(input.assistantMetrics)
+    || input.consumedScheduledWake
+  ) {
+    return "canonical_runtime_commit";
+  }
+  if (input.providerCleanupDue || input.terminalLinqCleanupDue) {
+    return "provider_cleanup";
+  }
+  if ((input.assistantMetrics.postCheckpointRecord ?? null) !== null) {
+    return "assistant_runtime_commit";
+  }
+  return "canonical_runtime_commit";
+}
+
+function resolveHostedSystemMailboxCheckpointReason(input: {
+  shouldRecordSystemMailbox: boolean;
+  systemMailboxDeliveryEffectCount: number;
+  systemMailboxPreparation: NonNullable<
+    Awaited<ReturnType<typeof prepareHostedSystemMailboxItemForCheckpoint>>
+  >;
+}): HostedWorkspaceCheckpointReason {
+  if (input.systemMailboxPreparation.status === "retryable_failed") {
+    return "system_mailbox_receipt";
+  }
+  if (!input.shouldRecordSystemMailbox) {
+    return "canonical_runtime_commit";
+  }
+  if (input.systemMailboxDeliveryEffectCount > 0) {
+    return "outbox_sending";
+  }
+  if (
+    "metrics" in input.systemMailboxPreparation
+    && input.systemMailboxPreparation.metrics.bootstrapResult !== null
+  ) {
+    return "activation_bootstrap";
+  }
+  return "system_mailbox_receipt";
 }
 
 function shouldFastDispatchAssistantDeliveryEffects(input: {

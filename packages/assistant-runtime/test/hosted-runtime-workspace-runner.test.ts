@@ -142,7 +142,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         state,
       },
       previousState: state,
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       redactedStatus: {},
       state,
     } satisfies Parameters<ReturnType<typeof createHostedWorkspaceCheckpointRequestBuilder>["createRequest"]>[0];
@@ -372,7 +372,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         requestId: "request_synthetic_runner_no_usage_drain",
         async runAssistantPhase() {
           return {
-            checkpointReason: "maintenance",
+            checkpointReason: "canonical_runtime_commit",
             progressed: true,
           };
         },
@@ -384,8 +384,54 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(recordUsage.mock.calls.length, 0);
       assert.deepEqual(
         checkpointRequests.map((request) => request.reason),
-        ["maintenance"],
+        ["canonical_runtime_commit"],
       );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("rejects a progressed assistant phase without an explicit checkpoint reason", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: "attempt_synthetic_runner_missing_checkpoint_reason",
+              expectedWorkspaceVersion: "0",
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem() {
+              throw new Error("Import should not run without mailbox items.");
+            },
+            limitPerLane: 10,
+            platform: createPlatform({
+              mailboxPort,
+              workspacePort: createWorkspacePort({ checkpointRequests }),
+            }),
+            requestId: "request_synthetic_runner_missing_checkpoint_reason",
+            async runAssistantPhase() {
+              return JSON.parse("{\"progressed\":true}");
+            },
+            vaultRoot,
+            workspace: createWorkspaceState({ version: "0" }),
+            now: () => TEST_NOW,
+          }),
+        /Hosted workspace assistant phase checkpoint requires an explicit reason\./u,
+      );
+
+      assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1056,7 +1102,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           assert.equal(input.initialMailboxImport.importResult.importedCount, 0);
           assert.equal(input.initialMailboxImport.state.watermarks.conversation, "1");
           return {
-            checkpointReason: "maintenance",
+            checkpointReason: "canonical_runtime_commit",
             progressed: true,
             redactedStatus: {
               hostedAssistantReplayHandledCount: 1,
@@ -1080,7 +1126,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ["0", "1"],
       );
       assert.deepEqual(secondCheckpointRequests.map((request) => request.reason), [
-        "maintenance",
+        "canonical_runtime_commit",
       ]);
       assert.equal(secondCheckpointRequests[0]?.expectedWorkspaceVersion, "1");
       assert.deepEqual(secondCheckpointRequests[0]?.redactedStatus, {
@@ -1392,6 +1438,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             });
             assert.equal(lateInputs.inputs.length, 1);
             return {
+              checkpointReason: "canonical_runtime_commit",
               progressed: true,
             };
           },
@@ -1414,7 +1461,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "import",
         "active_turn_input",
         "active_turn_acceptance",
-        "maintenance",
+        "canonical_runtime_commit",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
@@ -1716,6 +1763,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             reason: "no_new_input",
           });
           return {
+            checkpointReason: "canonical_runtime_commit",
             progressed: true,
           };
         },
@@ -1730,7 +1778,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       );
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "maintenance",
+        "canonical_runtime_commit",
       ]);
       assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
         hostedMailboxBlockedCount: 0,

@@ -252,11 +252,15 @@ image. If no base snapshot exists, the runner may fall back to a full
 checkpoint so non-hot workspace content is not lost. Hot checkpoints also carry
 forward the browser-vault replica ref for the current base snapshot explicitly;
 if that continuity is missing or stale, the runner uses a full checkpoint
-instead. `system_mailbox_receipt` remains full because activation can mutate
-canonical vault bootstrap state that must be present for later conversation
-wakes. Maintenance checkpoints refresh the full/base provider-continuity image,
-but pre-delivery outbox sending must stay hot so user-visible delivery is not
-gated on compacting or validating large native Codex continuity artifacts.
+instead. Checkpoint reasons are state-classed rather than workflow-labeled:
+`activation_bootstrap`, `canonical_runtime_commit`, and `idle_shutdown` write
+full/base snapshots, while `system_mailbox_receipt`,
+`assistant_runtime_commit`, `provider_cleanup`, pre-delivery outbox, and mailbox
+import/acceptance checkpoints write hot state. The legacy `maintenance` reason
+remains accepted as a conservative full checkpoint for staged deploy
+compatibility, but normal runtime paths should emit an explicit state-class
+reason. Pre-delivery outbox sending must stay hot so user-visible delivery is
+not gated on compacting or validating large native Codex continuity artifacts.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint

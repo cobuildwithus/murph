@@ -120,13 +120,21 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   workspace: HostedWorkspaceState | null;
 }
 
-export interface HostedWorkspaceRunnerAssistantPhaseResult {
+interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
-  checkpointReason?: HostedWorkspaceCheckpointReason;
   nextWakeAt?: string | null;
-  progressed?: boolean;
   redactedStatus?: HostedRuntimeRedactedJson | null;
 }
+
+export type HostedWorkspaceRunnerAssistantPhaseResult =
+  | (HostedWorkspaceRunnerAssistantPhaseResultBase & {
+      checkpointReason: HostedWorkspaceCheckpointReason;
+      progressed: true;
+    })
+  | (HostedWorkspaceRunnerAssistantPhaseResultBase & {
+      checkpointReason?: never;
+      progressed?: false;
+    });
 
 export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
   checkpointReason: HostedWorkspaceCheckpointReason;
@@ -889,6 +897,9 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
     return;
   }
 
+  const checkpointReason = requireHostedWorkspaceAssistantPhaseCheckpointReason(
+    input.assistantPhaseResult,
+  );
   const mailboxImport =
     input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
@@ -900,7 +911,7 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
     nextWakeAt: input.assistantPhaseResult.nextWakeAt ?? null,
     nextWakeReason: input.assistantPhaseResult.nextWakeAt ? "assistant" : null,
     previousState: mailboxImport.state,
-    reason: input.assistantPhaseResult.checkpointReason ?? "maintenance",
+    reason: checkpointReason,
     redactedStatus,
     state: mailboxImport.state,
   });
@@ -908,7 +919,7 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
     ...checkpointRequest,
     nextWakeAt: input.assistantPhaseResult.nextWakeAt ?? null,
     nextWakeReason: input.assistantPhaseResult.nextWakeAt ? "assistant" : null,
-    reason: input.assistantPhaseResult.checkpointReason ?? "maintenance",
+    reason: checkpointReason,
     redactedStatus,
   });
 
@@ -1051,6 +1062,15 @@ function shouldCheckpointHostedWorkspaceAssistantPhase(
   result: HostedWorkspaceRunnerAssistantPhaseResult,
 ): boolean {
   return result.progressed === true;
+}
+
+function requireHostedWorkspaceAssistantPhaseCheckpointReason(
+  result: HostedWorkspaceRunnerAssistantPhaseResult,
+): HostedWorkspaceCheckpointReason {
+  if (!result.checkpointReason) {
+    throw new TypeError("Hosted workspace assistant phase checkpoint requires an explicit reason.");
+  }
+  return result.checkpointReason;
 }
 
 function applyExpectedWorkspaceVersionOverride(input: {
