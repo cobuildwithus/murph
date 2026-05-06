@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,6 +11,10 @@ import {
 } from "@murphai/runtime-state";
 import {
   readHostedBundleTextFile,
+  restoreHostedBundleRoots,
+  restoreHostedExecutionContext,
+  sha256HostedBundleHex,
+  snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import {
   buildHostedMailboxPayloadScope,
@@ -745,7 +749,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     })).toBeNull();
   });
 
-  it("writes hot snapshots for system mailbox receipt checkpoints when base sidecars exist", async () => {
+  it("writes full snapshots for system mailbox receipt checkpoints when base sidecars exist", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -794,12 +798,21 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const result = await options.createCheckpointSnapshot(
       createCheckpointInput("system_mailbox_receipt"),
     );
-    const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
+    const snapshotRef = requireBundleRef(result.snapshotRef);
 
-    expect(snapshotRef.base).toEqual(baseSnapshotRef);
-    expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
-    expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
+    expect(snapshotRef).toEqual(expect.objectContaining({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u),
+      size: expect.any(Number),
+    }));
+    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sha256: snapshotRef.hash,
+    }));
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
+    }));
+    expect(result.browserVaultReplicaRef).not.toEqual(browserVaultReplicaRef);
   });
 
   it("pins the checkpoint snapshot policy for every supported checkpoint reason", async () => {
@@ -859,12 +872,107 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
       const result = await options.createCheckpointSnapshot(createCheckpointInput(reason));
 
-      const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
-      expect(snapshotRef.base).toEqual(baseSnapshotRef);
-      expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
-      expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
-      expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
+      if (expectedCheckpointSnapshotMode(reason) === "full") {
+        const snapshotRef = requireBundleRef(result.snapshotRef);
+        expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+        expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+        expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+          sourceBundleHash: snapshotRef.hash,
+        }));
+      } else {
+        const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
+        expect(snapshotRef.base).toEqual(baseSnapshotRef);
+        expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
+        expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+        expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
+      }
     }
+  });
+
+  it("keeps non-hot maintenance writes durable across a cold restore", async () => {
+    const nonHotRelativePath = path.join("bank", "device-sync", "observation.json");
+    const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    const restoreRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-restore-"));
+    cleanupPaths.push(baseVaultRoot, vaultRoot, restoreRoot);
+
+    await mkdir(path.dirname(path.join(baseVaultRoot, nonHotRelativePath)), { recursive: true });
+    await writeFile(path.join(baseVaultRoot, nonHotRelativePath), "{\"status\":\"old\"}\n", "utf8");
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      vaultRoot: baseVaultRoot,
+    });
+    const baseBundleHash = sha256HostedBundleHex(baseSnapshot.bundle);
+    const baseSnapshotRef = {
+      hash: baseBundleHash,
+      key: `cloudflare-workspace-snapshots/${baseBundleHash}.bundle`,
+      size: baseSnapshot.bundle.byteLength,
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const browserVaultReplicaRef = createBrowserVaultReplicaRef(baseBundleHash);
+    const artifactBundles = new Map<string, Uint8Array>([
+      [baseBundleHash, baseSnapshot.bundle],
+    ]);
+
+    await mkdir(path.dirname(path.join(vaultRoot, nonHotRelativePath)), { recursive: true });
+    await writeFile(path.join(vaultRoot, nonHotRelativePath), "{\"status\":\"latest\"}\n", "utf8");
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"),
+      "{\"intent\":\"ready\"}\n",
+      "utf8",
+    );
+
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact: async ({ bytes, sha256 }) => {
+          artifactBundles.set(sha256, bytes);
+        },
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            browserVaultReplicaRef,
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: baseSnapshotRef,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "8",
+          },
+        }),
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "8",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "8",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    const restored = await restoreCheckpointSnapshotForTest({
+      artifactBundles,
+      snapshotRef: result.snapshotRef,
+      workspaceRoot: restoreRoot,
+    });
+
+    await expect(readFile(
+      path.join(restored.vaultRoot, nonHotRelativePath),
+      "utf8",
+    )).resolves.toBe("{\"status\":\"latest\"}\n");
   });
 
   it("logs hashed Codex home snapshot diagnostics when checkpointing", async () => {
@@ -1434,6 +1542,82 @@ function createCheckpointInput(
     redactedStatus: {},
     state,
   };
+}
+
+type CheckpointReason = (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number];
+
+function expectedCheckpointSnapshotMode(reason: CheckpointReason): "full" | "hot" {
+  switch (reason) {
+    case "maintenance":
+    case "system_mailbox_receipt":
+      return "full";
+    case "active_turn_acceptance":
+    case "active_turn_input":
+    case "import":
+    case "outbox_receipt":
+    case "outbox_sending":
+      return "hot";
+  }
+
+  const exhaustive: never = reason;
+  return exhaustive;
+}
+
+async function restoreCheckpointSnapshotForTest(input: {
+  artifactBundles: ReadonlyMap<string, Uint8Array>;
+  snapshotRef: unknown;
+  workspaceRoot: string;
+}) {
+  if (isLayeredSnapshotRefForTest(input.snapshotRef)) {
+    const snapshotRef = requireLayeredSnapshotRef(input.snapshotRef);
+    if (!snapshotRef.base) {
+      throw new Error("Layered checkpoint snapshot is missing its base bundle ref.");
+    }
+
+    const restored = await restoreHostedExecutionContext({
+      bundle: requireStoredBundle(input.artifactBundles, snapshotRef.base.hash),
+      workspaceRoot: input.workspaceRoot,
+    });
+    if (snapshotRef.hot) {
+      await restoreHostedBundleRoots({
+        bytes: requireStoredBundle(input.artifactBundles, snapshotRef.hot.hash),
+        expectedKind: "vault",
+        roots: {
+          "operator-home": restored.operatorHomeRoot,
+          vault: restored.vaultRoot,
+        },
+      });
+    }
+
+    return restored;
+  }
+
+  const snapshotRef = requireBundleRef(input.snapshotRef);
+  return await restoreHostedExecutionContext({
+    bundle: requireStoredBundle(input.artifactBundles, snapshotRef.hash),
+    workspaceRoot: input.workspaceRoot,
+  });
+}
+
+function isLayeredSnapshotRefForTest(value: unknown): boolean {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && (value as Record<string, unknown>).schema === HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  );
+}
+
+function requireStoredBundle(
+  artifactBundles: ReadonlyMap<string, Uint8Array>,
+  hash: string,
+): Uint8Array {
+  const bytes = artifactBundles.get(hash);
+  if (!bytes) {
+    throw new Error(`Missing test bundle for hash ${hash}.`);
+  }
+
+  return bytes;
 }
 
 function createPlatform(input: {
