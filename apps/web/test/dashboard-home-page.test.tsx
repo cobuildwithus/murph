@@ -172,6 +172,7 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Trial credits are used up/);
-  assert.match(markup, /Start Pulse plan/);
+  assert.match(markup, /Start Pulse/);
+  assert.doesNotMatch(markup, /Start Pulse plan/);
   assert.doesNotMatch(markup, /href="\/settings"/);
 });
