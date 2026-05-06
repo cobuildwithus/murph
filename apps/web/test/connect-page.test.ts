@@ -639,7 +639,7 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
 
   assert.match(markup, /Oura connected/);
   assert.match(markup, /Whoop connected/);
-  assert.equal(markup.match(/>Connected<\/span>/gu)?.length, 2);
+  assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 2);
   assert.match(markup, /aria-label="Disconnect Oura"/u);
   assert.match(markup, /aria-label="Disconnect Whoop"/u);
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
@@ -838,8 +838,9 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
   });
 
   assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
-  const dialogButtons = [...rendered.container.querySelectorAll("button")];
-  const confirmButton = dialogButtons.at(-1);
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
   assert.equal(confirmButton.textContent, "Disconnect");
 
@@ -910,7 +911,9 @@ test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialo
     disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  const confirmButton = [...rendered.container.querySelectorAll("button")].at(-1);
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
   await act(async () => {

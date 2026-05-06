@@ -219,11 +219,10 @@ describe("HostedBillingSettings", () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
     assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
-    assert.match(rendered.window.document.body.textContent ?? "", /Confirm Edge upgrade/);
-    assert.match(rendered.window.document.body.textContent ?? "", /\$8\/month/);
-    assert.match(rendered.window.document.body.textContent ?? "", /\$20\/month/);
+    assert.match(rendered.window.document.body.textContent ?? "", /For when you want the full picture\./);
+    assert.match(rendered.window.document.body.textContent ?? "", /\$20\/ month/);
 
-    const confirmButton = findButtonByText(rendered.window.document, "Confirm upgrade", rendered.window);
+    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
     await act(async () => {
       confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
@@ -256,7 +255,7 @@ describe("HostedBillingSettings", () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
     assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
-    assert.match(rendered.window.document.body.textContent ?? "", /Switch to Pulse at renewal\./);
+    assert.match(rendered.window.document.body.textContent ?? "", /You keep Edge through May 6, 2026, then Pulse at \$8\/mo\./);
     assert.match(rendered.window.document.body.textContent ?? "", /Edge/);
     assert.match(rendered.window.document.body.textContent ?? "", /Pulse/);
     assert.match(rendered.window.document.body.textContent ?? "", /\$20\/mo/);
@@ -289,10 +288,10 @@ describe("HostedBillingSettings", () => {
     });
     assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
     assert.match(rendered.window.document.body.textContent ?? "", /Start Pulse plan/);
-    assert.match(rendered.window.document.body.textContent ?? "", /Your trial ends now/);
-    assert.match(rendered.window.document.body.textContent ?? "", /\$8 \/ month/);
+    assert.match(rendered.window.document.body.textContent ?? "", /Your trial ends and Pulse begins at \$8\/mo\./);
+    assert.match(rendered.window.document.body.textContent ?? "", /\$8\/ month/);
 
-    const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse plan", rendered.window);
+    const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse", rendered.window);
     await act(async () => {
       confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
@@ -319,7 +318,7 @@ describe("HostedBillingSettings", () => {
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
-    const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse plan", rendered.window);
+    const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse", rendered.window);
     await act(async () => {
       confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
@@ -345,7 +344,7 @@ describe("HostedBillingSettings", () => {
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
-    const confirmButton = findButtonByText(rendered.window.document, "Confirm upgrade", rendered.window);
+    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
     await act(async () => {
       confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
@@ -377,7 +376,7 @@ describe("HostedBillingSettings", () => {
     await act(async () => {
       upgradeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
-    const confirmButton = findButtonByText(rendered.window.document, "Confirm upgrade", rendered.window);
+    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
     await act(async () => {
       confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });

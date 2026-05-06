@@ -228,6 +228,7 @@ function createAuthorityHarness(input: {
         externalAccountId: currentRecord.externalAccountId ?? "acct_123",
       })),
     getStoredConnectionAccountForUser: vi.fn(async () => currentStoredAccount),
+    listConnectionSources: vi.fn(async () => []),
     persistStoredConnectionTokenBundle,
     prisma: {
       deviceConnection: {
