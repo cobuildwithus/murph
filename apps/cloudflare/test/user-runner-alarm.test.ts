@@ -1566,7 +1566,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms.at(-1)).toBe("2026-04-27T00:04:00.000Z");
+    expect(alarms.at(-1)).toBe("2026-04-27T00:04:55.000Z");
 	    expect(
 	      sql.exec(
 	        `SELECT idle_shutdown_checkpoint_due_at,
@@ -1576,7 +1576,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	        "member_123",
 	      ).toArray(),
 	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
+	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:55.000Z",
 	      idle_shutdown_checkpoint_workspace_version: "4",
 	      next_wake_at: null,
 	    }]);
@@ -1840,6 +1840,43 @@ describe("HostedUserRunner runtime crypto context", () => {
 	      idle_shutdown_checkpoint_due_at: null,
 	      idle_shutdown_checkpoint_workspace_version: null,
 	      pending_nudge: 1,
+	    }]);
+	  });
+
+	  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
+	    vi.useFakeTimers();
+	    vi.setSystemTime(new Date(FIXED_NOW));
+	    const workspace = createWorkspaceState({
+	      snapshotRef: createLayeredSnapshotRef("idle-schedule-read-fail"),
+	      version: "4",
+	    });
+	    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+	      onWorkspaceRead: ({ readCount }) => {
+	        if (readCount === 2) {
+	          throw new Error("workspace read unavailable after completion");
+	        }
+	      },
+	    });
+	    await runner.bindUser("member_123");
+
+	    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+	      status: "idle",
+	    });
+
+	    expect(invoke).toHaveBeenCalledOnce();
+	    expect(alarms).toContain("deleted");
+	    expect(
+	      sql.exec(
+	        `SELECT in_flight,
+	                last_error_code,
+	                retry_failure_count
+	         FROM runner_meta WHERE user_id = ?`,
+	        "member_123",
+	      ).toArray(),
+	    ).toEqual([{
+	      in_flight: 0,
+	      last_error_code: null,
+	      retry_failure_count: 0,
 	    }]);
 	  });
 

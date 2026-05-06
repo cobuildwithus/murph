@@ -709,7 +709,7 @@ export class HostedUserRunner {
         userId: initialRecord.userId,
         workspaceVersion,
       });
-      const completion = await this.stateStore.completeInvocation({
+	      const completion = await this.stateStore.completeInvocation({
         finishedAt: new Date().toISOString(),
         lease,
       });
@@ -719,11 +719,25 @@ export class HostedUserRunner {
             userId: initialRecord.userId,
           });
         } else {
-          await this.scheduleNextWorkspaceAlarm({
-            fallbackNextWakeAt: result.nextWakeAt ?? null,
-            resultStatus: result.status,
-            userId: initialRecord.userId,
-          });
+          try {
+            await this.scheduleNextWorkspaceAlarm({
+              fallbackNextWakeAt: result.nextWakeAt ?? null,
+              resultStatus: result.status,
+              userId: initialRecord.userId,
+            });
+          } catch (error) {
+            await this.runtimeAlarmScheduler.syncNextWake({
+              preferredWakeAt: result.nextWakeAt ?? null,
+            });
+            emitHostedExecutionStructuredLog({
+              component: "hosted.runner",
+              error,
+              level: "warn",
+              message: "Hosted runner post-completion alarm scheduling failed; invocation result preserved.",
+              phase: "scheduled",
+              userId: initialRecord.userId,
+            });
+          }
         }
       }
       emitHostedExecutionStructuredLog({
@@ -1162,6 +1176,7 @@ export class HostedUserRunner {
     }
   > {
     if (input.record.pendingNudge || !input.expectedWorkspaceVersion) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
       const record = await this.runtimeAlarmScheduler.syncNextWake({
         preferredWakeAt: input.record.nextWakeAt,
       });
@@ -1173,6 +1188,17 @@ export class HostedUserRunner {
 
     const workspaceRead = await this.readHostedWorkspaceFromWeb(input.record.userId);
     this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.record.userId);
+    const latestRecord = await this.stateStore.readState();
+    if (latestRecord.pendingNudge || latestRecord.inFlight) {
+      const record = latestRecord.pendingNudge
+        ? await this.reschedulePendingNudgeAfterInvocationLiveness(latestRecord)
+          ?? latestRecord
+        : await this.syncInvocationRecoveryAlarm(latestRecord);
+      return {
+        nextWakeAt: record.nextWakeAt,
+        run: false,
+      };
+    }
     const workspace = workspaceRead.workspace;
     if (
       !workspace
@@ -1180,8 +1206,9 @@ export class HostedUserRunner {
       || workspace.nextWakeAt
       || isHostedWorkspaceBaseOnlySnapshot(workspace)
     ) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
       const record = await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: workspace?.nextWakeAt ?? input.record.nextWakeAt,
+        preferredWakeAt: workspace?.nextWakeAt ?? latestRecord.nextWakeAt,
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -1267,7 +1294,13 @@ export class HostedUserRunner {
     retryDelayMs: number;
     workspaceVersion: string;
   }): Promise<boolean> {
-    const record = await this.stateStore.readState();
+	    const record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight) {
+      const scheduledRecord = record.pendingNudge
+        ? await this.reschedulePendingNudgeAfterInvocationLiveness(record) ?? record
+        : await this.syncInvocationRecoveryAlarm(record);
+      return scheduledRecord.pendingNudge || scheduledRecord.inFlight;
+    }
     if (record.retryFailureCount >= this.env.maxEventAttempts) {
       await this.stateStore.clearIdleShutdownCheckpoint();
       emitHostedExecutionStructuredLog({
@@ -1288,9 +1321,7 @@ export class HostedUserRunner {
       dueAt: new Date(Date.now() + input.retryDelayMs).toISOString(),
       workspaceVersion: input.workspaceVersion,
     });
-    await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: record.nextWakeAt,
-    });
+    await this.runtimeAlarmScheduler.syncStoredAlarm();
     return true;
   }
 
@@ -1342,8 +1373,11 @@ export class HostedUserRunner {
       });
       return;
     }
+    await this.stateStore.clearIdleShutdownCheckpoint();
     await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: null,
+      preferredWakeAt: destroyed.ok ? null : new Date(
+        Date.now() + this.env.retryDelayMs,
+      ).toISOString(),
     });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",

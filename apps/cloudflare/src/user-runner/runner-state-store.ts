@@ -161,8 +161,6 @@ export class RunnerStateStore {
       }
 
       const idleWorkspaceVersion = meta.idle_shutdown_checkpoint_workspace_version;
-      this.clearIdleShutdownCheckpointMetaSync(meta);
-      this.writeMetaRowSync(meta);
       return {
         idleWorkspaceVersion,
         kind: "idle_shutdown_checkpoint",
@@ -198,6 +196,9 @@ export class RunnerStateStore {
     meta.active_workspace_version = null;
     if (input.consumePendingNudge !== false) {
       meta.pending_nudge = 0;
+    }
+    if (input.reason === "idle_shutdown_checkpoint") {
+      this.clearIdleShutdownCheckpointMetaSync(meta);
     }
     this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
@@ -354,9 +355,11 @@ export class RunnerStateStore {
       };
     }
 
-    const ownsLease = input.workspaceVersion === undefined
+    const ownsLease = (
+      input.workspaceVersion === undefined
       || input.workspaceVersion === null
-      || lease.workspaceVersion === input.workspaceVersion;
+      || lease.workspaceVersion === input.workspaceVersion
+    ) && !isIdleShutdownCheckpointBlockedByPendingNudge(meta);
     const clearedOrphanObservation = ownsLease
       && meta.active_invocation_orphan_observed_at !== null;
     if (ownsLease) {
@@ -386,6 +389,14 @@ export class RunnerStateStore {
       || lease.leaseGeneration !== input.leaseGeneration
       || lease.userId !== input.userId
     ) {
+      return {
+        clearedOrphanObservation: false,
+        recorded: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    if (isIdleShutdownCheckpointBlockedByPendingNudge(meta)) {
       return {
         clearedOrphanObservation: false,
         recorded: false,
@@ -720,6 +731,11 @@ export class RunnerStateStore {
 
 function normalizeLeaseGeneration(value: number | null): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function isIdleShutdownCheckpointBlockedByPendingNudge(meta: RunnerMetaBundleRow): boolean {
+  return meta.active_invocation_reason === "idle_shutdown_checkpoint"
+    && meta.pending_nudge === 1;
 }
 
 function isHostedWorkspaceInvocationReasonValue(

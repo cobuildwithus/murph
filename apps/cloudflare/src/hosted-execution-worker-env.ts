@@ -92,9 +92,9 @@ export function readHostedExecutionWorkerEnvironment(
       3,
       "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
     ),
-    idleShutdownCheckpointSafetyMarginMs: parsePositiveInteger(
+    idleShutdownCheckpointSafetyMarginMs: parseNonNegativeInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS),
-      60_000,
+      5_000,
       "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS",
     ),
     retryDelayMs: parsePositiveInteger(
@@ -176,6 +176,20 @@ function parsePositiveInteger(value: string | null, fallback: number, label: str
 
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new TypeError(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
+}
+
+function parseNonNegativeInteger(value: string | null, fallback: number, label: string): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new TypeError(`${label} must be a non-negative integer.`);
   }
 
   return parsed;

@@ -215,6 +215,14 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.runnerReadyTimeoutMs).toBe(45_000);
   });
 
+  it("allows idle-shutdown checkpoint safety margin to be zero", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
+    }));
+
+    expect(environment.idleShutdownCheckpointSafetyMarginMs).toBe(0);
+  });
+
   it("reads optional runner-secret allowlist extensions", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY,CUSTOM_API_KEY",

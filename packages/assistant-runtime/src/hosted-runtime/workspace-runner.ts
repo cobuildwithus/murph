@@ -65,21 +65,28 @@ export interface HostedWorkspaceSnapshotCheckpointResult {
 }
 
 type HostedWorkspaceSnapshotCheckpointMailboxInput =
-  Omit<HostedMailboxImportCheckpointRequestInput, "redactedStatus">;
+  Omit<HostedMailboxImportCheckpointRequestInput, "reason" | "redactedStatus"> & {
+    reason: Exclude<HostedWorkspaceCheckpointReason, "idle_shutdown">;
+  };
 
-type HostedWorkspaceSnapshotCheckpointIdleInput = {
-  reason: "idle_shutdown";
-};
+export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
+  (
+    | HostedWorkspaceSnapshotCheckpointMailboxInput
+    | {
+      reason: "idle_shutdown";
+    }
+  ) & {
+    nextWakeAt?: string | null;
+    nextWakeReason?: string | null;
+    redactedStatus?: HostedRuntimeRedactedJson | null;
+  };
 
-export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput = (
-  | HostedWorkspaceSnapshotCheckpointMailboxInput
-  | HostedWorkspaceSnapshotCheckpointIdleInput
-) & {
+export interface HostedWorkspaceRunnerCheckpointRequestInput
+  extends Omit<HostedMailboxImportCheckpointRequestInput, "reason"> {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
-  redactedStatus?: HostedRuntimeRedactedJson | null;
-};
+}
 
 export type HostedWorkspaceSnapshotCheckpointBuilder = (
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -98,13 +105,6 @@ interface HostedWorkspaceCheckpointRequestSession
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
   recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
   takeMailboxPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
-}
-
-export interface HostedWorkspaceRunnerCheckpointRequestInput
-  extends HostedMailboxImportCheckpointRequestInput {
-  nextWakeAt?: string | null;
-  nextWakeReason?: string | null;
-  reason: HostedWorkspaceCheckpointReason;
 }
 
 export interface HostedWorkspaceRunnerPlatform
