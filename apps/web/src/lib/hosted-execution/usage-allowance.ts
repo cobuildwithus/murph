@@ -132,6 +132,7 @@ interface HostedAiUsageAllowanceBillingRef {
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
+const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
@@ -1044,22 +1045,24 @@ function buildHostedAiUsageGateLimitNotice(input: {
   ) {
     return {
       code: "trial_usage_limit_reached",
-      message: "You've reached the hosted AI usage included in your trial.",
+      message:
+        `You've reached the hosted AI usage included in your trial. Open ${HOSTED_AI_USAGE_HOME_URL} to upgrade.`,
     };
   }
 
-  const base = "Hey - you've reached your usage limit for the month.";
+  const base = "Hey, you've reached your usage limit for the month.";
 
   if (input.billingPlanCode === "launch_edge_monthly") {
     return {
       code: "edge_enable_usage_based_pricing",
-      message: `${base} Go to the dashboard to enable usage based pricing.`,
+      message:
+        `${base} Open ${HOSTED_AI_USAGE_HOME_URL} to enable usage-based pricing.`,
     };
   }
 
   return {
     code: "pulse_upgrade_edge",
-    message: `${base} Upgrade to Edge for more usage.`,
+    message: `${base} Open ${HOSTED_AI_USAGE_HOME_URL} to upgrade to Edge.`,
   };
 }
 

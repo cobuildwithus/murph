@@ -292,7 +292,8 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message: "Hey - you've reached your usage limit for the month. Upgrade to Edge for more usage.",
+        message:
+          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
       },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
@@ -315,7 +316,8 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "edge_enable_usage_based_pricing",
-        message: "Hey - you've reached your usage limit for the month. Go to the dashboard to enable usage based pricing.",
+        message:
+          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to enable usage-based pricing.",
       },
     });
   });
@@ -371,7 +373,8 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-08T12:00:00.000Z"),
       userNotice: {
         code: "trial_usage_limit_reached",
-        message: "You've reached the hosted AI usage included in your trial.",
+        message:
+          "You've reached the hosted AI usage included in your trial. Open https://withmurph.ai/home to upgrade.",
       },
     });
   });
