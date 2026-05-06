@@ -65,6 +65,7 @@ const FUTURE_WAKE_AT = "2099-01-01T00:05:00.000Z";
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 
 class TestHostedUserRunner extends HostedUserRunner {
+  public failRunWith: Error | null = null;
   public readonly runCalls: HostedWorkspaceInvocationReason[] = [];
 
   override async runUntilIdleOrBudget(input: {
@@ -72,6 +73,9 @@ class TestHostedUserRunner extends HostedUserRunner {
     reason: HostedWorkspaceInvocationReason;
   }) {
     this.runCalls.push(input.reason);
+    if (this.failRunWith) {
+      throw this.failRunWith;
+    }
     return {
       nextWakeAt: null,
       status: "idle" as const,
@@ -206,6 +210,46 @@ describe("HostedUserRunner alarm routing", () => {
         }),
         message: "Hosted runner nudge accepted.",
         phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("uses a short fallback alarm when an idle nudge starts an immediate drive", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner } = createRunnerHarness();
+    await runner.bindUser("member_123");
+
+    await runner.nudgeHostedRunner();
+
+    expect(alarms[0]).toBe("2026-04-27T00:00:01.000Z");
+  });
+
+  it("keeps failed immediate nudge retries on the short fallback path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner } = createRunnerHarness();
+    await runner.bindUser("member_123");
+    runner.failRunWith = new Error("Hosted runner failed before the alarm retry.");
+
+    await runner.nudgeHostedRunner();
+    await flushDetachedRunnerDrive();
+
+    expect(runner.runCalls).toEqual(["nudge"]);
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:01.000Z",
+      "2026-04-27T00:00:01.000Z",
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          reason: "nudge",
+          retryDelayMs: 1000,
+        }),
+        message: "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled.",
+        phase: "failed",
         userId: "member_123",
       }),
     );
@@ -619,11 +663,11 @@ describe("HostedUserRunner runtime crypto context", () => {
       accepted: true,
       alreadyRunning: false,
       inFlight: false,
-      nextAlarmAt: "2026-04-27T00:00:30.000Z",
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
-    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     const alarmRun = runner.alarm();
     await Promise.resolve();
     expect(invoke).toHaveBeenCalledOnce();
@@ -636,8 +680,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(alarmRun).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
-      "2026-04-27T00:00:30.000Z",
-      "2026-04-27T00:01:15.100Z",
+      "2026-04-27T00:00:01.000Z",
+      "2026-04-27T00:00:46.100Z",
       "deleted",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -672,7 +716,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
-      "2026-04-27T00:00:30.000Z",
+      "2026-04-27T00:00:01.000Z",
       "2026-04-27T00:00:45.100Z",
     ]);
     expect(
@@ -709,7 +753,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.nudgeHostedRunner();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     const alarmRun = runner.alarm();
     await Promise.resolve();
     expect(invoke).toHaveBeenCalledOnce();
@@ -717,8 +761,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(alarmRun).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
-      "2026-04-27T00:00:30.000Z",
-      "2026-04-27T00:01:15.100Z",
+      "2026-04-27T00:00:01.000Z",
+      "2026-04-27T00:00:46.100Z",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -786,7 +830,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.nudgeHostedRunner();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     const alarmRun = runner.alarm();
     await Promise.resolve();
     expect(invoke).toHaveBeenCalledOnce();
@@ -799,8 +843,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(alarmRun).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
-      "2026-04-27T00:00:30.000Z",
-      "2026-04-27T00:01:15.100Z",
+      "2026-04-27T00:00:01.000Z",
+      "2026-04-27T00:00:46.100Z",
       "2026-04-27T00:05:00.000Z",
     ]);
   });
@@ -1700,6 +1744,12 @@ function createDeferred<T>() {
     reject,
     resolve,
   };
+}
+
+async function flushDetachedRunnerDrive(): Promise<void> {
+  for (let index = 0; index < 5; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {

@@ -80,6 +80,7 @@ Updated: 2026-05-06
 - 2026-05-06 pre-scan input decision: automation passes refresh the assistant input source once before reading automation state and scanning so messages that arrive while a workspace restore is already in progress are imported before candidate selection.
 - 2026-05-06 nudge RPC decision: the control nudge route calls one Durable Object RPC that binds the user and nudges internally, avoiding the route-side `bindUser` RPC plus second `nudgeHostedRunner` RPC on the live webhook handoff path.
 - 2026-05-06 active-invocation heartbeat decision: runner-control heartbeats must touch the user-runner Durable Object and return pending-input state instead of a synthetic no-input response; Cloudflare runtime liveness polling is reduced to 1s so active invocations can notice live texts quickly.
+- 2026-05-06 immediate-nudge retry decision: failed immediate nudge drives use a 1s retry alarm instead of the generic 30s hosted runner retry delay, while non-nudge failures keep the generic retry path and max-attempt guard.
 
 ## Current evidence
 
@@ -101,6 +102,7 @@ Updated: 2026-05-06
 - The successful active-turn admission deploy exposed a new stale-restore edge: a post-deploy text appended while the prior invocation was already restoring, so skipping all active-turn refreshes caused the restored workspace to miss that input until a later invocation. The pre-scan input refresh fixes that without reintroducing provider-boundary refresh/checkpoint work.
 - The latest warm live probe restored in roughly 0.35s, but the auto-reply scan still took roughly 18.8s while Codex app-server work took roughly 2.4s. Code inspection found the auto-reply decision path was still calling `listAssistantTurnReceipts` with an effectively unbounded limit before every reply; that helper reads the whole turn receipt directory and matches the remaining warm-path scan gap.
 - The post-nudge-RPC live probe confirmed the route-side nudge was down to a single fast Durable Object call, but the response still waited behind active runner work. Code inspection found the active-invocation heartbeat endpoint parsed the heartbeat and always returned `inputAvailable: false` without calling `recordActiveInvocationHeartbeat`, so active containers could not refresh liveness or learn that a live text arrived.
+- A later live iMessage probe showed the webhook append and nudge were immediate, but the first immediate runner drive failed after a few seconds with a child-result failure and then waited for the generic 30s retry alarm before restoring/importing. That retry delay, not the 44 MB base snapshot by itself, explained a large part of the latest 40s-plus gap.
 
 ## Verification
 
@@ -149,3 +151,6 @@ Updated: 2026-05-06
   - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/runner-outbound.test.ts apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage`
   - `pnpm --dir apps/cloudflare typecheck`
   - `git diff --check -- apps/cloudflare/src/runner-outbound/heartbeat.ts apps/cloudflare/src/runtime-platform.ts apps/cloudflare/test/runner-outbound.test.ts`
+  - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage`
+  - `pnpm --dir apps/cloudflare typecheck`
+  - `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts`
