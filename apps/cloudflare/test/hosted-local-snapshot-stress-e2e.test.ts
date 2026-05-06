@@ -220,11 +220,16 @@ describe("hosted local snapshot stress e2e", () => {
 
     const postReplySnapshot = findLargestCheckpointLog(finalStatus.recentLogs, {
       eventCode: "checkpoint.snapshot_finished",
-      reason: ["outbox_sending", "maintenance"],
+      reason: "outbox_sending",
+    });
+    const postReplyFallback = findLargestCheckpointLog(finalStatus.recentLogs, {
+      eventCode: "checkpoint.hot_state_fallback",
+      reason: "outbox_sending",
     });
 
     expect(readRedactedJsonString(importSnapshot, "snapshotMode")).toBe("full");
     expect(readRedactedJsonString(postReplySnapshot, "snapshotMode")).toBe("full");
+    expect(readRedactedJsonString(postReplyFallback, "fallbackReason")).toBe("budget_exceeded");
     expect(readRedactedJsonNumber(importSnapshot, "bundlePutBytes"))
       .toBeGreaterThan(16 * 1024 * 1024);
     expect(readRedactedJsonNumber(postReplySnapshot, "bundlePutBytes"))

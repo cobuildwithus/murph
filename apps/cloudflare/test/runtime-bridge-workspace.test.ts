@@ -53,7 +53,7 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("writes full local workspace snapshots through the artifact store for maintenance checkpoints", async () => {
+  it("writes full local workspace snapshots through the artifact store for canonical runtime commit checkpoints", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -79,7 +79,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
     const snapshotRef = requireBundleRef(result.snapshotRef);
 
     expect(snapshotRef).toEqual(expect.objectContaining({
@@ -120,7 +120,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
 
     expect(result.snapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -159,7 +159,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
     const snapshotRef = requireBundleRef(result.snapshotRef);
 
     expect(snapshotRef.hash).toMatch(/^[a-f0-9]{64}$/u);
@@ -217,7 +217,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
     const snapshotRef = requireBundleRef(result.snapshotRef);
 
     expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
@@ -266,7 +266,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(
-      options.createCheckpointSnapshot(createCheckpointInput("maintenance")),
+      options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit")),
     ).rejects.toThrow("published a browser-vault replica for a different snapshot");
   });
 
@@ -408,6 +408,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const putArtifact = vi.fn(async () => {});
     const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
       createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         putArtifact,
@@ -426,6 +429,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           },
         }),
         writeBrowserVaultReplica,
+        writeLog,
       }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
@@ -455,6 +459,179 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
       sourceBundleHash: snapshotRef.hash,
     }));
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          component: "workspace",
+          eventCode: "checkpoint.hot_state_fallback",
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson: expect.objectContaining({
+            fallbackReason: "missing_base",
+          }),
+        }),
+      ],
+    });
+  });
+
+  it("falls back to a full snapshot when hot checkpointing has no browser replica", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"),
+      "{\"intent\":\"ready\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const baseSnapshotRef = createBundleRef("g");
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            browserVaultReplicaRef: null,
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: baseSnapshotRef,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "7",
+          },
+        }),
+        writeBrowserVaultReplica,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("import"));
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
+    }));
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          component: "workspace",
+          eventCode: "checkpoint.hot_state_fallback",
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson: expect.objectContaining({
+            fallbackReason: "missing_replica",
+          }),
+        }),
+      ],
+    });
+  });
+
+  it("falls back to a full snapshot when hot checkpointing has a stale browser replica", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"),
+      "{\"intent\":\"ready\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async (input: { replica: unknown }) =>
+      createBrowserVaultReplicaRef(readBrowserVaultReplicaSourceBundleHash(input.replica)));
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const baseSnapshotRef = createBundleRef("h");
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: {
+            browserVaultReplicaRef: createBrowserVaultReplicaRef("i".repeat(64)),
+            checkpointedAt: "2026-05-01T00:00:00.000Z",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: baseSnapshotRef,
+            updatedAt: "2026-05-01T00:00:00.000Z",
+            userId: "member_1",
+            version: "7",
+          },
+        }),
+        writeBrowserVaultReplica,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("import"));
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
+    }));
+    expect(writeLog).toHaveBeenCalledWith({
+      entries: [
+        expect.objectContaining({
+          component: "workspace",
+          eventCode: "checkpoint.hot_state_fallback",
+          level: "warn",
+          phase: "checkpoint",
+          redactedJson: expect.objectContaining({
+            fallbackReason: "stale_replica",
+          }),
+        }),
+      ],
+    });
   });
 
   it("falls back to a full snapshot when hot checkpoint current refs are unavailable", async () => {
@@ -663,7 +840,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("maintenance")))
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit")))
       .rejects.toThrow("missing required provider continuity state");
 
     expect(writeLog).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -749,7 +926,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     })).toBeNull();
   });
 
-  it("writes full snapshots for system mailbox receipt checkpoints when base sidecars exist", async () => {
+  it("writes hot snapshots for system mailbox receipt checkpoints when base sidecars exist", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -798,21 +975,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const result = await options.createCheckpointSnapshot(
       createCheckpointInput("system_mailbox_receipt"),
     );
-    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
 
-    expect(snapshotRef).toEqual(expect.objectContaining({
-      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      key: expect.stringMatching(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u),
-      size: expect.any(Number),
-    }));
+    expect(snapshotRef.base).toEqual(baseSnapshotRef);
+    expect(snapshotRef.hot?.key).toMatch(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u);
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.hash,
+      sha256: snapshotRef.hot?.hash,
     }));
-    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
-    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
-      sourceBundleHash: snapshotRef.hash,
-    }));
-    expect(result.browserVaultReplicaRef).not.toEqual(browserVaultReplicaRef);
+    expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(result.browserVaultReplicaRef).toEqual(browserVaultReplicaRef);
   });
 
   it("pins the checkpoint snapshot policy for every supported checkpoint reason", async () => {
@@ -889,7 +1060,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
   });
 
-  it("keeps non-hot maintenance writes durable across a cold restore", async () => {
+  it("keeps non-hot canonical runtime writes durable across a cold restore", async () => {
     const nonHotRelativePath = path.join("bank", "device-sync", "observation.json");
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
@@ -962,7 +1133,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
     const restored = await restoreCheckpointSnapshotForTest({
       artifactBundles,
       snapshotRef: result.snapshotRef,
@@ -1026,7 +1197,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await options.createCheckpointSnapshot(createCheckpointInput("maintenance"));
+    await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
 
     expect(writeLog).toHaveBeenCalledWith({
       entries: [
@@ -1520,7 +1691,7 @@ function createSystemMailboxImportItem(input: {
 }
 
 function createCheckpointInput(
-  reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "maintenance",
+  reason: (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number] = "canonical_runtime_commit",
 ) {
   const state = {
     recentStatuses: [],
@@ -1549,14 +1720,18 @@ type CheckpointReason = (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number];
 function expectedCheckpointSnapshotMode(reason: CheckpointReason): "full" | "hot" {
   switch (reason) {
     case "idle_shutdown":
+    case "activation_bootstrap":
+    case "canonical_runtime_commit":
     case "maintenance":
-    case "system_mailbox_receipt":
       return "full";
     case "active_turn_acceptance":
     case "active_turn_input":
+    case "assistant_runtime_commit":
     case "import":
     case "outbox_receipt":
     case "outbox_sending":
+    case "provider_cleanup":
+    case "system_mailbox_receipt":
       return "hot";
   }
 
