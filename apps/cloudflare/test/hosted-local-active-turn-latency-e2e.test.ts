@@ -1,0 +1,334 @@
+import { execFile } from "node:child_process";
+import { createHmac, randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
+import { performance } from "node:perf_hooks";
+import { promisify } from "node:util";
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
+
+import {
+  startHostedLocalFullStackScenario,
+  type HostedLocalFullStackScenario,
+} from "./helpers/hosted-local-full-stack-scenario.js";
+import {
+  buildHostedLinqInboundEvent,
+  buildLinqHomePhoneNumber,
+  buildLinqRecipientPhoneNumber,
+  startHostedLocalLinqStub,
+  type HostedLocalLinqStub,
+} from "./helpers/hosted-local-linq-support.js";
+import {
+  DEFAULT_DATABASE_URL,
+} from "../../../scripts/dev-hosted-local/constants.js";
+
+const linqWebhookSecret = "linq-local-active-turn-latency-secret";
+const execFileAsync = promisify(execFile);
+const runId = Date.now();
+const codexTurnDelayMs = readPositiveIntegerEnv(
+  "MURPH_E2E_ACTIVE_TURN_LATENCY_CODEX_DELAY_MS",
+  15_000,
+);
+const lateInputDelayAfterWakeMs = readPositiveIntegerEnv(
+  "MURPH_E2E_ACTIVE_TURN_LATENCY_LATE_INPUT_DELAY_MS",
+  10_000,
+);
+const productionLikeAssistantModel = "gpt-5.5";
+const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
+const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
+const configuredDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
+
+let scenario: HostedLocalFullStackScenario | null = null;
+let linqStub: HostedLocalLinqStub | null = null;
+
+afterEach(async () => {
+  await scenario?.stop();
+  scenario = null;
+  await linqStub?.stop();
+  linqStub = null;
+}, 120_000);
+
+describe("hosted local active-turn latency e2e", () => {
+  it("folds same-chat late input into the default hosted queue-only active turn", async () => {
+    const database = await createSharedProbeDatabase();
+
+    try {
+      const result = await runActiveTurnLatencyProbe({
+        localDatabaseUrl: database.url,
+      });
+
+      process.stdout.write(
+        `${[
+          "Hosted active-turn latency probe:",
+          `latency=${Math.round(result.webhookToFirstReplyMs)}ms`,
+          `lateInputFolded=${String(result.lateInputFolded)}`,
+          `providerRequests=${result.providerRequestCount}`,
+        ].join(" ")}\n`,
+      );
+
+      expect(result.lateInputFolded).toBe(true);
+      expect(result.providerRequestCount).toBe(1);
+      expect(result.webhookToFirstReplyMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      await database.cleanup();
+    }
+  }, 900_000);
+});
+
+async function runActiveTurnLatencyProbe(input: {
+  localDatabaseUrl: string;
+}): Promise<{
+  lateInputFolded: boolean;
+  providerRequestCount: number;
+  webhookToFirstReplyMs: number;
+}> {
+  const userId = `member_local_active_turn_latency_${runId}`;
+  const chatId = `chat_local_active_turn_latency_${runId}`;
+  const memberPhone = buildLinqRecipientPhoneNumber(userId);
+  const homePhone = buildLinqHomePhoneNumber(userId);
+  const firstText = "active turn latency first input";
+  const lateText = "active turn latency late input";
+  const replyText = "Active turn latency reply.";
+  const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+
+  await startProbeScenario({
+    localDatabaseUrl: input.localDatabaseUrl,
+    memberPhone,
+  });
+
+  try {
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone,
+      memberId: userId,
+      memberPhone,
+    });
+    await requireScenario().runWake(buildActivationWake(userId), userId);
+    await requireScenario().waitForHostedCompletion(userId);
+    await requireScenario().bindActiveHostedLinqHomeChat({
+      chatId,
+      memberId: userId,
+      recipientPhone: memberPhone,
+    });
+
+    const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
+    const baselineProviderRequestCount = requireScenario().assistantProviderRequests.length;
+    requireScenario().queueAssistantResponses([replyText, "Late reply."]);
+
+    const startedAt = performance.now();
+    const firstResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: `evt_active_turn_latency_first_${runId}`,
+        messageId: `msg_active_turn_latency_first_${runId}`,
+        text: firstText,
+      }),
+    );
+    expect(firstResponse.status).toBe(202);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    await sleep(lateInputDelayAfterWakeMs);
+
+    const lateResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: `evt_active_turn_latency_late_${runId}`,
+        messageId: `msg_active_turn_latency_late_${runId}`,
+        text: lateText,
+      }),
+    );
+    expect(lateResponse.status).toBe(202);
+    await expect(lateResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const firstReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: baselineSendCount,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    const webhookToFirstReplyMs = performance.now() - startedAt;
+    expect(firstReply.method).toBe("POST");
+    expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(replyText);
+
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: 420_000,
+    });
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+
+    const providerRequests = requireScenario().assistantProviderRequests.slice(
+      baselineProviderRequestCount,
+    );
+    const firstProviderRequestBody = providerRequests[0]?.body ?? "";
+    expect(firstProviderRequestBody).toContain(firstText);
+
+    return {
+      lateInputFolded: firstProviderRequestBody.includes(lateText),
+      providerRequestCount: providerRequests.length,
+      webhookToFirstReplyMs,
+    };
+  } finally {
+    await scenario?.stop();
+    scenario = null;
+    await linqStub?.stop();
+    linqStub = null;
+  }
+}
+
+async function startProbeScenario(input: {
+  localDatabaseUrl: string;
+  memberPhone: string;
+}): Promise<void> {
+  linqStub = await startHostedLocalLinqStub();
+  scenario = await startHostedLocalFullStackScenario({
+    additionalEnv: {
+      HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
+      LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+      LINQ_API_TOKEN: "linq-local-test-token",
+      LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      MURPH_E2E_CODEX_APP_SERVER_STUB_TURN_DELAY_MS: String(codexTurnDelayMs),
+    },
+    assistantProviderStubModelId: productionLikeAssistantModel,
+    localDatabaseUrl: input.localDatabaseUrl,
+    persistDirOverride: workerPersistDirOverride,
+    persistDirPrefix: "murph-hosted-local-active-turn-latency-",
+    requiredRunnerEnvProfile: "linq",
+    scenarioLabel: "Local hosted active-turn latency e2e",
+    streamLogs: streamDevLogs,
+  });
+}
+
+async function createSharedProbeDatabase(): Promise<{
+  cleanup(): Promise<void>;
+  url: string;
+}> {
+  if (configuredDatabaseUrl) {
+    return {
+      cleanup: async () => {},
+      url: configuredDatabaseUrl,
+    };
+  }
+
+  const adminUrl = new URL(DEFAULT_DATABASE_URL);
+  const databaseName = `murph_e2e_active_turn_latency_${
+    randomUUID().replace(/-/gu, "").slice(0, 12)
+  }`;
+  const commandArgs = buildPostgresDatabaseCommandArgs(adminUrl, databaseName);
+  const commandEnv = buildPostgresDatabaseCommandEnv(adminUrl);
+
+  await execFileAsync("createdb", commandArgs, { env: commandEnv });
+
+  const targetUrl = new URL(DEFAULT_DATABASE_URL);
+  targetUrl.pathname = `/${databaseName}`;
+
+  return {
+    cleanup: async () => {
+      await execFileAsync("dropdb", ["--if-exists", "--force", ...commandArgs], {
+        env: commandEnv,
+      });
+    },
+    url: targetUrl.toString(),
+  };
+}
+
+function buildPostgresDatabaseCommandArgs(url: URL, databaseName: string): string[] {
+  const args: string[] = [];
+
+  if (url.hostname) {
+    args.push("--host", url.hostname);
+  }
+
+  if (url.port) {
+    args.push("--port", url.port);
+  }
+
+  if (url.username) {
+    args.push("--username", decodeURIComponent(url.username));
+  }
+
+  args.push(databaseName);
+  return args;
+}
+
+function buildPostgresDatabaseCommandEnv(url: URL): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+
+  if (url.password) {
+    env.PGPASSWORD = decodeURIComponent(url.password);
+  }
+
+  return env;
+}
+
+function buildActivationWake(memberId: string) {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: `member.activated:local:${memberId}:evt_active_turn_latency`,
+    memberChannels: {
+      email: false,
+      linq: true,
+      telegram: false,
+    },
+    memberId,
+    occurredAt: new Date().toISOString(),
+  });
+}
+
+async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
+  const rawBody = JSON.stringify(event);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = signLinqWebhook(linqWebhookSecret, rawBody, timestamp);
+
+  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
+    body: rawBody,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-webhook-signature": signature,
+      "x-webhook-timestamp": timestamp,
+    },
+    method: "POST",
+  });
+}
+
+function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
+  const signature = createHmac("sha256", secret)
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+
+  return `sha256=${signature}`;
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number): number {
+  const rawValue = process.env[name]?.trim();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const value = Number(rawValue);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+
+  return value;
+}
+
+function requireScenario(): HostedLocalFullStackScenario {
+  if (!scenario) {
+    throw new Error("Hosted local active-turn latency scenario was not started.");
+  }
+  return scenario;
+}
+
+function requireLinqStub(): HostedLocalLinqStub {
+  if (!linqStub) {
+    throw new Error("Hosted local active-turn latency Linq stub was not started.");
+  }
+  return linqStub;
+}

@@ -5895,7 +5895,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
-  it('skips active-turn mailbox admission for hosted queue-only auto-replies', async () => {
+  it('uses active-turn mailbox admission for hosted queue-only auto-replies without receipt fallback', async () => {
     const inputSource = {
       checkpointAcceptedInput: vi.fn(async () => undefined),
       listNewConversationInputs: vi.fn(async () => ({
@@ -5914,8 +5914,8 @@ describe('assistant auto-reply runtime', () => {
       activeTurnInput?: unknown
       deliveryDispatchMode?: string
     }) => {
-      expect(input.activeTurnCheckpoint).toBeUndefined()
-      expect(input.activeTurnInput).toBeUndefined()
+      expect(input.activeTurnCheckpoint).toBeTypeOf('function')
+      expect(input.activeTurnInput).toBeTypeOf('function')
       expect(input.deliveryDispatchMode).toBe('queue-only')
       return {
         delivery: null,

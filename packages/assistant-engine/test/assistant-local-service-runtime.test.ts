@@ -120,7 +120,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.resolveAssistantMessageSession.mock.calls.length, 1)
   assert.equal(mocks.appendAssistantTranscriptEntries.mock.calls.length, 1)
   assert.equal(mocks.appendAssistantTurnReceiptEvent.mock.calls.length, 1)
-  assert.equal(mocks.persistPendingAssistantUsageEvent.mock.calls.length, 1)
+  assert.equal(mocks.recordAssistantUsageEvent.mock.calls.length, 1)
   assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 1)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
@@ -540,7 +540,7 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     ],
   )
   assert.deepEqual(
-    mocks.persistPendingAssistantUsageEvent.mock.calls.map(
+    mocks.recordAssistantUsageEvent.mock.calls.map(
       (call) => call[0]?.providerRequestOrdinal,
     ),
     [0, 1],
@@ -2772,7 +2772,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls.length, 1)
   assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]?.status, 'failed')
   assert.deepEqual(
-    mocks.persistPendingAssistantUsageEvent.mock.calls[0]?.[0],
+    mocks.recordAssistantUsageEvent.mock.calls[0]?.[0],
     {
       executionContext: null,
       providerRequestOrdinal: 0,
@@ -2798,7 +2798,6 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
         usageAttribution: null,
       },
       turnId: 'turn-1',
-      vault: '/vaults/test',
     },
   )
   assert.deepEqual(
@@ -3564,7 +3563,7 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
-    persistPendingAssistantUsageEvent: vi.fn(
+    recordAssistantUsageEvent: vi.fn(
       async (_input: { providerRequestOrdinal?: number }) => undefined,
     ),
     runtimeState: {
@@ -3828,7 +3827,7 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
-    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   if (!useRealAcceptedInputPersistence) {
     vi.doMock('../src/assistant/runtime-state-service.js', () => ({

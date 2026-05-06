@@ -42,5 +42,5 @@ Plain local working-tree verification is intentionally looser: if other agents h
 ## Completion Rule
 
 If a task used an execution plan and the task is done or abandoned, close that plan before handoff. Prefer `bash scripts/finish-task ...` when the task is also ready to commit.
-`scripts/finish-task` now removes the one matching coordination-ledger row by exact `Plan` value before it closes the plan, and it fails closed if the match is missing or ambiguous.
+`scripts/finish-task` removes the one matching coordination-ledger row by exact `Plan` value before it closes the plan, and it fails closed if the match is missing or ambiguous. Its scoped commit includes the closed plan, the resolved task paths, and only this task's ledger-row removal when that row exists in `HEAD`; unrelated dirty ledger rows stay in the working tree.
 If overlapping dirty-tree work makes an exact scoped commit unsafe, remove the matching ledger row and run `bash scripts/close-exec-plan.sh <active-plan-path>` anyway; do not leave closed work stranded under `active/`.

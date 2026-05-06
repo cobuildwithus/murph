@@ -3,7 +3,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantUsageCredentialSource,
-} from '@murphai/runtime-state/node'
+} from '@murphai/hosted-execution/assistant-usage'
 import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,

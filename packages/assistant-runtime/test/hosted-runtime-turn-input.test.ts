@@ -247,6 +247,76 @@ describe("createHostedAssistantInputSource", () => {
     });
   });
 
+  it("skips the first hosted mailbox refresh when initial import already staged preferred input", async () => {
+    const vaultRoot = await createTempVault();
+    const staged = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent(),
+    });
+    const refreshMailboxForActiveTurnInput =
+      vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      }));
+    const source = createHostedAssistantInputSource({
+      preferredInputIds: [staged.inputId],
+      requestId: "req_turn_input",
+      runtime: createRuntime({
+        checkpointActiveTurnInput: vi.fn(async () => undefined),
+        refreshMailboxForActiveTurnInput,
+      }),
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    await expect(source?.refresh({ phase: "input_available" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    await expect(source?.refresh({ phase: "request_boundary" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+
+    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledTimes(1);
+    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
+      requestId: "req_turn_input",
+    });
+  });
+
+  it("skips the first hosted mailbox refresh when initial import already progressed", async () => {
+    const vaultRoot = await createTempVault();
+    const refreshMailboxForActiveTurnInput =
+      vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      }));
+    const source = createHostedAssistantInputSource({
+      requestId: "req_turn_input",
+      runtime: createRuntime({
+        checkpointActiveTurnInput: vi.fn(async () => undefined),
+        refreshMailboxForActiveTurnInput,
+      }),
+      skipInitialMailboxRefresh: true,
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    await expect(source?.refresh({ phase: "input_available" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    await expect(source?.refresh({ phase: "request_boundary" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+
+    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledTimes(1);
+    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
+      requestId: "req_turn_input",
+    });
+  });
+
   it("does not let newer preferred input skip older unprocessed input", async () => {
     const vaultRoot = await createTempVault();
     const older = await upsertAssistantInputEvent({

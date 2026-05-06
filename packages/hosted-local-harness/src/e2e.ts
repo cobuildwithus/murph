@@ -10,6 +10,7 @@ import { runForegroundCommand } from "./process.ts";
 
 export type HostedLocalE2eScenarioName =
   | "all"
+  | "active-turn-latency"
   | "checkpoint-baseline"
   | "codex-gateway-prefix"
   | "device-connect"
@@ -31,6 +32,11 @@ export interface HostedLocalE2eScenario {
 }
 
 export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
+  {
+    file: "apps/cloudflare/test/hosted-local-active-turn-latency-e2e.test.ts",
+    manualOnly: true,
+    name: "active-turn-latency",
+  },
   {
     file: "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
     name: "checkpoint-baseline",

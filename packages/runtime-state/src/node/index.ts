@@ -23,7 +23,6 @@ export * from "../hosted-bundle-node.ts";
 export * from "../assistant-state-fs.ts";
 export * from "../assistant-state-security.ts";
 export * from "../assistant-state.ts";
-export * from "../assistant-usage.ts";
 export * from "../assistant-runtime-issues.ts";
 export * from "../atomic-write.ts";
 export * from "../hosted-bundles.ts";

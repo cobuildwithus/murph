@@ -388,23 +388,22 @@ This patch:
 
 **Main refactor risk:** keep the public client record limited to fields that really cross the control plane. Do not let store-only lease or retry internals leak outward just because the type now lives beside other public client records.
 
-### 22. Keep hosted runtime usage-record responses owned by assistant-runtime instead of parsing them again in Cloudflare
+### 22. Keep hosted runtime usage-record contracts owned by hosted-execution
 
-**Seam:** `packages/assistant-runtime/src/hosted-runtime/platform.ts` (`HostedRuntimeUsageRecordResponse`, `parseHostedRuntimeUsageRecordResponse`), `packages/assistant-runtime/src/hosted-runtime.ts`, `apps/cloudflare/src/{runtime-platform,index,user-runner,usage-store,worker-contracts,worker-routes/shared}.ts`
+**Seam:** `packages/hosted-execution/src/{assistant-usage,runtime-control,parsers/runtime-control}.ts`, `packages/assistant-runtime/src/hosted-runtime/platform.ts`, `apps/cloudflare/src/runtime-platform.ts`, `apps/web/src/lib/hosted-execution/usage.ts`
 
-The assistant-runtime platform already owned the `HostedRuntimeUsageExportPort` response type, but the Cloudflare runtime still carried a second local parser and a stringly repeated `{ recorded, usageIds }` shape through runner/store/stub contracts.
-That split a small but real hosted-runtime contract across the caller and callee.
+The web-owned hosted usage ledger is no longer assistant runtime state, so the record shape, id helper, credential-source helper, and request/response parser live with the hosted execution callback contracts. Assistant runtime keeps only the injected `usageRecordPort` capability, typed to the hosted usage record, and the Cloudflare adapter owns the HTTP transport wrapper.
 
 This patch:
 
-- adds `parseHostedRuntimeUsageRecordResponse(...)` next to the shared `HostedRuntimeUsageRecordResponse` type in `packages/assistant-runtime/src/hosted-runtime/platform.ts`
-- re-exports both from `packages/assistant-runtime/src/hosted-runtime.ts`
-- switches the Cloudflare runtime platform to reuse the shared parser
-- switches the local runner/store/stub signatures to the shared response type instead of parallel object literals
+- moves the pure `AssistantUsageRecord` contract and parser out of `runtime-state`
+- uses hosted-execution as the single parser owner for `{ recorded: boolean, usageId }`
+- keeps assistant-runtime's port single-record and strongly typed
+- keeps Cloudflare-specific transport details out of the shared contract
 
-**Why this is simpler:** the hosted runtime contract now has one owner for both its response shape and its boundary parser. One more usage-export field can flow through assistant-runtime and Cloudflare without copy/paste adapters.
+**Why this is simpler:** direct usage recording now has one contract owner and one transport adapter. A future usage-record field changes hosted-execution plus the web ledger, not runtime-state, assistant-runtime, and Cloudflare in parallel.
 
-**Main refactor risk:** keep the owner at the platform contract layer only. Do not push Cloudflare transport concerns or storage-specific helpers back into assistant-runtime just to chase total dedupe.
+**Main refactor risk:** keep the normal path best-effort and non-blocking. Do not reintroduce local pending usage queues unless usage capture is explicitly made lossless again.
 
 ### 23. Keep assistant header persistence splitting owned by operator-config instead of forked again in assistant-engine
 

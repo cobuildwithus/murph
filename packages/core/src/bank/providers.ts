@@ -19,6 +19,10 @@ import {
   resolveMarkdownRegistryUpsertTarget,
   writeMarkdownRegistryRecord,
 } from "../registry/markdown.ts";
+import {
+  acquireCanonicalWriteLock,
+  withCanonicalWriteLockScope,
+} from "../operations/canonical-write-lock.ts";
 import { loadVault } from "../vault.ts";
 
 import type { FrontmatterObject } from "../types.ts";
@@ -179,10 +183,31 @@ function selectExistingProviderRecord(
   return existingById ?? slugOwner ?? null;
 }
 
+async function withProviderUpsertLock<TResult>(
+  vaultRoot: string,
+  operation: () => Promise<TResult>,
+): Promise<TResult> {
+  return await withCanonicalWriteLockScope(vaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(vaultRoot);
+
+    try {
+      return await operation();
+    } finally {
+      await lock.release();
+    }
+  });
+}
+
 export async function upsertProvider(
   input: UpsertProviderInput,
 ): Promise<UpsertProviderResult> {
   await loadVault({ vaultRoot: input.vaultRoot });
+  return await withProviderUpsertLock(input.vaultRoot, () => upsertProviderLocked(input));
+}
+
+async function upsertProviderLocked(
+  input: UpsertProviderInput,
+): Promise<UpsertProviderResult> {
   const existingRecords = await loadProviderRecords(input.vaultRoot);
   const normalizedTitle = input.title.trim();
   const desiredSlug = normalizeProviderSlug(input.slug ?? normalizedTitle);

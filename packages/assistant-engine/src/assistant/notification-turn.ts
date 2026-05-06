@@ -14,7 +14,7 @@ import {
   type AssistantProviderTurnThreadScopeProfile,
 } from './provider-turn-runner.js'
 import type { CodexThreadIdentity } from './provider-route.js'
-import { persistPendingAssistantUsageEvent } from './service-usage.js'
+import { recordAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
@@ -192,7 +192,7 @@ export async function sendAssistantNotificationLocal(
           turnId,
         })
         if (providerOutcome.kind === 'failed_terminal') {
-          await persistPendingAssistantUsageEvent({
+          await recordAssistantUsageEvent({
             executionContext,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
             providerResult: {
@@ -205,7 +205,6 @@ export async function sendAssistantNotificationLocal(
               usageAttribution: providerOutcome.usageAttribution,
             },
             turnId,
-            vault: input.vault,
           })
           throw annotateAssistantNotificationError(
             providerOutcome.error,
@@ -220,11 +219,10 @@ export async function sendAssistantNotificationLocal(
 
         const providerResult = providerOutcome.providerTurn
         const selectedRoute = providerResult.route
-        await persistPendingAssistantUsageEvent({
+        await recordAssistantUsageEvent({
           executionContext,
           providerResult,
           turnId,
-          vault: input.vault,
         })
         const responsePolicy: AssistantNotificationResponsePolicy =
           input.responsePolicy ?? { kind: 'allow_send_or_skip' }

@@ -182,6 +182,25 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     } satisfies Partial<HostedOnboardingError>);
   });
 
+  it("rejects signed Cloudflare callbacks that exceed the configured body limit", async () => {
+    const request = await createSignedCallbackRequest({
+      body: JSON.stringify({ eventId: "evt_123" }),
+      nonce: "abcdef0123456789abcdef0123456789",
+      path: "/api/internal/hosted-runtime/log",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
+    });
+
+    await expect(
+      requireHostedCloudflareCallbackRequest(request, {
+        maxBodyBytes: 8,
+        nonceStore: new MemoryNonceStore(),
+        nowMs: FIXED_NOW_MS,
+        payloadText: JSON.stringify({ eventId: "evt_123" }),
+      }),
+    ).rejects.toThrow(/Request body exceeded 8 bytes/u);
+  });
+
   it("rejects requests whose bound user header was changed after signing", async () => {
     const request = await createSignedCallbackRequest({
       body: "",

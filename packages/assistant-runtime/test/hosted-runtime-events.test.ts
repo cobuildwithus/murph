@@ -73,7 +73,7 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
       },
       deviceSyncPort: null,
       effectsPort: createHostedRuntimeEffectsPortStub(),
-      usageExportPort: null,
+      usageRecordPort: null,
     },
     platformEnv: {},
     resolvedConfig: createHostedRuntimeResolvedConfig(),

@@ -8,6 +8,10 @@ import {
 import { validateContract } from "../domains/shared.ts";
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
+import {
+  canonicalLogicalResource,
+  withCanonicalResourceLocks,
+} from "../operations/index.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
@@ -255,8 +259,22 @@ const workoutFormatRegistryApi = createMarkdownRegistryApi<WorkoutFormatRecord>(
     summary: (_created, recordId) => `Upserted workout format ${recordId}.`,
   },
 });
+const workoutFormatRegistryResource = canonicalLogicalResource(
+  "bank/workout-formats",
+  WORKOUT_FORMATS_DIRECTORY,
+);
 
 export async function upsertWorkoutFormat(
+  input: UpsertWorkoutFormatInput,
+): Promise<UpsertWorkoutFormatResult> {
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vaultRoot,
+    resources: [workoutFormatRegistryResource],
+    run: () => upsertWorkoutFormatWithLatestRecord(input),
+  });
+}
+
+async function upsertWorkoutFormatWithLatestRecord(
   input: UpsertWorkoutFormatInput,
 ): Promise<UpsertWorkoutFormatResult> {
   const normalizedWorkoutFormatId = normalizeId(input.workoutFormatId, "workoutFormatId", "wfmt");

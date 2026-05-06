@@ -95,7 +95,7 @@ describe("hosted Linq document preservation", () => {
             },
             deviceSyncPort: null,
             effectsPort: createHostedRuntimeEffectsPortStub(),
-            usageExportPort: null,
+            usageRecordPort: null,
           },
           platformEnv: {},
         },

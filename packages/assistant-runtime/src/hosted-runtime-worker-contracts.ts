@@ -38,7 +38,7 @@ export type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
-  HostedRuntimeUsageExportPort,
+  HostedRuntimeUsageRecordPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
@@ -68,6 +68,7 @@ export {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_TURN_DELAY_MS_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILES_ENV,

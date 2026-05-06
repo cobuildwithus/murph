@@ -802,6 +802,9 @@ export class HostedUserRunner {
     userId: string,
   ): Promise<HostedRuntimeWebStatusResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(this.env.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
+        : {}),
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: userId,
       callbackSigning: this.env.webCallbackSigning,
@@ -826,6 +829,9 @@ export class HostedUserRunner {
     userId: string,
   ): Promise<HostedWorkspaceReadResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(this.env.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
+        : {}),
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: userId,
       callbackSigning: this.env.webCallbackSigning,
@@ -846,6 +852,9 @@ export class HostedUserRunner {
   ): Promise<HostedAiUsageGateDecision> {
     try {
       const response = await fetchHostedExecutionWebControlPlaneResponse({
+        ...(this.env.hostedWebAllowHttpHosts
+          ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
+          : {}),
         baseUrl: this.readHostedWebControlBaseUrl(),
         body: "{}",
         boundUserId: userId,

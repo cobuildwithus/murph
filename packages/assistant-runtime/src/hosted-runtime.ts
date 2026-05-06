@@ -124,7 +124,7 @@ export type {
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
   HostedRuntimeUsageRecordResponse,
-  HostedRuntimeUsageExportPort,
+  HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
 export type {
@@ -638,10 +638,10 @@ function createLivenessGuardedHostedRuntimePlatform(
             guard(() => platform.refreshMailboxForActiveTurnInput!(refreshInput)),
         }
       : {}),
-    ...(platform.usageExportPort
+    ...(platform.usageRecordPort
       ? {
-          usageExportPort: {
-            recordUsage: (usage) => guard(() => platform.usageExportPort!.recordUsage(usage)),
+          usageRecordPort: {
+            recordUsage: (usage) => guard(() => platform.usageRecordPort!.recordUsage(usage)),
           },
         }
       : {}),

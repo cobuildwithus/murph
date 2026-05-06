@@ -251,24 +251,12 @@ describe("runtime-state taxonomy and runtime paths", () => {
     );
     assert.equal(classifyVaultLocalStateRelativePath("vault.json"), null);
 
-    const assistantUsagePath = describeVaultLocalStateRelativePath(
-      ".runtime/operations/assistant/usage/pending/one.json",
+    const deviceSyncStatePath = describeVaultLocalStateRelativePath(
+      ".runtime/operations/device-sync/state.sqlite",
     );
-    assert.ok(assistantUsagePath);
-    assert.equal(assistantUsagePath.classification, "operational");
-    assert.equal(assistantUsagePath.defaultPortability, "machine_local");
-    assert.equal(
-      assistantUsagePath.description,
-      "Assistant pending usage records that must move with hosted usage import continuity.",
-    );
-    assert.equal(assistantUsagePath.owner, "assistant-runtime");
-    assert.equal(assistantUsagePath.portability, "portable");
-    assert.equal(assistantUsagePath.rebuildable, false);
-    assert.equal(
-      assistantUsagePath.relativePath,
-      ".runtime/operations/assistant/usage/pending/one.json",
-    );
-    assert.equal(assistantUsagePath.rootRelativePath, ".runtime/operations");
+    assert.ok(deviceSyncStatePath);
+    assert.equal(deviceSyncStatePath.classification, "operational");
+    assert.equal(deviceSyncStatePath.portability, "machine_local");
 
     assert.equal(
       describeVaultLocalStateRelativePath(".runtime/operations/assistant/outbox/.quarantine/a.json")

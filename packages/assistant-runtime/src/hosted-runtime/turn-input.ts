@@ -28,6 +28,7 @@ export function createHostedAssistantInputSource(input: {
   preferredInputIds?: readonly string[] | null;
   requestId: string;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  skipInitialMailboxRefresh?: boolean;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): AssistantInputSource {
@@ -38,6 +39,7 @@ export function createHostedAssistantInputSource(input: {
   const baseSource = createStoreBackedAssistantInputSource({
     vault: input.vaultRoot,
   });
+  const preferredInputIds = [...new Set(input.preferredInputIds ?? [])];
   let source: AssistantInputSource = baseSource;
 
   if (
@@ -50,6 +52,7 @@ export function createHostedAssistantInputSource(input: {
   }
 
   if (refreshMailboxForActiveTurnInput && checkpointActiveTurnInput) {
+    let skippedInitialMailboxRefresh = false;
     source = {
       async checkpointAcceptedInput(checkpointInput) {
         try {
@@ -64,11 +67,21 @@ export function createHostedAssistantInputSource(input: {
       async refresh(refreshInput) {
         let mailboxRefresh: AssistantTurnInputRefreshResult | null = null;
 
-        if (
+        const shouldRefreshMailbox =
           refreshInput.phase === "input_available"
           || refreshInput.phase === "request_boundary"
-          || refreshInput.phase === "commit_barrier"
-        ) {
+          || refreshInput.phase === "commit_barrier";
+        const shouldSkipInitialMailboxRefresh =
+          refreshInput.phase === "input_available"
+          && !skippedInitialMailboxRefresh
+          && (
+            input.skipInitialMailboxRefresh === true
+            || preferredInputIds.length > 0
+          );
+        skippedInitialMailboxRefresh =
+          skippedInitialMailboxRefresh || shouldSkipInitialMailboxRefresh;
+
+        if (shouldRefreshMailbox && !shouldSkipInitialMailboxRefresh) {
           try {
             mailboxRefresh = await refreshMailboxForActiveTurnInput({
               requestId: input.requestId,
@@ -104,7 +117,6 @@ export function createHostedAssistantInputSource(input: {
     };
   }
 
-  const preferredInputIds = [...new Set(input.preferredInputIds ?? [])];
   if (preferredInputIds.length === 0) {
     return source;
   }

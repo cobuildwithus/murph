@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
+  createAssistantOutboxIntent,
   type AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
 import type {
@@ -31,15 +32,6 @@ import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
-  ASSISTANT_USAGE_SCHEMA,
-  createAssistantUsageId,
-  listPendingAssistantRuntimeIssueRecords,
-  listPendingAssistantUsageRecords,
-  resolveAssistantStatePaths,
-  resolvePendingAssistantUsagePath,
-  writePendingAssistantUsageRecord,
-} from "@murphai/runtime-state/node";
-import {
   initializeVault,
 } from "@murphai/core";
 import { describe, test, vi } from "vitest";
@@ -51,7 +43,13 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedMailboxImportCheckpointResult,
+  type HostedRuntimeEffectsPort,
 } from "../src/hosted-runtime.ts";
+import {
+  collectHostedAssistantDeliverySideEffects,
+  drainHostedCommittedAssistantDeliveriesAfterCommit,
+  prepareHostedAssistantDeliverySideEffectsForCheckpoint,
+} from "../src/hosted-runtime/callbacks.ts";
 import {
   createHostedConversationMailboxImportItem,
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
@@ -68,7 +66,7 @@ import type {
 } from "../src/hosted-runtime/models.ts";
 import type {
   HostedRuntimeMailboxPort,
-  HostedRuntimeUsageExportPort,
+  HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
 
@@ -332,6 +330,59 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("checkpointing performs no runner-level usage recording", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const recordUsage = vi.fn(async () => {
+      throw new Error("usage recording should happen inside the assistant phase only.");
+    });
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_no_usage_drain",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          usageRecordPort: { recordUsage },
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_no_usage_drain",
+        async runAssistantPhase() {
+          return {
+            checkpointReason: "maintenance",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(recordUsage.mock.calls.length, 0);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.reason),
+        ["maintenance"],
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("does not add an import checkpoint when a deferred import is covered by assistant progress", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
@@ -396,6 +447,124 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("keeps Linq fast-dispatch idempotent when the receipt checkpoint fails and the same workspace retries", async () => {
+    const checkpointVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const firstAttemptVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const retryVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const effectObservations: Array<{ effectId: string; idempotencyKey: string | null }> = [];
+    const transportRequests: Array<{ idempotencyKey: string | null }> = [];
+    const externalMessages = new Map<string, {
+      providerMessageId: string;
+      providerThreadId: string;
+      target: string;
+    }>();
+    const sendLinq: NonNullable<HostedRuntimeEffectsPort["sendLinq"]> = vi.fn(
+      async (request) => {
+        transportRequests.push({ idempotencyKey: request.idempotencyKey ?? null });
+        if (!request.idempotencyKey) {
+          throw new Error("Expected Linq fast dispatch to carry an idempotency key.");
+        }
+        const idempotencyKey = request.idempotencyKey;
+        assert.equal(idempotencyKey, "assistant-outbox:crash-window-linq");
+        const existing = externalMessages.get(idempotencyKey);
+        if (existing) {
+          return existing;
+        }
+        const created = {
+          providerMessageId: `provider_synthetic_linq_${externalMessages.size + 1}`,
+          providerThreadId: "thread_synthetic_linq_crash_window",
+          target: "thread_synthetic_linq_crash_window",
+        };
+        externalMessages.set(idempotencyKey, created);
+        return created;
+      },
+    );
+
+    try {
+      await initializeVault({
+        createdAt: new Date(TEST_NOW),
+        timezone: "UTC",
+        title: "Hosted Workspace Runner Fast Dispatch Crash Window",
+        vaultRoot: checkpointVaultRoot,
+      });
+      await createAssistantOutboxIntent({
+        actorId: "+15550001",
+        bindingDelivery: {
+          kind: "participant",
+          target: "+15550001",
+        },
+        channel: "linq",
+        createdAt: TEST_NOW,
+        deliveryIdempotencyKey: "assistant-outbox:crash-window-linq",
+        deliverySource: {
+          kind: "linq",
+          fromPhoneNumber: "+15550000",
+        },
+        identityId: "phone_lookup_synthetic_crash_window",
+        message: "Synthetic Linq crash-window reply",
+        sessionId: "session_synthetic_crash_window",
+        threadId: null,
+        threadIsDirect: true,
+        turnId: "turn_synthetic_crash_window",
+        vault: checkpointVaultRoot,
+      });
+      await rm(firstAttemptVaultRoot, { force: true, recursive: true });
+      await rm(retryVaultRoot, { force: true, recursive: true });
+      await cp(checkpointVaultRoot, firstAttemptVaultRoot, { recursive: true });
+      await cp(checkpointVaultRoot, retryVaultRoot, { recursive: true });
+
+      await assert.rejects(
+        () =>
+          runFastDispatchCrashWindowAttempt({
+            checkpointed: false,
+            checkpointRequests,
+            effectObservations,
+            sendLinq,
+            vaultRoot: firstAttemptVaultRoot,
+          }),
+        HostedMailboxImportCheckpointConflictError,
+      );
+
+      assert.equal(externalMessages.size, 1);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "outbox_receipt",
+      ]);
+
+      await runFastDispatchCrashWindowAttempt({
+        checkpointed: true,
+        checkpointRequests,
+        effectObservations,
+        sendLinq,
+        vaultRoot: retryVaultRoot,
+      });
+
+      assert.equal(externalMessages.size, 1);
+      assert.deepEqual(transportRequests, [
+        { idempotencyKey: "assistant-outbox:crash-window-linq" },
+        { idempotencyKey: "assistant-outbox:crash-window-linq" },
+      ]);
+      assert.equal(effectObservations.length, 2);
+      assert.equal(effectObservations[0]?.effectId, effectObservations[1]?.effectId);
+      assert.deepEqual(effectObservations.map((effect) => effect.idempotencyKey), [
+        "assistant-outbox:crash-window-linq",
+        "assistant-outbox:crash-window-linq",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "outbox_receipt",
+        "outbox_receipt",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "0"],
+      );
+    } finally {
+      await rm(checkpointVaultRoot, { force: true, recursive: true });
+      await rm(firstAttemptVaultRoot, { force: true, recursive: true });
+      await rm(retryVaultRoot, { force: true, recursive: true });
     }
   });
 
@@ -554,307 +723,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("exports pending usage after a successful assistant checkpoint and checkpoints cleanup", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const exportedUsageIds: string[] = [];
-    const { mailboxPort } = createMailboxPort({ items: [] });
-
-    try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_usage",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          throw new Error("Import should not run without mailbox items.");
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          logRequests,
-          mailboxPort,
-          usageExportPort: {
-            async recordUsage(usage) {
-              exportedUsageIds.push(...usage.map((record) => {
-                const usageId = Reflect.get(record, "usageId");
-                if (typeof usageId !== "string") {
-                  throw new Error("Expected exported usage id.");
-                }
-                return usageId;
-              }));
-              return {
-                recorded: exportedUsageIds.length,
-                usageIds: exportedUsageIds,
-              };
-            },
-          },
-          workspacePort: createWorkspacePort({ checkpointRequests }),
-        }),
-        requestId: "request_synthetic_runner_usage",
-        runtimeLogContext: {
-          attemptId: "attempt_synthetic_runner_usage",
-          leaseGeneration: "1",
-          workspaceVersion: "0",
-        },
-        async runAssistantPhase() {
-          await writePendingHostedUsageRecord(vaultRoot, "turn_runner_usage");
-          return {
-            checkpointReason: "maintenance",
-            progressed: true,
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(exportedUsageIds, ["turn_runner_usage.attempt-1"]);
-      assert.deepEqual(await listPendingAssistantUsageRecords({ vault: vaultRoot }), []);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.reason),
-        ["maintenance", "maintenance"],
-      );
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedUsageCleanupCheckpoint,
-        true,
-      );
-      const usageLog = logRequests.flatMap((request) => request.entries)
-        .find((entry) => entry.eventCode === "runtime.usage_export_finished");
-      assert.deepEqual(usageLog?.redactedJson, {
-        cleanupCheckpointed: true,
-        exported: 1,
-        failed: 0,
-        invalid: 0,
-        pending: 0,
-      });
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("leaves pending usage when post-checkpoint export fails", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const { mailboxPort } = createMailboxPort({ items: [] });
-
-    try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_usage_export_failed",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          throw new Error("Import should not run without mailbox items.");
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          logRequests,
-          mailboxPort,
-          usageExportPort: {
-            async recordUsage() {
-              throw new Error("usage export unavailable");
-            },
-          },
-          workspacePort: createWorkspacePort({ checkpointRequests }),
-        }),
-        requestId: "request_synthetic_runner_usage_export_failed",
-        async runAssistantPhase() {
-          await writePendingHostedUsageRecord(vaultRoot, "turn_runner_usage_export_failed");
-          return {
-            checkpointReason: "maintenance",
-            progressed: true,
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(
-        (await listPendingAssistantUsageRecords({ vault: vaultRoot }))
-          .map((record) => record.usageId),
-        ["turn_runner_usage_export_failed.attempt-1"],
-      );
-      assert.equal(checkpointRequests.length, 1);
-      const usageLog = logRequests.flatMap((request) => request.entries)
-        .find((entry) => entry.eventCode === "runtime.usage_export_finished");
-      assert.equal(usageLog?.level, "warn");
-      assert.deepEqual(usageLog?.redactedJson, {
-        cleanupCheckpointed: false,
-        exported: 0,
-        failed: 1,
-        invalid: 0,
-        pending: 1,
-      });
-    } finally {
-      warn.mockRestore();
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("does not fail already checkpointed assistant work when usage cleanup checkpoint fails", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const { mailboxPort } = createMailboxPort({ items: [] });
-
-    try {
-      const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_usage_cleanup_failed",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          throw new Error("Import should not run without mailbox items.");
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          logRequests,
-          mailboxPort,
-          usageExportPort: {
-            async recordUsage(usage) {
-              const usageId = Reflect.get(usage[0], "usageId");
-              if (typeof usageId !== "string") {
-                throw new Error("Expected exported usage id.");
-              }
-              return {
-                recorded: 1,
-                usageIds: [usageId],
-              };
-            },
-          },
-          workspacePort: createWorkspacePort({
-            checkpointRequests,
-            checkpointed(request) {
-              return request.redactedStatus?.hostedUsageCleanupCheckpoint !== true;
-            },
-          }),
-        }),
-        requestId: "request_synthetic_runner_usage_cleanup_failed",
-        async runAssistantPhase() {
-          await writePendingHostedUsageRecord(vaultRoot, "turn_runner_usage_cleanup_failed");
-          return {
-            checkpointReason: "maintenance",
-            progressed: true,
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.equal(result.latestWorkspace?.version, "1");
-      assert.deepEqual(await listPendingAssistantUsageRecords({ vault: vaultRoot }), []);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
-      );
-      const usageLog = logRequests.flatMap((request) => request.entries)
-        .find((entry) => entry.eventCode === "runtime.usage_export_finished");
-      assert.equal(usageLog?.level, "warn");
-      assert.equal(usageLog?.errorCode, "usage_cleanup_checkpoint_failed");
-      assert.deepEqual(usageLog?.redactedJson, {
-        cleanupCheckpointed: false,
-        exported: 1,
-        failed: 0,
-        invalid: 0,
-        pending: 0,
-      });
-    } finally {
-      warn.mockRestore();
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("records a durable checkpoint when malformed pending usage creates a runtime issue", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const { mailboxPort } = createMailboxPort({ items: [] });
-
-    try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_usage_invalid",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          throw new Error("Import should not run without mailbox items.");
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort: createWorkspacePort({ checkpointRequests }),
-        }),
-        requestId: "request_synthetic_runner_usage_invalid",
-        async runAssistantPhase() {
-          await writeMalformedPendingUsageFile(vaultRoot, "turn_runner_usage_invalid.unexpected-1");
-          return {
-            checkpointReason: "maintenance",
-            progressed: true,
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedUsageInvalidIssueRecorded,
-        true,
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedUsageCleanupCheckpoint,
-        false,
-      );
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
   test("continues the assistant phase when pre-assistant mailbox effects fail", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
@@ -958,12 +826,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         platform: {
           ...createPlatform({
             mailboxPort,
-            usageExportPort: {
-              async recordUsage() {
-                events.push("optional:usage-export");
-                throw new Error("usage export unavailable");
-              },
-            },
             workspacePort: createWorkspacePort({ checkpointRequests }),
           }),
           logPort: {
@@ -981,7 +843,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         async runAssistantPhase() {
           events.push("assistant");
-          await writePendingHostedUsageRecord(vaultRoot, "turn_runner_liveness_optional_degraded");
           return {
             checkpointReason: "outbox_sending",
             progressed: true,
@@ -1021,14 +882,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "optional:projection",
         "optional:log",
         "assistant",
-        "optional:usage-export",
-        "optional:log",
       ]);
-      assert.deepEqual(
-        (await listPendingAssistantUsageRecords({ vault: vaultRoot }))
-          .map((record) => record.usageId),
-        ["turn_runner_liveness_optional_degraded.attempt-1"],
-      );
     } finally {
       warn.mockRestore();
       await rm(vaultRoot, {
@@ -1227,258 +1081,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
       });
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("exports pending usage when the assistant phase throws before checkpointing", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const usageExportCalls: string[] = [];
-    const { mailboxPort } = createMailboxPort({
-      items: [
-        createMailboxItem({
-          id: "mailbox_item_runner_usage_no_drain",
-          laneSeq: "1",
-        }),
-      ],
-    });
-
-    try {
-      await assert.rejects(
-        () =>
-          runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-              attemptId: "attempt_synthetic_runner_usage_no_drain",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
-            }),
-            expectedUserId: TEST_USER_ID,
-            async importItem() {
-              return { status: "imported" };
-            },
-            limitPerLane: 10,
-            platform: createPlatform({
-              mailboxPort,
-              usageExportPort: {
-                async recordUsage(usage) {
-                  const usageIds = usage.map((record) => {
-                    const usageId = Reflect.get(record, "usageId");
-                    if (typeof usageId !== "string") {
-                      throw new Error("Expected exported usage id.");
-                    }
-                    return usageId;
-                  });
-                  usageExportCalls.push(...usageIds);
-                  return {
-                    recorded: usageIds.length,
-                    usageIds,
-                  };
-                },
-              },
-              workspacePort: createWorkspacePort({ checkpointRequests }),
-            }),
-            requestId: "request_synthetic_runner_usage_no_drain",
-            async runAssistantPhase() {
-              await writePendingHostedUsageRecord(vaultRoot, "turn_runner_usage_no_drain");
-              throw new Error("assistant failed before checkpoint");
-            },
-            vaultRoot,
-            workspace: createWorkspaceState({ version: "0" }),
-            now: () => TEST_NOW,
-          }),
-        /assistant failed before checkpoint/u,
-      );
-
-      assert.deepEqual(usageExportCalls, ["turn_runner_usage_no_drain.attempt-1"]);
-      assert.deepEqual(
-        (await listPendingAssistantUsageRecords({ vault: vaultRoot }))
-          .map((record) => record.usageId),
-        [],
-      );
-      assert.equal(checkpointRequests.length, 2);
-      assert.equal(checkpointRequests[0]?.reason, "import");
-      assert.equal(checkpointRequests[1]?.reason, "maintenance");
-      assert.equal(checkpointRequests[1]?.redactedStatus?.hostedUsageExportedCount, 1);
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("checkpoints pending usage and records a runtime issue when assistant failure recovery export fails", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const usageExportCalls: string[] = [];
-    const { mailboxPort } = createMailboxPort({
-      items: [
-        createMailboxItem({
-          id: "mailbox_item_runner_usage_recovery_failed",
-          laneSeq: "1",
-        }),
-      ],
-    });
-
-    try {
-      await assert.rejects(
-        () =>
-          runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-              attemptId: "attempt_synthetic_runner_usage_recovery_failed",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
-            }),
-            expectedUserId: TEST_USER_ID,
-            async importItem() {
-              return { status: "imported" };
-            },
-            limitPerLane: 10,
-            platform: createPlatform({
-              logRequests,
-              mailboxPort,
-              usageExportPort: {
-                async recordUsage(usage) {
-                  usageExportCalls.push(
-                    ...usage.map((record) => {
-                      const usageId = Reflect.get(record, "usageId");
-                      if (typeof usageId !== "string") {
-                        throw new Error("Expected exported usage id.");
-                      }
-                      return usageId;
-                    }),
-                  );
-                  throw new Error("synthetic usage export failure");
-                },
-              },
-              workspacePort: createWorkspacePort({ checkpointRequests }),
-            }),
-            requestId: "request_synthetic_runner_usage_recovery_failed",
-            async runAssistantPhase() {
-              await writePendingHostedUsageRecord(vaultRoot, "turn_runner_usage_recovery_failed");
-              throw new Error("assistant failed before checkpoint");
-            },
-            vaultRoot,
-            workspace: createWorkspaceState({ version: "0" }),
-            now: () => TEST_NOW,
-          }),
-        /assistant failed before checkpoint/u,
-      );
-
-      assert.deepEqual(usageExportCalls, ["turn_runner_usage_recovery_failed.attempt-1"]);
-      assert.deepEqual(
-        (await listPendingAssistantUsageRecords({ vault: vaultRoot }))
-          .map((record) => record.usageId),
-        ["turn_runner_usage_recovery_failed.attempt-1"],
-      );
-      const issues = await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot });
-      assert.equal(issues.length, 1);
-      assert.equal(issues[0]?.errorCode, "pending_usage_may_be_stranded");
-      assert.equal(issues[0]?.operation, "pending_usage_may_be_stranded");
-
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "maintenance",
-      ]);
-      assert.equal(checkpointRequests[1]?.redactedStatus?.hostedUsagePendingCount, 1);
-      assert.equal(checkpointRequests[1]?.redactedStatus?.hostedUsageStrandedIssueRecorded, true);
-
-      const usageLog = logRequests
-        .flatMap((request) => request.entries)
-        .find((entry) => entry.eventCode === "runtime.usage_export_finished");
-      assert.equal(usageLog?.level, "warn");
-      assert.equal(usageLog?.redactedJson?.pending, 1);
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("recovers pending usage on assistant failure when restored workspace had no import checkpoint", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const usageExportCalls: string[] = [];
-    const { mailboxPort } = createMailboxPort({ items: [] });
-
-    try {
-      await assert.rejects(
-        () =>
-          runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-              attemptId: "attempt_synthetic_runner_usage_replay_no_import_checkpoint",
-              expectedWorkspaceVersion: "7",
-              leaseGeneration: "1",
-              nextWakeAt: "2026-04-26T01:00:00.000Z",
-              nextWakeReason: "assistant",
-              snapshotRef: null,
-            }),
-            expectedUserId: TEST_USER_ID,
-            async importItem() {
-              throw new Error("Import should not run without new mailbox items.");
-            },
-            limitPerLane: 10,
-            platform: createPlatform({
-              mailboxPort,
-              usageExportPort: {
-                async recordUsage(usage) {
-                  const usageIds = usage.map((record) => {
-                    const usageId = Reflect.get(record, "usageId");
-                    if (typeof usageId !== "string") {
-                      throw new Error("Expected exported usage id.");
-                    }
-                    return usageId;
-                  });
-                  usageExportCalls.push(...usageIds);
-                  return {
-                    recorded: usageIds.length,
-                    usageIds,
-                  };
-                },
-              },
-              workspacePort: createWorkspacePort({ checkpointRequests }),
-            }),
-            requestId: "request_synthetic_runner_usage_replay_no_import_checkpoint",
-            async runAssistantPhase(input) {
-              assert.equal(input.initialMailboxImport.stateChanged, false);
-              await writePendingHostedUsageRecord(vaultRoot, "turn_runner_usage_replay_no_import_checkpoint");
-              throw new Error("assistant failed before replay checkpoint");
-            },
-            vaultRoot,
-            workspace: createWorkspaceState({
-              nextWakeAt: "2026-04-26T01:00:00.000Z",
-              nextWakeReason: "assistant",
-              version: "7",
-            }),
-            now: () => TEST_NOW,
-          }),
-        /assistant failed before replay checkpoint/u,
-      );
-
-      assert.deepEqual(usageExportCalls, ["turn_runner_usage_replay_no_import_checkpoint.attempt-1"]);
-      assert.deepEqual(
-        (await listPendingAssistantUsageRecords({ vault: vaultRoot }))
-          .map((record) => record.usageId),
-        [],
-      );
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), ["maintenance"]);
-      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "7");
-      assert.equal(checkpointRequests[0]?.nextWakeAt, "2026-04-26T01:00:00.000Z");
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
-      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedUsageExportedCount, 1);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -3250,77 +2852,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   });
 });
 
-async function writePendingHostedUsageRecord(
-  vaultRoot: string,
-  turnId: string,
-): Promise<string> {
-  const usageId = createAssistantUsageId({
-    attemptCount: 1,
-    turnId,
-  });
-
-  await writePendingAssistantUsageRecord({
-    record: {
-      apiKeyEnv: null,
-      attemptCount: 1,
-      baseUrl: null,
-      cacheWriteTokens: null,
-      cachedInputTokens: null,
-      credentialSource: "platform",
-      featureKey: null,
-      gatewayTags: [],
-      inputTokens: 10,
-      memberId: TEST_USER_ID,
-      occurredAt: TEST_NOW,
-      outputTokens: 5,
-      provider: "codex-cli",
-      providerName: "OpenAI",
-      providerRequestId: null,
-      rawUsageJson: null,
-      rawUsageJsonHash: null,
-      reasoningTokens: null,
-      reportingUserId: null,
-      requestedModel: "gpt-5.5",
-      routeId: "primary",
-      schema: ASSISTANT_USAGE_SCHEMA,
-      servedModel: "gpt-5.5",
-      sessionId: "asst_synthetic_runner_usage",
-      stripeMeterSource: "murph",
-      surface: null,
-      totalTokens: 15,
-      triggerKind: null,
-      turnId,
-      usageId,
-      usageExtractionSourcePath: null,
-      usageExtractionVersion: "legacy",
-    },
-    vault: vaultRoot,
-  });
-
-  return usageId;
-}
-
-async function writeMalformedPendingUsageFile(
-  vaultRoot: string,
-  usageId: string,
-): Promise<void> {
-  const filePath = resolvePendingAssistantUsagePath(resolveAssistantStatePaths(vaultRoot), usageId);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(
-    filePath,
-    `${JSON.stringify({
-      schema: ASSISTANT_USAGE_SCHEMA,
-      turnId: "turn_runner_usage_invalid",
-      usageId,
-    })}\n`,
-    "utf8",
-  );
-}
-
 function createPlatform(input: {
+  effectsPort?: Partial<HostedRuntimeEffectsPort>;
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort;
-  usageExportPort?: HostedRuntimeUsageExportPort;
+  usageRecordPort?: HostedRuntimeUsageRecordPort;
   workspacePort: HostedRuntimeWorkspacePort;
 }) {
   return {
@@ -3339,6 +2875,7 @@ function createPlatform(input: {
       async sendEmail() {
         return undefined;
       },
+      ...input.effectsPort,
     },
     ...(input.logRequests
       ? {
@@ -3353,7 +2890,7 @@ function createPlatform(input: {
         }
       : {}),
     mailboxPort: input.mailboxPort,
-    ...(input.usageExportPort ? { usageExportPort: input.usageExportPort } : {}),
+    ...(input.usageRecordPort ? { usageRecordPort: input.usageRecordPort } : {}),
     workspacePort: input.workspacePort,
   };
 }
@@ -3559,6 +3096,81 @@ async function runActiveTurnRefreshSummaryScenario(input: {
       recursive: true,
     });
   }
+}
+
+async function runFastDispatchCrashWindowAttempt(input: {
+  checkpointed: boolean;
+  checkpointRequests: HostedWorkspaceCheckpointRequest[];
+  effectObservations: Array<{ effectId: string; idempotencyKey: string | null }>;
+  sendLinq: NonNullable<HostedRuntimeEffectsPort["sendLinq"]>;
+  vaultRoot: string;
+}) {
+  const { mailboxPort } = createMailboxPort({ items: [] });
+  return await runHostedWorkspaceUntilIdleOrBudget({
+    checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_synthetic_fast_dispatch_crash_window",
+      expectedWorkspaceVersion: "0",
+      leaseGeneration: "1",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: null,
+    }),
+    expectedUserId: TEST_USER_ID,
+    async importItem() {
+      throw new Error("Initial mailbox import was already provided.");
+    },
+    initialMailboxImport: createDeferredMailboxImportResult(),
+    limitPerLane: 10,
+    platform: createPlatform({
+      effectsPort: {
+        sendLinq: input.sendLinq,
+      },
+      mailboxPort,
+      workspacePort: createWorkspacePort({
+        checkpointRequests: input.checkpointRequests,
+        checkpointed: input.checkpointed,
+      }),
+    }),
+    requestId: "request_synthetic_fast_dispatch_crash_window",
+    async runAssistantPhase(phaseInput) {
+      const effects = await collectHostedAssistantDeliverySideEffects(input.vaultRoot);
+      assert.equal(effects.length, 1);
+      const effect = effects[0];
+      assert.equal(effect?.payload.channel, "linq");
+      assert.equal(effect?.payload.transportIdempotent, true);
+      input.effectObservations.push({
+        effectId: effect?.effectId ?? "",
+        idempotencyKey: effect?.payload.idempotencyKey ?? null,
+      });
+      await prepareHostedAssistantDeliverySideEffectsForCheckpoint({
+        assistantDeliveryEffects: effects,
+        now: () => TEST_NOW,
+        vaultRoot: input.vaultRoot,
+      });
+      const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: effects,
+        effectsPort: phaseInput.platform.effectsPort,
+        forwardedEnv: {},
+        platformEnv: {},
+        vaultRoot: input.vaultRoot,
+        wake: createRunnerConversationWake(),
+      });
+      return {
+        checkpointReason: "outbox_receipt",
+        progressed: true,
+        redactedStatus: {
+          hostedOutboxDeliveryAttempted: outcomes.length,
+          hostedOutboxDeliverySent: outcomes.filter((outcome) =>
+            outcome.deliveryStatus === "sent"
+          ).length,
+        },
+      };
+    },
+    vaultRoot: input.vaultRoot,
+    workspace: createWorkspaceState({ version: "0" }),
+    now: () => TEST_NOW,
+  });
 }
 
 function createWorkspacePort(input: {

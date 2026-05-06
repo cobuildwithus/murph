@@ -194,12 +194,4 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/status.json",
     "Assistant status snapshots are local observability residue only.",
   ),
-  definePortableAssistantDirectory(
-    ".runtime/operations/assistant/usage",
-    "Assistant usage container for portable pending usage descendants.",
-  ),
-  definePortableAssistantSubtree(
-    ".runtime/operations/assistant/usage/pending",
-    "Assistant pending usage records that must move with hosted usage import continuity.",
-  ),
 ] as const;

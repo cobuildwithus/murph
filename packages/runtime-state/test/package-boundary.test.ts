@@ -5,7 +5,6 @@ import * as assistantIds from "@murphai/runtime-state/assistant-ids";
 import * as runtimeStateNode from "@murphai/runtime-state/node";
 import * as runtimeStateNodeAssistantRuntimeIssues from "@murphai/runtime-state/node/assistant-runtime-issues";
 import * as runtimeStateNodeAssistantStateFs from "@murphai/runtime-state/node/assistant-state-fs";
-import * as runtimeStateNodeAssistantUsage from "@murphai/runtime-state/node/assistant-usage";
 import * as runtimeStateNodeHostedBundleCodec from "@murphai/runtime-state/node/hosted-bundle-codec";
 import * as runtimeStateNodeLoopbackAuth from "@murphai/runtime-state/node/loopback-control-plane-auth";
 import * as runtimeStateNodeRuntimePaths from "@murphai/runtime-state/node/runtime-paths";
@@ -77,7 +76,6 @@ describe("@murphai/runtime-state package boundary", () => {
       exports?: Record<string, { default?: string; types?: string }>;
     };
 
-    expect(runtimeStateNodeAssistantUsage.parseAssistantUsageRecord).toBeTypeOf("function");
     expect(runtimeStateNodeAssistantRuntimeIssues.parseAssistantRuntimeIssueRecord).toBeTypeOf("function");
     expect(runtimeStateNodeAssistantStateFs.ensureAssistantStateDir).toBeTypeOf("function");
     expect(runtimeStateNodeAssistantStateFs.writeAssistantStateJson).toBeTypeOf("function");
@@ -89,10 +87,6 @@ describe("@murphai/runtime-state package boundary", () => {
     expect(runtimeStateNodeRuntimePaths.DEVICE_SYNC_DB_RELATIVE_PATH).toBeTypeOf("string");
     expect(runtimeStateNodeSqliteWarningFilter.installSqliteExperimentalWarningFilter).toBeTypeOf("function");
     expect(runtimeStateNodeUlid.generateUlid).toBeTypeOf("function");
-    expect(packageJson.exports?.["./node/assistant-usage"]).toEqual({
-      default: "./dist/node/assistant-usage.js",
-      types: "./dist/node/assistant-usage.d.ts",
-    });
     expect(packageJson.exports?.["./node/assistant-runtime-issues"]).toEqual({
       default: "./dist/node/assistant-runtime-issues.js",
       types: "./dist/node/assistant-runtime-issues.d.ts",

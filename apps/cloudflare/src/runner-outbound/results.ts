@@ -137,6 +137,9 @@ async function handleRunnerEmailSendRequest(input: {
       request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
       userId: input.userId,
       webCallbackSigning: input.environment.webCallbackSigning,
+      ...(input.environment.hostedWebAllowHttpHosts
+        ? { webControlAllowHttpHosts: input.environment.hostedWebAllowHttpHosts }
+        : {}),
       webControlBaseUrl: input.environment.hostedWebBaseUrl,
     });
 

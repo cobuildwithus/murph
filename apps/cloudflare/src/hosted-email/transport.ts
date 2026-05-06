@@ -38,6 +38,7 @@ export async function sendHostedEmailMessage(input: {
   request: HostedEmailSendRequest;
   userId: string;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
 }): Promise<{
   target: string;
@@ -56,6 +57,7 @@ export async function sendHostedEmailMessage(input: {
     fetchImpl: input.fetchImpl,
     userId: input.userId,
     webCallbackSigning: input.webCallbackSigning,
+    ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
     webControlBaseUrl: input.webControlBaseUrl,
   });
   const prepared = await prepareHostedEmailSend({

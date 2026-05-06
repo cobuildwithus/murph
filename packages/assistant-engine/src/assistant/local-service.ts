@@ -72,7 +72,7 @@ import {
 } from './service-result.js'
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
-import { persistPendingAssistantUsageEvent } from './service-usage.js'
+import { recordAssistantUsageEvent } from './service-usage.js'
 import {
   AssistantActiveTurnInputBudgetExceededError,
   type AssistantActiveTurnInputAdmissionResult,
@@ -389,7 +389,7 @@ export async function sendAssistantMessageLocal(
                 turnId: currentUserTurn.turnId,
               })
             }
-            await persistPendingAssistantUsageEvent({
+            await recordAssistantUsageEvent({
               executionContext,
               providerRequestOrdinal,
               providerRequestOutcome: providerOutcome.providerRequestOutcome,
@@ -403,7 +403,6 @@ export async function sendAssistantMessageLocal(
                 usageAttribution: providerOutcome.usageAttribution,
               },
               turnId: currentUserTurn.turnId,
-              vault: currentInput.vault,
             })
             throw providerOutcome.error
           }
@@ -435,12 +434,11 @@ export async function sendAssistantMessageLocal(
           if (providerResult.nonReplayableProviderWork) {
             activeTurnRouteLock = providerResult.route
           }
-          await persistPendingAssistantUsageEvent({
+          await recordAssistantUsageEvent({
             executionContext,
             providerRequestOrdinal,
             providerResult,
             turnId: currentUserTurn.turnId,
-            vault: currentInput.vault,
           })
 
           for (const phase of ['request_boundary', 'commit_barrier'] as const) {

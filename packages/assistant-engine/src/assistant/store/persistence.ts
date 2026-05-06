@@ -82,8 +82,6 @@ export async function ensureAssistantState(
     ensureAssistantStateDirectory(paths.stateDirectory),
     ensureAssistantStateDirectory(paths.secretsDirectory),
     ensureAssistantStateDirectory(paths.sessionSecretsDirectory),
-    ensureAssistantStateDirectory(paths.usageDirectory),
-    ensureAssistantStateDirectory(paths.usagePendingDirectory),
   ])
 }
 

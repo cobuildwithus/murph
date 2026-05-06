@@ -3,8 +3,8 @@ import {
   createAssistantUsageId,
   resolveAssistantUsageCredentialSource,
   type AssistantProviderRequestOutcome,
-  writePendingAssistantUsageRecord,
-} from '@murphai/runtime-state/node'
+  type AssistantUsageRecord,
+} from '@murphai/hosted-execution/assistant-usage'
 import type {
   AssistantProviderSessionOptions,
   AssistantSession,
@@ -25,26 +25,25 @@ export interface AssistantUsageProviderResult {
   usageAttribution?: AssistantUsageAttribution | null
 }
 
-export async function persistPendingAssistantUsageEvent(input: {
+export async function recordAssistantUsageEvent(input: {
   executionContext: AssistantExecutionContext
   providerRequestOutcome?: AssistantProviderRequestOutcome
   providerRequestOrdinal?: number
   providerResult: AssistantUsageProviderResult
   turnId: string
-  vault: string
 }): Promise<void> {
   const usage = input.providerResult.usage
   const hostedMemberId = normalizeNullableString(input.executionContext.hosted?.memberId)
+  const usageRecorder = input.executionContext.hosted?.usageRecorder ?? null
   const apiKeyEnv = normalizeNullableString(usage?.apiKeyEnv)
   const usageAttribution = input.providerResult.usageAttribution ?? null
 
-  if (!usage || !hostedMemberId) {
+  if (!usage || !hostedMemberId || !usageRecorder) {
     return
   }
 
-  await writePendingAssistantUsageRecord({
-    vault: input.vault,
-    record: {
+  try {
+    const record: AssistantUsageRecord = {
       schema: ASSISTANT_USAGE_SCHEMA,
       usageId: createAssistantUsageId({
         attemptCount: input.providerResult.attemptCount,
@@ -88,7 +87,19 @@ export async function persistPendingAssistantUsageEvent(input: {
       usageExtractionSourcePath: normalizeNullableString(usage.usageExtractionSourcePath),
       usageExtractionVersion: normalizeNullableString(usage.usageExtractionVersion) ?? 'unknown',
       totalTokens: usage.totalTokens,
-    },
+    }
+
+    void usageRecorder.recordUsage(record).catch((error: unknown) => {
+      warnAssistantUsageRecordingFailure(error)
+    })
+  } catch (error) {
+    warnAssistantUsageRecordingFailure(error)
+  }
+}
+
+function warnAssistantUsageRecordingFailure(error: unknown): void {
+  console.warn('Assistant usage recording failed; continuing without retry.', {
+    errorName: error instanceof Error ? error.name : typeof error,
   })
 }
 

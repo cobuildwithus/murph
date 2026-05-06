@@ -439,7 +439,7 @@ partial turn history through a different provider as if it were a fresh attempt.
 
 Usage accounting needs a continuation/request ordinal so multiple provider
 requests inside one visible assistant turn cannot collide on the existing
-`turnId + attemptCount` pending usage identity.
+`turnId + attemptCount` usage identity.
 
 ## Provider State Policy
 
@@ -531,7 +531,7 @@ interface AssistantAcceptedTurnInputSnapshot {
   avoid provider-native resume state when the turn continuity policy is
   Murph-history-only.
 - `packages/assistant-engine/src/assistant/service-usage.ts`: include provider
-  request/continuation ordinals in pending usage records.
+  request/continuation ordinals in hosted usage records.
 - `packages/assistant-engine/src/assistant/provider-turn-runner.ts`: pass active
   provider history and provider continuation cursor through provider execution
   without replaying non-replayable work, and derive native resume use from the

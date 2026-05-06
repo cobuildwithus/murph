@@ -300,6 +300,7 @@ describe("hosted execution coverage gaps", () => {
     expect(exportKeys).toEqual([
       ".",
       "./assistant-identifiers",
+      "./assistant-usage",
       "./auth",
       "./browser-vault",
       "./bundles",
@@ -319,6 +320,8 @@ describe("hosted execution coverage gaps", () => {
     expect(exportKeys).not.toContain("./outbox-payload");
 
     const rootModule = await import("@murphai/hosted-execution");
+    const assistantUsageModule =
+      await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
     const browserVaultModule = await import("../src/browser-vault.ts") as Record<string, unknown>;
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
@@ -334,6 +337,8 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect(rootModule.parseAssistantUsageRecord).toBeTypeOf("function");
+    expect(assistantUsageModule.parseAssistantUsageRecord).toBeTypeOf("function");
     expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);
     expect(typeof browserVaultModule.getHostedBrowserVaultReplicaStorageKeyId).toBe("function");
     expect(typeof browserVaultModule.parseHostedBrowserVaultReplicaRef).toBe("function");

@@ -1,7 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ASSISTANT_USAGE_SCHEMA } from "@murphai/hosted-execution/assistant-usage";
 
 const mocks = vi.hoisted(() => ({
-  importHostedAiUsageRecords: vi.fn(),
+  recordHostedAiUsageRecords: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
@@ -10,7 +11,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
-  importHostedAiUsageRecords: mocks.importHostedAiUsageRecords,
+  recordHostedAiUsageRecords: mocks.recordHostedAiUsageRecords,
 }));
 
 type HostedExecutionUsageRecordRouteModule = typeof import(
@@ -29,18 +30,24 @@ describe("hosted execution usage record route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
-    mocks.importHostedAiUsageRecords.mockResolvedValue({
+    mocks.recordHostedAiUsageRecords.mockResolvedValue({
       recordedIds: ["turn_123.attempt-1"],
-      records: [],
     });
   });
 
-  it("stores usage rows and runs allowance accounting during callback import", async () => {
-    const usage = [
-      {
-        usageId: "turn_123.attempt-1",
-      },
-    ];
+  it("records usage rows and runs allowance accounting during callback", async () => {
+    const usage = {
+      attemptCount: 1,
+      credentialSource: "platform",
+      occurredAt: "2026-03-29T12:00:00.000Z",
+      provider: "codex-cli",
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: "asst_123",
+      stripeMeterSource: "murph",
+      turnId: "turn_123",
+      usageId: "turn_123.attempt-1",
+      usageExtractionVersion: "legacy",
+    };
 
     const response = await hostedExecutionUsageRecordRoute.POST(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
@@ -53,15 +60,28 @@ describe("hosted execution usage record route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.importHostedAiUsageRecords).toHaveBeenCalledWith({
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.objectContaining({
+        maxBodyBytes: 16_384,
+        payloadText: expect.any(String),
+      }),
+    );
+    expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith({
       accountAllowance: true,
       trustedUserId: "member_123",
-      usage,
+      usage: [
+        expect.objectContaining({
+          provider: "codex-cli",
+          schema: ASSISTANT_USAGE_SCHEMA,
+          stripeMeterSource: "murph",
+          usageId: "turn_123.attempt-1",
+        }),
+      ],
     });
     await expect(response.json()).resolves.toEqual({
-      recorded: 1,
-      usageIds: ["turn_123.attempt-1"],
+      recorded: true,
+      usageId: "turn_123.attempt-1",
     });
   });
 });

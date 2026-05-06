@@ -8,7 +8,7 @@ Persist token-only provider usage metadata for hosted AI usage rows so token ext
 
 - Hosted AI usage rows can store provider request id, sanitized raw usage JSON, sanitized raw usage hash, extraction version, and extraction source path.
 - Stored raw usage JSON is limited to token/count metadata and provider-usage details, not full provider debug events.
-- Pending assistant usage records carry the same sanitized metadata through hosted import.
+- Direct hosted usage records carry the same sanitized metadata through hosted recording.
 - Prisma schema and migration stay aligned.
 - Focused tests cover persistence and privacy minimization.
 
@@ -20,8 +20,8 @@ Persist token-only provider usage metadata for hosted AI usage rows so token ext
 
 ## State
 
-- Done: Added token-only usage metadata extraction, pending usage plumbing, hosted import persistence, Prisma schema fields, and migration SQL.
-- Done: Added focused provider extraction, runtime-state, hosted import, hosted migration, assistant-runtime, assistant-engine, and hosted-execution test coverage.
+- Done: Added token-only usage metadata extraction, hosted usage recording persistence, Prisma schema fields, and migration SQL. The former local pending-usage plumbing was superseded by direct hosted usage recording.
+- Done: Added focused provider extraction, hosted recording, hosted migration, assistant-runtime, assistant-engine, and hosted-execution test coverage.
 - Done: `pnpm typecheck` reaches unrelated `packages/vault-usecases` query package/type failures after the affected packages pass.
 - Blocked: Repo-level `CI=1 pnpm test` enters an interactive setup prompt in root Vitest and was terminated.
 - Now: Handoff pending; commit is blocked by overlapping active worktree edits.
@@ -42,6 +42,5 @@ Persist token-only provider usage metadata for hosted AI usage rows so token ext
 - `packages/assistant-runtime/test/hosted-runtime-usage.test.ts`
 - `packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts`
 - `packages/hosted-execution/test/hosted-runtime-control.test.ts`
-- `packages/runtime-state/src/assistant-usage.ts`
-- `packages/runtime-state/test/assistant-usage-path.test.ts`
-- `packages/runtime-state/test/assistant-usage.test.ts`
+- `packages/hosted-execution/src/assistant-usage.ts`
+- `packages/hosted-execution/test/assistant-usage.test.ts`

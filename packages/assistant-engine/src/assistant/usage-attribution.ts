@@ -7,8 +7,10 @@ import type {
 import type {
   AssistantUsageCredentialSource,
   AssistantUsageStripeMeterSource,
-} from '@murphai/runtime-state/node'
-import { normalizeAssistantUsageStripeMeterSource } from '@murphai/runtime-state/node'
+} from '@murphai/hosted-execution/assistant-usage'
+import {
+  normalizeAssistantUsageStripeMeterSource,
+} from '@murphai/hosted-execution/assistant-usage'
 
 import type { AssistantMessageInput } from './service-contracts.js'
 

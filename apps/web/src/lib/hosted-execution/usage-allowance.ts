@@ -6,7 +6,7 @@ import {
 import type {
   AssistantUsageCredentialSource,
   AssistantUsageRecord,
-} from "@murphai/runtime-state/node/assistant-usage";
+} from "@murphai/hosted-execution/assistant-usage";
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
   type HostedAiUsageAllowancePricedModel,

@@ -1,5 +1,6 @@
 export * from "./auth.ts";
 export * from "./ai-usage-billing-mode.ts";
+export * from "./assistant-usage.ts";
 export * from "./builders.ts";
 export {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,

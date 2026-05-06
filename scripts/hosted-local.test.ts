@@ -87,11 +87,20 @@ describe("hosted-local harness", () => {
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {
+    expect(resolveHostedLocalE2eScenarios("active-turn-latency")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-active-turn-latency-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("codex-gateway-prefix")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
+      "active-turn-latency",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "codex-gateway-prefix",
+    );
+    expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
+      "active-turn-latency",
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "codex-gateway-prefix",

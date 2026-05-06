@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 
 import {
   ASSISTANT_RUNTIME_ISSUE_SCHEMA,
-  ASSISTANT_USAGE_SCHEMA,
   type AssistantRuntimeIssueRecord,
-  type AssistantUsageRecord,
 } from "@murphai/runtime-state/node";
+import {
+  ASSISTANT_USAGE_SCHEMA,
+  type AssistantUsageRecord,
+} from "../src/assistant-usage.ts";
 
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -41,8 +43,8 @@ import {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeUsageExportRequest,
-  parseHostedRuntimeUsageExportResponse,
+  parseHostedRuntimeUsageRecordRequest,
+  parseHostedRuntimeUsageRecordResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
@@ -83,7 +85,6 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.usage_export_finished");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual(["nudge", "alarm", "retry", "manual"]);
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
@@ -442,21 +443,21 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/Hosted device-sync runtime apply request updates/u);
   });
 
-  it("parses usage and issue exports through their runtime-state owners", () => {
+  it("parses usage records and issue exports through their contract owners", () => {
     const usage = createAssistantUsageRecord();
     const issue = createAssistantRuntimeIssueRecord();
 
-    expect(parseHostedRuntimeUsageExportRequest({
-      usage: [usage],
+    expect(parseHostedRuntimeUsageRecordRequest({
+      usage,
     })).toEqual({
-      usage: [usage],
+      usage,
     });
-    expect(parseHostedRuntimeUsageExportResponse({
-      recorded: 1,
-      usageIds: [usage.usageId],
+    expect(parseHostedRuntimeUsageRecordResponse({
+      recorded: true,
+      usageId: usage.usageId,
     })).toEqual({
-      recorded: 1,
-      usageIds: [usage.usageId],
+      recorded: true,
+      usageId: usage.usageId,
     });
     expect(parseHostedRuntimeIssueExportRequest({
       issues: [issue],
@@ -470,13 +471,11 @@ describe("hosted runtime control contracts", () => {
       issueIds: [issue.issueId],
       recorded: 1,
     });
-    expect(() => parseHostedRuntimeUsageExportRequest({
-      usage: [
-        {
-          ...usage,
-          usageId: "wrong",
-        },
-      ],
+    expect(() => parseHostedRuntimeUsageRecordRequest({
+      usage: {
+        ...usage,
+        usageId: "wrong",
+      },
     })).toThrow(
       /usageId must match the canonical turnId\/providerRequestOrdinal\/attemptCount-derived value/u,
     );
@@ -488,14 +487,14 @@ describe("hosted runtime control contracts", () => {
         },
       ],
     })).toThrow(/issueId/u);
-    expect(() => parseHostedRuntimeUsageExportResponse({
+    expect(() => parseHostedRuntimeUsageRecordResponse({
       recorded: -1,
-      usageIds: [usage.usageId],
-    })).toThrow(/non-negative integer/u);
-    expect(() => parseHostedRuntimeUsageExportResponse({
-      recorded: 2,
-      usageIds: [usage.usageId],
-    })).toThrow(/recorded must equal usageIds\.length/u);
+      usageId: usage.usageId,
+    })).toThrow(/boolean/u);
+    expect(() => parseHostedRuntimeUsageRecordResponse({
+      recorded: true,
+      usageId: "",
+    })).toThrow(/non-empty string/u);
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {

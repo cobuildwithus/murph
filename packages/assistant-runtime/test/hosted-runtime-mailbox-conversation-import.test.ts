@@ -1425,6 +1425,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
     assert.deepEqual(outcome, {
       afterCheckpoint: outcome.afterCheckpoint,
+      assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
       metrics: {
         nextWakeAt: null,
@@ -1740,6 +1741,7 @@ describe("hosted mailbox conversation import adapter", () => {
       { ...first, afterCheckpoint: typeof first.afterCheckpoint },
       {
         afterCheckpoint: "function",
+        assistantInputId: "ain_00000000000000000000000000000000",
         captureId: null,
         metrics: {
           nextWakeAt: null,
@@ -1752,6 +1754,7 @@ describe("hosted mailbox conversation import adapter", () => {
       { ...second, afterCheckpoint: typeof second.afterCheckpoint },
       {
         afterCheckpoint: "function",
+        assistantInputId: "ain_00000000000000000000000000000000",
         captureId: null,
         metrics: {
           nextWakeAt: null,
@@ -1796,6 +1799,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
     assert.deepEqual(outcome, {
       afterCheckpoint: outcome.afterCheckpoint,
+      assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
       metrics: {
         nextWakeAt: null,
@@ -1946,8 +1950,12 @@ describe("hosted mailbox conversation import adapter", () => {
       throw new Error("Expected imported mailbox outcome.");
     }
 
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
     assert.deepEqual(outcome, {
       afterCheckpoint: outcome.afterCheckpoint,
+      assistantInputId: listed.events[0]?.inputId,
       captureId: null,
       metrics: {
         nextWakeAt: null,
@@ -1957,9 +1965,6 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(outcome.reasonCode, undefined);
     assert.equal(typeof outcome.afterCheckpoint, "function");
-    const listed = await listAssistantInputEvents({
-      vault: vaultRoot,
-    });
     assert.equal(listed.events.length, 1);
     assert.equal(
       listed.events[0]?.content.text,

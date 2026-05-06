@@ -74,13 +74,18 @@ Updated: 2026-05-06
 - 2026-05-06 provider timing decision: emit metadata-only Codex app-server timing trace stages (`spawn-ready`, initialize, thread start/resume, turn start/completion, shutdown) so live logs can split the remaining assistant pass latency without storing prompts, messages, identifiers, paths, or provider payloads.
 - 2026-05-06 automation timing decision: emit metadata-only assistant automation pass timing stages around diagnostics, maintenance, recovery, scan, cron, status refresh, and outbox summary so the remaining warm-path gap can be isolated without storing prompts, messages, identifiers, paths, or provider payloads.
 - 2026-05-06 status refresh latency decision: hosted queue-only auto-replies should not await status snapshot refresh before fast outbox dispatch; the status snapshot is operator metadata and can be refreshed by non-critical lanes after the user-visible send path is unblocked.
-- 2026-05-06 active-turn admission latency decision: hosted queue-only auto-replies should not install active-turn mailbox admission hooks because the request/commit boundary refreshes re-import and checkpoint mailbox state on the user-visible reply path; late same-conversation input can arrive through the next webhook/wake instead.
+- 2026-05-06 active-turn admission latency decision, superseded: hosted queue-only auto-replies should not install active-turn mailbox admission hooks because the request/commit boundary refreshes re-import and checkpoint mailbox state on the user-visible reply path; late same-conversation input can arrive through the next webhook/wake instead.
 - 2026-05-06 deploy unblock decision: write Health Commons generated artifacts through temp-file rename so concurrent deploy builds do not observe partially written generated files.
 - 2026-05-06 hot-path receipt fallback decision: hosted queue-only auto-replies skip the global turn-receipt fallback scan and rely on terminal evidence/cursors on the live send path; the receipt fallback remains enabled for non-hosted/recovery paths.
 - 2026-05-06 pre-scan input decision: automation passes refresh the assistant input source once before reading automation state and scanning so messages that arrive while a workspace restore is already in progress are imported before candidate selection.
 - 2026-05-06 nudge RPC decision: the control nudge route calls one Durable Object RPC that binds the user and nudges internally, avoiding the route-side `bindUser` RPC plus second `nudgeHostedRunner` RPC on the live webhook handoff path.
 - 2026-05-06 active-invocation heartbeat decision: runner-control heartbeats must touch the user-runner Durable Object and return pending-input state instead of a synthetic no-input response; Cloudflare runtime liveness polling is reduced to 1s so active invocations can notice live texts quickly.
 - 2026-05-06 immediate-nudge retry decision: failed immediate nudge drives use a 1s retry alarm instead of the generic 30s hosted runner retry delay, while non-nudge failures keep the generic retry path and max-attempt guard.
+- 2026-05-06 active-turn latency probe decision: add a manual hosted-local E2E scenario that uses the production-like hosted runner/mailbox/Linq path plus the Codex app-server E2E shim to compare the current hosted queue-only fast path against a diagnostic active-turn-admission-enabled path while reporting webhook-to-send latency and whether late input was folded into the same provider request.
+- 2026-05-06 active-turn latency probe result: local hosted E2E with a 15s Codex shim turn delay and a late same-chat Linq webhook 10s after wake measured baseline at 23892ms with 2 provider requests and no late-input folding, versus diagnostic active-turn admission at 22837ms with 1 provider request and late input folded into the first provider request.
+- 2026-05-06 late-input folding fix: hosted queue-only auto-replies use the existing active-turn admission hooks by default, while the hosted queue-only receipt fallback skip remains unchanged. The default-path hosted-local E2E folded late same-chat input into one provider request without a runtime flag.
+- 2026-05-06 fast-dispatch crash-window decision: add a runner-level Linq regression that restores the same pre-checkpoint workspace across a failed `outbox_receipt` checkpoint retry and asserts the stable idempotency key produces one external message.
+- 2026-05-06 preferred-input cursor decision: preferred assistant input ids are a cursor-safe overlay on the base scan, not a priority order; returned candidates stay cursor-sorted and `nextCursor` is derived from returned candidates so a newer preferred input cannot advance past older unprocessed input.
 
 ## Current evidence
 
@@ -154,3 +159,23 @@ Updated: 2026-05-06
   - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage`
   - `pnpm --dir apps/cloudflare typecheck`
   - `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts`
+  - `pnpm hosted-local e2e active-turn-latency`
+  - `pnpm hosted-local e2e active-turn-latency` passed with metric line `baseline=23892ms activeTurn=22837ms delta=-1055ms baselineFoldedLateInput=false activeTurnFoldedLateInput=true baselineProviderRequests=2 activeTurnProviderRequests=1`.
+  - `pnpm hosted-local e2e active-turn-latency` passed after enabling default hosted queue-only active-turn admission with metric line `latency=23334ms lateInputFolded=true providerRequests=1`.
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-workspace-runner.test.ts --testNamePattern "fast-dispatch idempotent"`
+  - `git diff --check -- packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts`
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-workspace-runner.test.ts`
+  - `pnpm --dir packages/assistant-runtime typecheck`
+  - `pnpm typecheck`
+  - `bash scripts/workspace-verify.sh test:diff packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts` failed in pre-existing package-wide assistant-runtime expectations outside this touched test: `hosted-runtime-mailbox-conversation-import.test.ts` now receives `assistantInputId` fields, and `hosted-runtime-workspace-entrypoint.test.ts` sees extra mailbox fetch/checkpoint behavior.
+  - `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-turn-input.test.ts`
+  - `pnpm --dir packages/assistant-runtime typecheck`
+  - `git diff --check -- packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/test/hosted-runtime-turn-input.test.ts`
+  - `pnpm typecheck`
+  - `pnpm hosted-local e2e` failed in `apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts`: the checkpoint baseline expected 300 assistant messages in the snapshot bundle and one mailbox fetch, but saw 100 assistant messages and two mailbox fetches.
+  - `bash scripts/workspace-verify.sh test:diff packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/test/hosted-runtime-turn-input.test.ts` failed in the same pre-existing broader assistant-runtime expectations noted above: mailbox conversation import tests now receive `assistantInputId` fields, and workspace entrypoint tests see extra mailbox fetch/checkpoint behavior.
+  - Inline TS reproduction using the real assistant input store and the old preferred-only selection logic produced `{"oldFirstInput":"preferred-newer","oldNextCursor":"preferred-cursor-20","olderCursorWasLower":true,"olderSkippedAfterOldCursor":true}`.
+  - After simplifying preferred input to a cursor-sorted overlay: `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-turn-input.test.ts` passed.
+  - After simplifying preferred input to a cursor-sorted overlay: `git diff --check -- packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/test/hosted-runtime-turn-input.test.ts agent-docs/exec-plans/active/2026-05-03-prod-typing-latency.md` passed.
+  - After simplifying preferred input to a cursor-sorted overlay: `pnpm --dir packages/assistant-runtime typecheck` failed on unrelated hosted-usage/export drift; the previous `turn-input.ts` query-shape error was removed.
+  - After simplifying preferred input to a cursor-sorted overlay: `pnpm typecheck` failed in `packages/hosted-execution/src/parsers/runtime-control.ts` because `@murphai/hosted-execution/assistant-usage` is not currently resolvable.

@@ -29,6 +29,7 @@ export interface HostedEmailMailboxNudgeWorkflowStartResponse {
 }
 
 export async function appendHostedEmailIngressWakeInWeb(input: {
+  allowHttpHosts?: readonly string[];
   baseUrl: string;
   body: HostedEmailIngressWakeAppendRequest;
   boundUserId: string;
@@ -39,6 +40,7 @@ export async function appendHostedEmailIngressWakeInWeb(input: {
   let response: Response;
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(input.allowHttpHosts ? { allowHttpHosts: input.allowHttpHosts } : {}),
       baseUrl: input.baseUrl,
       body: JSON.stringify(input.body),
       boundUserId: input.boundUserId,
@@ -98,6 +100,7 @@ export async function appendHostedEmailIngressWakeInWeb(input: {
 }
 
 export async function startHostedEmailIngressNudgeWorkflowInWeb(input: {
+  allowHttpHosts?: readonly string[];
   baseUrl: string;
   boundUserId: string;
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
@@ -112,6 +115,7 @@ export async function startHostedEmailIngressNudgeWorkflowInWeb(input: {
 
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(input.allowHttpHosts ? { allowHttpHosts: input.allowHttpHosts } : {}),
       baseUrl: input.baseUrl,
       body,
       boundUserId: input.boundUserId,
