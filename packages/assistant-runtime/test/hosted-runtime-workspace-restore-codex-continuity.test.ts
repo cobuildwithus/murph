@@ -146,29 +146,7 @@ describe("hosted workspace restore Codex continuity", () => {
       await assert.rejects(
         readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "latest.json"), "utf8"),
       );
-      const restoreLayerLogs = flattenLogEntries(logRequests).filter((entry) =>
-        entry.eventCode === "workspace.restore_layer_finished"
-      );
-      assert.deepEqual(
-        restoreLayerLogs.map((entry) => entry.redactedJson?.snapshotLayer),
-        ["base", "hot"],
-      );
-      assert.equal(restoreLayerLogs[0]?.redactedJson?.bundleBytes, baseBundle.byteLength);
-      assert.equal(restoreLayerLogs[1]?.redactedJson?.bundleBytes, hotSnapshot.bundle.byteLength);
-      assert.equal(restoreLayerLogs.every((entry) =>
-        typeof entry.redactedJson?.fetchElapsedMs === "number"
-        && typeof entry.redactedJson?.materializeElapsedMs === "number"
-        && typeof entry.redactedJson?.totalElapsedMs === "number"
-      ), true);
-      assert.deepEqual(
-        flattenLogEntries(logRequests).map((entry) => entry.eventCode),
-        [
-          "workspace.restore_started",
-          "workspace.restore_layer_finished",
-          "workspace.restore_layer_finished",
-          "workspace.restore_finished",
-        ],
-      );
+      assert.deepEqual(flattenLogEntries(logRequests), []);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -280,17 +258,7 @@ describe("hosted workspace restore Codex continuity", () => {
         ),
         "{\"resumeState\":{\"providerSessionId\":\"thread-second\",\"resumeRouteId\":\"route-second\"},\"session\":\"second\"}\n",
       );
-      const restoreLayerLogs = flattenLogEntries(logRequests).filter((entry) =>
-        entry.eventCode === "workspace.restore_layer_finished"
-      );
-      assert.deepEqual(
-        restoreLayerLogs.map((entry) => entry.redactedJson?.snapshotLayer),
-        ["base", "hot"],
-      );
-      assert.equal(restoreLayerLogs[0]?.redactedJson?.cacheHit, true);
-      assert.equal(restoreLayerLogs[0]?.redactedJson?.fetchElapsedMs, 0);
-      assert.equal(restoreLayerLogs[0]?.redactedJson?.materializeElapsedMs, 0);
-      assert.equal(restoreLayerLogs[1]?.redactedJson?.cacheHit, false);
+      assert.deepEqual(flattenLogEntries(logRequests), []);
 
       await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
         snapshotRef: secondSnapshotRef,
@@ -315,19 +283,7 @@ describe("hosted workspace restore Codex continuity", () => {
         ),
         "{\"resumeState\":{\"providerSessionId\":\"thread-second\",\"resumeRouteId\":\"route-second\"},\"session\":\"second\"}\n",
       );
-      const cachedHotLayerLogs = flattenLogEntries(logRequests).filter((entry) =>
-        entry.eventCode === "workspace.restore_layer_finished"
-      );
-      assert.deepEqual(
-        cachedHotLayerLogs.map((entry) => entry.redactedJson?.snapshotLayer),
-        ["base", "hot"],
-      );
-      assert.deepEqual(
-        cachedHotLayerLogs.map((entry) => entry.redactedJson?.cacheHit),
-        [true, true],
-      );
-      assert.equal(cachedHotLayerLogs[1]?.redactedJson?.fetchElapsedMs, 0);
-      assert.equal(cachedHotLayerLogs[1]?.redactedJson?.materializeElapsedMs, 0);
+      assert.deepEqual(flattenLogEntries(logRequests), []);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

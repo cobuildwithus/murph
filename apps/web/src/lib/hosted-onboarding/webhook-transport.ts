@@ -174,11 +174,6 @@ async function sendHostedLinqSideEffect(
     );
     throw error;
   }
-
-  console.info(
-    "Hosted Linq side-effect delivery completed.",
-    buildHostedLinqSideEffectLogDetails(effect, null, Date.now() - startedAtMs),
-  );
 }
 
 function buildHostedLinqSideEffectLogDetails(

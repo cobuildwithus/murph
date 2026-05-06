@@ -61,10 +61,6 @@ import {
   buildAssistantProviderTurnExecutionPlan,
   buildCodexProviderAttemptPlan,
 } from './provider-turn/planning.js'
-import {
-  createAssistantProviderTurnTimingEmitter,
-  type AssistantProviderTurnTimingEmitter,
-} from './provider-turn/timing-trace.js'
 import type {
   AssistantProviderAttemptPlan,
   AssistantProviderTurnExecutionPlan,
@@ -145,27 +141,20 @@ export async function executeProviderTurnWithRecovery(input: {
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantProviderTurnRecoveryOutcome> {
-  const emitTiming = createAssistantProviderTurnTimingEmitter(
-    input.input.onTraceEvent,
-  )
   const executionPlan = await buildAssistantProviderTurnExecutionPlan(input)
-  emitTiming('execution-plan-built')
   const attemptPlan = await buildCodexProviderAttemptPlan({
     attemptCount: 1,
     executionPlan,
     session: input.resolvedSession,
   })
-  emitTiming('attempt-plan-built')
 
   await input.onProviderRequestPlanned?.({
     providerAttemptId: null,
     providerContinuation: attemptPlan.routePlan.providerContinuation,
   })
-  emitTiming('provider-request-planned')
 
   const attemptOutcome = await executeAssistantProviderAttempt({
     attemptPlan,
-    emitTiming,
     executionPlan,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
   })
@@ -278,7 +267,6 @@ function emitProviderPlanTraceEvent(input: {
 
 async function executeAssistantProviderAttempt(input: {
   attemptPlan: AssistantProviderAttemptPlan
-  emitTiming?: AssistantProviderTurnTimingEmitter | null
   executionPlan: AssistantProviderTurnExecutionPlan
   providerRequestOrdinal: number | null
 }): Promise<AssistantProviderAttemptOutcome> {
@@ -314,7 +302,6 @@ async function executeAssistantProviderAttempt(input: {
     vaultRoot: executionPlan.input.vault,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
-  input.emitTiming?.('provider-plan-recorded')
   emitProviderPlanTraceEvent({
     activeTurnHistoryMessageCount:
       executionPlan.activeTurnHistory?.messages.length ?? 0,
@@ -333,7 +320,6 @@ async function executeAssistantProviderAttempt(input: {
       attemptPlan.routePlan.threadInstructionsFingerprint !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
-  input.emitTiming?.('provider-plan-trace-emitted')
   await recordProviderAttemptStarted({
     activeTurnMessagesPresent:
       (attemptPlan.routePlan.activeTurnMessages?.length ?? 0) > 0,
@@ -355,7 +341,6 @@ async function executeAssistantProviderAttempt(input: {
     turnId: executionPlan.turnId,
     vault: executionPlan.input.vault,
   })
-  input.emitTiming?.('attempt-started-recorded')
   let effectiveProviderContinuation = attemptPlan.routePlan.providerContinuation
   let usageAttribution: AssistantUsageAttribution | null = null
   let failedAttemptProviderSessionId: string | null = null
@@ -381,7 +366,6 @@ async function executeAssistantProviderAttempt(input: {
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
-    input.emitTiming?.('attempt-env-built')
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       abortSignal: executionPlan.input.abortSignal,
       activeTurnId: executionPlan.turnId,
@@ -425,23 +409,12 @@ async function executeAssistantProviderAttempt(input: {
       onTraceEvent: executionPlan.input.onTraceEvent,
       showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
     })
-    input.emitTiming?.('codex-attempt-finished', {
-      providerTurnActionCount: attemptResult.metadata?.providerActionCount ?? null,
-      providerTurnOk: attemptResult.ok,
-      providerTurnRawEventCount: attemptResult.ok
-        ? attemptResult.result.rawEvents.length
-        : attemptResult.rawEvents?.length ?? null,
-      providerTurnUsagePresent: attemptResult.ok
-        ? attemptResult.result.usage != null
-        : attemptResult.usage != null,
-    })
     attemptMetadata = attemptResult.metadata
     await recordAssistantToolFailureRuntimeIssues({
       policy: attemptPlan.routePlan.diagnosticsPolicy,
       rawToolEvents: attemptMetadata.rawToolEvents,
       vault: executionPlan.input.vault,
     }).catch(() => undefined)
-    input.emitTiming?.('tool-issues-recorded')
     if (!attemptResult.ok) {
       failedAttemptProviderSessionId = attemptResult.providerSessionId ?? null
       failedAttemptProviderTurnId = attemptResult.providerTurnId ?? null
@@ -467,7 +440,6 @@ async function executeAssistantProviderAttempt(input: {
       turnId: executionPlan.turnId,
       vault: executionPlan.input.vault,
     })
-    input.emitTiming?.('attempt-succeeded-recorded')
     return {
       kind: 'succeeded',
       result: {
@@ -523,7 +495,6 @@ async function executeAssistantProviderAttempt(input: {
       turnId: executionPlan.turnId,
       vault: executionPlan.input.vault,
     })
-    input.emitTiming?.('attempt-failed-recorded')
 
     return {
       kind: 'failed_terminal',

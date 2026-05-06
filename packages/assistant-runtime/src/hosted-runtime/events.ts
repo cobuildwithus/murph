@@ -44,10 +44,6 @@ const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   "murph.assistant-provider-plan-diagnostics.v1";
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = "assistant.provider.plan";
-const ASSISTANT_PROVIDER_TURN_TIMING_TRACE_SCHEMA =
-  "murph.assistant-provider-turn-timing.v1";
-const ASSISTANT_PROVIDER_TURN_TIMING_TRACE_TYPE =
-  "assistant.provider.turn_timing";
 const ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
   "murph.assistant-codex-invalid-output-diagnostics.v1";
 const ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
@@ -62,14 +58,6 @@ const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   "assistant.codex.app_server_timing";
-const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA =
-  "murph.assistant-automation-pass-timing.v1";
-const ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_TYPE =
-  "assistant.automation.pass_timing";
-const ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA =
-  "murph.assistant-local-message-timing.v1";
-const ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_TYPE =
-  "assistant.local_message.timing";
 const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -78,25 +66,6 @@ const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
 const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
   "hosted-stable-proc-cwd",
   "raw",
-]);
-const HOSTED_ASSISTANT_PROVIDER_TURN_TIMING_STAGE_VALUES = new Set([
-  "attempt-env-built",
-  "attempt-failed-recorded",
-  "attempt-observability-recorded",
-  "attempt-plan-built",
-  "attempt-started-recorded",
-  "attempt-succeeded-recorded",
-  "codex-app-server-returned",
-  "codex-attempt-finished",
-  "codex-input-built",
-  "codex-prompt-built",
-  "codex-result-built",
-  "codex-usage-extracted",
-  "execution-plan-built",
-  "provider-plan-recorded",
-  "provider-plan-trace-emitted",
-  "provider-request-planned",
-  "tool-issues-recorded",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES = new Set([
   "fallback-failed",
@@ -160,37 +129,6 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "thread-started",
   "turn-completed",
   "turn-started",
-]);
-const HOSTED_ASSISTANT_AUTOMATION_PASS_TIMING_STAGE_VALUES = new Set([
-  "complete",
-  "cron-finished",
-  "cron-status-finished",
-  "diagnostic-recorded",
-  "input-refresh-finished",
-  "outbox-drain-finished",
-  "outbox-summary-finished",
-  "post-scan-outbox-drain-finished",
-  "recovery-finished",
-  "runtime-maintenance-finished",
-  "scan-finished",
-  "state-read",
-  "status-refresh-finished",
-]);
-const HOSTED_ASSISTANT_LOCAL_MESSAGE_TIMING_STAGE_VALUES = new Set([
-  "artifacts-finalized",
-  "complete",
-  "defaults-resolved",
-  "delivery-finished",
-  "lock-acquired",
-  "preflight-finished",
-  "provider-completed",
-  "receipt-created",
-  "session-resolved",
-  "shared-plan-built",
-  "turn-finalized",
-  "turn-persisted",
-  "typing-started",
-  "typing-stop-finished",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_METHOD_VALUES = new Set([
   "initialize",
@@ -625,15 +563,6 @@ function readHostedAssistantProviderDiagnosticTrace(
     };
   }
 
-  const providerTurnTimingDiagnostic =
-    readHostedAssistantProviderTurnTimingTrace(event);
-  if (providerTurnTimingDiagnostic) {
-    return {
-      details: providerTurnTimingDiagnostic,
-      message: "Hosted assistant provider turn timing captured.",
-    };
-  }
-
   const invalidOutputDiagnostic =
     readHostedAssistantCodexInvalidOutputDiagnosticTrace(event);
   if (invalidOutputDiagnostic) {
@@ -658,24 +587,6 @@ function readHostedAssistantProviderDiagnosticTrace(
     return {
       details: appServerTimingDiagnostic,
       message: "Hosted assistant Codex app-server timing captured.",
-    };
-  }
-
-  const automationPassTimingDiagnostic =
-    readHostedAssistantAutomationPassTimingTrace(event);
-  if (automationPassTimingDiagnostic) {
-    return {
-      details: automationPassTimingDiagnostic,
-      message: "Hosted assistant automation pass timing captured.",
-    };
-  }
-
-  const localMessageTimingDiagnostic =
-    readHostedAssistantLocalMessageTimingTrace(event);
-  if (localMessageTimingDiagnostic) {
-    return {
-      details: localMessageTimingDiagnostic,
-      message: "Hosted assistant local-message timing captured.",
     };
   }
 
@@ -1104,214 +1015,6 @@ function readHostedAssistantCodexAppServerTimingTrace(
     "codexTimingTurnIdPresent",
     readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingTurnIdPresent"),
   );
-
-  return details;
-}
-
-function readHostedAssistantProviderTurnTimingTrace(
-  event: unknown,
-): HostedExecutionStructuredLogDetails | null {
-  const record = readHostedAssistantProviderRawTraceRecord(event);
-  if (!record) {
-    return null;
-  }
-
-  const schema = readHostedAssistantProviderPlanString(record, "schema");
-  const type = readHostedAssistantProviderPlanString(record, "type");
-  if (
-    schema !== ASSISTANT_PROVIDER_TURN_TIMING_TRACE_SCHEMA
-    || type !== ASSISTANT_PROVIDER_TURN_TIMING_TRACE_TYPE
-  ) {
-    return null;
-  }
-
-  const stage = readHostedAssistantProviderDiagnosticAllowedString(
-    record,
-    "providerTurnStage",
-    HOSTED_ASSISTANT_PROVIDER_TURN_TIMING_STAGE_VALUES,
-  );
-  if (!stage) {
-    return null;
-  }
-
-  const details: HostedExecutionStructuredLogDetails = {
-    providerTraceKind: "provider.turn_timing",
-    providerTurnStage: stage,
-    providerTurnTraceType: "provider-turn",
-    schema: ASSISTANT_PROVIDER_TURN_TIMING_TRACE_SCHEMA,
-  };
-
-  for (const key of [
-    "providerTurnOk",
-    "providerTurnUsagePresent",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticBoolean(record, key),
-    );
-  }
-  for (const key of [
-    "providerTurnActionCount",
-    "providerTurnElapsedMs",
-    "providerTurnRawEventCount",
-    "providerTurnTotalElapsedMs",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
-    );
-  }
-
-  return details;
-}
-
-function readHostedAssistantAutomationPassTimingTrace(
-  event: unknown,
-): HostedExecutionStructuredLogDetails | null {
-  const record = readHostedAssistantProviderRawTraceRecord(event);
-  if (!record) {
-    return null;
-  }
-
-  const schema = readHostedAssistantProviderPlanString(record, "schema");
-  const type = readHostedAssistantProviderPlanString(record, "type");
-  if (
-    schema !== ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA
-    || type !== ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_TYPE
-  ) {
-    return null;
-  }
-
-  const stage = readHostedAssistantProviderDiagnosticAllowedString(
-    record,
-    "automationPassStage",
-    HOSTED_ASSISTANT_AUTOMATION_PASS_TIMING_STAGE_VALUES,
-  );
-  if (!stage) {
-    return null;
-  }
-
-  const details: HostedExecutionStructuredLogDetails = {
-    automationPassStage: stage,
-    automationPassTraceType: "pass",
-    providerTraceKind: "automation.pass_timing",
-    schema: ASSISTANT_AUTOMATION_PASS_TIMING_TRACE_SCHEMA,
-  };
-
-  for (const key of [
-    "automationPassApplyCanonicalWrites",
-    "automationPassCheckpointRequired",
-    "automationPassDrainOutbox",
-    "automationPassInputRefreshProgressed",
-    "automationPassInputRefreshSkipped",
-    "automationPassInputRefreshSourceUnavailable",
-    "automationPassOutboxNextAttemptPresent",
-    "automationPassPostScanOutboxDrainSkipped",
-    "automationPassProgressed",
-    "automationPassRecoveryProgressed",
-    "automationPassStateProgressed",
-    "automationPassStatusRefreshSkipped",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticBoolean(record, key),
-    );
-  }
-  for (const key of [
-    "automationPassCronFailed",
-    "automationPassCronProcessed",
-    "automationPassCronSucceeded",
-    "automationPassElapsedMs",
-    "automationPassOutboxAttempted",
-    "automationPassOutboxFailed",
-    "automationPassOutboxQueued",
-    "automationPassOutboxSent",
-    "automationPassRecoveryConsidered",
-    "automationPassRecoveryFailed",
-    "automationPassRecoveryReplied",
-    "automationPassRecoverySkipped",
-    "automationPassRepliesConsidered",
-    "automationPassRepliesFailed",
-    "automationPassRepliesReplied",
-    "automationPassRepliesSkipped",
-    "automationPassRoutingConsidered",
-    "automationPassRoutingFailed",
-    "automationPassRoutingRouted",
-    "automationPassRoutingSkipped",
-    "automationPassScanNumber",
-    "automationPassScanReplyConsidered",
-    "automationPassScanReplyFailed",
-    "automationPassScanReplyReplied",
-    "automationPassScanReplySkipped",
-    "automationPassTotalElapsedMs",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
-    );
-  }
-
-  return details;
-}
-
-function readHostedAssistantLocalMessageTimingTrace(
-  event: unknown,
-): HostedExecutionStructuredLogDetails | null {
-  const record = readHostedAssistantProviderRawTraceRecord(event);
-  if (!record) {
-    return null;
-  }
-
-  const schema = readHostedAssistantProviderPlanString(record, "schema");
-  const type = readHostedAssistantProviderPlanString(record, "type");
-  if (
-    schema !== ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA
-    || type !== ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_TYPE
-  ) {
-    return null;
-  }
-
-  const stage = readHostedAssistantProviderDiagnosticAllowedString(
-    record,
-    "localSendTimingStage",
-    HOSTED_ASSISTANT_LOCAL_MESSAGE_TIMING_STAGE_VALUES,
-  );
-  if (!stage) {
-    return null;
-  }
-
-  const details: HostedExecutionStructuredLogDetails = {
-    localSendTimingStage: stage,
-    localSendTimingTraceType: "local-send",
-    providerTraceKind: "local_message.timing",
-    schema: ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA,
-  };
-
-  for (const key of [
-    "localSendDeliveryRequested",
-    "localSendHosted",
-    "localSendQueueOnly",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticBoolean(record, key),
-    );
-  }
-  for (const key of [
-    "localSendElapsedMs",
-    "localSendTotalElapsedMs",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
-    );
-  }
 
   return details;
 }
