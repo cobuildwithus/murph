@@ -272,6 +272,82 @@ test("goal upserts preserve metric targets in canonical frontmatter", async () =
   assert.match(read.document.markdown, /targetId: fasting-glucose-under-90/);
 });
 
+test("goal upserts merge concurrent partial updates with the latest record", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-concurrent-upsert");
+  await initializeVault({ vaultRoot });
+  const metricTargets: GoalMetricTarget[] = [
+    {
+      targetId: "sleep-duration-over-7-hours",
+      kind: "metric",
+      metricKey: "sleep-duration",
+      comparator: ">=",
+      value: 7,
+      unit: "h",
+      evaluation: { kind: "rolling-window", statistic: "mean", windowDays: 7 },
+    },
+  ];
+
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Sleep consistently",
+    window: {
+      startAt: "2026-03-01",
+    },
+    status: "active",
+    horizon: "medium_term",
+    priority: 5,
+  });
+
+  await Promise.all([
+    upsertGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+      status: "paused",
+    }),
+    upsertGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+      horizon: "long_term",
+    }),
+    upsertGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+      priority: 9,
+    }),
+    upsertGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+      window: {
+        targetAt: "2026-06-01",
+      },
+    }),
+    upsertGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+      domains: ["Sleep"],
+    }),
+    upsertGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+      metricTargets,
+    }),
+  ]);
+
+  const persisted = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+
+  assert.equal(persisted.entity.title, "Sleep consistently");
+  assert.equal(persisted.entity.status, "paused");
+  assert.equal(persisted.entity.horizon, "long_term");
+  assert.equal(persisted.entity.priority, 9);
+  assert.equal(persisted.entity.window.startAt, "2026-03-01");
+  assert.equal(persisted.entity.window.targetAt, "2026-06-01");
+  assert.deepEqual(persisted.entity.domains, ["sleep"]);
+  assert.deepEqual(persisted.entity.metricTargets, metricTargets);
+});
+
 test("goal reads reject non-canonical frontmatter after the hard cut", async () => {
   const vaultRoot = await makeTempDirectory("murph-goal-strict-frontmatter");
   await initializeVault({ vaultRoot });
