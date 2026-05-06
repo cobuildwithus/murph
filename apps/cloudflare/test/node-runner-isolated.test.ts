@@ -3,13 +3,20 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedExecutionWorkspaceInvocationJobInput } from "../src/runner-job-transport.ts";
+import {
+  createHostedExecutionRunnerChildResultMessage,
+  type HostedExecutionWorkspaceInvocationJobInput,
+} from "../src/runner-job-transport.ts";
 
 const spawnMock = vi.fn();
 
-vi.mock("node:child_process", () => ({
-  spawn: spawnMock,
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: spawnMock,
+  };
+});
 
 describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
   afterEach(async () => {
@@ -58,10 +65,11 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       child.stderr.setEncoding("utf8");
 
       queueMicrotask(() => {
-        child.stdout.end(module.formatHostedExecutionChildResult({
+        emitChildResult(child, module, {
           ok: true,
           result: createRunnerResult(),
-        }));
+        });
+        child.stdout.end();
         child.emit("close", 0);
       });
 
@@ -181,10 +189,11 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       child.stderr.setEncoding("utf8");
 
       queueMicrotask(() => {
-        child.stdout.end(module.formatHostedExecutionChildResult({
+        emitChildResult(child, module, {
           ok: true,
           result: createRunnerResult(),
-        }));
+        });
+        child.stdout.end();
         child.emit("close", 0);
       });
 
@@ -213,6 +222,9 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
 
   it("rejects legacy child results at the isolated runner boundary", async () => {
     const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const stdoutWriteSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const module = await import("../src/node-runner-isolated.ts");
 
     spawnMock.mockImplementation(() => {
@@ -252,9 +264,125 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_legacy_result"),
-    })).rejects.toThrow("Hosted workspace invocation result");
+    })).rejects.toThrow("without emitting a result payload");
 
     expect(processKillSpy).toHaveBeenCalledWith(-4246, "SIGKILL");
+    expect(stdoutWriteSpy).toHaveBeenCalled();
+  });
+
+  it("ignores stdout result spoofing and trusts only the IPC child result", async () => {
+    const stdoutWriteSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const module = await import("../src/node-runner-isolated.ts");
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChildProcess(4250);
+
+      queueMicrotask(() => {
+        child.stdout.write(`${formatLegacyChildResult({
+          nextWakeAt: null,
+          status: "failed",
+        })}\n`);
+        emitChildResult(child, module, {
+          ok: true,
+          result: createRunnerResult(),
+        });
+        child.stdout.end();
+        child.emit("close", 0);
+      });
+
+      return child;
+    });
+
+    const result = await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_child_stdout_spoof"),
+    });
+
+    expect(result.status).toBe("idle");
+    expect(stdoutWriteSpy).toHaveBeenCalled();
+  });
+
+  it("rejects duplicate IPC child result payloads", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChildProcess(4251);
+
+      queueMicrotask(() => {
+        emitChildResult(child, module, {
+          ok: true,
+          result: createRunnerResult(),
+        });
+        emitChildResult(child, module, {
+          ok: true,
+          result: createRunnerResult(),
+        });
+        child.stdout.end();
+        child.emit("close", 0);
+      });
+
+      return child;
+    });
+
+    await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_child_duplicate_result"),
+    })).rejects.toThrow("multiple result payloads");
+  });
+
+  it("rejects a successful IPC result when the child exits nonzero", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChildProcess(4252);
+
+      queueMicrotask(() => {
+        emitChildResult(child, module, {
+          ok: true,
+          result: createRunnerResult(),
+        });
+        child.stdout.end();
+        child.emit("close", 1);
+      });
+
+      return child;
+    });
+
+    await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_child_success_nonzero"),
+    })).rejects.toThrow("after reporting success");
+  });
+
+  it("rejects malformed IPC child result payloads", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChildProcess(4253);
+
+      queueMicrotask(() => {
+        child.emit("message", {
+          result: {
+            ok: true,
+            result: {
+              status: "not-a-runtime-status",
+            },
+          },
+          type: "murph.hosted-execution.runner-child-result.v1",
+        });
+        child.stdout.end();
+        child.emit("close", 0);
+      });
+
+      return child;
+    });
+
+    await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_child_malformed_result"),
+    })).rejects.toThrow("Hosted workspace invocation result");
   });
 
   it("redacts isolated child stderr before forwarding it to runner logs", async () => {
@@ -286,10 +414,11 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
           "OPENAI_API_KEY=secret-value person@example.test +15555550123 /tmp/hosted-runner/path",
         );
         child.stderr.end();
-        child.stdout.end(module.formatHostedExecutionChildResult({
+        emitChildResult(child, module, {
           ok: true,
           result: createRunnerResult(),
-        }));
+        });
+        child.stdout.end();
         child.emit("close", 0);
       });
 
@@ -336,7 +465,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       child.stderr.setEncoding("utf8");
 
       queueMicrotask(() => {
-        child.stdout.end(module.formatHostedExecutionChildResult({
+        emitChildResult(child, module, {
           ok: false,
           error: {
             details: {
@@ -349,7 +478,8 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
             stack:
               "Error: failed\n    at run (/tmp/hosted-runner/private-file.ts:7:3)",
           },
-        }));
+        });
+        child.stdout.end();
         child.emit("close", 1);
       });
 
@@ -418,10 +548,11 @@ function createSuccessfulChildProcess(
   child.stderr.setEncoding("utf8");
 
   queueMicrotask(() => {
-    child.stdout.end(module.formatHostedExecutionChildResult({
+    emitChildResult(child, module, {
       ok: true,
       result: createRunnerResult(),
-    }));
+    });
+    child.stdout.end();
     child.emit("close", 0);
   });
 
@@ -447,17 +578,44 @@ function createFailedChildProcess(
   child.stderr.setEncoding("utf8");
 
   queueMicrotask(() => {
-    child.stdout.end(module.formatHostedExecutionChildResult({
+    emitChildResult(child, module, {
       ok: false,
       error: {
         message: "simulated child failure",
         name: "Error",
       },
-    }));
+    });
+    child.stdout.end();
     child.emit("close", 1);
   });
 
   return child;
+}
+
+function createMockChildProcess(pid: number) {
+  const child = new EventEmitter() as EventEmitter & {
+    kill: ReturnType<typeof vi.fn>;
+    pid: number;
+    stderr: PassThrough;
+    stdin: PassThrough;
+    stdout: PassThrough;
+  };
+  child.kill = vi.fn();
+  child.pid = pid;
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  return child;
+}
+
+function emitChildResult(
+  child: EventEmitter,
+  _module: typeof import("../src/node-runner-isolated.ts"),
+  payload: Parameters<typeof createHostedExecutionRunnerChildResultMessage>[0],
+) {
+  child.emit("message", createHostedExecutionRunnerChildResultMessage(payload));
 }
 
 function formatLegacyChildResult(result: unknown): string {

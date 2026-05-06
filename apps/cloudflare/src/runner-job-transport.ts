@@ -11,8 +11,6 @@ import {
 
 export const HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND = "workspace-invocation";
 
-const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
-
 export interface HostedExecutionWorkspaceInvocationJobInput
   extends HostedAssistantWorkspaceRuntimeJobInput {
   kind: typeof HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND;
@@ -26,16 +24,30 @@ export interface HostedExecutionRunnerJobParsers {
   parseWorkspaceJobInput(value: unknown): HostedAssistantWorkspaceRuntimeJobInput;
 }
 
-export interface HostedExecutionRunnerChildResult {
-  ok: boolean;
-  error?: {
-    code?: string | null;
-    details?: Record<string, unknown> | null;
-    message: string;
-    name?: string | null;
-    stack?: string | null;
-  };
-  result?: HostedExecutionRunnerJobResult;
+export type HostedExecutionRunnerChildResult =
+  | {
+      error?: never;
+      ok: true;
+      result: HostedExecutionRunnerJobResult;
+    }
+  | {
+      error: {
+        code?: string | null;
+        details?: Record<string, unknown> | null;
+        message: string;
+        name?: string | null;
+        stack?: string | null;
+      };
+      ok: false;
+      result?: never;
+    };
+
+export const HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE =
+  "murph.hosted-execution.runner-child-result.v1";
+
+export interface HostedExecutionRunnerChildResultMessage {
+  result: HostedExecutionRunnerChildResult;
+  type: typeof HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE;
 }
 
 export function parseHostedExecutionRunnerJobInput(
@@ -72,36 +84,26 @@ export function assertHostedExecutionRunnerJobResult(
   return parseHostedWorkspaceInvocationResult(value);
 }
 
-export function formatHostedExecutionRunnerChildResult(
+export function createHostedExecutionRunnerChildResultMessage(
   payload: HostedExecutionRunnerChildResult,
-): string {
-  return `${HOSTED_RUNTIME_CHILD_RESULT_PREFIX}${Buffer.from(
-    JSON.stringify(payload),
-    "utf8",
-  ).toString("base64")}`;
+): HostedExecutionRunnerChildResultMessage {
+  return {
+    result: payload,
+    type: HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE,
+  };
 }
 
-export function parseHostedExecutionRunnerChildResult(
-  output: string,
+export function parseHostedExecutionRunnerChildResultMessage(
+  value: unknown,
 ): HostedExecutionRunnerChildResult {
-  const lines = output
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const encoded = [...lines]
-    .reverse()
-    .find((line) => line.startsWith(HOSTED_RUNTIME_CHILD_RESULT_PREFIX));
-
-  if (!encoded) {
-    throw new Error("Hosted assistant runtime child did not emit a result payload.");
+  const record = requireRecord(value, "Hosted execution runner child IPC message");
+  if (record.type !== HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE) {
+    throw new TypeError(
+      `Hosted execution runner child IPC message.type must be ${HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE}.`,
+    );
   }
 
-  return JSON.parse(
-    Buffer.from(
-      encoded.slice(HOSTED_RUNTIME_CHILD_RESULT_PREFIX.length),
-      "base64",
-    ).toString("utf8"),
-  ) as HostedExecutionRunnerChildResult;
+  return parseHostedExecutionRunnerChildResultPayload(record.result);
 }
 
 function requireHostedExecutionWorkspaceJobKind(
@@ -120,4 +122,64 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+function parseHostedExecutionRunnerChildResultPayload(
+  value: unknown,
+): HostedExecutionRunnerChildResult {
+  const record = requireRecord(value, "Hosted execution runner child result");
+  if (typeof record.ok !== "boolean") {
+    throw new TypeError("Hosted execution runner child result.ok must be a boolean.");
+  }
+
+  if (record.ok) {
+    return {
+      ok: true,
+      result: record.result as HostedExecutionRunnerJobResult,
+    };
+  }
+
+  return {
+    ok: false,
+    error: parseHostedExecutionRunnerChildError(record.error),
+  };
+}
+
+function parseHostedExecutionRunnerChildError(
+  value: unknown,
+): Extract<HostedExecutionRunnerChildResult, { ok: false }>["error"] {
+  const record = requireRecord(value, "Hosted execution runner child error");
+  if (typeof record.message !== "string" || record.message.length === 0) {
+    throw new TypeError("Hosted execution runner child error.message must be a non-empty string.");
+  }
+
+  return {
+    ...(record.code === undefined ? {} : { code: requireOptionalString(record.code, "code") }),
+    ...(record.details === undefined
+      ? {}
+      : { details: requireOptionalRecord(record.details, "details") }),
+    message: record.message,
+    ...(record.name === undefined ? {} : { name: requireOptionalString(record.name, "name") }),
+    ...(record.stack === undefined ? {} : { stack: requireOptionalString(record.stack, "stack") }),
+  };
+}
+
+function requireOptionalRecord(value: unknown, field: string): Record<string, unknown> | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireRecord(value, `Hosted execution runner child error.${field}`);
+}
+
+function requireOptionalString(value: unknown, field: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`Hosted execution runner child error.${field} must be a string or null.`);
+  }
+
+  return value;
 }

@@ -27,9 +27,10 @@ import {
   createCloudflareHostedMailboxPayloadDecoder,
 } from "./runtime-bridge-mailbox-payload-decode.js";
 import {
-  formatHostedExecutionRunnerChildResult,
+  createHostedExecutionRunnerChildResultMessage,
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
+  type HostedExecutionRunnerChildResult,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
 import {
@@ -53,7 +54,7 @@ interface HostedExecutionChildDependencies {
   emitLog?: typeof emitHostedExecutionStructuredLog;
   readStandardInput?: () => Promise<string>;
   runWorkspaceInProcess?: typeof runHostedWorkspaceRuntimeJobInProcess;
-  stdout?: Pick<NodeJS.WriteStream, "write">;
+  sendResult?: (payload: HostedExecutionRunnerChildResult) => void;
   setExitCode?: (value: number) => void;
 }
 
@@ -70,7 +71,7 @@ export async function runHostedExecutionChild(
   const readInput = dependencies.readStandardInput ?? readStandardInput;
   const runWorkspaceInProcess =
     dependencies.runWorkspaceInProcess ?? runHostedWorkspaceRuntimeJobInProcess;
-  const stdout = dependencies.stdout ?? process.stdout;
+  const sendResult = dependencies.sendResult ?? sendHostedExecutionRunnerChildResult;
   const setExitCode = dependencies.setExitCode ?? ((value: number) => {
     process.exitCode = value;
   });
@@ -91,11 +92,11 @@ export async function runHostedExecutionChild(
       message: "Hosted node runner child failed to parse its bootstrap payload.",
       phase: "failed",
     });
-    stdout.write(`${formatHostedExecutionRunnerChildResult({
+    setExitCode(1);
+    sendResult({
       ok: false,
       error: createHostedExecutionChildBootstrapError(error),
-    })}\n`);
-    setExitCode(1);
+    });
     return;
   }
 
@@ -130,7 +131,7 @@ export async function runHostedExecutionChild(
         resultPhase: "phase" in result ? result.phase ?? null : null,
       },
     });
-    stdout.write(`${formatHostedExecutionRunnerChildResult({ ok: true, result })}\n`);
+    sendResult({ ok: true, result });
   } catch (error) {
     emitHostedRunnerChildDebug({
       stage: "run-error",
@@ -140,14 +141,22 @@ export async function runHostedExecutionChild(
       },
     });
     const serializedError = createHostedExecutionChildRuntimeError(error);
-    stdout.write(
-      `${formatHostedExecutionRunnerChildResult({
-        ok: false,
-        error: serializedError,
-      })}\n`,
-    );
     setExitCode(1);
+    sendResult({
+      ok: false,
+      error: serializedError,
+    });
   }
+}
+
+function sendHostedExecutionRunnerChildResult(
+  payload: HostedExecutionRunnerChildResult,
+): void {
+  if (typeof process.send !== "function") {
+    throw new Error("Hosted node runner child requires an IPC result channel.");
+  }
+
+  process.send(createHostedExecutionRunnerChildResultMessage(payload));
 }
 
 async function runWorkspaceChildJob(input: {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,8 +20,8 @@ import {
 } from "./runner-child-launcher.ts";
 import {
   assertHostedExecutionRunnerJobResult,
-  formatHostedExecutionRunnerChildResult,
-  parseHostedExecutionRunnerChildResult,
+  parseHostedExecutionRunnerChildResultMessage,
+  type HostedExecutionRunnerChildResult,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
 import {
@@ -35,7 +35,6 @@ export interface HostedExecutionIsolatedRunnerInput {
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
 
-const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
 const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
 
@@ -83,23 +82,25 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
         isTypeScriptChild,
         launcherDirectories,
       }),
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe", "ipc"],
     },
   );
+
+  if (!child.stdin || !child.stdout || !child.stderr) {
+    throw new Error("Hosted runner child requires piped stdin, stdout, and stderr.");
+  }
 
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
 
-  const stdoutChunks: string[] = [];
   let stdoutRemainder = "";
   let stderrRemainder = "";
+  const childResultState = createHostedRunnerChildResultState(child);
   child.stdout.on("data", (chunk: string) => {
-    stdoutChunks.push(chunk);
     stdoutRemainder = forwardHostedRuntimeChildOutputChunk({
       chunk,
       remainder: stdoutRemainder,
       sink: process.stdout,
-      suppressResultPayload: true,
     });
   });
   child.stderr.on("data", (chunk: string) => {
@@ -107,7 +108,6 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
       chunk,
       remainder: stderrRemainder,
       sink: process.stderr,
-      suppressResultPayload: false,
     });
   });
 
@@ -129,14 +129,18 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
     flushHostedRuntimeChildOutputRemainder({
       remainder: stdoutRemainder,
       sink: process.stdout,
-      suppressResultPayload: true,
     });
     flushHostedRuntimeChildOutputRemainder({
       remainder: stderrRemainder,
       sink: process.stderr,
-      suppressResultPayload: false,
     });
-    const childResult = parseHostedExecutionRunnerChildResult(stdoutChunks.join(""));
+    const childResult = readHostedRunnerChildResult(childResultState, code);
+
+    if (childResult.ok && code !== 0) {
+      throw new Error(
+        `Hosted assistant runtime child exited with code ${code ?? "unknown"} after reporting success.`,
+      );
+    }
 
     if (!childResult.ok) {
       throw createHostedRuntimeChildFailure(childResult.error, code);
@@ -156,12 +160,6 @@ export async function clearHostedRunnerWarmLauncherRootsForTests(): Promise<void
   await Promise.all(
     roots.map((root) => rm(root, { force: true, recursive: true })),
   );
-}
-
-export function formatHostedExecutionChildResult(
-  payload: Parameters<typeof formatHostedExecutionRunnerChildResult>[0],
-): string {
-  return formatHostedExecutionRunnerChildResult(payload);
 }
 
 function resolveNodeRunnerChildEntry(): string {
@@ -262,11 +260,53 @@ function createHostedRuntimeChildFailure(
   return untyped;
 }
 
+interface HostedRunnerChildResultState {
+  errors: Error[];
+  results: HostedExecutionRunnerChildResult[];
+}
+
+function createHostedRunnerChildResultState(child: ChildProcess): HostedRunnerChildResultState {
+  const state: HostedRunnerChildResultState = {
+    errors: [],
+    results: [],
+  };
+
+  child.on("message", (message: unknown) => {
+    try {
+      state.results.push(parseHostedExecutionRunnerChildResultMessage(message));
+    } catch (error) {
+      state.errors.push(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+
+  return state;
+}
+
+function readHostedRunnerChildResult(
+  state: HostedRunnerChildResultState,
+  code: number | null,
+): HostedExecutionRunnerChildResult {
+  if (state.errors.length > 0) {
+    throw state.errors[0];
+  }
+
+  if (state.results.length === 0) {
+    throw new Error(
+      `Hosted assistant runtime child exited with code ${code ?? "unknown"} without emitting a result payload.`,
+    );
+  }
+
+  if (state.results.length > 1) {
+    throw new Error("Hosted assistant runtime child emitted multiple result payloads.");
+  }
+
+  return state.results[0]!;
+}
+
 function forwardHostedRuntimeChildOutputChunk(input: {
   chunk: string;
   remainder: string;
   sink: Pick<NodeJS.WriteStream, "write">;
-  suppressResultPayload: boolean;
 }): string {
   const combined = input.remainder + input.chunk;
   const lines = combined.split(/\r?\n/u);
@@ -276,7 +316,6 @@ function forwardHostedRuntimeChildOutputChunk(input: {
     writeHostedRuntimeChildOutputLine({
       line,
       sink: input.sink,
-      suppressResultPayload: input.suppressResultPayload,
     });
   }
 
@@ -286,7 +325,6 @@ function forwardHostedRuntimeChildOutputChunk(input: {
 function flushHostedRuntimeChildOutputRemainder(input: {
   remainder: string;
   sink: Pick<NodeJS.WriteStream, "write">;
-  suppressResultPayload: boolean;
 }): void {
   if (input.remainder.length === 0) {
     return;
@@ -295,21 +333,15 @@ function flushHostedRuntimeChildOutputRemainder(input: {
   writeHostedRuntimeChildOutputLine({
     line: input.remainder,
     sink: input.sink,
-    suppressResultPayload: input.suppressResultPayload,
   });
 }
 
 function writeHostedRuntimeChildOutputLine(input: {
   line: string;
   sink: Pick<NodeJS.WriteStream, "write">;
-  suppressResultPayload: boolean;
 }): void {
   const trimmed = input.line.trim();
   if (trimmed.length === 0) {
-    return;
-  }
-
-  if (input.suppressResultPayload && trimmed.startsWith(HOSTED_RUNTIME_CHILD_RESULT_PREFIX)) {
     return;
   }
 
