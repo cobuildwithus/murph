@@ -1,9 +1,10 @@
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
+import {
+  readRunnerActiveInvocationLeaseHeaders,
+} from "./active-lease.ts";
 
 export const HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH =
   "/internal/active-invocation/heartbeat";
@@ -27,16 +28,32 @@ export async function handleRunnerHeartbeatRequest(input: {
     return json(payload);
   }
 
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const recordActiveInvocationHeartbeat = requireRunnerOutboundUserStubMethod(
-    stub,
-    "recordActiveInvocationHeartbeat",
-  );
-  return json(await recordActiveInvocationHeartbeat({
-    attemptId: payload.attemptId,
-    leaseGeneration: payload.leaseGeneration,
-    userId: input.userId,
-  }));
+  const headers = readRunnerActiveInvocationLeaseHeaders(input.request);
+  if (!headers) {
+    return json({
+      ok: false,
+      reason: "malformed_request",
+    });
+  }
+  if (headers.attemptId !== payload.attemptId) {
+    return json({
+      ok: false,
+      reason: "stale_attempt",
+    });
+  }
+  if (headers.leaseGeneration !== payload.leaseGeneration) {
+    return json({
+      ok: false,
+      reason: "stale_generation",
+    });
+  }
+
+  return json({
+    inputAvailable: false,
+    nextAlarmAt: null,
+    ok: true,
+    pendingNudge: false,
+  });
 }
 
 async function readHeartbeatPayload(request: Request): Promise<

@@ -83,6 +83,20 @@ export function requireRunnerActiveInvocationLeaseHeaders(
   return headers;
 }
 
+export function requireRunnerActiveInvocationLeaseWriteHeaders(
+  request: Request,
+): RunnerActiveInvocationLeaseWriteHeaders {
+  const headers = requireRunnerActiveInvocationLeaseHeaders(request);
+  if (!headers.workspaceVersion) {
+    throw new RunnerActiveInvocationLeaseError();
+  }
+
+  return {
+    ...headers,
+    workspaceVersion: headers.workspaceVersion,
+  };
+}
+
 export function writeRunnerActiveInvocationLeaseHeaders(
   headers: Headers,
   lease: RunnerActiveInvocationLeaseWriteHeaders,

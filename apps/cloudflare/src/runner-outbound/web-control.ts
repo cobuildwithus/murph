@@ -12,20 +12,18 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
+  requireRunnerActiveInvocationLeaseWriteHeaders,
+  RunnerActiveInvocationLeaseError,
+} from "./active-lease.ts";
+import {
   handleRunnerMailboxPayloadDecodeRequest,
 } from "./mailbox-payload-decode.ts";
 import {
   isAllowedHostedRunnerWebControlRequest,
 } from "./shared-web-control-policy.ts";
 import {
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
-
-type RunnerOutboundUserRunnerStub = Awaited<
-  ReturnType<typeof resolveRunnerOutboundUserRunnerStub>
->;
 
 export async function handleRunnerWebControlRequest(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -61,23 +59,22 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST"
     ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
     : null;
-  const checkpointContext = checkpointRequest
-    ? {
-        request: checkpointRequest,
-        stub: await resolveRunnerOutboundUserRunnerStub(input.env, input.userId),
-      }
-    : null;
 
-  if (checkpointContext) {
-    const hasLease = await runnerOwnsActiveInvocationLease({
-      attemptId: checkpointContext.request.attemptId,
-      leaseGeneration: checkpointContext.request.leaseGeneration,
-      stub: checkpointContext.stub,
-      userId: input.userId,
-      workspaceVersion: checkpointContext.request.expectedWorkspaceVersion,
-    });
-    if (!hasLease) {
-      return unauthorized();
+  if (checkpointRequest) {
+    try {
+      const headers = requireRunnerActiveInvocationLeaseWriteHeaders(input.request);
+      if (
+        headers.attemptId !== checkpointRequest.attemptId
+        || headers.leaseGeneration !== checkpointRequest.leaseGeneration
+        || headers.workspaceVersion !== checkpointRequest.expectedWorkspaceVersion
+      ) {
+        return unauthorized();
+      }
+    } catch (error) {
+      if (error instanceof RunnerActiveInvocationLeaseError) {
+        return unauthorized();
+      }
+      throw error;
     }
   }
 
@@ -91,64 +88,15 @@ export async function handleRunnerWebControlRequest(input: {
     search: input.url.search || null,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
-  if (checkpointContext && response.ok) {
-    const checkpointResponse = parseHostedWorkspaceCheckpointResponse(
-      await response.clone().json(),
-    );
-    if (checkpointResponse.checkpointed) {
-      const recorded = await recordRunnerActiveInvocationWorkspaceCheckpoint({
-        attemptId: checkpointContext.request.attemptId,
-        leaseGeneration: checkpointContext.request.leaseGeneration,
-        stub: checkpointContext.stub,
-        userId: input.userId,
-        workspaceVersion: checkpointResponse.workspace.version,
-      });
-      if (!recorded) {
-        return unauthorized();
-      }
+  if (checkpointRequest && response.ok) {
+    try {
+      parseHostedWorkspaceCheckpointResponse(await response.clone().json());
+    } catch {
+      return unauthorized();
     }
   }
 
   return response;
-}
-
-async function runnerOwnsActiveInvocationLease(input: {
-  attemptId: string;
-  leaseGeneration: string;
-  stub: RunnerOutboundUserRunnerStub;
-  userId: string;
-  workspaceVersion: string;
-}): Promise<boolean> {
-  const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
-    input.stub,
-    "ownsActiveInvocationLease",
-  );
-  return await ownsActiveInvocationLease({
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    userId: input.userId,
-    workspaceVersion: input.workspaceVersion,
-  });
-}
-
-async function recordRunnerActiveInvocationWorkspaceCheckpoint(input: {
-  attemptId: string;
-  leaseGeneration: string;
-  stub: RunnerOutboundUserRunnerStub;
-  userId: string;
-  workspaceVersion: string;
-}): Promise<boolean> {
-  const recordActiveInvocationWorkspaceCheckpoint = requireRunnerOutboundUserStubMethod(
-    input.stub,
-    "recordActiveInvocationWorkspaceCheckpoint",
-  );
-  const response = await recordActiveInvocationWorkspaceCheckpoint({
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    userId: input.userId,
-    workspaceVersion: input.workspaceVersion,
-  });
-  return response.recorded;
 }
 
 async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {

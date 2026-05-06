@@ -12,7 +12,7 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
-  requireRunnerActiveInvocationLease,
+  requireRunnerActiveInvocationLeaseWriteHeaders,
   RunnerActiveInvocationLeaseError,
 } from "./runner-outbound/active-lease.ts";
 import { handleRunnerHeartbeatRequest } from "./runner-outbound/heartbeat.ts";
@@ -258,7 +258,7 @@ async function writeRequestOwnsActiveInvocationLease(input: {
   userId: string;
 }): Promise<boolean> {
   try {
-    await requireRunnerActiveInvocationLease(input);
+    requireRunnerActiveInvocationLeaseWriteHeaders(input.request);
     return true;
   } catch (error) {
     if (error instanceof RunnerActiveInvocationLeaseError) {

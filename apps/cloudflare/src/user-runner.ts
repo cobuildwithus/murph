@@ -528,7 +528,9 @@ export class HostedUserRunner {
       };
     }
 
-    const gate = await this.readHostedAiUsageGateBeforeInvocation(initialRecord.userId);
+    const gate = input.reason === "nudge"
+      ? createAllowedHostedAiUsageGateDecision()
+      : await this.readHostedAiUsageGateBeforeInvocation(initialRecord.userId);
     if (!gate.allowed) {
       if (gate.reason === "ai_usage_gate_unavailable") {
         const error = new Error("Hosted AI usage gate was unavailable.");
@@ -1147,13 +1149,7 @@ export class HostedUserRunner {
 function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecision {
   const record = requireHostedAiUsageGateObject(value);
   if (record.allowed === true) {
-    return {
-      allowed: true,
-      noticeCode: null,
-      reason: null,
-      retryAfter: null,
-      userNotice: null,
-    };
+    return createAllowedHostedAiUsageGateDecision();
   }
 
   if (record.allowed !== false) {
@@ -1166,6 +1162,16 @@ function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecisi
     reason: requireHostedAiUsageGateString(record.reason, "reason"),
     retryAfter: requireHostedAiUsageGateIsoDateString(record.retryAfter, "retryAfter"),
     userNotice: parseOptionalHostedAiUsageGateString(record.userNotice, "userNotice"),
+  };
+}
+
+function createAllowedHostedAiUsageGateDecision(): HostedAiUsageGateDecision {
+  return {
+    allowed: true,
+    noticeCode: null,
+    reason: null,
+    retryAfter: null,
+    userNotice: null,
   };
 }
 
