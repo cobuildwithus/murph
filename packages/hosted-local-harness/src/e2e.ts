@@ -189,6 +189,7 @@ function buildHostedLocalE2eSuiteEnv(input: {
 }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...input.env,
+    MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]:
       input.env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim()
       || input.env.MURPH_HOSTED_LOCAL_RUN_ID?.trim()

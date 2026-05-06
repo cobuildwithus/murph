@@ -397,6 +397,7 @@ describe("appendHostedDeviceSyncWake", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });
@@ -1286,6 +1287,7 @@ describe("appendHostedDeviceSyncWake", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: "NUDGE_UNAVAILABLE",
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });

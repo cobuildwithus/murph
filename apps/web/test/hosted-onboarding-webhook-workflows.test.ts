@@ -98,6 +98,7 @@ describe("hosted onboarding webhook workflows", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });
@@ -287,6 +288,7 @@ describe("hosted onboarding webhook workflows", () => {
       alreadyRunning: null,
       configured: false,
       errorCode: null,
+      immediateDriveStarted: null,
       inFlight: null,
       nextAlarmAtPresent: null,
     });

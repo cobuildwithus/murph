@@ -21,6 +21,7 @@ describe("hosted device-sync dirty sweeper", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: true,
       inFlight: false,
       nextAlarmAtPresent: true,
     });
@@ -92,6 +93,7 @@ describe("hosted device-sync dirty sweeper", () => {
       alreadyRunning: null,
       configured: true,
       errorCode: "TimeoutError",
+      immediateDriveStarted: null,
       inFlight: null,
       nextAlarmAtPresent: null,
     });

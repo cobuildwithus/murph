@@ -10,6 +10,7 @@ export interface HostedRunnerUserNudgeBestEffortResult {
   alreadyRunning: boolean | null;
   configured: boolean;
   errorCode: string | null;
+  immediateDriveStarted: boolean | null;
   inFlight: boolean | null;
   nextAlarmAtPresent: boolean | null;
 }
@@ -120,6 +121,7 @@ export async function nudgeHostedRunnerUserBestEffortResult(input: {
         alreadyRunning: result.alreadyRunning,
         configured: true,
         errorCode: null,
+        immediateDriveStarted: result.immediateDriveStarted ?? null,
         inFlight: result.inFlight,
         nextAlarmAtPresent: (result.nextAlarmAt ?? null) !== null,
       }
@@ -129,6 +131,7 @@ export async function nudgeHostedRunnerUserBestEffortResult(input: {
         alreadyRunning: null,
         configured: false,
         errorCode: null,
+        immediateDriveStarted: null,
         inFlight: null,
         nextAlarmAtPresent: null,
       };
@@ -145,6 +148,7 @@ export async function nudgeHostedRunnerUserBestEffortResult(input: {
       alreadyRunning: null,
       configured: true,
       errorCode: error instanceof Error && error.name ? error.name : "UnknownError",
+      immediateDriveStarted: null,
       inFlight: null,
       nextAlarmAtPresent: null,
     };

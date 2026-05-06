@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
@@ -168,6 +170,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });
@@ -177,6 +180,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });
@@ -706,6 +710,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       alreadyRunning: false,
       configured: false,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });

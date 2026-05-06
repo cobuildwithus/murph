@@ -139,6 +139,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });
@@ -148,6 +149,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });

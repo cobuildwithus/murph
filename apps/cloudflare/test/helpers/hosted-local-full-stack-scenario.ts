@@ -56,6 +56,7 @@ import {
 } from "#hosted-web-testing";
 
 const execFileAsync = promisify(execFile);
+const reuseExplicitDatabaseUrlEnv = "MURPH_HOSTED_LOCAL_E2E_REUSE_DATABASE_URL";
 
 interface HostedActiveMemberSeedArgs {
   environment?: NodeJS.ProcessEnv;
@@ -355,7 +356,7 @@ async function resolveHostedLocalScenarioDatabase(input: {
   scenarioPrefix: string;
 }): Promise<HostedLocalScenarioDatabaseLease> {
   const explicitDatabaseUrl = input.databaseUrl?.trim();
-  if (explicitDatabaseUrl) {
+  if (explicitDatabaseUrl && shouldReuseExplicitHostedLocalScenarioDatabaseUrl()) {
     return {
       cleanup: async () => {},
       url: explicitDatabaseUrl,
@@ -363,6 +364,10 @@ async function resolveHostedLocalScenarioDatabase(input: {
   }
 
   return await createEphemeralHostedLocalDatabase(input.scenarioPrefix);
+}
+
+function shouldReuseExplicitHostedLocalScenarioDatabaseUrl(): boolean {
+  return process.env.CI === "true" || process.env[reuseExplicitDatabaseUrlEnv] === "1";
 }
 
 async function createEphemeralHostedLocalDatabase(

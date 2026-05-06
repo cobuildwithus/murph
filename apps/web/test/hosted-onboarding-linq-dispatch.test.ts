@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
@@ -64,6 +65,7 @@ const mocks = vi.hoisted(() => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
@@ -346,6 +348,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });
@@ -355,6 +358,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       alreadyRunning: false,
       configured: true,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });
@@ -1030,6 +1034,7 @@ https://join.example.test/join/code_first_text`);
       alreadyRunning: false,
       configured: false,
       errorCode: null,
+      immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAtPresent: false,
     });

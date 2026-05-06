@@ -53,6 +53,9 @@ const replyText = "Got it - snapshot stress reply delivered.";
 const linqWebhookSecret = "linq-local-snapshot-stress-secret";
 const productionLikeAssistantModel = "gpt-5.5";
 const hostedAssistantProfileId = "platform-default";
+const stressCodexThreadId = "00000000-0000-4000-8000-000000000025";
+const stressCodexRolloutRelativePath =
+  `sessions/2026/05/05/rollout-2026-05-05T01-02-03-${stressCodexThreadId}.jsonl`;
 
 const stressConversationCount = readPositiveIntegerEnv(
   "MURPH_E2E_SNAPSHOT_STRESS_CONVERSATIONS",
@@ -370,7 +373,8 @@ async function writeSyntheticAssistantRuntimeState(vaultRoot: string): Promise<v
     path.join(sessionsDirectory, "snapshot-stress-session.json"),
     `${JSON.stringify({
       resumeState: {
-        providerSessionId: "thread_snapshot_stress",
+        codexRolloutRelativePath: stressCodexRolloutRelativePath,
+        providerSessionId: stressCodexThreadId,
         resumeRouteId: "route_snapshot_stress",
       },
       schema: "murph.synthetic-hosted-assistant-session.v1",
@@ -427,34 +431,33 @@ async function writeSyntheticCodexContinuity(operatorHomeRoot: string): Promise<
   const datedSessionsDirectory = path.join(rootSessionsDirectory, "2026", "05", "05");
   await mkdir(datedSessionsDirectory, { recursive: true });
 
-  for (let index = 0; index < stressConversationCount; index += 1) {
-    await writeFile(
-      path.join(datedSessionsDirectory, `session-snapshot-stress-${index}.jsonl`),
-      `${JSON.stringify({
-        events: [
-          {
-            content: buildPaddedText({
-              bytes: Math.max(1024, Math.floor(stressCodexSessionBytes / 8)),
-              label: `codex-session-user-input-${index}`,
-            }),
-            role: "user",
-            type: "message",
-          },
-          {
-            output: buildPaddedText({
-              bytes: stressCodexSessionBytes,
-              label: `codex-session-function-output-${index}`,
-            }),
-            type: "function_call_output",
-          },
-        ],
-        providerSessionId: "thread_snapshot_stress",
-        schema: "murph.synthetic-codex-session.v1",
-        turnId: `turn_snapshot_stress_${index}`,
-      })}\n`,
-      "utf8",
-    );
-  }
+  const rolloutItems = Array.from({ length: stressConversationCount }, (_, index) => ({
+    events: [
+      {
+        content: buildPaddedText({
+          bytes: Math.max(1024, Math.floor(stressCodexSessionBytes / 8)),
+          label: `codex-session-user-input-${index}`,
+        }),
+        role: "user",
+        type: "message",
+      },
+      {
+        output: buildPaddedText({
+          bytes: stressCodexSessionBytes,
+          label: `codex-session-function-output-${index}`,
+        }),
+        type: "function_call_output",
+      },
+    ],
+    providerSessionId: stressCodexThreadId,
+    schema: "murph.synthetic-codex-session.v1",
+    turnId: `turn_snapshot_stress_${index}`,
+  }));
+  await writeFile(
+    path.join(operatorHomeRoot, ".codex-hosted", stressCodexRolloutRelativePath),
+    `${rolloutItems.map((item) => JSON.stringify(item)).join("\n")}\n`,
+    "utf8",
+  );
 
   for (let index = 0; index < 4; index += 1) {
     await writeFile(
@@ -470,7 +473,7 @@ async function writeSyntheticCodexContinuity(operatorHomeRoot: string): Promise<
             type: "message",
           },
         ],
-        providerSessionId: "thread_snapshot_stress",
+        providerSessionId: stressCodexThreadId,
         schema: "murph.synthetic-codex-root-session.v1",
       })}\n`,
       "utf8",
