@@ -592,6 +592,56 @@ describe("hosted onboarding routes", () => {
     });
   });
 
+  it("logs allowlisted hosted onboarding error details without logging arbitrary response details", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = hostedOnboardingHttp.jsonError(
+      hostedOnboardingError({
+        code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+        details: {
+          code: "resource_missing",
+          inviteCode: "invite-code",
+          requestIdPresent: true,
+          statusCode: 404,
+          type: "StripeInvalidRequestError",
+        },
+        httpStatus: 502,
+        message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
+        retryable: true,
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+        details: {
+          code: "resource_missing",
+          inviteCode: "invite-code",
+          requestIdPresent: true,
+          statusCode: 404,
+          type: "StripeInvalidRequestError",
+        },
+        message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorCode: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+      errorDetails: {
+        code: "resource_missing",
+        requestIdPresent: true,
+        statusCode: 404,
+        type: "StripeInvalidRequestError",
+      },
+      errorMessage: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
+      errorResponseCode: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+      errorResponseRetryable: true,
+      errorResponseStatus: 502,
+      errorType: "HostedOnboardingError",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+    });
+  });
+
   it("reuses the shared JSON object reader for hosted onboarding bodies", async () => {
     await expect(
       hostedOnboardingHttp.readJsonObject(
