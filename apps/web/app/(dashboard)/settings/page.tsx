@@ -7,7 +7,10 @@ import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
-import { canUpgradeHostedBillingPlanToEdge } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  canSwitchHostedBillingPlanToPulse,
+  canUpgradeHostedBillingPlanToEdge,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -52,7 +55,7 @@ export default async function SettingsPage() {
       />
 
       <section className="flex flex-col gap-4">
-        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Billing
         </div>
         <HostedBillingSettings
@@ -62,13 +65,24 @@ export default async function SettingsPage() {
             currentBillingPlanCode: billingRef?.currentBillingPlanCode,
             currentCheckoutOffer: billingRef?.currentCheckoutOffer,
           })}
+          canSwitchToPulse={canSwitchHostedBillingPlanToPulse({
+            billingStatus: authenticatedMember?.billingStatus,
+            currentBillingPhase: billingRef?.currentBillingPhase,
+            currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+            stripeCustomerId: billingRef?.stripeCustomerId,
+            stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+            suspendedAt: authenticatedMember?.suspendedAt,
+          })}
           currentBillingPhase={billingRef?.currentBillingPhase}
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
+          currentPeriodEnd={billingRef?.currentPeriodEnd}
+          scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
+          scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
         />
       </section>
 
       <section className="flex flex-col gap-4">
-        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Messaging
         </div>
         {account ? (
@@ -87,7 +101,7 @@ export default async function SettingsPage() {
       </section>
 
       <section className="flex flex-col gap-4">
-        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Data & privacy
         </div>
         <HostedDataPrivacySettings authenticated={authenticated} />

@@ -129,8 +129,12 @@ Add a narrow eligibility helper:
 
 ```ts
 function canSwitchHostedBillingPlanToPulse(input: {
+  billingStatus?: unknown;
   currentBillingPhase?: unknown;
   currentBillingPlanCode?: unknown;
+  stripeCustomerId?: unknown;
+  stripeSubscriptionId?: unknown;
+  suspendedAt?: unknown;
 }): boolean;
 ```
 

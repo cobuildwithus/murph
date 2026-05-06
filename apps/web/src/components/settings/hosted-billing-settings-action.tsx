@@ -7,19 +7,23 @@ import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
+import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
 
 interface HostedBillingPortalResponse {
   url: string;
 }
 
 export function HostedBillingSettingsAction(props: {
+  currentPeriodEnd?: string | null;
   helperText?: string | null;
+  showSwitchToPulse?: boolean;
   showUpgrade?: boolean;
 }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSwitchToPulsePending, setIsSwitchToPulsePending] = useState(false);
   const [isUpgradePending, setIsUpgradePending] = useState(false);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
-  const isBillingActionPending = isUpgradePending || isOpeningPortal;
+  const isBillingActionPending = isSwitchToPulsePending || isUpgradePending || isOpeningPortal;
 
   async function handleManageSubscription() {
     setErrorMessage(null);
@@ -46,6 +50,13 @@ export function HostedBillingSettingsAction(props: {
           <UpgradeToEdgeButton
             disabled={isBillingActionPending}
             onPendingChange={setIsUpgradePending}
+          />
+        ) : null}
+        {props.showSwitchToPulse === true ? (
+          <SwitchToPulseButton
+            currentPeriodEnd={props.currentPeriodEnd}
+            disabled={isBillingActionPending}
+            onPendingChange={setIsSwitchToPulsePending}
           />
         ) : null}
         <Button

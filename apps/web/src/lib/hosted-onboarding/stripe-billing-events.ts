@@ -739,16 +739,7 @@ function readHostedStripeInvoiceBillingReason(invoice: Stripe.Invoice): string |
 export function resolveHostedStripeSubscriptionBillingPlanCode(
   subscription: Stripe.Subscription,
 ): ReturnType<typeof parseHostedBillingPlanCode> {
-  const metadataPlanCode = parseHostedBillingPlanCode(subscription.metadata?.billingPlanCode);
-  if (metadataPlanCode) {
-    return metadataPlanCode;
-  }
-
   const priceIds = readHostedStripeSubscriptionPriceIds(subscription);
-  if (priceIds.length === 0) {
-    return null;
-  }
-
   for (const code of HOSTED_BILLING_PLAN_CODES) {
     const expectedPriceId = process.env[getHostedBillingPlanDefinition(code).priceIdEnvKey];
     if (expectedPriceId && priceIds.includes(expectedPriceId)) {
@@ -764,7 +755,7 @@ export function resolveHostedStripeSubscriptionBillingPlanCode(
     }
   }
 
-  return null;
+  return parseHostedBillingPlanCode(subscription.metadata?.billingPlanCode);
 }
 
 function readHostedStripeSubscriptionPriceIds(

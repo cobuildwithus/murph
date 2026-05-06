@@ -323,6 +323,46 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
+  it("keeps Edge allowance while a Pulse switch is only scheduled locally", async () => {
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      scheduledBillingEffectiveAt: new Date("2026-04-01T00:00:00.000Z"),
+      scheduledBillingPlanCode: "launch_monthly",
+      spentUsdMicros: 24_000_000n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      remainingUsdMicros: 1_000_000n,
+    });
+  });
+
+  it("uses Pulse allowance only after subscription reconciliation writes Pulse as current plan", async () => {
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      spentUsdMicros: 9_000_000n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 1_000_000n,
+    });
+  });
+
   it("uses the Pulse Trial allowance while the active trial period is current", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
@@ -770,6 +810,8 @@ function createGatePrisma(input: {
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   queryRaw?: ReturnType<typeof vi.fn>;
+  scheduledBillingEffectiveAt?: Date | null;
+  scheduledBillingPlanCode?: string | null;
   spentUsdMicros: bigint;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
@@ -827,6 +869,8 @@ function createGatePrisma(input: {
             currentTrialStartedAt: input.trialStartedAt ?? null,
             pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
             pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
+            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
           },
           billingStatus: input.billingStatus ?? HostedBillingStatus.active,
           suspendedAt: input.suspendedAt ?? null,
@@ -842,6 +886,8 @@ function createGatePrisma(input: {
             currentTrialStartedAt: input.trialStartedAt ?? null,
             pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
             pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
+            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
           },
           id: "member_123",
         }),

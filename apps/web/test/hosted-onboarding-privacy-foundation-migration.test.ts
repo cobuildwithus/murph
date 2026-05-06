@@ -57,10 +57,14 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeCustomerIdEncrypted String? @map("stripe_customer_id_encrypted")',
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
+    'stripeSubscriptionScheduleLookupKey String? @unique @map("stripe_subscription_schedule_lookup_key")',
+    'stripeSubscriptionScheduleIdEncrypted String? @map("stripe_subscription_schedule_id_encrypted")',
     'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
     'currentBillingPhase String? @map("current_billing_phase")',
     'currentBillingPlanCode String? @map("current_billing_plan_code")',
     'currentCheckoutOffer String? @map("current_checkout_offer")',
+    'scheduledBillingPlanCode String? @map("scheduled_billing_plan_code")',
+    'scheduledBillingEffectiveAt DateTime? @map("scheduled_billing_effective_at")',
     'currentPeriodStart DateTime? @map("current_period_start")',
     'currentPeriodEnd DateTime? @map("current_period_end")',
     'pulseTrialRedeemedAt DateTime? @map("pulse_trial_redeemed_at")',
@@ -235,6 +239,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050502_hosted_ai_usage_allowance",
       "2026050503_pulse_trial_checkout_offer",
       "2026050601_hosted_ai_usage_limit_notice_sent",
+      "2026050602_hosted_plan_switch_schedule_ref",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
