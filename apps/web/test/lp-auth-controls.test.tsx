@@ -22,7 +22,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
 
   return {
     HostedAuthPanelIsland(props: {
-      authMode?: "login" | "signup";
       requireLaunchConsentOnCompletion?: boolean;
       showPassiveLegalNotice?: boolean;
     }) {
@@ -31,7 +30,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
       return createElement(
         "div",
         {
-          "data-hosted-auth-mode": props.authMode ?? "signup",
           "data-hosted-auth-launch-consent":
             props.requireLaunchConsentOnCompletion ? "required" : "not-required",
           "data-hosted-auth-passive-legal-notice":
@@ -178,7 +176,7 @@ test("LandingAuthActions splits the nav CTA when requested", async () => {
   expect(buttons[1]?.textContent).toBe("Signup");
 });
 
-test("LandingAuthActions splits the lower homepage CTA into login and signup actions", async () => {
+test("LandingAuthActions split CTAs open the same unified auth modal", async () => {
   const { cleanup, container, window } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
@@ -202,13 +200,10 @@ test("LandingAuthActions splits the lower homepage CTA into login and signup act
   });
   await flushHostedAuthPanelIsland();
 
-  expect(container.textContent).toContain("Log in to Murph");
-  expect(
-    container.querySelector('[data-hosted-auth-mode="login"]'),
-  ).toBeTruthy();
+  expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-mode="login"][data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 
@@ -217,10 +212,10 @@ test("LandingAuthActions splits the lower homepage CTA into login and signup act
   });
   await flushHostedAuthPanelIsland();
 
-  expect(container.textContent).toContain("Create your Murph account");
+  expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-mode="signup"][data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 });

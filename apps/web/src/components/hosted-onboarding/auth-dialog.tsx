@@ -22,8 +22,6 @@ type WindowWithIdleCallback = typeof window & {
   ) => number;
 };
 
-type LandingAuthMode = "login" | "signup";
-
 let hostedAuthPanelIslandComponent: HostedAuthPanelIslandComponent | null = null;
 let hostedAuthPanelIslandLoadPromise: Promise<HostedAuthPanelIslandComponent> | null =
   null;
@@ -99,7 +97,6 @@ export function AuthDialog({
   onOpenChange,
   title = "Log in or sign up",
   description = "Discover what actually makes you healthier.",
-  authMode,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
@@ -107,7 +104,6 @@ export function AuthDialog({
   onOpenChange: (open: boolean) => void;
   title?: string;
   description?: string;
-  authMode?: LandingAuthMode;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
 }) {
@@ -157,7 +153,6 @@ export function AuthDialog({
         </DialogHeader>
         {AuthPanelIsland ? (
           <AuthPanelIsland
-            authMode={authMode}
             methods={["phone", "telegram", "email"]}
             requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
             showPassiveLegalNotice={showPassiveLegalNotice}
