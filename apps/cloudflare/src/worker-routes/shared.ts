@@ -23,6 +23,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   bindUser(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
   nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
+  nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult>;
   ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;

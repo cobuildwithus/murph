@@ -994,7 +994,7 @@ describe("cloudflare worker routes", () => {
 
   it("nudges the hosted runner without enqueuing a normal-path wake", async () => {
     const stub = createUserRunnerStub({
-      nudgeHostedRunner: vi.fn(async () => ({
+      nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
         alreadyRunning: false,
@@ -1023,7 +1023,9 @@ describe("cloudflare worker routes", () => {
       inFlight: false,
       nextAlarmAt: "2026-04-26T00:00:00.000Z",
     });
-    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
@@ -1123,7 +1125,7 @@ describe("cloudflare worker routes", () => {
 
   it("does not start another workspace invocation when the nudge is already running", async () => {
     const stub = createUserRunnerStub({
-      nudgeHostedRunner: vi.fn(async () => ({
+      nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
         alreadyRunning: true,
@@ -1149,13 +1151,14 @@ describe("cloudflare worker routes", () => {
       alreadyRunning: true,
       inFlight: true,
     });
-    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
   it("accepts runner nudges through the direct Durable Object nudge path", async () => {
     const stub = createUserRunnerStub({
-      nudgeHostedRunner: vi.fn(async () => ({
+      nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
         alreadyRunning: false,
@@ -1178,7 +1181,9 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(202);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
   });
 
   it("drains retained legacy runner wake Queue messages through the direct Durable Object nudge path", async () => {
@@ -1195,6 +1200,7 @@ describe("cloudflare worker routes", () => {
 
     expect(stub.bindUser).toHaveBeenCalledWith("member_123");
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
     expect(message.ack).toHaveBeenCalledTimes(1);
     expect(message.retry).not.toHaveBeenCalled();
@@ -1234,6 +1240,7 @@ describe("cloudflare worker routes", () => {
     await worker.queue(createQueueBatch([message]), env);
 
     expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(message.ack).toHaveBeenCalledTimes(1);
     expect(message.retry).not.toHaveBeenCalled();
@@ -1253,6 +1260,7 @@ describe("cloudflare worker routes", () => {
     await worker.queue(batch, env);
 
     expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(message.ack).not.toHaveBeenCalled();
     expect(batch.retryAll).toHaveBeenCalledWith({ delaySeconds: 30 });
@@ -1277,6 +1285,7 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the route user.",
     });
     expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
   });
 
@@ -1823,6 +1832,17 @@ async function resolveHostedUserCryptoContextForTest(
 }
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
+  const defaultNudgeResult = {
+    accepted: true,
+    alarmScheduled: true,
+    alreadyRunning: false,
+    inFlight: false,
+    nextAlarmAt: null,
+  };
+  const nudgeHostedRunner = (overrides.nudgeHostedRunner ??
+    vi.fn(async () => defaultNudgeResult)) as UserRunnerDurableObjectStubLike["nudgeHostedRunner"];
+  const nudgeHostedRunnerForUser = (overrides.nudgeHostedRunnerForUser ??
+    vi.fn(async () => defaultNudgeResult)) as UserRunnerDurableObjectStubLike["nudgeHostedRunnerForUser"];
   return {
     bindUser: vi.fn(async (userId: string) => ({ userId })),
     deleteHostedUserData: vi.fn(async (userId: string) => ({
@@ -1840,13 +1860,8 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       },
       userId,
     })),
-    nudgeHostedRunner: vi.fn(async () => ({
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: false,
-      inFlight: false,
-      nextAlarmAt: null,
-    })),
+    nudgeHostedRunner,
+    nudgeHostedRunnerForUser,
     ownsActiveInvocationLease: vi.fn(async () => true),
     recordActiveInvocationHeartbeat: vi.fn(async () => ({
       inputAvailable: false,

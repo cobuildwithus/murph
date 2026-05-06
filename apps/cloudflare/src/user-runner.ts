@@ -403,6 +403,11 @@ export class HostedUserRunner {
     };
   }
 
+  async nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult> {
+    await this.stateStore.bindUser(userId);
+    return this.nudgeHostedRunner();
+  }
+
   async ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;
