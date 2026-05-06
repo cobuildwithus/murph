@@ -18,12 +18,12 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
-    currentBillingPlanCode?: string | null;
+    canUpgradeToEdge?: boolean;
   }) =>
     React.createElement(
       "div",
       null,
-      `Hosted billing settings ${String(props.authenticated)} ${String(props.currentBillingPlanCode ?? "")}`,
+      `Hosted billing settings ${String(props.authenticated)} ${String(props.canUpgradeToEdge ?? false)}`,
     )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
@@ -148,7 +148,9 @@ test("SettingsPage reads the app session and persisted account settings into the
     telegramUserLookupKey: null,
   });
   mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    currentBillingPhase: "paid",
     currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: "standard",
     memberId: "member_123",
     stripeCustomerId: "cus_123",
     stripeSubscriptionId: "sub_123",
@@ -190,7 +192,7 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
-    currentBillingPlanCode: "launch_monthly",
+    canUpgradeToEdge: true,
   }), undefined);
   expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
     memberId: "member_123",

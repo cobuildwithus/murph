@@ -35,7 +35,7 @@ describe("HostedBillingSettings", () => {
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
-      currentBillingPlanCode: "launch_monthly",
+      canUpgradeToEdge: true,
     }));
 
     assert.match(markup, /Manage subscription/);
@@ -48,12 +48,24 @@ describe("HostedBillingSettings", () => {
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
-      currentBillingPlanCode: "launch_edge_monthly",
+      canUpgradeToEdge: false,
     }));
 
     assert.doesNotMatch(markup, /Upgrade to Edge/);
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Manage your plan and payment details\./);
+  });
+
+  test("omits the Edge upgrade action when billing state is not eligible", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canUpgradeToEdge: false,
+    }));
+
+    assert.doesNotMatch(markup, /Upgrade to Edge/);
+    assert.match(markup, /Manage subscription/);
   });
 
   test("posts the Edge upgrade request and refreshes on success", async () => {

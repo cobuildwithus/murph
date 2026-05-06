@@ -571,6 +571,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
+        limitNoticeSentAt: null,
         limitUsdMicros: 25_000_000n,
       }),
     }));

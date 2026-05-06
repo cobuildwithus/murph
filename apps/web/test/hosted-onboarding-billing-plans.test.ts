@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   formatHostedLandingPricingLongSummary,
   formatHostedLandingPricingShortSummary,
+  canUpgradeHostedBillingPlanToEdge,
   getHostedBillingPlanDefinition,
+  isHostedPulseTrialBillingState,
   isHostedPulseTrialCheckoutEnabled,
   listHostedBillingPlanPresentations,
   parseHostedBillingCheckoutOffer,
@@ -55,6 +57,33 @@ describe("hosted billing launch plan Stripe configuration", () => {
       durationDays: 7,
       usageLimitUsdMicros: 2_500_000n,
     });
+  });
+
+  it("keeps Edge upgrade eligibility tied to paid Pulse source state", () => {
+    expect(canUpgradeHostedBillingPlanToEdge({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+    })).toBe(true);
+    expect(canUpgradeHostedBillingPlanToEdge({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+    })).toBe(false);
+    expect(canUpgradeHostedBillingPlanToEdge({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+    })).toBe(false);
+    expect(canUpgradeHostedBillingPlanToEdge({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+    })).toBe(false);
+    expect(isHostedPulseTrialBillingState({
+      currentBillingPhase: "paid",
+      currentCheckoutOffer: "pulse_trial_7d",
+    })).toBe(false);
   });
 
   it("resolves the Pulse Trial checkout rollout flag from a single helper", () => {
