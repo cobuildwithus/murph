@@ -682,7 +682,7 @@ function ConnectDisconnectDialog({
         <div className="flex flex-col gap-2">
           <Button
             type="button"
-            size="lg"
+            size="xl"
             onClick={() => {
               if (source) {
                 void onConfirm(source);
@@ -693,7 +693,7 @@ function ConnectDisconnectDialog({
           >
             {pending ? "Disconnecting..." : "Disconnect"}
           </Button>
-          <Button type="button" size="lg" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending} className="w-full">
+          <Button type="button" size="xl" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending} className="w-full">
             Cancel
           </Button>
         </div>

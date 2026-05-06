@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRightIcon, DownloadIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { DownloadIcon, Trash2Icon } from "lucide-react";
 
 import {
   HostedOnboardingApiError,
@@ -13,15 +13,17 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import {
+  loadBrowserVaultReplica,
+  normalizeBrowserVaultError,
+} from "@/src/lib/browser-vault/loader";
+import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
-  HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
 } from "@/src/lib/hosted-privacy/account-data-shared";
 
 import { ConnectedAccountCard } from "./connected-account-card";
@@ -58,10 +60,9 @@ type DeletionDialogStep = "review" | "confirm";
 type CloudflareCleanupSummary = HostedAccountDeleteResponse["result"]["cloudflare"];
 type ProviderRevocationSummary = HostedAccountDeleteResponse["result"]["providerRevocations"][number];
 
-const DATA_EXPORT_ENDPOINT = "/api/settings/data-export";
-const DEFAULT_EXPORT_FILENAME = "murph-data-export.json";
-const DATA_EXPORT_CONFIRMATION_HELP_ID = "hosted-data-export-phrase-help";
-const ACCOUNT_DELETION_CONFIRMATION_HELP_ID = "hosted-account-delete-phrase-help";
+const VAULT_EXPORT_CONFIRMATION_TEXT = "EXPORT MY VAULT";
+const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
+const VAULT_EXPORT_MIME_TYPE = "application/json; charset=utf-8";
 
 export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [exportPending, setExportPending] = useState(false);
@@ -79,7 +80,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [success, setSuccess] = useState<string | null>(null);
   const [deletionSummary, setDeletionSummary] = useState<HostedAccountDeleteResponse["result"] | null>(null);
 
-  const exportPhraseMatches = exportConfirmationText === HOSTED_DATA_EXPORT_CONFIRMATION_TEXT;
+  const exportPhraseMatches = exportConfirmationText === VAULT_EXPORT_CONFIRMATION_TEXT;
   const exportReady = acknowledgedSensitiveDownload && exportPhraseMatches && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
   const deleteReady = dialogStep === "confirm"
@@ -104,34 +105,29 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     setSuccess(null);
 
     try {
-      const response = await fetch(DATA_EXPORT_ENDPOINT, {
-        body: JSON.stringify({
-          acknowledgedSensitiveDownload,
-          confirmationText: exportConfirmationText,
-        }),
-        cache: "no-store",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
+      const result = await loadBrowserVaultReplica({
+        knownReplicaRef: null,
       });
 
-      if (!response.ok) {
-        throw new Error(await readDataExportErrorMessage(response));
+      if (result.state !== "ready") {
+        throw new Error("Your vault is not ready to export yet.");
       }
 
-      const blob = await response.blob();
-      triggerDataExportDownload(
+      const blob = new Blob([JSON.stringify(result.client.replica, null, 2)], {
+        type: VAULT_EXPORT_MIME_TYPE,
+      });
+      triggerJsonDownload(
         blob,
-        readDataExportFilename(response.headers.get("content-disposition")),
+        buildVaultExportFilename(result.client.replica.generatedAt),
       );
 
       closeExportDialog();
-      setSuccess("Your data export downloaded. Keep the file somewhere private and secure.");
+      setSuccess("Your vault export downloaded. Keep the file somewhere private and secure.");
     } catch (requestError) {
       setExportDialogError(requestError instanceof Error
-        ? requestError.message
+        ? normalizeBrowserVaultError(requestError) === "Your dashboard data is not available right now."
+          ? requestError.message
+          : normalizeBrowserVaultError(requestError)
         : "Could not export your data right now.");
     } finally {
       setExportPending(false);
@@ -230,13 +226,13 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       ) : null}
 
       <ConnectedAccountCard
-        label="Export data"
-        value="Download your Murph data"
-        meta="Account, messaging, wearable, and usage records as JSON."
+        label="Export vault"
+        value="Download your browser vault"
+        meta="Private records, metrics, timelines, search rows, and summaries as JSON."
         action={
           <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} type="button" variant="outline">
             <DownloadIcon data-icon="inline-start" />
-            {deletionSummary ? "Export unavailable" : exportPending ? "Exporting..." : "Export data"}
+            {deletionSummary ? "Export unavailable" : exportPending ? "Exporting..." : "Export vault"}
           </Button>
         }
       />
@@ -284,175 +280,147 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       <Dialog open={exportDialogOpen} onOpenChange={(open) => (open ? setExportDialogOpen(true) : closeExportDialog())}>
         <DialogContent
           aria-busy={exportPending}
-          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+          className="max-h-[calc(100dvh-2rem)] max-w-md gap-6 overflow-y-auto p-6 md:p-7"
           showCloseButton={!exportPending}
         >
-          <DialogHeader>
-            <DialogTitle>Confirm data export</DialogTitle>
-            <DialogDescription>
-              This download can contain decrypted account details and account metadata. Murph will omit mailbox payload
-              bodies, tokens, lookup keys, nonces, invite codes, and API key environment names.
+          <DialogHeader className="pr-10">
+            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
+              Export your vault
+            </DialogTitle>
+            <DialogDescription className="text-sm leading-6 text-muted-foreground">
+              Downloads the private browser-vault snapshot used by your dashboard, including records, metrics, timelines, search rows, and summaries.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Export request failed</AlertTitle>
-              <AlertDescription>{exportDialogError}</AlertDescription>
-            </Alert>
+            <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+              {exportDialogError}
+            </p>
           ) : null}
           <div className="flex flex-col gap-4">
-            <label className="flex gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
               <input
                 checked={acknowledgedSensitiveDownload}
                 className="mt-0.5 size-4 shrink-0 accent-current"
                 type="checkbox"
                 onChange={(event) => setAcknowledgedSensitiveDownload(event.target.checked)}
               />
-              <span>I understand this export may contain sensitive account, message, wearable, and usage data.</span>
+              <span>This export may contain sensitive health data and private notes.</span>
             </label>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="hosted-data-export-phrase">Confirmation phrase</Label>
-              <code className="block rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
-                {HOSTED_DATA_EXPORT_CONFIRMATION_TEXT}
-              </code>
+              <Label htmlFor="hosted-data-export-phrase">Type <span className="font-mono">{VAULT_EXPORT_CONFIRMATION_TEXT}</span> to confirm</Label>
               <Input
                 autoComplete="off"
+                className="h-12 text-base"
                 id="hosted-data-export-phrase"
                 inputMode="text"
                 value={exportConfirmationText}
                 onChange={(event) => setExportConfirmationText(event.target.value)}
                 aria-invalid={exportConfirmationText.length > 0 && !exportPhraseMatches}
-                aria-describedby={DATA_EXPORT_CONFIRMATION_HELP_ID}
-                placeholder={HOSTED_DATA_EXPORT_CONFIRMATION_TEXT}
+
+                placeholder={VAULT_EXPORT_CONFIRMATION_TEXT}
               />
-              <p
-                className={exportConfirmationText.length > 0 && !exportPhraseMatches
-                  ? "text-xs text-destructive"
-                  : "text-xs text-muted-foreground"}
-                id={DATA_EXPORT_CONFIRMATION_HELP_ID}
-              >
-                Type {HOSTED_DATA_EXPORT_CONFIRMATION_TEXT} exactly, with no extra spaces.
-              </p>
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeExportDialog} disabled={exportPending}>
+          <div className="flex flex-col gap-2">
+            <Button type="button" size="xl" onClick={() => void handleExportConfirmed()} disabled={!exportReady} className="w-full">
+              <DownloadIcon data-icon="inline-start" />
+              {exportPending ? "Preparing..." : "Download vault JSON"}
+            </Button>
+            <Button type="button" size="xl" variant="ghost" onClick={closeExportDialog} disabled={exportPending} className="w-full">
               Cancel
             </Button>
-            <Button type="button" onClick={() => void handleExportConfirmed()} disabled={!exportReady}>
-              <DownloadIcon data-icon="inline-start" />
-              {exportPending ? "Preparing..." : "Download JSON"}
-            </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
         <DialogContent
           aria-busy={deletePending}
-          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+          className="max-h-[calc(100dvh-2rem)] max-w-md gap-6 overflow-y-auto p-6 md:p-7"
           showCloseButton={!deletePending}
         >
           {dialogStep === "review" ? (
             <>
-              <DialogHeader>
-                <DialogTitle>Review deletion first</DialogTitle>
-                <DialogDescription>
-                  This is the first confirmation. Murph will delete live account rows, mailbox payloads,
-                  device tokens/audits, runtime logs, and workspace state. Provider and backup retention may still apply.
+              <DialogHeader className="pr-10">
+                <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
+                  Delete your data
+                </DialogTitle>
+                <DialogDescription className="text-sm leading-6 text-muted-foreground">
+                  This permanently deletes your Murph account data, wearable connections, and message history. Provider and backup retention may still apply.
                 </DialogDescription>
               </DialogHeader>
-              <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">High-value pieces included in this deletion</p>
-                <p className="mt-1">
-                  Prisma records, hosted mailbox/payloads, wearable connections/tokens/audit rows,
-                  runtime logs, Linq/Telegram/email routing, and best-effort Cloudflare runner/R2 cleanup.
-                </p>
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={closeDialog} disabled={deletePending}>
-                  Cancel
-                </Button>
-                <Button type="button" variant="destructive" onClick={() => {
+              <div className="flex flex-col gap-2">
+                <Button type="button" size="xl" variant="destructive" onClick={() => {
                   setDialogError(null);
                   setDialogStep("confirm");
-                }} disabled={deletePending}>
-                  <ArrowRightIcon data-icon="inline-start" />
+                }} disabled={deletePending} className="w-full">
                   I understand, continue
                 </Button>
-              </DialogFooter>
+                <Button type="button" size="xl" variant="ghost" onClick={closeDialog} disabled={deletePending} className="w-full">
+                  Cancel
+                </Button>
+              </div>
             </>
           ) : (
             <>
-              <DialogHeader>
-                <DialogTitle>Second confirmation required</DialogTitle>
-                <DialogDescription>
-                  Type the exact phrase and check both boxes before deleting your live Murph data.
+              <DialogHeader className="pr-10">
+                <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
+                  Confirm deletion
+                </DialogTitle>
+                <DialogDescription className="text-sm leading-6 text-muted-foreground">
+                  Type the phrase and check both boxes to proceed.
                 </DialogDescription>
               </DialogHeader>
               {dialogError ? (
-                <Alert variant="destructive">
-                  <AlertTitle>Deletion request failed</AlertTitle>
-                  <AlertDescription>{dialogError}</AlertDescription>
-                </Alert>
+                <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+                  {dialogError}
+                </p>
               ) : null}
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="hosted-account-delete-phrase">Confirmation phrase</Label>
-                  <code className="block rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
-                    {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
-                  </code>
+                  <Label htmlFor="hosted-account-delete-phrase">Type <span className="font-mono">{HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}</span> to confirm</Label>
                   <Input
                     autoComplete="off"
+                    className="h-12 text-base"
                     id="hosted-account-delete-phrase"
                     inputMode="text"
                     value={confirmationPhrase}
                     onChange={(event) => setConfirmationPhrase(event.target.value)}
                     aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
-                    aria-describedby={ACCOUNT_DELETION_CONFIRMATION_HELP_ID}
+
                     placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                   />
-                  <p
-                    className={confirmationPhrase.length > 0 && !phraseMatches
-                      ? "text-xs text-destructive"
-                      : "text-xs text-muted-foreground"}
-                    id={ACCOUNT_DELETION_CONFIRMATION_HELP_ID}
-                  >
-                    Type {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE} exactly, with no extra spaces.
-                  </p>
                 </div>
-                <label className="flex gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
                   <input
                     checked={acknowledgedIrreversibleDeletion}
                     className="mt-0.5 size-4 shrink-0 accent-current"
                     type="checkbox"
                     onChange={(event) => setAcknowledgedIrreversibleDeletion(event.target.checked)}
                   />
-                  <span>I understand live Murph data deletion is irreversible.</span>
+                  <span>This deletion is irreversible.</span>
                 </label>
-                <label className="flex gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                <label className="flex gap-3 rounded-lg border border-[rgba(196,168,130,0.25)] bg-[rgba(255,252,246,0.9)] p-3 text-sm text-muted-foreground">
                   <input
                     checked={acknowledgedProviderAndBackupLimits}
                     className="mt-0.5 size-4 shrink-0 accent-current"
                     type="checkbox"
                     onChange={(event) => setAcknowledgedProviderAndBackupLimits(event.target.checked)}
                   />
-                  <span>I understand provider-side records, Stripe/Privy records, and backups may follow separate retention rules.</span>
+                  <span>Provider records (Stripe, Privy) and backups follow separate retention.</span>
                 </label>
               </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => {
+              <div className="flex flex-col gap-2">
+                <Button type="button" size="xl" variant="destructive" onClick={() => void handleDeleteConfirmed()} disabled={!deleteReady} className="w-full">
+                  {deletePending ? "Deleting..." : "Delete my data"}
+                </Button>
+                <Button type="button" size="xl" variant="ghost" onClick={() => {
                   setDialogError(null);
                   setDialogStep("review");
-                }} disabled={deletePending}>
-                  <Undo2Icon data-icon="inline-start" />
+                }} disabled={deletePending} className="w-full">
                   Back
                 </Button>
-                <Button type="button" variant="destructive" onClick={() => void handleDeleteConfirmed()} disabled={!deleteReady}>
-                  <Trash2Icon data-icon="inline-start" />
-                  {deletePending ? "Deleting..." : "Delete my Murph data"}
-                </Button>
-              </DialogFooter>
+              </div>
             </>
           )}
         </DialogContent>
@@ -472,51 +440,14 @@ function formatDeletionTimestamp(value: string): string {
   }
 }
 
-async function readDataExportErrorMessage(response: Response): Promise<string> {
-  const fallback = "Could not prepare your data export right now.";
-  const text = await response.text().catch(() => "");
-  if (!text.trim()) {
-    return fallback;
-  }
-
-  try {
-    const payload: unknown = JSON.parse(text);
-    if (isRecord(payload) && isRecord(payload.error) && typeof payload.error.message === "string") {
-      return payload.error.message;
-    }
-  } catch {
-    return fallback;
-  }
-
-  return fallback;
+function buildVaultExportFilename(generatedAt: string): string {
+  const safeTimestamp = sanitizeFilenameSegment(generatedAt);
+  return safeTimestamp
+    ? `murph-vault-export-${safeTimestamp}.json`
+    : DEFAULT_VAULT_EXPORT_FILENAME;
 }
 
-function readDataExportFilename(contentDisposition: string | null): string {
-  if (!contentDisposition) {
-    return DEFAULT_EXPORT_FILENAME;
-  }
-
-  const encodedMatch = /filename\*=UTF-8''([^;]+)/iu.exec(contentDisposition);
-  if (encodedMatch?.[1]) {
-    try {
-      return sanitizeDownloadFilename(decodeURIComponent(encodedMatch[1]));
-    } catch {
-      return DEFAULT_EXPORT_FILENAME;
-    }
-  }
-
-  const quotedMatch = /filename="([^"]+)"/iu.exec(contentDisposition);
-  if (quotedMatch?.[1]) {
-    return sanitizeDownloadFilename(quotedMatch[1]);
-  }
-
-  const bareMatch = /filename=([^;]+)/iu.exec(contentDisposition);
-  return bareMatch?.[1]
-    ? sanitizeDownloadFilename(bareMatch[1])
-    : DEFAULT_EXPORT_FILENAME;
-}
-
-function triggerDataExportDownload(blob: Blob, filename: string): void {
+function triggerJsonDownload(blob: Blob, filename: string): void {
   const objectUrl = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
@@ -527,13 +458,8 @@ function triggerDataExportDownload(blob: Blob, filename: string): void {
   window.URL.revokeObjectURL(objectUrl);
 }
 
-function sanitizeDownloadFilename(value: string): string {
-  const sanitized = value.trim().replace(/[\\/]/gu, "-");
-  return sanitized || DEFAULT_EXPORT_FILENAME;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function sanitizeFilenameSegment(value: string): string {
+  return value.trim().replace(/[^0-9A-Za-z-]/gu, "-").replace(/-+/gu, "-");
 }
 
 function formatCloudflareCleanupResult(result: CloudflareCleanupSummary): string {

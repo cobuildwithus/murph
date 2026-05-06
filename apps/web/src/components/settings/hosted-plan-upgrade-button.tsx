@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ReceiptText } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
@@ -16,12 +16,18 @@ import {
 import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedBillingPlanUpgradeResult } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
 
+import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
-const pulsePlan = getHostedBillingPlanDefinition("launch_monthly");
 const edgePlan = getHostedBillingPlanDefinition("launch_edge_monthly");
-const pulsePriceLabel = formatHostedBillingPlanMonthlyPrice(pulsePlan.recurringAmountUsdCents);
 const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
+
+const EDGE_FEATURES = [
+  "Everything in Pulse",
+  "More usage on latest AI models",
+  "Longer experiment context",
+  "Deeper research and analysis",
+];
 
 export function UpgradeToEdgeButton(props: {
   children?: ReactNode;
@@ -131,37 +137,16 @@ function EdgeUpgradeConfirmationDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <DialogHeader className="gap-3 pr-10">
-          <div className="flex size-10 items-center justify-center rounded-full border border-[#c4a882]/30 bg-[#c4a882]/15 text-[#5a6e32]">
-            <ReceiptText className="size-5" aria-hidden="true" />
-          </div>
-          <div className="space-y-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-              Billing change
-            </p>
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              Confirm Edge upgrade
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              Edge is {edgePriceLabel}/month. Your current Pulse plan is {pulsePriceLabel}/month.
-            </DialogDescription>
-          </div>
+        <DialogHeader className="pr-10">
+          <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+            Upgrade to Edge
+          </DialogTitle>
+          <DialogDescription className="text-sm leading-6 text-[#736a58]">
+            For when you want the full picture.
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="border-y border-[#c4a882]/25 py-2">
-          <PlanPriceRow label="Current" name="Pulse" price={pulsePriceLabel} />
-          <div className="mx-1 flex items-center gap-3 py-1 text-[#736a58]">
-            <div className="h-px min-w-0 flex-1 bg-[#c4a882]/25" />
-            <ArrowRight className="size-4" aria-hidden="true" />
-            <div className="h-px min-w-0 flex-1 bg-[#c4a882]/25" />
-          </div>
-          <PlanPriceRow emphasized label="New" name="Edge" price={edgePriceLabel} />
-        </div>
-
-        <p className="text-sm leading-6 text-[#736a58]">
-          Edge adds more usage, longer context, and deeper analysis. Stripe may invoice a prorated
-          amount today for the rest of your current billing period.
-        </p>
+        <PlanFeatureCard price={edgePriceLabel} features={EDGE_FEATURES} />
 
         {props.errorMessage ? (
           <p
@@ -172,56 +157,29 @@ function EdgeUpgradeConfirmationDialog(props: {
           </p>
         ) : null}
 
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="flex flex-col gap-2">
           <Button
             type="button"
-            variant="outline"
-            onClick={() => props.onOpenChange(false)}
+            size="xl"
+            onClick={props.onConfirm}
             disabled={props.isUpgrading}
+            className="w-full"
           >
-            Cancel
+            {props.isUpgrading ? "Upgrading..." : "Upgrade to Edge"}
           </Button>
           <Button
             type="button"
-            onClick={props.onConfirm}
+            size="xl"
+            variant="ghost"
+            onClick={() => props.onOpenChange(false)}
             disabled={props.isUpgrading}
-            className="rounded-2xl bg-[#5a6e32] px-5 text-white hover:bg-[#7a8c6e]"
+            className="w-full"
           >
-            {props.isUpgrading ? "Upgrading..." : "Confirm upgrade"}
+            Cancel
           </Button>
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function PlanPriceRow(props: {
-  emphasized?: boolean;
-  label: string;
-  name: string;
-  price: string;
-}) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
-      <div className="min-w-0">
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-          {props.label}
-        </p>
-        <p className="mt-1 text-sm font-medium text-[#2d3436]">
-          {props.name}
-        </p>
-      </div>
-      <p
-        className={
-          props.emphasized
-            ? "shrink-0 font-serif text-3xl/8 font-semibold tracking-normal text-[#5a6e32]"
-            : "shrink-0 font-serif text-3xl/8 font-semibold tracking-normal text-[#2d3436]"
-        }
-      >
-        {props.price}
-        <span className="ml-1 font-sans text-sm font-normal text-[#736a58]">/mo</span>
-      </p>
-    </div>
   );
 }
 
