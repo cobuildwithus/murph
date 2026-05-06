@@ -224,6 +224,39 @@ describe("ConnectTelegram", () => {
     });
   });
 
+  it("shows an email support action when Telegram sync reports an account conflict", async () => {
+    const { ConnectTelegram } = await import(
+      "@/src/components/settings/hosted-telegram-settings"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new Error("This verified session conflicts with an existing Murph account. Contact support so we can merge it safely."),
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(ConnectTelegram, {
+        authenticated: true,
+        initialTelegramAccount: {
+          telegramUserId: "telegram-test-conflict-user",
+          username: "murph_test_conflict",
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Unable to update Telegram");
+      expect(container.textContent).toContain("Email support");
+    });
+
+    const supportLink = container.querySelector<HTMLAnchorElement>(
+      'a[href^="mailto:support@withmurph.ai"]',
+    );
+
+    expect(supportLink?.textContent).toContain("Email support");
+    expect(supportLink?.href).toContain("subject=Murph+Telegram+account+support");
+    expect(supportLink?.href).toContain("Telegram+setup+or+account+support");
+  });
+
   it("keeps a newer relink result when an older background sync resolves later", async () => {
     const { ConnectTelegram } = await import(
       "@/src/components/settings/hosted-telegram-settings"
@@ -565,5 +598,38 @@ describe("HostedTelegramCardSettings", () => {
       });
     });
     expect(onSynced).not.toHaveBeenCalled();
+  });
+
+  it("shows an email support action when the settings Telegram card reports a support error", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new Error("That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely."),
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: {
+          telegramUserId: "telegram-test-settings-conflict-user",
+          username: "murph_test_settings_conflict",
+        },
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Contact support");
+      expect(container.textContent).toContain("Email support");
+    });
+
+    const supportLink = container.querySelector<HTMLAnchorElement>(
+      'a[href^="mailto:support@withmurph.ai"]',
+    );
+
+    expect(supportLink?.textContent).toContain("Email support");
+    expect(supportLink?.href).toContain("subject=Murph+Telegram+account+support");
+    expect(supportLink?.href).toContain("Telegram+setup+or+account+support");
   });
 });

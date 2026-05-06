@@ -4,6 +4,10 @@ import { useLinkAccount, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
+import {
+  ContactSupportAction,
+  shouldShowContactSupportAction,
+} from "@/src/components/support/contact-support-action";
 import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
@@ -245,6 +249,19 @@ export function HostedTelegramCardSettings(props: {
       ) : null}
 
       <SettingsStatusLine message={statusMessage} tone={statusTone} />
+      {shouldShowContactSupportAction(errorMessage) ? (
+        <ContactSupportAction
+          body={[
+            "Hi Murph support,",
+            "",
+            "I need help linking Telegram to my Murph account.",
+            "",
+            "Context: Telegram setup or account support.",
+          ].join("\n")}
+          className="w-full sm:w-fit"
+          subject="Murph Telegram account support"
+        />
+      ) : null}
     </div>
   );
 }

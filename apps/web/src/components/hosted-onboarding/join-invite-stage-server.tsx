@@ -14,6 +14,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
+import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { isHostedPulseTrialCheckoutEnabled } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
@@ -86,12 +87,21 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       ) : null}
 
       {!model.launchConsent.gateActive && status.stage === "blocked" ? (
-        <div className="text-sm leading-relaxed text-muted-foreground">
-          Email{" "}
-          <a href="mailto:support@withmurph.ai" className="font-semibold text-olive underline-offset-4 hover:underline">
-            support@withmurph.ai
-          </a>{" "}
-          to restore access.
+        <div className="space-y-3 text-sm leading-relaxed text-muted-foreground">
+          <p>
+            Email support to restore access.
+          </p>
+          <ContactSupportAction
+            body={[
+              "Hi Murph support,",
+              "",
+              "I need help restoring access to my Murph account.",
+              "",
+              "Context: Invite or hosted account is blocked.",
+            ].join("\n")}
+            className="w-full sm:w-fit"
+            subject="Murph account support"
+          />
         </div>
       ) : null}
 
