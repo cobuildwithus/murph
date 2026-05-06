@@ -13,6 +13,7 @@ import {
 import {
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceReadResponse,
+  readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_STATUS_PATH,
@@ -115,6 +116,7 @@ interface RunnerUserStores {
 
 interface RunnerDrainInput {
   dueWake?: boolean;
+  idleCheckpointWorkspaceVersion?: string | null;
   reason: HostedWorkspaceInvocationReason;
 }
 
@@ -199,14 +201,14 @@ export class HostedUserRunner {
     return { userId };
   }
 
-  async alarm(): Promise<void> {
-    let record: RunnerStateRecord;
-    try {
-      record = await this.stateStore.readState();
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
+	  async alarm(): Promise<void> {
+	    let record: RunnerStateRecord;
+	    try {
+	      record = await this.stateStore.readState();
+	    } catch (error) {
+	      emitHostedExecutionStructuredLog({
+	        component: "hosted.runner",
+	        error,
         level: "warn",
         message: "Hosted wake nudge could not read runner state; scheduling a retry.",
         phase: "wake.running",
@@ -216,9 +218,8 @@ export class HostedUserRunner {
       return;
     }
 
-    const alarmNowMs = Date.now();
-    const alarmWakeWasDue = isWakeDue(record.nextWakeAt, alarmNowMs);
-    record = await this.stateStore.clearNextWakeIfDue(alarmNowMs);
+    const dueAlarm = await this.stateStore.consumeDueRunnerAlarm(Date.now());
+    record = dueAlarm.record;
     if (!record.userId) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -236,18 +237,57 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: {
           pendingNudge: record.pendingNudge,
+          runnerAlarmKind: dueAlarm.kind,
           runnerNextWakePresent: record.nextWakeAt !== null,
         },
         message: "Hosted runner alarm starting workspace invocation.",
         phase: "wake.running",
         userId: record.userId,
-      });
-      await this.runUntilIdleOrBudget({
-        dueWake: alarmWakeWasDue,
-        reason: "alarm",
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
+	      });
+	      await this.runUntilIdleOrBudget({
+        dueWake: dueAlarm.kind === "drain",
+        idleCheckpointWorkspaceVersion: dueAlarm.kind === "idle_shutdown_checkpoint"
+          ? dueAlarm.idleWorkspaceVersion
+          : null,
+	        reason: dueAlarm.kind === "idle_shutdown_checkpoint"
+	          ? "idle_shutdown_checkpoint"
+	          : "alarm",
+	      });
+	    } catch (error) {
+	      if (dueAlarm.kind === "idle_shutdown_checkpoint") {
+	        const latestRecord = await this.stateStore.readState();
+	        if (latestRecord.retryFailureCount === record.retryFailureCount) {
+	          const failedRecord = await this.stateStore.recordInvocationStartFailure({
+	            error,
+	            failedAt: new Date().toISOString(),
+	          });
+	          const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
+	            defaultRetryDelayMs: this.env.retryDelayMs,
+	            reason: "idle_shutdown_checkpoint",
+	            retryFailureCount: failedRecord.retryFailureCount,
+	          });
+          const retryScheduled = await this.scheduleIdleShutdownCheckpointRetry({
+            retryDelayMs,
+            workspaceVersion: dueAlarm.idleWorkspaceVersion,
+          });
+          if (!retryScheduled) {
+            await this.runtimeAlarmScheduler.syncNextWake({
+              preferredWakeAt: latestRecord.nextWakeAt,
+            });
+          }
+	        }
+	        emitHostedExecutionStructuredLog({
+	          component: "hosted.runner",
+	          error,
+	          level: "warn",
+	          message: "Hosted idle-shutdown checkpoint alarm failed; preserving idle checkpoint retry state.",
+	          phase: "wake.running",
+	          userId: record.userId,
+	        });
+	        return;
+	      }
+
+	      emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         error,
         level: "warn",
@@ -272,7 +312,10 @@ export class HostedUserRunner {
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
-      nextAlarmAt: record.nextWakeAt ?? webStatus.workspace?.nextWakeAt ?? null,
+      nextAlarmAt: earliestIsoDate(
+        earliestIsoDate(record.nextWakeAt, record.idleShutdownCheckpointDueAt),
+        webStatus.workspace?.nextWakeAt ?? null,
+      ),
       userId: record.userId,
       workspace: webStatus.workspace,
     };
@@ -539,7 +582,22 @@ export class HostedUserRunner {
       };
     }
 
-    const gate = input.reason === "nudge"
+    let preflightWorkspaceRead: HostedWorkspaceReadResponse | null = null;
+    if (input.reason === "idle_shutdown_checkpoint") {
+      const idlePreflight = await this.preflightIdleShutdownCheckpoint({
+        expectedWorkspaceVersion: input.idleCheckpointWorkspaceVersion ?? null,
+        record: initialRecord,
+      });
+      if (!idlePreflight.run) {
+        return {
+          nextWakeAt: idlePreflight.nextWakeAt,
+          status: "idle",
+        };
+      }
+      preflightWorkspaceRead = idlePreflight.workspaceRead;
+    }
+
+    const gate = input.reason === "nudge" || input.reason === "idle_shutdown_checkpoint"
       ? createAllowedHostedAiUsageGateDecision()
       : await this.readHostedAiUsageGateBeforeInvocation(initialRecord.userId);
     if (!gate.allowed) {
@@ -593,6 +651,7 @@ export class HostedUserRunner {
     }
 
     let lease = await this.stateStore.beginInvocation({
+      consumePendingNudge: input.reason === "idle_shutdown_checkpoint" ? false : undefined,
       reason: input.reason,
       userId: initialRecord.userId,
     });
@@ -609,7 +668,35 @@ export class HostedUserRunner {
     });
 
     try {
-      const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
+      if (input.reason === "idle_shutdown_checkpoint") {
+        const quietRecord = await this.stateStore.readState();
+        if (quietRecord.pendingNudge) {
+          const completion = await this.stateStore.completeInvocation({
+            finishedAt: new Date().toISOString(),
+            lease,
+          });
+          const record = await this.reschedulePendingNudgeAfterInvocationLiveness(
+            completion.record,
+          ) ?? completion.record;
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              pendingNudge: true,
+              workspaceAttemptId: lease.attemptId,
+            },
+            message: "Hosted runner skipped idle-shutdown checkpoint because work arrived before invocation.",
+            phase: "scheduled",
+            userId: initialRecord.userId,
+          });
+          return {
+            nextWakeAt: record.nextWakeAt,
+            status: "scheduled",
+          };
+        }
+      }
+
+      const workspaceRead = preflightWorkspaceRead
+        ?? await this.readHostedWorkspaceFromWeb(initialRecord.userId);
       this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
       const workspaceVersion = workspaceRead.workspace?.version ?? "0";
       lease = await this.stateStore.bindInvocationWorkspaceVersion({
@@ -627,10 +714,17 @@ export class HostedUserRunner {
         lease,
       });
       if (completion.completed) {
-        await this.scheduleNextWorkspaceAlarm({
-          fallbackNextWakeAt: result.nextWakeAt ?? null,
-          userId: initialRecord.userId,
-        });
+        if (input.reason === "idle_shutdown_checkpoint") {
+          await this.finishIdleShutdownCheckpoint({
+            userId: initialRecord.userId,
+          });
+        } else {
+          await this.scheduleNextWorkspaceAlarm({
+            fallbackNextWakeAt: result.nextWakeAt ?? null,
+            resultStatus: result.status,
+            userId: initialRecord.userId,
+          });
+        }
       }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -656,11 +750,26 @@ export class HostedUserRunner {
           reason: input.reason,
           retryFailureCount: failure.record.retryFailureCount,
         });
-        await this.scheduleHostedWakeRetryAlarm({
-          respectMaxAttempts: true,
-          retryDelayMs,
-          userId: initialRecord.userId,
-        });
+        if (
+          input.reason === "idle_shutdown_checkpoint"
+          && input.idleCheckpointWorkspaceVersion
+        ) {
+          const retryScheduled = await this.scheduleIdleShutdownCheckpointRetry({
+            retryDelayMs,
+            workspaceVersion: input.idleCheckpointWorkspaceVersion,
+          });
+          if (!retryScheduled) {
+            await this.runtimeAlarmScheduler.syncNextWake({
+              preferredWakeAt: failure.record.nextWakeAt,
+            });
+          }
+        } else {
+          await this.scheduleHostedWakeRetryAlarm({
+            respectMaxAttempts: true,
+            retryDelayMs,
+            userId: initialRecord.userId,
+          });
+        }
       }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -979,6 +1088,7 @@ export class HostedUserRunner {
 
   private async scheduleNextWorkspaceAlarm(input: {
     fallbackNextWakeAt: string | null;
+    resultStatus: HostedWorkspaceInvocationResult["status"];
     userId: string;
   }): Promise<void> {
     const record = await this.stateStore.readState();
@@ -1005,6 +1115,25 @@ export class HostedUserRunner {
       return;
     }
 
+    if (input.resultStatus === "idle" && input.fallbackNextWakeAt === null) {
+      const idleSchedule = await this.scheduleIdleShutdownCheckpointIfCurrent(input.userId);
+      if (idleSchedule?.kind === "scheduled") {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            idleShutdownCheckpointDueAt: idleSchedule.record.idleShutdownCheckpointDueAt,
+          },
+          message: "Hosted runner scheduled idle-shutdown checkpoint.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+        return;
+      }
+      if (idleSchedule?.kind === "deferred") {
+        return;
+      }
+    }
+
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: input.fallbackNextWakeAt,
     });
@@ -1015,6 +1144,217 @@ export class HostedUserRunner {
       },
       message: "Hosted runner synced next workspace alarm.",
       phase: "scheduled",
+      userId: input.userId,
+    });
+  }
+
+  private async preflightIdleShutdownCheckpoint(input: {
+    expectedWorkspaceVersion: string | null;
+    record: RunnerStateRecord;
+  }): Promise<
+    | {
+      nextWakeAt: string | null;
+      run: false;
+    }
+    | {
+      run: true;
+      workspaceRead: HostedWorkspaceReadResponse;
+    }
+  > {
+    if (input.record.pendingNudge || !input.expectedWorkspaceVersion) {
+      const record = await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: input.record.nextWakeAt,
+      });
+      return {
+        nextWakeAt: record.nextWakeAt,
+        run: false,
+      };
+    }
+
+    const workspaceRead = await this.readHostedWorkspaceFromWeb(input.record.userId);
+    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.record.userId);
+    const workspace = workspaceRead.workspace;
+    if (
+      !workspace
+      || workspace.version !== input.expectedWorkspaceVersion
+      || workspace.nextWakeAt
+      || isHostedWorkspaceBaseOnlySnapshot(workspace)
+    ) {
+      const record = await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: workspace?.nextWakeAt ?? input.record.nextWakeAt,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          expectedWorkspaceVersion: input.expectedWorkspaceVersion,
+          hasNextWake: Boolean(workspace?.nextWakeAt),
+          hasWorkspace: Boolean(workspace),
+          workspaceAlreadyBaseOnly: workspace ? isHostedWorkspaceBaseOnlySnapshot(workspace) : false,
+          workspaceVersionMatches: workspace?.version === input.expectedWorkspaceVersion,
+        },
+        message: "Hosted runner skipped stale idle-shutdown checkpoint alarm.",
+        phase: "scheduled",
+        userId: input.record.userId,
+      });
+      return {
+        nextWakeAt: record.nextWakeAt,
+        run: false,
+      };
+    }
+
+    return {
+      run: true,
+      workspaceRead,
+    };
+  }
+
+  private async scheduleIdleShutdownCheckpointIfCurrent(userId: string): Promise<
+    | {
+      kind: "deferred";
+      record: RunnerStateRecord;
+    }
+    | {
+      kind: "scheduled";
+      record: RunnerStateRecord;
+    }
+    | null
+  > {
+    const workspaceRead = await this.readHostedWorkspaceFromWeb(userId);
+    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, userId);
+    const workspace = workspaceRead.workspace;
+    const currentRecord = await this.stateStore.readState();
+    if (currentRecord.pendingNudge || currentRecord.inFlight) {
+      const record = await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: currentRecord.nextWakeAt,
+      });
+      return {
+        kind: "deferred",
+        record,
+      };
+    }
+
+	    if (!workspace || workspace.nextWakeAt || isHostedWorkspaceBaseOnlySnapshot(workspace)) {
+	      if (workspace?.nextWakeAt) {
+	        const record = await this.runtimeAlarmScheduler.syncNextWake({
+	          preferredWakeAt: workspace.nextWakeAt,
+	        });
+	        return {
+	          kind: "deferred",
+	          record,
+	        };
+	      }
+	      return null;
+	    }
+
+    const dueAt = new Date(Date.now() + resolveIdleShutdownCheckpointDelayMs({
+      idleTtlMs: this.env.runnerIdleTtlMs,
+      safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
+    })).toISOString();
+    await this.stateStore.scheduleIdleShutdownCheckpoint({
+      dueAt,
+      workspaceVersion: workspace.version,
+	    });
+	    const record = await this.runtimeAlarmScheduler.syncNextWake({
+	      preferredWakeAt: null,
+	    });
+    return {
+      kind: "scheduled",
+      record,
+    };
+  }
+
+  private async scheduleIdleShutdownCheckpointRetry(input: {
+    retryDelayMs: number;
+    workspaceVersion: string;
+  }): Promise<boolean> {
+    const record = await this.stateStore.readState();
+    if (record.retryFailureCount >= this.env.maxEventAttempts) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          maxEventAttempts: this.env.maxEventAttempts,
+          retryFailureCount: record.retryFailureCount,
+        },
+        level: "warn",
+        message: "Hosted runner idle-shutdown checkpoint retry attempts exhausted; waiting for fresh activity.",
+        phase: "failed",
+        userId: record.userId,
+      });
+      return false;
+    }
+
+    await this.stateStore.scheduleIdleShutdownCheckpoint({
+      dueAt: new Date(Date.now() + input.retryDelayMs).toISOString(),
+      workspaceVersion: input.workspaceVersion,
+    });
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: record.nextWakeAt,
+    });
+    return true;
+  }
+
+  private async finishIdleShutdownCheckpoint(input: {
+    userId: string;
+  }): Promise<void> {
+    const record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight) {
+      await this.reschedulePendingNudgeAfterInvocationLiveness(record);
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          inFlight: record.inFlight,
+          pendingNudge: record.pendingNudge,
+        },
+        message: "Hosted runner kept warm container after idle checkpoint because work is pending.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return;
+    }
+
+    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+      source: this.runnerRuntimeEnvSource,
+      userId: input.userId,
+    });
+    const destroyed = await destroyHostedExecutionContainer({
+      runnerContainerName,
+      runnerContainerNamespace: this.runnerContainerNamespace,
+      userId: input.userId,
+    });
+    const postCleanupRecord = await this.stateStore.readState();
+    if (postCleanupRecord.pendingNudge || postCleanupRecord.inFlight) {
+      const record = postCleanupRecord.pendingNudge
+        ? await this.reschedulePendingNudgeAfterInvocationLiveness(postCleanupRecord)
+          ?? postCleanupRecord
+        : await this.syncInvocationRecoveryAlarm(postCleanupRecord);
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          destroyAttempted: destroyed.attempted,
+          destroyOk: destroyed.ok,
+          inFlight: postCleanupRecord.inFlight,
+          pendingNudge: postCleanupRecord.pendingNudge,
+        },
+        message: "Hosted runner preserved wake after idle checkpoint because work arrived during cleanup.",
+        phase: "scheduled",
+        userId: record.userId,
+      });
+      return;
+    }
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: null,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        destroyErrorCode: destroyed.errorCode,
+        destroyAttempted: destroyed.attempted,
+        destroyOk: destroyed.ok,
+      },
+      level: destroyed.ok ? "info" : "warn",
+      message: "Hosted runner completed idle-shutdown checkpoint container cleanup.",
+      phase: "checkpoint",
       userId: input.userId,
     });
   }
@@ -1301,23 +1641,50 @@ function safeCleanupErrorCode(error: unknown): string {
   return error instanceof Error && error.name ? error.name : "UnknownError";
 }
 
-function isWakeDue(nextWakeAt: string | null, nowMs: number): boolean {
-  if (!nextWakeAt) {
-    return false;
-  }
-
-  const wakeAtMs = Date.parse(nextWakeAt);
-  return Number.isFinite(wakeAtMs) && wakeAtMs <= nowMs;
-}
-
 function shouldRunHostedRunnerInvocation(input: {
   dueWake?: boolean;
   reason: HostedWorkspaceInvocationReason;
   record: RunnerStateRecord;
 }): boolean {
-  return input.reason === "manual"
+  return input.reason === "idle_shutdown_checkpoint"
+    || input.reason === "manual"
     || input.record.pendingNudge
     || input.dueWake === true;
+}
+
+function isHostedWorkspaceBaseOnlySnapshot(workspace: HostedWorkspaceState): boolean {
+  return workspace.snapshotRef !== null
+    && readHostedExecutionSnapshotHotRef(workspace.snapshotRef) === null;
+}
+
+function resolveIdleShutdownCheckpointDelayMs(input: {
+  idleTtlMs: number;
+  safetyMarginMs: number;
+}): number {
+  const boundedMarginMs = Math.min(
+    Math.max(0, Math.floor(input.safetyMarginMs)),
+    Math.max(0, Math.floor(input.idleTtlMs / 2)),
+  );
+  return Math.max(1_000, input.idleTtlMs - boundedMarginMs);
+}
+
+function earliestIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
+  }
+  if (!Number.isFinite(rightMs)) {
+    return left;
+  }
+  return rightMs < leftMs ? right : left;
 }
 
 function resolvePendingNudgeWakeAt(input: {

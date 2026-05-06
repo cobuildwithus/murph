@@ -57,6 +57,7 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
+  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   createEmptyHostedMailboxImportState,
@@ -80,6 +81,15 @@ const TEST_HOSTED_CODEX_FORWARDED_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
   OPENAI_API_KEY: "test-vercel-key",
 } as const;
+
+function requireMailboxSnapshotInput(
+  input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+) {
+  if (!("state" in input) || !("previousState" in input)) {
+    throw new Error("Expected mailbox checkpoint snapshot input.");
+  }
+  return input;
+}
 
 describe("hosted workspace runtime entrypoint", () => {
   test("reads workspace, imports mailbox prefix, snapshots through the semantic checkpoint builder, and checkpoints", async () => {
@@ -131,7 +141,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async createCheckpointSnapshot(snapshotInput) {
             const state = await readHostedMailboxImportState({ vaultRoot });
             events.push(`snapshot:${state.watermarks.conversation}`);
-            assert.equal(snapshotInput.state.watermarks.conversation, "1");
+            assert.equal(requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation, "1");
             return {
               snapshotRef: createBundleRef({
                 hash: "a".repeat(64),
@@ -196,6 +206,271 @@ describe("hosted workspace runtime entrypoint", () => {
       const runtimePaths = resolveRuntimePaths(vaultRoot);
       await stat(runtimePaths.inboxConfigPath);
       await stat(runtimePaths.inboxDbPath);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("runs idle-shutdown checkpoint without mailbox, sidecar, assistant, or usage work", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+      events,
+      workspace: createWorkspaceState({
+        redactedStatus: {
+          preservedStatus: true,
+        },
+        version: "4",
+      }),
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            workspacePort,
+          }),
+          vaultRoot,
+        });
+
+      assert.deepEqual(events, [
+        "workspace.read",
+        "snapshot:idle_shutdown",
+        "workspace.checkpoint",
+      ]);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.attemptId, "attempt_synthetic_idle_shutdown");
+      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "4");
+      assert.equal(checkpointRequests[0]?.leaseGeneration, "9");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        preservedStatus: true,
+      });
+      assert.deepEqual(result, {
+        redactedStatus: {
+          preservedStatus: true,
+        },
+        status: "idle",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("skips idle-shutdown checkpoint when pre-snapshot liveness reports input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let touchCalls = 0;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        touchCalls += 1;
+        events.push(`heartbeat:${touchCalls}`);
+        if (touchCalls === 1) {
+          return { ok: true };
+        }
+        return {
+          inputAvailable: true,
+          nextAlarmAt: "2026-04-27T00:00:45.000Z",
+          ok: true,
+          pendingNudge: true,
+        };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_liveness",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Idle-shutdown checkpoint must not snapshot after input appears.");
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessPort,
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push("workspace.checkpoint.start");
+                checkpointRequests.push(request);
+                await new Promise<void>((resolve) => {
+                  setTimeout(resolve, 25);
+                });
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+	      assert.deepEqual(result, {
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+	        status: "scheduled",
+	      });
+	      assert.equal(checkpointRequests.length, 0);
+	      assert.equal(touchCalls, 2);
+	      assert.deepEqual(events, [
+	        "heartbeat:1",
+	        "workspace.read",
+	        "heartbeat:2",
+	      ]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("skips idle-shutdown checkpoint commit when liveness reports input during snapshot", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let touchCalls = 0;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        touchCalls += 1;
+        events.push(`heartbeat:${touchCalls}`);
+        if (touchCalls < 3) {
+          return { ok: true };
+        }
+        return {
+          inputAvailable: true,
+          nextAlarmAt: "2026-04-27T00:00:45.000Z",
+          ok: true,
+          pendingNudge: true,
+        };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_snapshot_liveness",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot.start");
+            await vi.waitFor(() => expect(touchCalls).toBeGreaterThanOrEqual(3));
+            events.push("snapshot.finish");
+            return {
+              snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+                base: createBundleRef({
+                  hash: "sha256:base",
+                  key: "users/bundles/member-synthetic/base.bundle.json",
+                  size: 1,
+                }),
+                hot: createBundleRef({
+                  hash: "sha256:hot",
+                  key: "users/bundles/member-synthetic/hot.bundle.json",
+                  size: 1,
+                }),
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessPort,
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push("workspace.checkpoint");
+                checkpointRequests.push(request);
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(result, {
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      });
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(events, [
+        "heartbeat:1",
+        "workspace.read",
+        "heartbeat:2",
+        "snapshot.start",
+        "heartbeat:3",
+      ]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -407,7 +682,7 @@ describe("hosted workspace runtime entrypoint", () => {
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${snapshotInput.reason}:${snapshotInput.state.watermarks.conversation}`);
+          events.push(`snapshot:${snapshotInput.reason}:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
           return {
             snapshotRef: createBundleRef({
               hash: snapshotInput.reason === "import" ? "1".repeat(64) : "2".repeat(64),
@@ -717,7 +992,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       {
         async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+          events.push(`snapshot:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
           return {
             snapshotRef: createBundleRef({
               hash: "d".repeat(64),
@@ -803,7 +1078,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+            events.push(`snapshot:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
             return {
               snapshotRef: createBundleRef({
                 hash: "e".repeat(64),
@@ -932,7 +1207,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+            events.push(`snapshot:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
             return {
               snapshotRef: createBundleRef({
                 hash: "9".repeat(64),
@@ -996,7 +1271,7 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           {
             async createCheckpointSnapshot(snapshotInput) {
-              events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+              events.push(`snapshot:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
               return {
                 snapshotRef: createBundleRef({
                   hash: "f".repeat(64),
@@ -1433,7 +1708,7 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             return await measureStage(stageSamples, "snapshot.create", async () => {
-              events.push(`snapshot.create:${snapshotInput.state.watermarks.conversation}`);
+              events.push(`snapshot.create:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
               assert.equal(
                 (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
                 String(mailboxItemCount),
@@ -1561,7 +1836,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(
-            `snapshot:${snapshotInput.previousState.watermarks.conversation}->${snapshotInput.state.watermarks.conversation}`,
+            `snapshot:${requireMailboxSnapshotInput(snapshotInput).previousState.watermarks.conversation}->${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`,
           );
           return {
             snapshotRef: createBundleRef({
@@ -1709,7 +1984,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       {
         async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+          events.push(`snapshot:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
           return {
             snapshotRef: createBundleRef({
               hash: "b".repeat(64),
@@ -1803,7 +2078,7 @@ describe("hosted workspace runtime entrypoint", () => {
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
+          events.push(`snapshot:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
           return {
             snapshotRef: createBundleRef({
               hash: "d".repeat(64),
@@ -1998,7 +2273,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       {
         async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${snapshotInput.reason}:${snapshotInput.state.watermarks.conversation}`);
+          events.push(`snapshot:${snapshotInput.reason}:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
           return {
             snapshotRef: createBundleRef({
               hash: "7".repeat(64),

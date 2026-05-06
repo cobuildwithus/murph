@@ -6,7 +6,15 @@
 
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
+const RUNNER_STATE_SCHEMA_VERSION = 1;
+
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS runner_schema_meta (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    )
+  `);
   sql.exec(`
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -22,11 +30,14 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       last_error_at TEXT,
       last_error_code TEXT,
       last_invocation_at TEXT,
+      idle_shutdown_checkpoint_due_at TEXT,
+      idle_shutdown_checkpoint_workspace_version TEXT,
       next_wake_at TEXT,
       pending_nudge INTEGER NOT NULL DEFAULT 0,
       retry_failure_count INTEGER NOT NULL DEFAULT 0
     )
   `);
+  assertRunnerStateSchemaVersionSupported(sql);
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_id", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_last_heartbeat_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_reason", "TEXT");
@@ -51,6 +62,19 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     "retry_failure_count",
     "INTEGER NOT NULL DEFAULT 0",
   );
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
+    "idle_shutdown_checkpoint_due_at",
+    "TEXT",
+  );
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
+    "idle_shutdown_checkpoint_workspace_version",
+    "TEXT",
+  );
+  markRunnerStateSchemaVersion(sql);
   assertRunnerStateTableAbsent(sql, "runner_bundle_slots");
   assertRunnerStateTableColumns(sql, "runner_meta", {
     requiredColumns: [
@@ -67,11 +91,45 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "last_error_at",
       "last_error_code",
       "last_invocation_at",
+      "idle_shutdown_checkpoint_due_at",
+      "idle_shutdown_checkpoint_workspace_version",
       "next_wake_at",
       "pending_nudge",
       "retry_failure_count",
     ],
   });
+}
+
+function assertRunnerStateSchemaVersionSupported(sql: DurableObjectSqlStorageLike): void {
+  const version = readRunnerStateSchemaVersion(sql);
+  if (version > RUNNER_STATE_SCHEMA_VERSION) {
+    throw new Error(
+      `Hosted runner Durable Object schema version ${version} is newer than supported version ${RUNNER_STATE_SCHEMA_VERSION}.`,
+    );
+  }
+}
+
+function markRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): void {
+  const version = readRunnerStateSchemaVersion(sql);
+  if (version >= RUNNER_STATE_SCHEMA_VERSION) {
+    return;
+  }
+
+  sql.exec(
+    `INSERT INTO runner_schema_meta (key, value)
+     VALUES ('runner_state_schema_version', ${RUNNER_STATE_SCHEMA_VERSION})
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  );
+}
+
+function readRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): number {
+  const row = sql.exec<{ value: DurableObjectSqlValue }>(
+    "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
+  ).toArray()[0];
+  const value = row?.value;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0;
 }
 
 function assertRunnerStateTableAbsent(

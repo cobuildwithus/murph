@@ -41,6 +41,8 @@ export interface RunnerStateRecord {
   lastErrorAt: string | null;
   lastErrorCode: string | null;
   lastInvocationAt: string | null;
+  idleShutdownCheckpointDueAt: string | null;
+  idleShutdownCheckpointWorkspaceVersion: string | null;
   leaseGeneration: number;
   nextWakeAt: string | null;
   pendingNudge: boolean;

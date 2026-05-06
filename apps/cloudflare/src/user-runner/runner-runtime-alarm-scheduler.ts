@@ -13,7 +13,7 @@ export class RunnerRuntimeAlarmScheduler {
     const record = await this.stateStore.syncNextWake({
       preferredWakeAt: input.preferredWakeAt ?? null,
     });
-    await this.applyAlarm(record.nextWakeAt);
+    await this.applyAlarm(readEarliestRunnerAlarmAt(record));
     return record;
   }
 
@@ -25,4 +25,28 @@ export class RunnerRuntimeAlarmScheduler {
 
     await this.state.storage.deleteAlarm?.();
   }
+}
+
+function readEarliestRunnerAlarmAt(record: RunnerStateRecord): string | null {
+  return earliestIsoDate(record.nextWakeAt, record.idleShutdownCheckpointDueAt);
+}
+
+function earliestIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
+  }
+  if (!Number.isFinite(rightMs)) {
+    return left;
+  }
+
+  return rightMs < leftMs ? right : left;
 }

@@ -32,6 +32,14 @@ The live ownership split is:
 - `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
+  After a runner finishes idle with a layered hot checkpoint and no workspace
+  next wake, Cloudflare schedules one `idle_shutdown_checkpoint` alarm at the
+  runner idle TTL minus the configured safety margin. Fresh nudges clear that
+  pending idle checkpoint. When the idle alarm is still current, Cloudflare
+  starts a normal lease-scoped invocation that runs checkpoint reason
+  `idle_shutdown`, validates the same workspace CAS/user fences, writes a
+  full/base checkpoint, and destroys the warm container only if no pending work
+  arrived meanwhile.
   When hosted runtime crypto is configured, Cloudflare fetches signed
   ingress/runtime root envelopes from web through the signed
   `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority
@@ -232,6 +240,9 @@ projections. Hot checkpoints snapshot a much narrower explicit assistant
 runtime continuity subset under `vault/.runtime/operations/assistant/**` for
 user-visible checkpoint boundaries such as mailbox import, active-turn
 acceptance, and pre-delivery outbox sending state.
+`idle_shutdown` is the compaction boundary for warm-runner wind-down: it maps
+to a full/base snapshot and runs through the ordinary invocation lease shortly
+before container sleep, not in the Cloudflare container shutdown hook.
 Operator-home `.codex-hosted/**` remains full/base snapshot provider
 continuity, not hot-state continuity. Restore applies the base bundle first,
 clears the vault hot-state include paths, leaves operator-home Codex state from
