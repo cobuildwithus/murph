@@ -60,6 +60,16 @@ export type JsonLogStringSanitizer = (
 ) => string | null;
 
 const JSON_LOG_STRING_MAX_LENGTH = 240;
+const JSON_ERROR_RESPONSE_DETAIL_SAFE_KEYS = new Set([
+  "code",
+  "operationName",
+  "requestIdPresent",
+  "retryAfterMs",
+  "retryAfterSeconds",
+  "status",
+  "statusCode",
+  "type",
+]);
 
 interface JsonErrorResponseOptions {
   defaultHeaders?: HeadersInit;
@@ -412,14 +422,69 @@ function logMappedJsonError(
     return;
   }
 
+  const explicitLogDetails = mapping.log?.details ?? {};
+  const mappedErrorDetails =
+    "errorDetails" in explicitLogDetails || "errorResponseDetails" in explicitLogDetails
+      ? {}
+      : describeMappedJsonErrorDetailsForLog(
+          mapping.error.details,
+          options.sanitizeLogString ?? sanitizeJsonLogString,
+        );
+
   logJsonError(mapping.log?.level ?? inferJsonErrorLogLevel(mapping.status), error, options, {
     errorResponseCode: mapping.error.code,
     ...(mapping.error.retryable === undefined
       ? {}
       : { errorResponseRetryable: mapping.error.retryable }),
     errorResponseStatus: mapping.status,
-    ...(mapping.log?.details ?? {}),
+    ...(mappedErrorDetails ?? {}),
+    ...explicitLogDetails,
   });
+}
+
+function describeMappedJsonErrorDetailsForLog(
+  details: unknown,
+  sanitizeLogString: JsonLogStringSanitizer,
+): Record<string, unknown> | null {
+  if (!isRecord(details)) {
+    return null;
+  }
+
+  const safeDetails = Object.entries(details).flatMap(([key, value]) => {
+    if (!JSON_ERROR_RESPONSE_DETAIL_SAFE_KEYS.has(key)) {
+      return [];
+    }
+
+    const safeValue = sanitizeMappedJsonErrorDetailValue(value, sanitizeLogString);
+    return safeValue === null ? [] : [[key, safeValue] as const];
+  });
+
+  return safeDetails.length > 0
+    ? { errorResponseDetails: Object.fromEntries(safeDetails) }
+    : null;
+}
+
+function sanitizeMappedJsonErrorDetailValue(
+  value: unknown,
+  sanitizeLogString: JsonLogStringSanitizer,
+): unknown {
+  if (typeof value === "string") {
+    return sanitizeLogString(value);
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  return null;
 }
 
 function inferJsonErrorLogLevel(status: number): JsonLogLevel {

@@ -134,6 +134,9 @@ describe("device sync callback redirect helpers", () => {
       errorCode: "ACCOUNT_REQUIRES_REAUTH",
       errorMessage: "Reconnect the account to continue syncing.",
       errorResponseCode: "ACCOUNT_REQUIRES_REAUTH",
+      errorResponseDetails: {
+        status: 401,
+      },
       errorResponseRetryable: true,
       errorResponseStatus: 409,
       errorType: "MockDeviceSyncError",
