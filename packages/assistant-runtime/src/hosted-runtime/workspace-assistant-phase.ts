@@ -13,9 +13,14 @@ import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
+  compareAssistantInputCursors,
+  listAssistantInputEvents,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
 } from "@murphai/assistant-engine/assistant-automation";
+import {
+  readAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-store";
 import {
   listConfiguredDeviceSyncConnectTargets,
 } from "@murphai/device-syncd/config";
@@ -329,12 +334,16 @@ export async function runHostedWorkspaceAssistantPhase(
             dirtyDeviceSyncMetrics.postCheckpointRecord?.nextWakeAt ?? null,
           )
         : null;
+      const pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(input);
       const nextWakeAt = resolveEarliestHostedWorkspaceWakeAt(
         resolveEarliestHostedWorkspaceWakeAt(
           resolveEarliestHostedWorkspaceWakeAt(
             resolveEarliestHostedWorkspaceWakeAt(
-              systemMailboxWakeAt,
-              systemMailboxMetricsWakeAt,
+              resolveEarliestHostedWorkspaceWakeAt(
+                systemMailboxWakeAt,
+                systemMailboxMetricsWakeAt,
+              ),
+              pendingAssistantInputWakeAt,
             ),
             dirtyDeviceSyncWakeAt,
           ),
@@ -391,8 +400,11 @@ export async function runHostedWorkspaceAssistantPhase(
                     : null;
                   const dirtyPostCheckpointWakeAt = dirtyPostCheckpoint?.nextWakeAt ?? null;
                   const statusNextWakeAt = resolveEarliestHostedWorkspaceWakeAt(
-                    statusCallback.nextWakeAt,
-                    dirtyPostCheckpointWakeAt,
+                    resolveEarliestHostedWorkspaceWakeAt(
+                      statusCallback.nextWakeAt,
+                      dirtyPostCheckpointWakeAt,
+                    ),
+                    pendingAssistantInputWakeAt,
                   );
                   const dirtyRedactedStatus: HostedRuntimeRedactedJson = dirtyPostCheckpoint
                     ? {
@@ -452,8 +464,11 @@ export async function runHostedWorkspaceAssistantPhase(
                   return await drainHostedPostCheckpointDeliveryCleanup({
                     assistantDeliveryEffects: [],
                     baseNextWakeAt: resolveEarliestHostedWorkspaceWakeAt(
-                      systemMailboxWakeAt,
-                      dirtyPostCheckpointWakeAt,
+                      resolveEarliestHostedWorkspaceWakeAt(
+                        systemMailboxWakeAt,
+                        dirtyPostCheckpointWakeAt,
+                      ),
+                      pendingAssistantInputWakeAt,
                     ),
                     checkpointReason: "provider_cleanup",
                     input,
@@ -880,6 +895,33 @@ function resolveHostedAssistantPhaseNowMs(input: {
 
   const parsed = Date.parse(input.now());
   return Number.isFinite(parsed) ? parsed : fallbackNowMs;
+}
+
+async function resolvePendingAssistantInputWakeAt(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<string | null> {
+  const wakeAt = new Date(resolveHostedAssistantPhaseNowMs(input)).toISOString();
+  const assistantInputIds = input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  if (assistantInputIds.length > 0) {
+    return wakeAt;
+  }
+
+  const [automationState, latestInputCursor] = await Promise.all([
+    readAssistantAutomationState(input.restored.vaultRoot),
+    listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER,
+      vault: input.restored.vaultRoot,
+    }).then((listed) => listed.events.at(-1)?.cursor ?? null),
+  ]);
+  if (!latestInputCursor) {
+    return null;
+  }
+
+  const hasPendingAutoReplyInput = automationState.autoReply.some((entry) =>
+    !entry.eligibleAfter
+    || compareAssistantInputCursors(latestInputCursor, entry.eligibleAfter) > 0
+  );
+  return hasPendingAutoReplyInput ? wakeAt : null;
 }
 
 function buildHostedProviderCleanupRedactedStatus(input: {

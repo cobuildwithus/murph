@@ -11,15 +11,18 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  compareAssistantInputCursors: vi.fn(),
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
+  listAssistantInputEvents: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantDeliverySideEffectsForCheckpoint: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
+  readAssistantAutomationState: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
@@ -31,9 +34,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
+  compareAssistantInputCursors: mocks.compareAssistantInputCursors,
+  listAssistantInputEvents: mocks.listAssistantInputEvents,
   listPendingAssistantAutoReplyLinqCleanupEvidence:
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
+}));
+
+vi.mock("@murphai/assistant-engine/assistant-store", () => ({
+  readAssistantAutomationState: mocks.readAssistantAutomationState,
 }));
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
@@ -135,6 +144,15 @@ beforeEach(() => {
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
+  mocks.readAssistantAutomationState.mockResolvedValue({
+    autoReply: [],
+    cron: [],
+    schemaVersion: 1,
+  });
+  mocks.listAssistantInputEvents.mockResolvedValue({
+    events: [],
+    nextCursor: null,
+  });
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
     recorded: true,
@@ -974,6 +992,112 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         wakeKind: "assistant.notification.requested",
       }),
     }));
+  });
+
+  it("schedules an immediate assistant wake when system mailbox work imports conversation input", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      logRequests,
+      now: () => "2026-04-27T00:09:00.000Z",
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).not.toHaveBeenCalled();
+    expect(result.nextWakeAt).toBe("2026-04-27T00:09:00.000Z");
+    expect(result.redactedStatus).toEqual(expect.objectContaining({
+      hostedAssistantNextWakeAt: "2026-04-27T00:09:00.000Z",
+      hostedSystemMailboxPrepared: 1,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:09:00.000Z",
+      nextWakeReason: "assistant",
+    }));
+    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+      "mailbox.system_processed",
+      "mailbox.system_processed",
+    ]);
+    expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      nextWakeAtPresent: true,
+      status: "processed",
+    }));
+    expect(logRequests[1]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      nextWakeAtPresent: true,
+      recorded: 1,
+      status: "recorded",
+    }));
+  });
+
+  it("schedules an immediate assistant wake when staged input predates a system mailbox reset", async () => {
+    const pendingCursor = {
+      createdAt: "2026-04-27T00:09:00.000Z",
+      inputId: "ain_00000000000000000000000000000002",
+      occurredAt: "2026-04-27T00:09:00.000Z",
+      sourceKind: "hosted-conversation",
+      sourcePosition: "hosted-mailbox:conversation:00000000000000000002",
+    };
+    const eligibleAfter = {
+      createdAt: "2026-04-27T00:08:00.000Z",
+      inputId: "ain_00000000000000000000000000000001",
+      occurredAt: "2026-04-27T00:08:00.000Z",
+      sourceKind: "hosted-conversation",
+      sourcePosition: "hosted-mailbox:conversation:00000000000000000001",
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.readAssistantAutomationState.mockResolvedValueOnce({
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter,
+        enabledAt: "2026-04-27T00:00:00.000Z",
+      }],
+      cron: [],
+      schemaVersion: 1,
+    });
+    mocks.listAssistantInputEvents.mockResolvedValueOnce({
+      events: [{
+        cursor: pendingCursor,
+      }],
+      nextCursor: pendingCursor,
+    });
+    mocks.compareAssistantInputCursors.mockReturnValueOnce(1);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result.nextWakeAt).toBe("2026-04-27T00:10:00.000Z");
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+    }));
+    expect(mocks.runHostedAssistantRuntimeTimerLane).not.toHaveBeenCalled();
   });
 
   it("uses a full bootstrap checkpoint reason for member activation work", async () => {
