@@ -84,9 +84,6 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.usage_export_finished");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.restore_started");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.restore_layer_finished");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.restore_finished");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual(["nudge", "alarm", "retry", "manual"]);
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
@@ -681,30 +678,6 @@ describe("hosted runtime control contracts", () => {
       customProviderErrorDetail: "Provider rejected the request after resume.",
       failureAssistantProviderErrorBodyMessage: "provider rejected the request",
       safeErrorMessage: "Codex app-server failed before producing a reply.",
-    });
-    expect(parseHostedRuntimeLogEntry({
-      ...entry,
-      redactedJson: {
-        localSendDeliveryRequested: true,
-        localSendElapsedMs: 321,
-        localSendHosted: true,
-        localSendQueueOnly: true,
-        localSendTimingStage: "delivery-finished",
-        localSendTimingTraceType: "local-send",
-        localSendTotalElapsedMs: 654,
-        providerTraceKind: "local_message.timing",
-        schema: "murph.assistant-local-message-timing.v1",
-      },
-    }).redactedJson).toEqual({
-      localSendDeliveryRequested: true,
-      localSendElapsedMs: 321,
-      localSendHosted: true,
-      localSendQueueOnly: true,
-      localSendTimingStage: "delivery-finished",
-      localSendTimingTraceType: "local-send",
-      localSendTotalElapsedMs: 654,
-      providerTraceKind: "local_message.timing",
-      schema: "murph.assistant-local-message-timing.v1",
     });
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,

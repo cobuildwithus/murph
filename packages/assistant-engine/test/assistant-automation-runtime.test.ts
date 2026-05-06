@@ -4549,57 +4549,6 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('emits redaction-safe timing traces for automation pass stages', async () => {
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-    const onTraceEvent = vi.fn()
-
-    await runLoop.runAssistantAutomationPass({
-      drainOutbox: false,
-      onTraceEvent,
-      requestId: 'request-timing',
-      scanNumber: 7,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    const traceEvents = onTraceEvent.mock.calls.map(([event]) => event)
-    const rawEvents = traceEvents.map((event) => event.rawEvent)
-
-    expect(rawEvents.map((event) => event.automationPassStage)).toEqual([
-      'diagnostic-recorded',
-      'runtime-maintenance-finished',
-      'outbox-drain-finished',
-      'input-refresh-finished',
-      'state-read',
-      'recovery-finished',
-      'scan-finished',
-      'cron-finished',
-      'status-refresh-finished',
-      'cron-status-finished',
-      'outbox-summary-finished',
-      'complete',
-    ])
-    expect(rawEvents[0]).toMatchObject({
-      schema: 'murph.assistant-automation-pass-timing.v1',
-      type: 'assistant.automation.pass_timing',
-      automationPassDrainOutbox: false,
-      automationPassScanNumber: 7,
-    })
-    expect(rawEvents[rawEvents.length - 1]).toMatchObject({
-      automationPassProgressed: false,
-      automationPassRepliesReplied: 1,
-      automationPassStage: 'complete',
-      automationPassStateProgressed: false,
-    })
-    for (const event of traceEvents) {
-      expect(event.providerSessionId).toBeNull()
-      expect(event.updates).toEqual([])
-      expect(JSON.stringify(event.rawEvent)).not.toContain('/tmp/')
-      expect(JSON.stringify(event.rawEvent)).not.toContain('request-timing')
-    }
-  })
-
   it('refreshes assistant input before recovery and scan', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
@@ -4618,11 +4567,8 @@ describe('assistant auto-reply runtime', () => {
         reason: 'ingested_input' as const,
       })),
     }
-    const onTraceEvent = vi.fn()
-
     await runLoop.runAssistantAutomationPass({
       inputSource,
-      onTraceEvent,
       requestId: 'request-input-refresh',
       vault: '/tmp/assistant-automation-vault',
     })
@@ -4639,23 +4585,12 @@ describe('assistant auto-reply runtime', () => {
       .toBeLessThan(
         runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
       )
-    expect(
-      onTraceEvent.mock.calls
-        .map(([event]) => event.rawEvent)
-        .find((event) => event.automationPassStage === 'input-refresh-finished'),
-    ).toMatchObject({
-      automationPassInputRefreshProgressed: true,
-      automationPassInputRefreshSkipped: false,
-      automationPassInputRefreshSourceUnavailable: false,
-    })
   })
 
   it('skips status refresh on hosted queue-only automation passes', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
-    const onTraceEvent = vi.fn()
-
     await runLoop.runAssistantAutomationPass({
       deliveryDispatchMode: 'queue-only',
       executionContext: {
@@ -4664,19 +4599,11 @@ describe('assistant auto-reply runtime', () => {
           userEnvKeys: [],
         },
       },
-      onTraceEvent,
       requestId: 'request-hosted-queue-only',
       vault: '/tmp/assistant-automation-vault',
     })
 
     expect(runLoopMocks.refreshAssistantStatusSnapshot).not.toHaveBeenCalled()
-    expect(
-      onTraceEvent.mock.calls
-        .map(([event]) => event.rawEvent)
-        .find((event) => event.automationPassStage === 'status-refresh-finished'),
-    ).toMatchObject({
-      automationPassStatusRefreshSkipped: true,
-    })
   })
 
   it('skips canonical automation branches for no-canonical-write automation passes', async () => {

@@ -168,21 +168,6 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "codexResumeFailureOutputObjectKeys",
   "codexResumeFailureOutputStringLengths",
   "codexResumeFailureRetryable",
-  "providerTurnTraceType",
-  "providerTurnStage",
-  "providerTurnElapsedMs",
-  "providerTurnTotalElapsedMs",
-  "providerTurnActionCount",
-  "providerTurnRawEventCount",
-  "providerTurnUsagePresent",
-  "providerTurnOk",
-  "localSendTimingTraceType",
-  "localSendTimingStage",
-  "localSendElapsedMs",
-  "localSendTotalElapsedMs",
-  "localSendDeliveryRequested",
-  "localSendHosted",
-  "localSendQueueOnly",
 ] as const;
 
 const HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH = 2048;
