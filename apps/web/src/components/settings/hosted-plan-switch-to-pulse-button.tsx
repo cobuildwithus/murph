@@ -135,7 +135,7 @@ function PulseSwitchConfirmationDialog(props: {
         <div className="flex flex-col gap-2">
           <Button
             type="button"
-            size="lg"
+            size="xl"
             onClick={props.onConfirm}
             disabled={props.isSwitching}
             className="w-full"
@@ -144,7 +144,7 @@ function PulseSwitchConfirmationDialog(props: {
           </Button>
           <Button
             type="button"
-            size="lg"
+            size="xl"
             variant="ghost"
             onClick={() => props.onOpenChange(false)}
             disabled={props.isSwitching}

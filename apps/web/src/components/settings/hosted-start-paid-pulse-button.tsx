@@ -15,6 +15,7 @@ import {
 } from "@/src/components/ui/dialog";
 import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
 
+import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 interface HostedPulseTrialStartPaidResponse {
@@ -24,7 +25,16 @@ interface HostedPulseTrialStartPaidResponse {
 }
 
 const pulsePlan = getHostedBillingPlanDefinition("launch_monthly");
-const pulsePriceLabel = `$${pulsePlan.recurringAmountUsdCents / 100} / month`;
+const pulsePriceLabel = `$${pulsePlan.recurringAmountUsdCents / 100}`;
+
+const PULSE_FEATURES = [
+  "Run experiments, see what changed",
+  "Sync your health data",
+  "Private before/after outcomes",
+  "Chat via iMessage, Telegram, or email",
+  "Guided experiment setup",
+  "Access to frontier AI models",
+];
 
 export function StartPaidPulseButton(props: {
   children?: ReactNode;
@@ -115,9 +125,11 @@ function StartPaidPulseConfirmationDialog(props: {
             Start Pulse
           </DialogTitle>
           <DialogDescription className="text-sm leading-6 text-[#736a58]">
-            Your trial ends and Pulse begins at {pulsePriceLabel}.
+            Your trial ends and Pulse begins at {pulsePriceLabel}/mo.
           </DialogDescription>
         </DialogHeader>
+
+        <PlanFeatureCard price={pulsePriceLabel} features={PULSE_FEATURES} />
 
         {props.errorMessage ? (
           <p
@@ -131,7 +143,7 @@ function StartPaidPulseConfirmationDialog(props: {
         <div className="flex flex-col gap-2">
           <Button
             type="button"
-            size="lg"
+            size="xl"
             onClick={props.onConfirm}
             disabled={props.isStarting}
             className="w-full"
@@ -140,7 +152,7 @@ function StartPaidPulseConfirmationDialog(props: {
           </Button>
           <Button
             type="button"
-            size="lg"
+            size="xl"
             variant="ghost"
             onClick={() => props.onOpenChange(false)}
             disabled={props.isStarting}
