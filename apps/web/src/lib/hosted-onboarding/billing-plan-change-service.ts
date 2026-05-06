@@ -561,6 +561,7 @@ function describeSafeStripePlanChangeError(error: unknown): Record<string, unkno
   }
 
   const code = Reflect.get(error, "code");
+  const stripeParam = parseSafeStripeErrorParam(Reflect.get(error, "param"));
   const statusCode = Reflect.get(error, "statusCode");
   const type = Reflect.get(error, "type");
   const requestId = Reflect.get(error, "requestId");
@@ -568,9 +569,18 @@ function describeSafeStripePlanChangeError(error: unknown): Record<string, unkno
   return {
     ...(typeof type === "string" && type.length > 0 ? { type } : {}),
     ...(typeof code === "string" && code.length > 0 ? { code } : {}),
+    ...(stripeParam ? { stripeParam } : {}),
     ...(typeof statusCode === "number" ? { statusCode } : {}),
     requestIdPresent: typeof requestId === "string" && requestId.length > 0,
   };
+}
+
+function parseSafeStripeErrorParam(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 120) {
+    return null;
+  }
+
+  return /^[A-Za-z0-9_.\-[\]]+$/u.test(value) ? value : null;
 }
 
 function buildHostedBillingPlanUpgradeDispatchContext(input: {
