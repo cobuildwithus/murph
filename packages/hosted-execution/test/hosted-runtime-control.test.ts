@@ -202,18 +202,34 @@ describe("hosted runtime control contracts", () => {
       })).toThrow(`Hosted workspace invocation request.${field} is no longer supported.`);
     }
     expect(parseHostedWorkspaceInvocationResult({
+      idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
         count: 1,
       },
       status: "idle",
     })).toEqual({
+      idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
         count: 1,
       },
       status: "idle",
     });
+    expect(parseHostedWorkspaceInvocationResult({
+      status: "scheduled",
+    })).toEqual({
+      status: "scheduled",
+    });
+    expect(() => parseHostedWorkspaceInvocationResult({
+      idleShutdownCheckpointed: true,
+      nextWakeAt: "2026-04-26T00:00:05.000Z",
+      status: "idle",
+    })).toThrow("Hosted workspace invocation result idleShutdownCheckpointed requires no nextWakeAt.");
+    expect(() => parseHostedWorkspaceInvocationResult({
+      idleShutdownCheckpointed: true,
+      status: "scheduled",
+    })).toThrow("Hosted workspace invocation result idleShutdownCheckpointed requires status idle.");
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {

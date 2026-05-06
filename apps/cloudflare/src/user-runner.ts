@@ -729,13 +729,14 @@ export class HostedUserRunner {
         userId: initialRecord.userId,
         workspaceVersion,
       });
-	      const completion = await this.stateStore.completeInvocation({
+      const completion = await this.stateStore.completeInvocation({
         finishedAt: new Date().toISOString(),
         lease,
       });
       if (completion.completed) {
         if (input.reason === "idle_shutdown_checkpoint") {
-          await this.finishIdleShutdownCheckpoint({
+          await this.handleIdleShutdownCheckpointResult({
+            result,
             userId: initialRecord.userId,
           });
         } else {
@@ -923,6 +924,18 @@ export class HostedUserRunner {
         runnerTimeoutMs: this.env.runnerTimeoutMs,
       }),
     });
+  }
+
+  private async syncPendingWorkAlarm(
+    record: RunnerStateRecord,
+  ): Promise<RunnerStateRecord> {
+    if (record.pendingNudge) {
+      return await this.reschedulePendingNudgeAfterInvocationLiveness(record) ?? record;
+    }
+    if (record.inFlight) {
+      return await this.syncInvocationRecoveryAlarm(record);
+    }
+    return record;
   }
 
   private logStaleInvocationLeaseCleared(
@@ -1199,7 +1212,16 @@ export class HostedUserRunner {
       workspaceRead: HostedWorkspaceReadResponse;
     }
   > {
-    if (input.record.pendingNudge || !input.expectedWorkspaceVersion) {
+    if (input.record.pendingNudge) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
+      const record = await this.syncPendingWorkAlarm(input.record);
+      return {
+        nextWakeAt: record.nextWakeAt,
+        run: false,
+      };
+    }
+
+    if (!input.expectedWorkspaceVersion) {
       await this.stateStore.clearIdleShutdownCheckpoint();
       const record = await this.runtimeAlarmScheduler.syncNextWake({
         preferredWakeAt: input.record.nextWakeAt,
@@ -1214,10 +1236,8 @@ export class HostedUserRunner {
     this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.record.userId);
     const latestRecord = await this.stateStore.readState();
     if (latestRecord.pendingNudge || latestRecord.inFlight) {
-      const record = latestRecord.pendingNudge
-        ? await this.reschedulePendingNudgeAfterInvocationLiveness(latestRecord)
-          ?? latestRecord
-        : await this.syncInvocationRecoveryAlarm(latestRecord);
+      await this.stateStore.clearIdleShutdownCheckpoint();
+      const record = await this.syncPendingWorkAlarm(latestRecord);
       return {
         nextWakeAt: record.nextWakeAt,
         run: false,
@@ -1349,12 +1369,55 @@ export class HostedUserRunner {
     return true;
   }
 
+  private async handleIdleShutdownCheckpointResult(input: {
+    result: HostedWorkspaceInvocationResult;
+    userId: string;
+  }): Promise<void> {
+    const record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight) {
+      const scheduledRecord = await this.syncPendingWorkAlarm(record);
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          idleShutdownCheckpointed: input.result.idleShutdownCheckpointed === true,
+          inFlight: record.inFlight,
+          pendingNudge: record.pendingNudge,
+        },
+        message: "Hosted runner preserved wake after idle checkpoint because work is pending.",
+        phase: "scheduled",
+        userId: scheduledRecord.userId,
+      });
+      return;
+    }
+
+    if (isCommittedIdleShutdownCheckpointResult(input.result)) {
+      await this.finishIdleShutdownCheckpoint({
+        userId: input.userId,
+      });
+      return;
+    }
+
+    await this.stateStore.clearIdleShutdownCheckpoint();
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: input.result.nextWakeAt ?? null,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        resultStatus: input.result.status,
+      },
+      message: "Hosted runner skipped idle-shutdown cleanup because checkpoint was not committed.",
+      phase: "scheduled",
+      userId: input.userId,
+    });
+  }
+
   private async finishIdleShutdownCheckpoint(input: {
     userId: string;
   }): Promise<void> {
     const record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
-      await this.reschedulePendingNudgeAfterInvocationLiveness(record);
+      const scheduledRecord = await this.syncPendingWorkAlarm(record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -1363,7 +1426,7 @@ export class HostedUserRunner {
         },
         message: "Hosted runner kept warm container after idle checkpoint because work is pending.",
         phase: "scheduled",
-        userId: input.userId,
+        userId: scheduledRecord.userId,
       });
       return;
     }
@@ -1708,6 +1771,12 @@ function shouldRunHostedRunnerInvocation(input: {
     || input.reason === "manual"
     || input.record.pendingNudge
     || input.dueWake === true;
+}
+
+function isCommittedIdleShutdownCheckpointResult(input: HostedWorkspaceInvocationResult): boolean {
+  return input.idleShutdownCheckpointed === true
+    && input.status === "idle"
+    && (input.nextWakeAt === undefined || input.nextWakeAt === null);
 }
 
 function isHostedWorkspaceBaseOnlySnapshot(workspace: HostedWorkspaceState): boolean {

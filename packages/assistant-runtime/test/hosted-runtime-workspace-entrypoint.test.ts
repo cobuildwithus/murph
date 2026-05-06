@@ -276,9 +276,54 @@ describe("hosted workspace runtime entrypoint", () => {
         preservedStatus: true,
       });
       assert.deepEqual(result, {
+        idleShutdownCheckpointed: true,
         redactedStatus: {
           preservedStatus: true,
         },
+        status: "idle",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("does not mark idle-shutdown checkpointed when no workspace exists", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_no_workspace",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Idle-shutdown checkpoint must not snapshot without a workspace.");
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events,
+              workspace: null,
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(events, ["workspace.read"]);
+      assert.deepEqual(result, {
         status: "idle",
       });
     } finally {
@@ -571,6 +616,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await vi.waitFor(() => expect(pendingReported).toBe(true));
       releaseCheckpoint();
       await expect(resultPromise).resolves.toEqual({
+        idleShutdownCheckpointed: true,
         status: "idle",
       });
       assert.equal(checkpointRequests.length, 1);
