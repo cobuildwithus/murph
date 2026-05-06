@@ -11,7 +11,6 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '../src/assistant/provider-config.ts'
 import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantRuntimeTarget,
 } from '../src/assistant/target-runtime.ts'
 
@@ -121,7 +120,6 @@ test('explicit Codex provider inputs serialize only Codex request-shaping fields
       codexHome: null,
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       oss: true,
       profile: 'hosted',
     },
@@ -142,7 +140,6 @@ test('explicit Codex provider inputs serialize only Codex request-shaping fields
     executionDriver: 'codex-app-server',
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: true,
     profile: 'hosted',
     provider: 'codex-cli',
@@ -157,7 +154,6 @@ test('explicit Codex provider inputs serialize only Codex request-shaping fields
     codexHome: null,
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: true,
     profile: 'hosted',
     reasoningEffort: 'medium',

@@ -10,9 +10,8 @@ import { normalizeNullableString } from './shared.js'
 import {
   createUnsupportedAssistantRuntimeTargetError,
   normalizeAssistantCodexModelProvider,
-  resolveAssistantCodexModelProviderConfig,
+  resolveStrictAssistantCodexModelProvider,
   resolveAssistantRuntimeTarget,
-  type AssistantCodexModelProviderConfig,
   type AssistantResolvedRuntimeTarget,
 } from './target-runtime.js'
 
@@ -22,7 +21,6 @@ export interface AssistantCodexTargetConfig {
   codexHome: string | null
   model: string | null
   modelProvider: string | null
-  modelProviderConfig: AssistantCodexModelProviderConfig | null
   oss: boolean
   profile: string | null
 }
@@ -46,7 +44,6 @@ export interface AssistantProviderDefaultsConfig {
   codexHome: string | null
   model: string | null
   modelProvider: string | null
-  modelProviderConfig: AssistantCodexModelProviderConfig | null
   oss: boolean
   profile: string | null
   reasoningEffort: string | null
@@ -127,7 +124,6 @@ export function sanitizeAssistantProviderConfig(
     codexHome: normalizeNullableString(input?.codexHome),
     model: normalizeNullableString(input?.model),
     modelProvider,
-    modelProviderConfig: resolveAssistantCodexModelProviderConfig(modelProvider),
     oss: input?.oss === true,
     profile: normalizeNullableString(input?.profile),
   }
@@ -217,6 +213,7 @@ export function compactAssistantProviderConfigInput(
 export function serializeAssistantProviderSessionOptions(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderSessionOptions {
+  const strictModelProvider = resolveStrictAssistantProviderModelProvider(input)
   const normalized = normalizeAssistantProviderConfig(input)
   const resolved = resolveAssistantRuntimeTarget(normalized)
   const provider = resolveAssistantChatProviderFromConfig(normalized)
@@ -226,12 +223,8 @@ export function serializeAssistantProviderSessionOptions(
     executionDriver: resolved.executionDriver,
     provider,
     model: normalized.target.model,
-    ...(isAssistantCodexTargetConfig(normalized) && normalized.target.modelProvider
-      ? { modelProvider: normalized.target.modelProvider }
-      : {}),
-    ...(isAssistantCodexTargetConfig(normalized) &&
-    normalized.target.modelProviderConfig
-      ? { modelProviderConfig: normalized.target.modelProviderConfig }
+    ...(strictModelProvider
+      ? { modelProvider: strictModelProvider }
       : {}),
     reasoningEffort: normalized.policy.reasoningEffort,
     resumeKind: resolved.resumeKind,
@@ -260,9 +253,6 @@ export function serializeAssistantProviderOperatorDefaults(
     model: normalized.target.model,
     modelProvider: isAssistantCodexTargetConfig(normalized)
       ? normalized.target.modelProvider
-      : null,
-    modelProviderConfig: isAssistantCodexTargetConfig(normalized)
-      ? normalized.target.modelProviderConfig
       : null,
     reasoningEffort: normalized.policy.reasoningEffort,
     sandbox: normalized.policy.sandbox,
@@ -293,6 +283,7 @@ export function assistantProviderConfigsEqual(
 export function resolveAssistantProviderRuntimeTarget(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantResolvedRuntimeTarget {
+  resolveStrictAssistantProviderModelProvider(input)
   return resolveAssistantRuntimeTarget(normalizeAssistantProviderConfig(input))
 }
 
@@ -361,6 +352,17 @@ function assistantProviderConfigToInput(
     reasoningEffort: config.policy.reasoningEffort,
     sandbox: config.policy.sandbox,
   }
+}
+
+function resolveStrictAssistantProviderModelProvider(
+  input: AssistantProviderConfigLike | null | undefined,
+): string | null {
+  const providerConfigInput = isAssistantProviderConfig(input)
+    ? assistantProviderConfigToInput(input)
+    : input
+  return resolveStrictAssistantCodexModelProvider(
+    providerConfigInput?.modelProvider,
+  ).id
 }
 
 function isAssistantProviderConfig(

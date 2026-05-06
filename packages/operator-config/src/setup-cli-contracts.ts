@@ -140,6 +140,7 @@ export const setupConfiguredAssistantSchema = z.object({
   oss: z.boolean().nullable(),
   account: setupAssistantAccountSchema.nullable().optional(),
   detail: z.string().min(1),
+  missingEnv: z.array(z.string().min(1)).optional(),
 })
 
 export const setupScheduledUpdateSchema = z.object({

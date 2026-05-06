@@ -233,6 +233,7 @@ export function registerModelCommands(
       const wizardSelection =
         allowPrompt && shouldRunModelAssistantWizard(options)
           ? await assistantWizard({
+              enableApiKeyProviderOnboarding: false,
               ...buildSetupAssistantWizardInputFromDefaults(existingDefaults),
             })
           : null
@@ -354,6 +355,12 @@ function mergeModelCommandOptionsWithWizardSelection(
           oss: wizardSelection.assistantOss ?? undefined,
         }
       : {}),
+    ...(wizardSelection.assistantPreset === 'codex' &&
+    'assistantModelProvider' in wizardSelection
+      ? {
+          modelProvider: wizardSelection.assistantModelProvider ?? undefined,
+        }
+      : {}),
   }
 }
 
@@ -396,7 +403,15 @@ function createModelSetupOptions(input: {
   )
   if (input.wizardSelection) {
     delete savedAssistantOptions.assistantModel
+    delete savedAssistantOptions.assistantOss
+    if ('assistantModelProvider' in input.wizardSelection) {
+      delete savedAssistantOptions.assistantModelProvider
+    }
   }
+  const wizardAssistantModelProvider =
+    input.wizardSelection && 'assistantModelProvider' in input.wizardSelection
+      ? input.wizardSelection.assistantModelProvider
+      : undefined
 
   return setupCommandOptionsSchema.parse({
     vault: './vault',
@@ -408,10 +423,10 @@ function createModelSetupOptions(input: {
         }
       : {}),
     ...(input.options.modelProvider !== undefined
-      ? {
-          assistantModelProvider: input.options.modelProvider,
-        }
-      : {}),
+      ? { assistantModelProvider: input.options.modelProvider }
+      : wizardAssistantModelProvider
+        ? { assistantModelProvider: wizardAssistantModelProvider }
+        : {}),
     ...(input.options.codexCommand !== undefined
       ? {
           assistantCodexCommand: input.options.codexCommand,
@@ -535,6 +550,7 @@ function buildSetupAssistantWizardInputFromDefaults(
     default:
       return {
         initialAssistantPreset: 'codex',
+        initialAssistantModelProvider: backend.modelProvider ?? null,
         initialAssistantOss: backend.oss === true ? true : undefined,
       }
   }

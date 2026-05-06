@@ -54,6 +54,12 @@ import {
 } from './setup-services/steps.js'
 import { describeSelectedSetupWearables } from '@murphai/operator-config/setup-runtime-env'
 import {
+  resolveSetupAssistantModelProviderMissingEnv,
+} from '@murphai/operator-config/setup-runtime-env'
+import {
+  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   configureSetupOperatorDefaults,
 } from './setup-services/operator-defaults.js'
 import {
@@ -66,6 +72,7 @@ interface SetupInput {
   allowChannelPrompts?: boolean
   channels?: readonly SetupChannel[] | null
   envOverrides?: NodeJS.ProcessEnv
+  localEnvOverrides?: NodeJS.ProcessEnv
   requestId?: string | null
   dryRun?: boolean
   rebuild?: boolean
@@ -158,9 +165,16 @@ export function createSetupServices(
     )
     const notes: string[] = []
     const steps: SetupStepResult[] = []
-    const effectiveEnv = {
+    const rawEffectiveEnv = {
       ...(getBaseEnv?.() ?? { ...process.env }),
       ...(input.envOverrides ?? {}),
+    }
+    const effectiveEnv = scrubAssistantProviderEnv({
+      env: rawEffectiveEnv,
+    })
+    const persistedEnv = {
+      ...rawEffectiveEnv,
+      ...(input.localEnvOverrides ?? input.envOverrides ?? {}),
     }
 
     log(
@@ -274,7 +288,7 @@ export function createSetupServices(
     await persistSetupEnvOverrides({
       cwd: getCwd?.() ?? process.cwd(),
       dryRun,
-      envOverrides: input.envOverrides,
+      envOverrides: input.localEnvOverrides ?? input.envOverrides,
       steps,
     })
     const assistant = await configureSetupOperatorDefaults({
@@ -286,6 +300,16 @@ export function createSetupServices(
       steps,
       vault,
     })
+
+    const assistantWithReadiness = assistant
+      ? {
+          ...assistant,
+          missingEnv: resolveSetupAssistantModelProviderMissingEnv(
+            assistant.modelProvider,
+            persistedEnv,
+          ),
+        }
+      : null
 
     const channels =
       input.channels == null
@@ -334,9 +358,9 @@ export function createSetupServices(
           ? null
           : redactHomePathsInValue(bootstrap, homeDirectory),
       assistant:
-        assistant === null
+        assistantWithReadiness === null
           ? null
-          : redactSetupAssistantForOutput(assistant, homeDirectory),
+          : redactSetupAssistantForOutput(assistantWithReadiness, homeDirectory),
       scheduledUpdates: scheduledUpdates.map((scheduledUpdate) =>
         redactHomePathsInValue(scheduledUpdate, homeDirectory),
       ) as SetupScheduledUpdate[],
@@ -380,6 +404,16 @@ export function createSetupServices(
     setupHost,
     setupMacos,
   }
+}
+
+function scrubAssistantProviderEnv(input: {
+  env: NodeJS.ProcessEnv
+}): NodeJS.ProcessEnv {
+  const next = { ...input.env }
+  for (const config of ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS) {
+    delete next[config.envKey]
+  }
+  return next
 }
 
 function redactSetupAssistantForOutput(

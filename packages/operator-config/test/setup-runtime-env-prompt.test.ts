@@ -12,12 +12,36 @@ vi.mock('node:readline', () => ({
 
 import {
   createSetupRuntimeEnvResolver,
+  resolveSetupRuntimePromptKeys,
 } from '../src/setup-runtime-env.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
   readlineMock.createInterface.mockReset()
+})
+
+test('setup runtime prompt keys are derived from selected provider metadata', () => {
+  assert.deepEqual(
+    resolveSetupRuntimePromptKeys({
+      assistantModelProvider: 'venice',
+      channels: [],
+      env: {},
+      wearables: [],
+    }),
+    ['VENICE_API_KEY'],
+  )
+  assert.deepEqual(
+    resolveSetupRuntimePromptKeys({
+      assistantModelProvider: 'venice',
+      channels: [],
+      env: {
+        VENICE_API_KEY: 'present',
+      },
+      wearables: [],
+    }),
+    [],
+  )
 })
 
 test('setup runtime resolver prompts for missing keys in deterministic order and skips blank answers', async () => {

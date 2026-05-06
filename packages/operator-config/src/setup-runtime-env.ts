@@ -64,7 +64,7 @@ export function createSetupRuntimeEnvResolver(): SetupRuntimeEnvResolver {
       return { ...process.env }
     },
     async promptForMissing(input) {
-      const missingKeys = collectSetupPromptKeys(input)
+      const missingKeys = resolveSetupRuntimePromptKeys(input)
       if (missingKeys.length === 0) {
         return {}
       }
@@ -254,6 +254,58 @@ export function describeSetupWearableStatus(
   }
 }
 
+export function resolveSetupAssistantModelProviderMissingEnv(
+  modelProvider: string | null | undefined,
+  env: NodeJS.ProcessEnv,
+): string[] {
+  const envKeys = resolveSetupAssistantModelProviderEnvKeys(modelProvider)
+  return envKeys.length > 0 && !hasAnyEnv(env, envKeys)
+    ? envKeys
+    : []
+}
+
+export function resolveSetupAssistantModelProviderEnvKeys(
+  modelProvider: string | null | undefined,
+): string[] {
+  const modelProviderConfig =
+    resolveAssistantCodexModelProviderConfig(modelProvider)
+  return modelProviderConfig ? [modelProviderConfig.envKey] : []
+}
+
+export function describeSetupAssistantModelProviderStatus(
+  modelProvider: string | null | undefined,
+  env: NodeJS.ProcessEnv,
+): SetupWizardRuntimeStatus {
+  const modelProviderConfig =
+    resolveAssistantCodexModelProviderConfig(modelProvider)
+  if (!modelProviderConfig) {
+    return {
+      badge: 'ready',
+      detail: 'No assistant provider API key is required.',
+      missingEnv: [],
+      ready: true,
+    }
+  }
+
+  const missingEnv = resolveSetupAssistantModelProviderMissingEnv(
+    modelProviderConfig.id,
+    env,
+  )
+  return missingEnv.length === 0
+    ? {
+        badge: 'ready',
+        detail: `${modelProviderConfig.name} API key is available in the current environment.`,
+        missingEnv,
+        ready: true,
+      }
+    : {
+        badge: 'needs key',
+        detail: `Add ${modelProviderConfig.envKey} to the current environment to use ${modelProviderConfig.name}.`,
+        missingEnv,
+        ready: false,
+      }
+}
+
 export function describeSelectedSetupWearables(input: {
   wearables: readonly SetupWearable[]
   env: NodeJS.ProcessEnv
@@ -276,7 +328,7 @@ export function describeSelectedSetupWearables(input: {
   return configured
 }
 
-function collectSetupPromptKeys(input: {
+export function resolveSetupRuntimePromptKeys(input: {
   assistantModelProvider?: string | null
   channels: readonly SetupChannel[]
   env: NodeJS.ProcessEnv
@@ -288,12 +340,17 @@ function collectSetupPromptKeys(input: {
     input.assistantModelProvider,
   )
 
-  if (
-    modelProviderConfig &&
-    !hasAnyEnv(input.env, [modelProviderConfig.envKey])
-  ) {
-    seen.add(modelProviderConfig.envKey)
-    keys.push(modelProviderConfig.envKey)
+  if (modelProviderConfig) {
+    const missingAssistantEnv = resolveSetupAssistantModelProviderMissingEnv(
+      modelProviderConfig.id,
+      input.env,
+    )
+    for (const key of missingAssistantEnv) {
+      if (!seen.has(key)) {
+        seen.add(key)
+        keys.push(key)
+      }
+    }
   }
 
   for (const channel of input.channels) {

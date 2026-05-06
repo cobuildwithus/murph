@@ -2099,6 +2099,109 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
   }
 })
 
+test('createSetupServices keeps assistant provider keys out of provisioning subprocess envs', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-provider-env-'))
+  const cwd = path.join(root, 'workspace')
+  const homeDirectory = path.join(root, 'home')
+  const binDirectory = path.join(root, 'bin')
+  const toolchainRoot = path.join(root, 'toolchain')
+  const cliBinPath = path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js')
+
+  await mkdir(cwd, { recursive: true })
+  await mkdir(homeDirectory, { recursive: true })
+  await mkdir(binDirectory, { recursive: true })
+  await mkdir(path.dirname(cliBinPath), { recursive: true })
+  await writeFile(cliBinPath, '// cli stub\n', 'utf8')
+  for (const tool of ['apt-get', 'sudo']) {
+    const toolPath = path.join(binDirectory, tool)
+    await writeFile(toolPath, '#!/usr/bin/env bash\nexit 0\n', 'utf8')
+    await chmod(toolPath, 0o755)
+  }
+  const whisperModelPath = path.join(
+    toolchainRoot,
+    'models',
+    'whisper',
+    'ggml-base.en.bin',
+  )
+  await mkdir(path.dirname(whisperModelPath), { recursive: true })
+  await writeFile(whisperModelPath, 'model', 'utf8')
+
+  const commandEnvs: NodeJS.ProcessEnv[] = []
+
+  try {
+    const services = createSetupServices({
+      arch: () => 'x64',
+      env: () => ({
+        OPENAI_API_KEY: 'openai_secret_SENTINEL',
+        PATH: binDirectory,
+        VENICE_API_KEY: 'venice_secret_SENTINEL',
+        VERCEL_AI_API_KEY: 'vercel_secret_SENTINEL',
+      }),
+      getCwd: () => cwd,
+      getHomeDirectory: () => homeDirectory,
+      platform: () => 'linux',
+      resolveCliBinPath: () => cliBinPath,
+      async runCommand(input) {
+        commandEnvs.push({ ...input.env })
+        return {
+          exitCode: 1,
+          stderr: 'install unavailable',
+          stdout: '',
+        }
+      },
+      inboxServices: {
+        async bootstrap(input) {
+          return makeInboxBootstrapResult(
+            input.vault,
+            path.join(homeDirectory, '.runtime', 'toolchain.json'),
+          )
+        },
+      },
+    })
+
+    const result = await services.setupHost({
+      assistant: {
+        preset: 'skip',
+        enabled: false,
+        provider: null,
+        model: null,
+        modelProvider: null,
+        codexCommand: null,
+        codexHome: undefined,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        oss: false,
+        account: null,
+        detail: 'Skipped',
+      },
+      channels: [],
+      dryRun: false,
+      localEnvOverrides: {
+        VENICE_API_KEY: 'venice_secret_SENTINEL',
+      },
+      strict: false,
+      toolchainRoot,
+      vault: './vault',
+    })
+
+    assert.ok(commandEnvs.length > 0)
+    for (const env of commandEnvs) {
+      assert.equal(env.OPENAI_API_KEY, undefined)
+      assert.equal(env.VENICE_API_KEY, undefined)
+      assert.equal(env.VERCEL_AI_API_KEY, undefined)
+    }
+    assert.equal(JSON.stringify(result).includes('venice_secret_SENTINEL'), false)
+    assert.match(
+      await readFile(path.join(cwd, '.env.local'), 'utf8'),
+      /VENICE_API_KEY="venice_secret_SENTINEL"/u,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('createSetupServices saves canonical wearable preferences, including explicit empty selections', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-services-wearable-prefs-'))
   const cwd = path.join(root, 'workspace')

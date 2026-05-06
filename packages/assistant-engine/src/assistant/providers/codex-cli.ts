@@ -12,13 +12,13 @@ import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
+import {
+  resolveStrictAssistantCodexModelProvider,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   DEFAULT_CODEX_MODELS,
 } from './catalog.js'
-import {
-  VENICE_CODEX_MODEL_PROVIDER_ID,
-} from '@murphai/operator-config/assistant/target-runtime'
 import {
   extractCodexAssistantProviderUsage,
   mergeCodexConfigOverrides,
@@ -34,6 +34,7 @@ import {
 import { normalizeNullableString } from '../shared.js'
 import {
   isSensitiveAssistantFieldName,
+  redactAssistantStateString,
   sanitizeAssistantPortableStateString,
 } from '../redaction.js'
 import type {
@@ -151,6 +152,18 @@ export async function executeCodexAssistantTurnAttempt(
       'Codex app-server execution requires a Codex provider config.',
     )
   }
+  const modelProviderResolution = resolveStrictAssistantCodexModelProvider(
+    providerConfig.target.modelProvider,
+  )
+  const modelProviderConfig = modelProviderResolution.config
+  const providerFailureHint = modelProviderConfig?.failureHint ?? null
+  const providerSecretValue =
+    modelProviderConfig?.envKey
+      ? normalizeNullableString(
+          input.env?.[modelProviderConfig.envKey] ??
+            process.env[modelProviderConfig.envKey],
+        )
+      : null
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(
     providerConfig.policy.approvalPolicy,
   )
@@ -164,7 +177,6 @@ export async function executeCodexAssistantTurnAttempt(
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides: mergeCodexConfigOverrides({
       modelProvider: providerConfig.target.modelProvider,
-      modelProviderConfig: providerConfig.target.modelProviderConfig,
       showThinkingTraces: input.showThinkingTraces ?? false,
     }),
     env: prepareAssistantDirectCliEnv(input.env),
@@ -294,7 +306,8 @@ export async function executeCodexAssistantTurnAttempt(
         })
         throw addCodexModelProviderFailureHint({
           error: fallbackError,
-          modelProvider: providerConfig.target.modelProviderConfig?.id ?? null,
+          failureHint: providerFailureHint,
+          providerSecretValue,
         })
       }
 
@@ -321,7 +334,8 @@ export async function executeCodexAssistantTurnAttempt(
         : null
       const surfacedError = addCodexModelProviderFailureHint({
         error,
-        modelProvider: providerConfig.target.modelProviderConfig?.id ?? null,
+        failureHint: providerFailureHint,
+        providerSecretValue,
       })
       return {
         error: surfacedError,
@@ -374,43 +388,89 @@ export async function executeCodexAssistantTurnAttempt(
   return attemptResult
 }
 
-const VENICE_CODEX_FAILURE_HINT =
-  'Venice via Codex Responses failed. Check VENICE_API_KEY, the Venice model id, account balance/rate limits, and whether this key/model has Venice Responses API Alpha access.'
-
 function addCodexModelProviderFailureHint(input: {
   error: unknown
-  modelProvider: string | null
+  failureHint?: string | null
+  providerSecretValue?: string | null
 }): unknown {
-  if (input.modelProvider !== VENICE_CODEX_MODEL_PROVIDER_ID) {
-    return input.error
+  const failureHint = normalizeNullableString(input.failureHint)
+  if (!failureHint) {
+    return redactCodexProviderFailureError({
+      error: input.error,
+      providerSecretValue: input.providerSecretValue,
+    })
   }
+
+  const redactedError = redactCodexProviderFailureError({
+    error: input.error,
+    providerSecretValue: input.providerSecretValue,
+  })
 
   if (
-    input.error instanceof Error &&
-    input.error.message.includes(VENICE_CODEX_FAILURE_HINT)
+    redactedError instanceof Error &&
+    redactedError.message.includes(failureHint)
   ) {
-    return input.error
+    return redactedError
   }
 
-  if (input.error instanceof VaultCliError) {
+  if (redactedError instanceof VaultCliError) {
     return new VaultCliError(
-      input.error.code,
-      `${input.error.message} ${VENICE_CODEX_FAILURE_HINT}`,
-      input.error.context,
+      redactedError.code,
+      `${redactedError.message} ${failureHint}`,
+      redactedError.context,
     )
   }
 
-  if (input.error instanceof Error) {
-    return new VaultCliError(
-      'ASSISTANT_CODEX_FAILED',
-      `${input.error.message} ${VENICE_CODEX_FAILURE_HINT}`,
+  if (redactedError instanceof Error) {
+    setCodexProviderFailureErrorMessage(
+      redactedError,
+      `${redactedError.message} ${failureHint}`,
     )
+    return redactedError
   }
 
   return new VaultCliError(
     'ASSISTANT_CODEX_FAILED',
-    VENICE_CODEX_FAILURE_HINT,
+    failureHint,
   )
+}
+
+function redactCodexProviderFailureError(input: {
+  error: unknown
+  providerSecretValue?: string | null
+}): unknown {
+  if (!(input.error instanceof Error)) {
+    return input.error
+  }
+
+  Object.defineProperty(input.error, 'message', {
+    configurable: true,
+    value: redactCodexProviderFailureText({
+      providerSecretValue: input.providerSecretValue,
+      text: input.error.message,
+    }),
+  })
+  return input.error
+}
+
+function setCodexProviderFailureErrorMessage(error: Error, message: string): void {
+  Object.defineProperty(error, 'message', {
+    configurable: true,
+    value: message,
+  })
+}
+
+function redactCodexProviderFailureText(input: {
+  providerSecretValue?: string | null
+  text: string
+}): string {
+  let redacted = redactAssistantStateString(input.text)
+  const providerSecretValue = normalizeNullableString(input.providerSecretValue)
+  if (providerSecretValue) {
+    redacted = redacted.split(providerSecretValue).join('[REDACTED]')
+  }
+
+  return redacted
 }
 
 function hasCodexAssistantProviderUsageData(

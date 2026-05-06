@@ -42,10 +42,6 @@ import {
   isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '../src/assistant/shared.ts'
-import {
-  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
-} from '../src/assistant/target-runtime.ts'
-
 test('assistant shared and state-id helpers handle empty, invalid, and valid inputs', () => {
   const nonStringEnv = { ...process.env }
   Object.defineProperty(nonStringEnv, 'OPENAI_API_KEY', {
@@ -190,7 +186,6 @@ test('assistant provider helpers cover Codex inference and serialization branche
       codexHome: null,
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
-      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
       oss: false,
       profile: null,
     },
@@ -206,7 +201,6 @@ test('assistant provider helpers cover Codex inference and serialization branche
       codexHome: null,
       model: null,
       modelProvider: null,
-      modelProviderConfig: null,
       oss: false,
       profile: 'hosted',
     },
@@ -218,7 +212,6 @@ test('assistant provider helpers cover Codex inference and serialization branche
     approvalPolicy: null,
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: false,
     profile: null,
     provider: 'codex-cli',
@@ -232,7 +225,6 @@ test('assistant provider helpers cover Codex inference and serialization branche
     codexHome: null,
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: false,
     profile: null,
     reasoningEffort: 'medium',

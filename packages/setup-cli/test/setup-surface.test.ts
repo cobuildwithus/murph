@@ -696,6 +696,11 @@ test('interactive onboard lets the wizard switch a local Codex flag back to clou
 test('interactive onboard resolves Venice model provider before prompting for provider keys', async () => {
   const order: string[] = []
   const promptCalls: Array<Record<string, unknown>> = []
+  const setupHostCalls: Array<{
+    envOverrides?: NodeJS.ProcessEnv
+    localEnvOverrides?: NodeJS.ProcessEnv
+  }> = []
+  const sentinelKey = 'venice_secret_SENTINEL'
 
   await runSetupCli(
     ['onboard', '--vault', './assistant-venice-vault'],
@@ -736,12 +741,16 @@ test('interactive onboard resolves Venice model provider before prompting for pr
             wearables: [...input.wearables],
           })
           return {
-            VENICE_API_KEY: 'test-venice-key',
+            VENICE_API_KEY: sentinelKey,
           }
         },
       },
       services: {
         async setupHost(input) {
+          setupHostCalls.push({
+            envOverrides: input.envOverrides,
+            localEnvOverrides: input.localEnvOverrides,
+          })
           return makeSetupResult(input.vault, {
             assistant: input.assistant,
           })
@@ -780,6 +789,61 @@ test('interactive onboard resolves Venice model provider before prompting for pr
       wearables: [],
     },
   ])
+  assert.deepEqual(setupHostCalls, [
+    {
+      envOverrides: undefined,
+      localEnvOverrides: {
+        VENICE_API_KEY: sentinelKey,
+      },
+    },
+  ])
+})
+
+test('noninteractive Venice setup requires provider key in the effective environment', async () => {
+  let setupHostCalls = 0
+  const result = await runSetupCliJson<SetupResult>(
+    [
+      'onboard',
+      '--vault',
+      './assistant-venice-vault',
+      '--assistantPreset',
+      'codex',
+      '--assistantModelProvider',
+      'venice',
+      '--assistantModel',
+      'venice-model',
+    ],
+    {
+      commandName: 'murph',
+      runtimeEnv: {
+        getCurrentEnv() {
+          return {}
+        },
+        async promptForMissing() {
+          throw new Error('noninteractive setup must not prompt for provider keys')
+        },
+      },
+      services: {
+        async setupHost(input) {
+          setupHostCalls += 1
+          return makeSetupResult(input.vault)
+        },
+        async setupMacos(input) {
+          setupHostCalls += 1
+          return makeSetupResult(input.vault)
+        },
+      } satisfies NonNullable<SetupCliOptions['services']>,
+      terminal: {
+        stdinIsTTY: false,
+        stderrIsTTY: false,
+      },
+    },
+  )
+
+  assert.equal(result.ok, false)
+  assert.equal(result.error?.code, 'SETUP_ASSISTANT_PROVIDER_ENV_MISSING')
+  assert.match(result.error?.message ?? '', /VENICE_API_KEY/u)
+  assert.equal(setupHostCalls, 0)
 })
 
 test('setup CLI helper exports keep interactive and post-launch decisions stable', () => {

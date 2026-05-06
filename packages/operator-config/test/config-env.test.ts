@@ -403,13 +403,6 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     executionDriver: 'codex-app-server',
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    modelProviderConfig: {
-      baseUrl: 'https://ai-gateway.vercel.sh/v1',
-      envKey: 'VERCEL_AI_API_KEY',
-      id: 'vercel-ai-gateway',
-      name: 'Vercel AI Gateway',
-      wireApi: 'responses',
-    },
     oss: false,
     profile: null,
     provider: 'codex-cli',

@@ -138,11 +138,6 @@ describe('assistant store persistence seams', () => {
       reasoningEffort: 'medium',
       resumeKind: 'codex-thread',
     })
-    expect(roundTrippedSession.providerOptions.modelProviderConfig).toMatchObject({
-      envKey: 'VERCEL_AI_API_KEY',
-      id: 'vercel-ai-gateway',
-      wireApi: 'responses',
-    })
     expect(roundTrippedSession.providerOptions.continuityFingerprint).toEqual(
       expect.any(String),
     )
