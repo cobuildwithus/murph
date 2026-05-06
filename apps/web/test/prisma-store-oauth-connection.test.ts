@@ -664,6 +664,73 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnectionSecret.upsert).not.toHaveBeenCalled();
   });
 
+  it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {
+    let stored = createConnection({
+      accessTokenEncrypted: null,
+      id: "dsc_123",
+      keyVersion: null,
+      provider: "whoop",
+      refreshTokenEncrypted: null,
+      status: "disconnected",
+      tokenVersion: null,
+      userId: "user-123",
+    });
+    const updateConnection = vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+      stored = {
+        ...stored,
+        ...data,
+        updatedAt: new Date("2026-03-26T04:00:00.000Z"),
+      };
+      return cloneConnection(stored);
+    });
+
+    const tx = {
+      deviceConnection: {
+        findUnique: async () => cloneConnection(stored),
+        update: updateConnection,
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery", "read:sleep"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: "2026-03-26T09:00:00.000Z",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dsc_123",
+      provider: "whoop",
+      status: "active",
+    }));
+
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        accessTokenEncrypted: "enc:new-access-token",
+        keyVersion: "v1",
+        refreshTokenEncrypted: "enc:new-refresh-token",
+        status: "active",
+        tokenVersion: 1,
+      }),
+    }));
+    expect(stored.status).toBe("active");
+  });
+
   it("clears hosted OAuth tokens when post-connect setup fails", async () => {
     let stored = createConnection({
       accessTokenEncrypted: "enc:access-token",
