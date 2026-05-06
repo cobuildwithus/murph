@@ -1,37 +1,59 @@
-# Hosted account data deletion and export
+# Hosted account data deletion and vault export
 
-Last verified: 2026-04-30
+Last verified: 2026-05-07
 
 ## Purpose
 
-Murph hosted users need a real, backend-backed way to export account data and delete live account data from the Settings page before wider beta. The MVP workflow is intentionally conservative: the export requires an authenticated confirmed POST before returning a no-store JSON attachment, and deletion requires an authenticated destructive request with two user confirmations before deletion starts.
+Murph hosted users need a real way to export useful private vault data and delete live account data from the Settings page before wider beta. The primary user-facing export downloads the decrypted browser-vault replica JSON that powers dashboard pages. Deletion requires an authenticated destructive request with two user confirmations before deletion starts.
 
 ## User-facing entry points
 
 - `/settings` includes a **Data & privacy** section.
-- **Export data** opens a confirmation dialog that requires an acknowledgement checkbox plus the exact phrase `EXPORT MY DATA`, then calls `POST /api/settings/data-export` and downloads a JSON attachment.
+- **Export vault** opens a confirmation dialog that requires an acknowledgement checkbox plus the exact phrase `EXPORT MY VAULT`, then loads the current browser-vault replica through `/api/settings/vault-export/session` and downloads it as a JSON attachment in the browser.
 - **Delete data** opens a two-step dialog. The first step explains the high-value stores covered. The second step requires the exact phrase `DELETE MY MURPH DATA` plus explicit acknowledgements that live deletion is irreversible and that providers, vendors, and backups have separate retention rules.
 
 ## Security model
 
-The export and delete endpoints are intentionally stricter than normal settings reads.
+The export and delete paths are intentionally stricter than normal settings reads.
 
-1. `POST /api/settings/data-export` and `POST /api/settings/privacy/delete` require an authenticated Murph hosted app session via `requireHostedAppSessionFromRequest`, including members who need privacy access after losing active billing state.
-2. Both routes enforce browser mutation-origin protection with `assertHostedOnboardingMutationOrigin`, allowing only the canonical hosted origin or explicitly trusted mutation origins.
-3. Both routes parse JSON through the hosted onboarding JSON helper with a 4 KiB body limit instead of accepting form-encoded, ambiguous, or oversized bodies.
-4. `parseHostedDataExportRequest` requires the exact `EXPORT MY DATA` phrase plus sensitive-download acknowledgement. Lowercase, extra spaces, or omitted acknowledgement fail with structured 400 errors.
-5. `parseHostedAccountDeletionRequest` requires the exact deletion confirmation phrase. Lowercase, extra spaces, or omitted acknowledgements fail with structured 400 errors.
-6. The data export response is a JSON attachment with `private, no-store, no-cache` caching headers, same-origin resource policy, no referrer policy, and content-type sniffing disabled.
-7. Provider revocation runs before local database deletion while local token references are still readable.
-8. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
-9. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
-10. Cloudflare runner/R2 cleanup runs only after the Prisma transaction commits, so a database failure does not leave a still-present account with already-destroyed runner state.
+1. Settings vault export uses the same encrypted browser-vault session machinery as dashboard reads through the privacy-specific `POST /api/settings/vault-export/session` route. It requires an authenticated hosted app session, launch-required legal consent, browser mutation-origin protection, and a caller-provided browser public key before returning a per-session encrypted replica.
+2. The Settings client decrypts the browser-vault replica in-browser and downloads the decrypted JSON. The decrypted vault payload is not routed through the hosted account metadata export route.
+3. Settings vault export and `POST /api/settings/data-export` both use authenticated hosted app-session privacy access, including members who need export access after losing active billing state. The dashboard `POST /api/browser-vault/session` route remains active-access gated for normal app reads.
+4. `POST /api/settings/privacy/delete` requires an authenticated Murph hosted app session via `requireHostedAppSessionFromRequest`, including members who need privacy access after losing active billing state.
+5. The account metadata export and deletion routes enforce browser mutation-origin protection with `assertHostedOnboardingMutationOrigin`, allowing only the canonical hosted origin or explicitly trusted mutation origins.
+6. The account metadata export and deletion routes parse JSON through the hosted onboarding JSON helper with a 4 KiB body limit instead of accepting form-encoded, ambiguous, or oversized bodies.
+7. `parseHostedDataExportRequest` still requires the exact `EXPORT MY DATA` phrase plus sensitive-download acknowledgement for direct account metadata export route callers.
+8. `parseHostedAccountDeletionRequest` requires the exact deletion confirmation phrase. Lowercase, extra spaces, or omitted acknowledgements fail with structured 400 errors.
+9. Provider revocation runs before local database deletion while local token references are still readable.
+10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
+11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
+12. Cloudflare runner/R2 cleanup runs only after the Prisma transaction commits, so a database failure does not leave a still-present account with already-destroyed runner state.
 
 ## Export contract
 
-The user-facing export route calls `buildHostedDataExport`, which returns schema `murph.hosted-data-export.v1`.
+The Settings **Export vault** workflow downloads the browser-vault replica schema `murph.browser-vault-replica`.
 
 The export includes:
+
+- Browser-safe private vault entities from the browser-vault policy families: allergy, assessment, condition, event, experiment, family, genetics, goal, journal, protocol, regimen, provider, sample, and workout format.
+- Entity attributes, lookup ids, titles, tags, status, dates, links, and bounded body previews.
+- Metric rows, metric selection rows, metric goal progress rows, source-health rows, weekly sample summaries, assistant summary highlights, timeline rows, and search rows.
+- Browser-vault policy metadata, generated timestamp, data version, and source bundle hash already used by the browser-vault freshness contract.
+
+The Settings vault export does not include:
+
+- Raw local vault files or a full hosted workspace archive.
+- OAuth access and refresh tokens.
+- Token hashes.
+- Hosted mailbox ciphertext or arbitrary decoded mailbox payload bodies.
+- CSRF, browser assertion, internal request, and OAuth state nonce tables.
+- Active invite codes.
+- Hosted R2 object keys for workspace snapshots, browser-vault replicas, artifacts, runner secrets, or raw email.
+- API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
+
+The direct account metadata export route calls `buildHostedDataExport`, which returns schema `murph.hosted-data-export.v1`.
+
+That account metadata export includes:
 
 - Hosted member core fields plus decrypted user-facing identity, routing, billing reference, and email authorization fields when available.
 - Mailbox items with envelope metadata, payload byte counts, and payload presence flags, plus lane counters and Linq daily state.
@@ -42,7 +64,7 @@ The export includes:
 - AI usage rows with environment, gateway, session, turn, and Stripe metering internals replaced by presence flags.
 - Per-store row limits and truncation metadata. Each multi-row export query returns at most 250 rows for this MVP.
 
-The export explicitly omits:
+The account metadata export explicitly omits:
 
 - OAuth access and refresh tokens.
 - Token hashes.

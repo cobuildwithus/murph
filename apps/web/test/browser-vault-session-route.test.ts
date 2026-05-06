@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
@@ -29,6 +30,7 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSessionFromRequest: mocks.requireActivePrivyMemberAuth,
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -48,12 +50,15 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
 }));
 
 type BrowserVaultSessionRouteModule = typeof import("../app/api/browser-vault/session/route");
+type SettingsVaultExportSessionRouteModule = typeof import("../app/api/settings/vault-export/session/route");
 
 let browserVaultSessionRoute: BrowserVaultSessionRouteModule;
+let settingsVaultExportSessionRoute: SettingsVaultExportSessionRouteModule;
 
 describe("browser vault session route", () => {
   beforeAll(async () => {
     browserVaultSessionRoute = await import("../app/api/browser-vault/session/route");
+    settingsVaultExportSessionRoute = await import("../app/api/settings/vault-export/session/route");
   });
 
   beforeEach(() => {
@@ -62,6 +67,11 @@ describe("browser vault session route", () => {
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
+      member: {
+        id: "member_123",
+      },
+    });
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
       },
@@ -94,6 +104,35 @@ describe("browser vault session route", () => {
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state: "empty",
+    });
+  });
+
+  it("uses authenticated privacy access, not active billing access, for Settings vault export sessions", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
