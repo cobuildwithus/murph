@@ -16,14 +16,22 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  HostedBillingSettings: vi.fn((props: { authenticated: boolean }) =>
-    React.createElement("div", null, `Hosted billing settings ${String(props.authenticated)}`)),
+  HostedBillingSettings: vi.fn((props: {
+    authenticated: boolean;
+    currentBillingPlanCode?: string | null;
+  }) =>
+    React.createElement(
+      "div",
+      null,
+      `Hosted billing settings ${String(props.authenticated)} ${String(props.currentBillingPlanCode ?? "")}`,
+    )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedDeviceSyncSettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted device sync settings ${String(props.authenticated)}`)),
   prisma: {},
   readHostedAccountSettingsSnapshot: vi.fn(),
+  readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
 }));
 
@@ -47,6 +55,10 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
@@ -135,6 +147,12 @@ test("SettingsPage reads the app session and persisted account settings into the
     telegramUserId: null,
     telegramUserLookupKey: null,
   });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    currentBillingPlanCode: "launch_monthly",
+    memberId: "member_123",
+    stripeCustomerId: "cus_123",
+    stripeSubscriptionId: "sub_123",
+  });
   const accountSnapshot = {
     email: {
       address: "verified@example.com",
@@ -172,8 +190,13 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
+    currentBillingPlanCode: "launch_monthly",
   }), undefined);
   expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: mocks.prisma,
+  });
+  expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
     memberId: "member_123",
     prisma: mocks.prisma,
   });

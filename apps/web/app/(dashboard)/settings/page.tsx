@@ -9,6 +9,7 @@ import { PageHeader } from "@/src/components/ui/page-header";
 import { getPrisma } from "@/src/lib/prisma";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -24,17 +25,22 @@ export default async function SettingsPage() {
     redirect("/");
   }
 
-  const [routing, account] = authenticatedMember
+  const prisma = getPrisma();
+  const [routing, account, billingRef] = authenticatedMember
     ? await Promise.all([
         readHostedMemberRoutingState({
           memberId: authenticatedMember.id,
-          prisma: getPrisma(),
+          prisma,
         }),
         readHostedAccountSettingsSnapshot({
           memberId: authenticatedMember.id,
         }),
+        readHostedMemberStripeBillingRef({
+          memberId: authenticatedMember.id,
+          prisma,
+        }),
       ])
-    : [null, null];
+    : [null, null, null];
 
   return (
     <div className="flex flex-col gap-8">
@@ -48,7 +54,10 @@ export default async function SettingsPage() {
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Billing
           </div>
-          <HostedBillingSettings authenticated={authenticated} />
+          <HostedBillingSettings
+            authenticated={authenticated}
+            currentBillingPlanCode={billingRef?.currentBillingPlanCode ?? null}
+          />
         </section>
 
         <section className="flex flex-col gap-4">

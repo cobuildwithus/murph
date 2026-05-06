@@ -6,14 +6,19 @@ import { Button } from "@/src/components/ui/button";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
+import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
 interface HostedBillingPortalResponse {
   url: string;
 }
 
-export function HostedBillingSettingsAction() {
+export function HostedBillingSettingsAction(props: {
+  showUpgrade?: boolean;
+}) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isUpgradePending, setIsUpgradePending] = useState(false);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
+  const isBillingActionPending = isUpgradePending || isOpeningPortal;
 
   async function handleManageSubscription() {
     setErrorMessage(null);
@@ -34,10 +39,23 @@ export function HostedBillingSettingsAction() {
   }
 
   return (
-    <div className="flex flex-col items-start gap-2 sm:items-end">
-      <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal}>
-        {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
-      </Button>
+    <div className="flex flex-col items-start gap-3 sm:items-end">
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-start">
+        {props.showUpgrade === true ? (
+          <UpgradeToEdgeButton
+            disabled={isBillingActionPending}
+            onPendingChange={setIsUpgradePending}
+          />
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void handleManageSubscription()}
+          disabled={isBillingActionPending}
+        >
+          {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
+        </Button>
+      </div>
       <p
         role="alert"
         aria-live="polite"

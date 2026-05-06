@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
+import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usage-allowance";
 
 interface UsageLimitBannerProps {
@@ -47,7 +48,7 @@ export function UsageLimitBanner({ noticeCode }: UsageLimitBannerProps) {
   return (
     <section
       aria-label="Usage limit"
-      className="flex gap-5 rounded-lg border border-[#c4a882]/25 border-l-[3px] border-l-[#7a8c6e] bg-[rgba(255,252,246,0.9)] p-5 sm:items-center sm:justify-between sm:p-6"
+      className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 border-l-[3px] border-l-[#7a8c6e] bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
     >
       <div className="min-w-0">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -61,13 +62,19 @@ export function UsageLimitBanner({ noticeCode }: UsageLimitBannerProps) {
         </p>
       </div>
 
-      <Link
-        href="/settings"
-        className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
-      >
-        {copy.action}
-        <ArrowRight className="size-4" aria-hidden="true" />
-      </Link>
+      {noticeCode === "pulse_upgrade_edge" ? (
+        <UpgradeToEdgeButton presentation="banner">
+          {copy.action}
+        </UpgradeToEdgeButton>
+      ) : (
+        <Link
+          href="/settings"
+          className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
+        >
+          {copy.action}
+          <ArrowRight className="size-4" aria-hidden="true" />
+        </Link>
+      )}
     </section>
   );
 }
