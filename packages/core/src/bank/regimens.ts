@@ -7,6 +7,10 @@ import { generateRecordId } from "../ids.ts";
 import { defaultTimeZone, toLocalDayKey } from "../time.ts";
 import { loadVault } from "../vault.ts";
 import {
+  canonicalLogicalResource,
+  withCanonicalResourceLocks,
+} from "../operations/index.ts";
+import {
   loadMarkdownRegistryDocuments,
   resolveMarkdownRegistryUpsertTarget,
   writeMarkdownRegistryRecord,
@@ -57,6 +61,8 @@ import type {
 } from "./types.ts";
 
 type RegimenUpsertPayload = Omit<RegimenEntity, "schemaVersion" | "docType" | "regimenId">;
+
+const regimenRegistryResource = canonicalLogicalResource("bank/regimens", REGIMENS_DIRECTORY);
 
 function deriveRegimenGroupFromRelativePath(relativePath: string, directory: string): string | null {
   const prefix = `${directory.replace(/\/+$/u, "")}/`;
@@ -553,6 +559,12 @@ async function resolveRegimenRecord(input: ReadRegimenInput): Promise<RegimenSto
 export async function upsertRegimen(
   input: UpsertRegimenInput,
 ): Promise<UpsertRegimenResult> {
+  return await withRegimenRegistryLock(input.vaultRoot, () => upsertRegimenWithLatestRegistry(input));
+}
+
+async function upsertRegimenWithLatestRegistry(
+  input: UpsertRegimenInput,
+): Promise<UpsertRegimenResult> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const today = toLocalDayKey(new Date(), vault.metadata.timezone ?? defaultTimeZone(), "startedOn");
   const normalizedRegimenId = normalizeId(input.regimenId, "regimenId", "reg");
@@ -688,6 +700,12 @@ export async function readRegimen(
 export async function stopRegimen(
   input: StopRegimenInput,
 ): Promise<StopRegimenResult> {
+  return await withRegimenRegistryLock(input.vaultRoot, () => stopRegimenWithLatestRegistry(input));
+}
+
+async function stopRegimenWithLatestRegistry(
+  input: StopRegimenInput,
+): Promise<StopRegimenResult> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const current = await resolveRegimenRecord(input);
   const stoppedOn = optionalDateOnly(
@@ -724,4 +742,15 @@ export async function stopRegimen(
     auditPath,
     record,
   };
+}
+
+async function withRegimenRegistryLock<TResult>(
+  vaultRoot: string,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  return await withCanonicalResourceLocks({
+    vaultRoot,
+    resources: [regimenRegistryResource],
+    run,
+  });
 }
