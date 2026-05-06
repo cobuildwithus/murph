@@ -362,6 +362,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       expectedUserId: input.request.userId,
       workspace: workspaceRead.workspace,
     });
+    if (isIdleShutdownCheckpoint && !workspaceRead.workspace) {
+      return {
+        status: "idle",
+      };
+    }
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
     );
@@ -582,9 +587,7 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
       nextWakeAt: null,
       nextWakeReason: null,
       reason: "idle_shutdown",
-      ...(input.redactedStatus === undefined
-        ? {}
-        : { redactedStatus: input.redactedStatus ?? null }),
+      redactedStatus: input.redactedStatus ?? null,
     })),
     input.livenessAbortSignal,
   );

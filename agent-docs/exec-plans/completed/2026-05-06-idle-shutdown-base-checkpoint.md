@@ -276,12 +276,13 @@ idle_shutdown_checkpoint_workspace_version =
 Start with:
 
 ```text
-idleShutdownSafetyMarginMs = 60_000
+idleShutdownSafetyMarginMs = 5_000
 ```
 
-Make the safety margin env-configurable with conservative bounds. If the
-configured idle TTL is too short for the margin, clamp the margin rather than
-scheduling in the past.
+Make the safety margin env-configurable with conservative bounds. The default
+must stay small so a 5-minute idle TTL checkpoints immediately before expiry,
+not a minute early. If the configured idle TTL is too short for the margin,
+clamp the margin rather than scheduling in the past.
 
 Do not add min-interval or last-success state in the first implementation.
 Duplicate suppression should come from clearing the two pending fields, matching
@@ -473,7 +474,7 @@ durability/compaction miss, not a reason to weaken the trust boundary.
    lease does not consume `pending_nudge`.
 6. On successful idle checkpoint completion, destroy the warm container if no
    pending nudge appeared; log destroy success/failure.
-7. Add hosted-local scenario proof.
+7. Add hosted-local scenario proof before broad production rollout.
 8. After production confidence, demote broad full checkpoint reasons:
    `maintenance` first, then `system_mailbox_receipt` only if activation
    bootstrap state has a separate full/base guarantee.
@@ -570,11 +571,9 @@ fail-closed order:
    `"idle_shutdown_checkpoint"`, with no producer emitting it.
 2. Deploy assistant-runtime/container code that understands
    `"idle_shutdown_checkpoint"` and runs the checkpoint-only path.
-3. Enable Cloudflare scheduling behind one explicit rollout flag so production
-   can stop emitting the new reason quickly if container version skew appears.
-   If the first version ships without a flag, the operational fallback is to
-   set the idle-checkpoint safety margin beyond the idle TTL so the producer
-   cannot schedule the idle checkpoint.
+3. Deploy Cloudflare worker and runner container together after web/shared
+   support is live, so the producer does not emit the new reason to old
+   consumers.
 4. Only later rely on `idle_shutdown` metrics or demote existing full reasons.
 
 Old web/control-plane callbacks currently reject unknown checkpoint reasons, and

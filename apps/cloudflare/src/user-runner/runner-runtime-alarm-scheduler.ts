@@ -17,6 +17,12 @@ export class RunnerRuntimeAlarmScheduler {
     return record;
   }
 
+  async syncStoredAlarm(): Promise<RunnerStateRecord> {
+    const record = await this.stateStore.readState();
+    await this.applyAlarm(readEarliestRunnerAlarmAt(record));
+    return record;
+  }
+
   private async applyAlarm(nextWakeAt: string | null): Promise<void> {
     if (nextWakeAt) {
       await this.state.storage.setAlarm(new Date(nextWakeAt));
@@ -32,17 +38,10 @@ function readEarliestRunnerAlarmAt(record: RunnerStateRecord): string | null {
 }
 
 function earliestIsoDate(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
+  const leftMs = left ? Date.parse(left) : Number.NaN;
+  const rightMs = right ? Date.parse(right) : Number.NaN;
   if (!Number.isFinite(leftMs)) {
-    return right;
+    return Number.isFinite(rightMs) ? right : null;
   }
   if (!Number.isFinite(rightMs)) {
     return left;

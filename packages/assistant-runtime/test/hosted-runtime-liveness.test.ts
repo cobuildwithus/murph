@@ -74,6 +74,37 @@ describe("startRuntimeLivenessHeartbeat", () => {
     await heartbeat.stop();
   });
 
+  test("reports pending nudges as available input", async () => {
+    vi.useFakeTimers();
+    const available: string[] = [];
+    const port: RuntimeLivenessPort = {
+      async touch() {
+        return {
+          nextAlarmAt: "2026-04-27T00:00:45.000Z",
+          ok: true,
+          pendingNudge: true,
+        };
+      },
+    };
+
+    const heartbeat = startRuntimeLivenessHeartbeat({
+      intervalMs: 1_000,
+      onInputAvailable(result) {
+        available.push(result.nextAlarmAt ?? "none");
+      },
+      port,
+      requestId: "request_123",
+    });
+
+    assert.deepEqual(await heartbeat.initialTouch, {
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+      pendingNudge: true,
+    });
+    await vi.waitFor(() => assert.deepEqual(available, ["2026-04-27T00:00:45.000Z"]));
+    await heartbeat.stop();
+  });
+
   test("skips overlapping touches and reports rejected liveness", async () => {
     vi.useFakeTimers();
     let releaseFirstTouch!: () => void;
