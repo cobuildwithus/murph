@@ -58,7 +58,7 @@ restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
 pull pending device-sync dirty rows
 checkpoint after import
-run best-effort local inbox projection/parser enrichment and checkpoint it
+run best-effort local inbox projection/parser enrichment without checkpointing it
 run local runtime work until idle or budget
 checkpoint final runtime state
 project redacted status/logs
@@ -74,13 +74,15 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, checkpoints the mailbox staged
 watermark, and only then makes one best-effort inbox projection attempt while
-the decoded wake is still in memory. Projection status and inbox artifacts are
-checkpointed separately as diagnostic/enrichment state. Failed projection is not
-durably retried by hosted runtime unless a future executor adds enough durable
-projection reference data to reconstruct the work without raw payload
-duplication. Inbox capture and parser state remain useful projections for
-search, display, attachment enrichment, and debugging, but hosted callers must
-not stage hidden runtime-only inbox rows to make Codex admission succeed.
+the decoded wake is still in memory. Projection status is logged and local inbox
+artifacts may help the same invocation, but hosted runtime must not take a
+separate workspace checkpoint just to persist projection/cache cleanup. Failed
+projection is not durably retried by hosted runtime unless a future executor
+adds enough typed remote projection reference data to reconstruct the work
+without raw payload duplication. Inbox capture and parser state remain useful
+projections for search, display, attachment enrichment, and debugging, but
+hosted callers must not stage hidden runtime-only inbox rows to make Codex
+admission succeed.
 Invocation-local Worker routes such as artifact writes, browser-vault replica
 writes, provider effects, and mailbox payload decode authorize the current
 runner by active invocation identity (`attemptId`, `leaseGeneration`, and
@@ -178,10 +180,11 @@ the same invocation instead of hiding them behind a stale pre-restore read. The
 runtime stages decoded conversation rows as assistant input, checkpoints
 immediately after staging, and attempts inbox projection once as a
 post-checkpoint enrichment effect before assistant admission. Projection status
-and artifacts checkpoint separately and best-effort, so failed or slow
-projection does not delay the staged mailbox watermark and does not imply a
-durable retry queue. Successful projection may make parsed or bounded attachment
-evidence available to the same assistant turn.
+is logged and artifacts remain rebuildable best-effort state rather than a
+reason to take another workspace checkpoint, so failed or slow projection does
+not delay the staged mailbox watermark and does not imply a durable retry queue.
+Successful projection may make parsed or bounded attachment evidence available
+to the same assistant turn.
 Retryable mailbox import blockers, including lane gaps, missing or temporarily
 unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
@@ -211,9 +214,10 @@ Mailbox import has no provider-visible pre-assistant side-effect phase.
 Provider-visible cleanup and read acknowledgement must not run between import
 checkpoint and assistant admission. Local inbox projection and parser enrichment
 may run after the import checkpoint and before assistant admission because they
-only update vault projection artifacts and `AssistantInputEvent` projection
-state. Linq inbound message deletion is still eventual, but it is queued only
-after terminal handling evidence is durable under
+only update rebuildable local projection artifacts and `AssistantInputEvent`
+projection metadata. These projection updates must not request an additional
+workspace checkpoint. Linq inbound message deletion is still eventual, but it is
+queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
 drained through the hosted provider-cleanup retry state after the next workspace
 checkpoint.
