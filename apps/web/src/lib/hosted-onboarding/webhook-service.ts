@@ -20,6 +20,7 @@ import {
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
+  sanitizeHostedOnboardingStructuredLogDetails,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -127,6 +128,23 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       source: "linq",
       userId: plan.wakeUserId,
     });
+
+    console.warn(
+      "Hosted Linq webhook outcome.",
+      sanitizeHostedOnboardingStructuredLogDetails({
+        desiredSideEffectCount: plan.desiredSideEffects.length,
+        duplicate: Boolean(plan.response.duplicate),
+        elapsedMs: Date.now() - timing.startedAtMs,
+        eventType,
+        ok: plan.response.ok,
+        responseReason,
+        wakeHandoffReason: wakeHandoff?.reason ?? null,
+        wakeHandoffRunnerNudgeAccepted: wakeHandoff?.runnerNudgeAccepted ?? false,
+        wakeHandoffStarted: wakeHandoff?.started ?? false,
+        wakeHandoffWorkflowStarted: wakeHandoff?.workflowStarted ?? false,
+        wakeUserPresent: Boolean(plan.wakeUserId),
+      }),
+    );
 
     finishHostedOnboardingTiming(timing, "completed", {
       duplicate: Boolean(plan.response.duplicate),
