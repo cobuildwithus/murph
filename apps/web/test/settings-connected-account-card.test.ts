@@ -42,8 +42,8 @@ describe("ConnectedAccountCard", () => {
     expect(markup).toContain("•••• 7706");
     expect(markup).toContain("Verified");
     expect(markup).toContain("Change");
-    expect(markup).toContain("bg-muted/40");
-    expect(markup).toContain("border-border");
+    expect(markup).toContain("bg-[rgba(255,252,246,0.9)]");
+    expect(markup).toContain("border-[rgba(196,168,130,0.25)]");
     expect(markup).toContain("sm:justify-end");
   });
 
@@ -74,7 +74,7 @@ describe("ConnectedAccountCard", () => {
     expect(markup).toContain("Link email");
     expect(markup).toContain("text-muted-foreground");
     expect(markup).toContain("text-lg");
-    expect(markup).toContain("bg-muted/40");
+    expect(markup).toContain("bg-[rgba(255,252,246,0.9)]");
     expect(markup).toContain("sm:justify-end");
   });
 

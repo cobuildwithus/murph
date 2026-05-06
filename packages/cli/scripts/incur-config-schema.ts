@@ -49,7 +49,7 @@ export async function generateIncurArtifacts(
     options,
     async ({ generatedConfigSchemaPath, generatedTypesPath }) => ({
       configSchema: await readFile(generatedConfigSchemaPath, 'utf8'),
-      types: await readFile(generatedTypesPath, 'utf8'),
+      types: quoteInvalidTypePropertyNames(await readFile(generatedTypesPath, 'utf8')),
     }),
   )
 }
@@ -105,4 +105,12 @@ async function withGeneratedIncurArtifacts<T>(
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
+}
+
+function quoteInvalidTypePropertyNames(types: string): string {
+  return types.replace(
+    /([;{]\s*)([A-Za-z_$][\w$]*(?:-[A-Za-z_$][\w$]*)+)(\??:)/gu,
+    (_match, prefix: string, propertyName: string, suffix: string) =>
+      `${prefix}${JSON.stringify(propertyName)}${suffix}`,
+  )
 }

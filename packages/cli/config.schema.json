@@ -2916,6 +2916,11 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "description": "Live device-sync provider key such as junction, whoop, or oura."
+                                },
+                                "source-provider": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Upstream device source provider such as fitbit, garmin, whoop, or oura."
                                 }
                               }
                             }

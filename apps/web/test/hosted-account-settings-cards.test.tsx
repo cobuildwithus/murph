@@ -20,9 +20,9 @@ describe("HostedAccountSettingsCards", () => {
       }),
     );
 
-    expect(withoutPhone).not.toContain("Message Murph");
+    expect(withoutPhone).not.toContain("Text Murph");
     expect(withoutPhone).not.toContain("sms:+15550100001");
-    expect(withPhone).toContain("Message Murph");
+    expect(withPhone).toContain("Text Murph");
     expect(withPhone).toContain("sms:+15550100001");
   });
 });

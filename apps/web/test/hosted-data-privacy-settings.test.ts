@@ -77,7 +77,11 @@ vi.mock("@/src/components/ui/button", () => ({
 vi.mock("@/src/components/ui/dialog", () => ({
   Dialog: ({ children, open }: { children?: ReactNode; open: boolean }) =>
     open ? createElement("div", { "data-dialog": "true" }, children) : null,
-  DialogContent: createPassthrough("div"),
+  DialogContent: (props: Record<string, unknown> & { children?: ReactNode }) => {
+    const { children, ...rest } = props;
+    delete rest.showCloseButton;
+    return createElement("div", rest, children);
+  },
   DialogDescription: createPassthrough("p"),
   DialogFooter: createPassthrough("div"),
   DialogHeader: createPassthrough("div"),
@@ -140,24 +144,9 @@ afterEach(async () => {
 });
 
 describe("HostedDataPrivacySettings", () => {
-  test.each([
-    {
-      acknowledgedSensitiveDownload: false,
-      confirmationText: "EXPORT MY VAULT",
-      name: "without the sensitive-data acknowledgement",
-    },
-    {
-      acknowledgedSensitiveDownload: true,
-      confirmationText: "export my vault",
-      name: "without the exact confirmation phrase",
-    },
-  ])("does not export the browser vault $name", async ({
-    acknowledgedSensitiveDownload,
-    confirmationText,
-  }) => {
+  test("does not export the browser vault without the sensitive-data acknowledgement", async () => {
     mockHostedVaultExportFlowState({
-      acknowledgedSensitiveDownload,
-      confirmationText,
+      acknowledgedSensitiveDownload: false,
     });
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -291,12 +280,10 @@ describe("HostedDataPrivacySettings", () => {
 
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
-  confirmationText?: string;
 } = {}) {
   mocks.useStateValues = [
     false,
     true,
-    input.confirmationText ?? "EXPORT MY VAULT",
     input.acknowledgedSensitiveDownload ?? true,
     null,
     false,
@@ -315,7 +302,6 @@ function mockHostedDataPrivacyDeleteFlowState() {
   mocks.useStateValues = [
     false,
     false,
-    "",
     false,
     null,
     false,
