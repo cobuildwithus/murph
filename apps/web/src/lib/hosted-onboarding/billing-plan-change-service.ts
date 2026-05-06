@@ -335,10 +335,17 @@ function buildHostedBillingPlanUpgradeSubscriptionMetadata(input: {
     billingPlanCode: input.targetPlanCode,
     checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
     memberId: input.memberId,
-    trialDurationDays: "",
-    trialPolicyVersion: "",
-    trialUsageLimitUsdMicros: "",
+    ...buildStripeMetadataUnsetFields([
+      "trialDurationDays",
+      "trialPolicyVersion",
+      "trialUsageLimitUsdMicros",
+    ]),
   };
+}
+
+function buildStripeMetadataUnsetFields(keys: readonly string[]): Stripe.MetadataParam {
+  // Stripe removes individual metadata keys when their update value is an empty string.
+  return Object.fromEntries(keys.map((key) => [key, ""]));
 }
 
 async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
