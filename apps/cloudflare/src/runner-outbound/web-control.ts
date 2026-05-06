@@ -12,6 +12,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
+  requireRunnerActiveInvocationLease,
   requireRunnerActiveInvocationLeaseWriteHeaders,
   RunnerActiveInvocationLeaseError,
 } from "./active-lease.ts";
@@ -52,30 +53,42 @@ export async function handleRunnerWebControlRequest(input: {
     return notFound();
   }
 
-  const body = input.request.method === "POST"
-    ? await readOptionalHostedRunnerWebControlBody(input.request)
-    : undefined;
-  const checkpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
-    && input.request.method === "POST"
-    ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
-    : null;
-
-  if (checkpointRequest) {
+  const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
+    && input.request.method === "POST";
+  let checkpointHeaders: ReturnType<typeof requireRunnerActiveInvocationLeaseWriteHeaders> | null =
+    null;
+  if (isCheckpointRequest) {
     try {
-      const headers = requireRunnerActiveInvocationLeaseWriteHeaders(input.request);
-      if (
-        headers.attemptId !== checkpointRequest.attemptId
-        || headers.leaseGeneration !== checkpointRequest.leaseGeneration
-        || headers.workspaceVersion !== checkpointRequest.expectedWorkspaceVersion
-      ) {
-        return unauthorized();
-      }
+      checkpointHeaders = requireRunnerActiveInvocationLeaseWriteHeaders(input.request);
+      await requireRunnerActiveInvocationLease({
+        env: input.env,
+        request: input.request,
+        userId: input.userId,
+      });
     } catch (error) {
       if (error instanceof RunnerActiveInvocationLeaseError) {
         return unauthorized();
       }
       throw error;
     }
+  }
+
+  const body = input.request.method === "POST"
+    ? await readOptionalHostedRunnerWebControlBody(input.request)
+    : undefined;
+  const checkpointRequest = isCheckpointRequest
+    ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
+    : null;
+  if (
+    checkpointHeaders
+    && checkpointRequest
+    && (
+      checkpointHeaders.attemptId !== checkpointRequest.attemptId
+      || checkpointHeaders.leaseGeneration !== checkpointRequest.leaseGeneration
+      || checkpointHeaders.workspaceVersion !== checkpointRequest.expectedWorkspaceVersion
+    )
+  ) {
+    return unauthorized();
   }
 
   const response = await fetchHostedExecutionWebControlPlaneResponse({
