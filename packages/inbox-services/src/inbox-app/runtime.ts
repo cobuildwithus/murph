@@ -13,7 +13,9 @@ import { instantiateConnector } from '../inbox-services/connectors.js'
 import {
   buildDaemonState,
   createProcessSignalBridge,
+  type InboxDaemonControlTarget,
   normalizeDaemonState,
+  verifyDaemonStateForExpectedOwner,
   writeDaemonState,
 } from '../inbox-services/daemon.js'
 import {
@@ -31,11 +33,31 @@ import {
   relativeToVault,
   runtimeNamespaceAccountId,
 } from '../inbox-services/shared.js'
-import { tryKillProcess } from '@murphai/runtime-state/node'
+import { captureProcessIdentity, tryKillProcess } from '@murphai/runtime-state/node'
 
 const FOREGROUND_CONNECTOR_RESTART_POLICY = {
   enabled: true,
 } as const
+
+function daemonControlTargetError(
+  target: Exclude<InboxDaemonControlTarget, { verified: true }>,
+): VaultCliError {
+  if (target.reason === 'not-running' || target.reason === 'pid-not-running') {
+    return new VaultCliError(
+      'INBOX_NOT_RUNNING',
+      'Inbox daemon is not currently running.',
+    )
+  }
+
+  return new VaultCliError(
+    'INBOX_STOP_UNVERIFIED',
+    'Inbox daemon PID could not be verified as the recorded daemon; refusing to signal an unverified process.',
+    {
+      pid: target.state.pid,
+      reason: target.reason,
+    },
+  )
+}
 
 function instrumentConnectorForRunEvents(
   connector: PollConnector,
@@ -431,6 +453,8 @@ export function createInboxRuntimeOps(
       const runSignal = signalBridge.signal
       const shouldReportSignal = runSignal.aborted === false
 
+      const processIdentity = await captureProcessIdentity(env.getPid())
+
       await writeDaemonState(
         paths,
         buildDaemonState(paths, {
@@ -440,6 +464,7 @@ export function createInboxRuntimeOps(
           status: 'running',
           connectorIds,
         }),
+        { processIdentity },
       )
 
       let reason: 'completed' | 'error' | 'signal' = 'completed'
@@ -520,12 +545,34 @@ export function createInboxRuntimeOps(
 
     async stop(input) {
       const paths = await ensureInitialized(env.loadInbox, input.vault)
-      const state = await normalizeDaemonState(paths, {
+      const normalizedState = await normalizeDaemonState(paths, {
         clock: env.clock,
         getPid: env.getPid,
         killProcess: env.killProcess,
       })
 
+      if (!normalizedState.running || !normalizedState.pid) {
+        throw new VaultCliError(
+          'INBOX_NOT_RUNNING',
+          'Inbox daemon is not currently running.',
+        )
+      }
+
+      const initialControlTarget = await verifyDaemonStateForExpectedOwner(
+        paths,
+        normalizedState,
+        {
+          clock: env.clock,
+          getPid: env.getPid,
+          killProcess: env.killProcess,
+        },
+      )
+
+      if (!initialControlTarget.verified) {
+        throw daemonControlTargetError(initialControlTarget)
+      }
+
+      const state = initialControlTarget.state
       if (!state.running || !state.pid) {
         throw new VaultCliError(
           'INBOX_NOT_RUNNING',
@@ -546,7 +593,37 @@ export function createInboxRuntimeOps(
         return stoppedGracefully
       }
 
-      tryKillProcess(env.killProcess, state.pid, 'SIGKILL')
+      const beforeForceKill = await verifyDaemonStateForExpectedOwner(
+        paths,
+        state,
+        {
+          clock: env.clock,
+          getPid: env.getPid,
+          killProcess: env.killProcess,
+        },
+      )
+      if (!beforeForceKill.verified) {
+        if (
+          beforeForceKill.reason === 'not-running' ||
+          beforeForceKill.reason === 'pid-not-running'
+        ) {
+          return beforeForceKill.state
+        }
+
+        throw daemonControlTargetError(beforeForceKill)
+      }
+      if (beforeForceKill.state.pid !== state.pid) {
+        throw new VaultCliError(
+          'INBOX_STOP_RESTARTED',
+          'Inbox daemon restarted under a different PID while Murph was stopping the original process.',
+          {
+            expectedPid: state.pid,
+            pid: beforeForceKill.state.pid,
+          },
+        )
+      }
+
+      tryKillProcess(env.killProcess, beforeForceKill.state.pid, 'SIGKILL')
       const stoppedForcefully = await waitForDaemonStop(paths, {
         attempts: 10,
         clock: env.clock,

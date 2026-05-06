@@ -1,6 +1,9 @@
 import {
   hasLocalStatePath,
+  matchProcessIdentity,
   readVersionedJsonStateFile,
+  type ProcessIdentity,
+  type ProcessIdentityMatch,
   writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
 import { inboxDaemonStateSchema, type InboxDaemonState } from '@murphai/operator-config/inbox-cli-contracts'
@@ -13,6 +16,24 @@ import {
 
 const INBOX_DAEMON_STATE_SCHEMA = 'murph.inbox-daemon-state.v1'
 const INBOX_DAEMON_STATE_SCHEMA_VERSION = 1
+
+type PersistedInboxDaemonState = InboxDaemonState & {
+  processIdentity: ProcessIdentity | null
+}
+
+export type InboxDaemonControlTarget =
+  | { verified: true; state: InboxDaemonState }
+  | {
+      verified: false
+      state: InboxDaemonState
+      reason:
+        | 'not-running'
+        | 'pid-not-running'
+        | 'owner-changed'
+        | 'identity-missing'
+        | 'identity-mismatched'
+        | 'identity-unverifiable'
+    }
 
 export async function normalizeDaemonState(
   paths: InboxPaths,
@@ -27,29 +48,77 @@ export async function normalizeDaemonState(
   }
 
   const state = await readDaemonState(paths)
+  const publicState = toPublicDaemonState(state)
 
-  if (!state.running || !state.pid) {
-    return state
+  if (!publicState.running || !publicState.pid) {
+    return publicState
   }
 
-  if (state.pid === input.getPid()) {
-    return state
+  if (!isProcessAlive(publicState.pid, input.killProcess)) {
+    const staleState = buildStaleDaemonState(paths, publicState, {
+      clock: input.clock,
+      message: 'Stale daemon state found; recorded PID is no longer running.',
+    })
+    await writeDaemonState(paths, staleState)
+    return staleState
   }
 
-  if (isProcessAlive(state.pid, input.killProcess)) {
-    return state
+  return publicState
+}
+
+export async function verifyDaemonStateForExpectedOwner(
+  paths: InboxPaths,
+  expected: InboxDaemonState,
+  input: {
+    clock: () => Date
+    getPid: () => number
+    killProcess?: (pid: number, signal?: NodeJS.Signals | number) => void
+    matchProcessIdentity?: (
+      pid: number,
+      expected: ProcessIdentity | null | undefined,
+    ) => Promise<ProcessIdentityMatch>
+  },
+): Promise<InboxDaemonControlTarget> {
+  if (!(await hasLocalStatePath({ currentPath: paths.inboxStatePath }))) {
+    return { verified: false, state: idleState(paths), reason: 'not-running' }
   }
 
-  const staleState = buildDaemonState(paths, {
-    ...state,
-    running: false,
-    stale: true,
-    status: 'stale',
-    stoppedAt: state.stoppedAt ?? input.clock().toISOString(),
-    message: 'Stale daemon state found; recorded PID is no longer running.',
-  })
-  await writeDaemonState(paths, staleState)
-  return staleState
+  const state = await readDaemonState(paths)
+  const current = toPublicDaemonState(state)
+  if (!current.running || !current.pid) {
+    return { verified: false, state: current, reason: 'not-running' }
+  }
+
+  if (!isProcessAlive(current.pid, input.killProcess)) {
+    const staleState = buildStaleDaemonState(paths, current, {
+      clock: input.clock,
+      message: 'Stale daemon state found; recorded PID is no longer running.',
+    })
+    await writeDaemonState(paths, staleState)
+    return { verified: false, state: staleState, reason: 'pid-not-running' }
+  }
+
+  if (
+    current.pid !== expected.pid ||
+    current.startedAt !== expected.startedAt ||
+    current.status !== expected.status
+  ) {
+    return { verified: false, state: current, reason: 'owner-changed' }
+  }
+
+  const identityMatch = await (input.matchProcessIdentity ?? matchProcessIdentity)(
+    current.pid,
+    state.processIdentity,
+  )
+  if (!identityMatch.matches) {
+    return {
+      verified: false,
+      state: current,
+      reason: mapIdentityFailureReason(identityMatch.reason),
+    }
+  }
+
+  return { verified: true, state: current }
 }
 
 export function idleState(paths: InboxPaths): InboxDaemonState {
@@ -81,12 +150,24 @@ export function buildDaemonState(
 export async function writeDaemonState(
   paths: InboxPaths,
   state: InboxDaemonState,
+  options: {
+    processIdentity?: ProcessIdentity | null
+  } = {},
 ): Promise<void> {
+  const publicState = inboxDaemonStateSchema.parse(state)
+  const persistedState: PersistedInboxDaemonState = {
+    ...publicState,
+    processIdentity:
+      publicState.running && publicState.pid
+        ? options.processIdentity ?? null
+        : null,
+  }
+
   await writeVersionedJsonStateFile({
     filePath: paths.inboxStatePath,
     schema: INBOX_DAEMON_STATE_SCHEMA,
     schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
-    value: inboxDaemonStateSchema.parse(state),
+    value: persistedState,
   })
 }
 
@@ -112,13 +193,13 @@ export function createProcessSignalBridge(): {
   }
 }
 
-async function readDaemonState(paths: InboxPaths): Promise<InboxDaemonState> {
+async function readDaemonState(paths: InboxPaths): Promise<PersistedInboxDaemonState> {
   try {
     const { value } = await readVersionedJsonStateFile({
       currentPath: paths.inboxStatePath,
       label: 'Inbox daemon state',
       parseValue(value) {
-        return inboxDaemonStateSchema.parse(value)
+        return parsePersistedDaemonState(value)
       },
       schema: INBOX_DAEMON_STATE_SCHEMA,
       schemaVersion: INBOX_DAEMON_STATE_SCHEMA_VERSION,
@@ -131,6 +212,81 @@ async function readDaemonState(paths: InboxPaths): Promise<InboxDaemonState> {
       { error: errorMessage(error) },
     )
   }
+}
+
+function parsePersistedDaemonState(value: unknown): PersistedInboxDaemonState {
+  const publicState = inboxDaemonStateSchema.parse(value)
+  const processIdentity =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? parseProcessIdentity((value as { processIdentity?: unknown }).processIdentity)
+      : null
+
+  return {
+    ...publicState,
+    processIdentity: publicState.running && publicState.pid ? processIdentity : null,
+  }
+}
+
+function parseProcessIdentity(value: unknown): ProcessIdentity | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.pid !== 'number' ||
+    !Number.isInteger(record.pid) ||
+    record.pid <= 0 ||
+    typeof record.platform !== 'string' ||
+    record.platform.length === 0 ||
+    typeof record.startToken !== 'string' ||
+    record.startToken.length === 0
+  ) {
+    return null
+  }
+
+  return {
+    pid: record.pid,
+    platform: record.platform as NodeJS.Platform,
+    startToken: record.startToken,
+  }
+}
+
+function toPublicDaemonState(state: PersistedInboxDaemonState): InboxDaemonState {
+  const { processIdentity: _processIdentity, ...publicState } = state
+  return publicState
+}
+
+function buildStaleDaemonState(
+  paths: InboxPaths,
+  state: InboxDaemonState,
+  input: {
+    clock: () => Date
+    message: string
+  },
+): InboxDaemonState {
+  return buildDaemonState(paths, {
+    ...state,
+    running: false,
+    stale: true,
+    status: 'stale',
+    stoppedAt: state.stoppedAt ?? input.clock().toISOString(),
+    message: input.message,
+  })
+}
+
+function mapIdentityFailureReason(
+  reason: Exclude<ProcessIdentityMatch, { matches: true }>['reason'],
+): Exclude<InboxDaemonControlTarget, { verified: true }>['reason'] {
+  if (reason === 'missing') {
+    return 'identity-missing'
+  }
+
+  if (reason === 'mismatched') {
+    return 'identity-mismatched'
+  }
+
+  return 'identity-unverifiable'
 }
 
 function isProcessAlive(

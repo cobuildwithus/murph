@@ -3,7 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 
-import { resolveRuntimePaths, tryKillProcess } from '@murphai/runtime-state/node'
+import {
+  resolveRuntimePaths,
+  tryKillProcess,
+  type ProcessIdentity,
+} from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { expect, test, vi } from 'vitest'
 
@@ -23,6 +27,7 @@ import {
   createProcessSignalBridge,
   idleState,
   normalizeDaemonState,
+  verifyDaemonStateForExpectedOwner,
   writeDaemonState,
 } from '../src/inbox-services/daemon.ts'
 import { instantiateConnector } from '../src/inbox-services/connectors.ts'
@@ -1076,22 +1081,145 @@ test('daemon, process, and assistant vault-path helpers handle stale and invalid
       123,
     )
 
+    const aliveIdentity: ProcessIdentity = {
+      pid: 456,
+      platform: 'linux',
+      startToken: 'linux-proc-start:456',
+    }
     const aliveState = buildDaemonState(paths, {
       status: 'running',
       running: true,
       pid: 456,
     })
-    await writeDaemonState(paths, aliveState)
-    assert.equal(
-      (
-        await normalizeDaemonState(paths, {
-          clock: () => new Date('2026-04-08T00:00:00.000Z'),
-          getPid: () => 999,
-          killProcess() {},
-        })
-      ).pid,
-      456,
+    await writeDaemonState(paths, aliveState, {
+      processIdentity: aliveIdentity,
+    })
+    const aliveNormalized = await normalizeDaemonState(paths, {
+      clock: () => new Date('2026-04-08T00:00:00.000Z'),
+      getPid: () => 999,
+      killProcess() {},
+    })
+    assert.equal(aliveNormalized.pid, 456)
+    assert.equal('processIdentity' in aliveNormalized, false)
+    const aliveOwner = await verifyDaemonStateForExpectedOwner(paths, aliveNormalized, {
+      clock: () => new Date('2026-04-08T00:00:00.000Z'),
+      getPid: () => 999,
+      killProcess() {},
+      async matchProcessIdentity(pid, expected) {
+        assert.equal(pid, 456)
+        assert.deepEqual(expected, aliveIdentity)
+        return { matches: true, reason: 'matched' }
+      },
+    })
+    assert.equal(aliveOwner.verified, true)
+    assert.equal(aliveOwner.state.pid, 456)
+
+    const changedGeneration = buildDaemonState(paths, {
+      status: 'running',
+      running: true,
+      pid: 456,
+      startedAt: '2026-04-08T00:01:00.000Z',
+    })
+    await writeDaemonState(paths, changedGeneration, {
+      processIdentity: aliveIdentity,
+    })
+    const expectedOwnerMismatch = await verifyDaemonStateForExpectedOwner(
+      paths,
+      aliveNormalized,
+      {
+        clock: () => new Date('2026-04-08T00:00:00.000Z'),
+        getPid: () => 999,
+        killProcess() {},
+        async matchProcessIdentity() {
+          return { matches: true, reason: 'matched' }
+        },
+      },
     )
+    assert.equal(expectedOwnerMismatch.verified, false)
+    assert.equal(expectedOwnerMismatch.reason, 'owner-changed')
+    assert.equal(expectedOwnerMismatch.state.status, 'running')
+
+    const mismatchedState = buildDaemonState(paths, {
+      status: 'running',
+      running: true,
+      pid: 789,
+    })
+    await writeDaemonState(paths, mismatchedState, {
+      processIdentity: {
+        pid: 789,
+        platform: 'linux',
+        startToken: 'linux-proc-start:old',
+      },
+    })
+    const mismatchedNormalized = await normalizeDaemonState(paths, {
+      clock: () => new Date('2026-04-08T00:00:00.000Z'),
+      getPid: () => 999,
+      killProcess() {},
+    })
+    assert.equal(mismatchedNormalized.status, 'running')
+    const mismatched = await verifyDaemonStateForExpectedOwner(
+      paths,
+      mismatchedNormalized,
+      {
+        clock: () => new Date('2026-04-08T00:00:00.000Z'),
+        getPid: () => 999,
+        killProcess() {},
+        async matchProcessIdentity() {
+          return { matches: false, reason: 'mismatched' }
+        },
+      },
+    )
+    assert.equal(mismatched.verified, false)
+    assert.equal(mismatched.reason, 'identity-mismatched')
+    assert.equal(mismatched.state.status, 'running')
+
+    await writeDaemonState(paths, mismatchedState, {
+      processIdentity: {
+        pid: 789,
+        platform: 'linux',
+        startToken: 'linux-proc-start:old',
+      },
+    })
+    const currentPidMismatch = await verifyDaemonStateForExpectedOwner(
+      paths,
+      mismatchedState,
+      {
+        clock: () => new Date('2026-04-08T00:00:00.000Z'),
+        getPid: () => 789,
+        killProcess() {},
+        async matchProcessIdentity() {
+          return { matches: false, reason: 'mismatched' }
+        },
+      },
+    )
+    assert.equal(currentPidMismatch.verified, false)
+    assert.equal(currentPidMismatch.reason, 'identity-mismatched')
+    assert.equal(currentPidMismatch.state.status, 'running')
+
+    const unverifiableState = buildDaemonState(paths, {
+      status: 'running',
+      running: true,
+      pid: 790,
+    })
+    await writeDaemonState(paths, unverifiableState)
+    const unverifiableNormalized = await normalizeDaemonState(paths, {
+      clock: () => new Date('2026-04-08T00:00:00.000Z'),
+      getPid: () => 999,
+      killProcess() {},
+    })
+    assert.equal(unverifiableNormalized.status, 'running')
+    const unverifiable = await verifyDaemonStateForExpectedOwner(
+      paths,
+      unverifiableNormalized,
+      {
+        clock: () => new Date('2026-04-08T00:00:00.000Z'),
+        getPid: () => 999,
+        killProcess() {},
+      },
+    )
+    assert.equal(unverifiable.verified, false)
+    assert.equal(unverifiable.reason, 'identity-unverifiable')
+    assert.equal(unverifiable.state.status, 'running')
 
     const stoppedState = buildDaemonState(paths, {
       status: 'stopped',
