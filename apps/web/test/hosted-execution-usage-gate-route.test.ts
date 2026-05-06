@@ -30,7 +30,7 @@ describe("hosted AI usage gate route", () => {
       userNotice: {
         code: "pulse_upgrade_edge",
         message:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
       },
     });
 
@@ -50,7 +50,7 @@ describe("hosted AI usage gate route", () => {
       reason: "ai_usage_limit_exceeded",
       retryAfter: "2026-05-01T00:00:00.000Z",
       userNotice:
-        "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+        "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
     });
     expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
       memberId: "member_gate_1",

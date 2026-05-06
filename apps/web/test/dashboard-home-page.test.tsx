@@ -131,7 +131,7 @@ test("HomePage shows a usage-limit upgrade banner when assistant usage is exhaus
     userNotice: {
       code: "pulse_upgrade_edge",
       message:
-        "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+        "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
     },
   });
 

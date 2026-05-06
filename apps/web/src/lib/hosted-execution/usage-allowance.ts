@@ -419,6 +419,30 @@ export async function resolveHostedAiUsageGate(input: {
   });
 }
 
+export async function claimHostedAiUsageLimitNotice(input: {
+  memberId: string;
+  periodStart: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+  sentAt?: Date | string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
+  const sentAt = normalizeHostedAiUsageAllowanceDate(input.sentAt ?? new Date());
+
+  const claimed = await prisma.hostedAiUsagePeriod.updateMany({
+    where: {
+      limitNoticeSentAt: null,
+      memberId: input.memberId,
+      periodStart,
+    },
+    data: {
+      limitNoticeSentAt: sentAt,
+    },
+  });
+
+  return claimed.count === 1;
+}
+
 function resolveHostedAiUsageInactiveGateDecision(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
@@ -1046,7 +1070,7 @@ function buildHostedAiUsageGateLimitNotice(input: {
     return {
       code: "trial_usage_limit_reached",
       message:
-        `You've reached the hosted AI usage included in your trial. Open ${HOSTED_AI_USAGE_HOME_URL} to upgrade.`,
+        `You've reached the hosted AI usage included in your trial. Upgrade: ${HOSTED_AI_USAGE_HOME_URL}`,
     };
   }
 
@@ -1056,13 +1080,13 @@ function buildHostedAiUsageGateLimitNotice(input: {
     return {
       code: "edge_enable_usage_based_pricing",
       message:
-        `${base} Open ${HOSTED_AI_USAGE_HOME_URL} to enable usage-based pricing.`,
+        `${base} Enable usage-based pricing: ${HOSTED_AI_USAGE_HOME_URL}`,
     };
   }
 
   return {
     code: "pulse_upgrade_edge",
-    message: `${base} Open ${HOSTED_AI_USAGE_HOME_URL} to upgrade to Edge.`,
+    message: `${base} Upgrade to Edge: ${HOSTED_AI_USAGE_HOME_URL}`,
   };
 }
 

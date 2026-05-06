@@ -13,6 +13,7 @@ import {
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
+    claimHostedAiUsageLimitNotice: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
@@ -156,6 +157,7 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
@@ -327,6 +329,7 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -2167,7 +2170,7 @@ https://join.example.test/join/code_first_text`);
       userNotice: {
         code: "pulse_upgrade_edge",
         message:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
       },
     });
     const prisma = asPrismaTransactionClient({
@@ -2208,6 +2211,11 @@ https://join.example.test/join/code_first_text`);
       reason: "sent-ai-usage-quota-reply",
     });
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma,
+    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
@@ -2216,7 +2224,7 @@ https://join.example.test/join/code_first_text`);
         chatId: "chat_123",
         idempotencyKey: "linq-message:evt_ai_usage_limit",
         message:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
         replyToMessageId: "msg_123",
       }),
     );
@@ -2241,7 +2249,7 @@ https://join.example.test/join/code_first_text`);
       userNotice: {
         code: "pulse_upgrade_edge",
         message:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
       },
     });
     const prisma = asPrismaTransactionClient({
@@ -2286,10 +2294,70 @@ https://join.example.test/join/code_first_text`);
         chatId: "chat_123",
         idempotencyKey: "linq-message:evt_ai_usage_limit_repeat",
         message:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
         replyToMessageId: "msg_123",
       }),
     );
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("suppresses repeated Linq AI usage quota replies after the usage-period notice is already claimed", async () => {
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValueOnce(false);
+    mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+      allowed: false,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 100_000n,
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 100_000n,
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message:
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+      },
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_ai_usage_limit_repeat_suppressed",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "ai-usage-gate-denied",
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });

@@ -1193,7 +1193,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         reason: "ai_usage_limit_exceeded",
         retryAfter: "2026-05-01T00:00:00.000Z",
         userNotice:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
       },
     });
     await runner.bindUser("member_123");
@@ -1203,7 +1203,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       redactedStatus: {
         aiUsageGateBlocked: true,
         aiUsageGateNotice:
-          "Hey, you've reached your usage limit for the month. Open https://withmurph.ai/home to upgrade to Edge.",
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
         aiUsageGateNoticeCode: "pulse_upgrade_edge",
         aiUsageGateReason: "ai_usage_limit_exceeded",
         aiUsageGateRetryAfter: "2026-05-01T00:00:00.000Z",
