@@ -659,6 +659,49 @@ describe("cloudflare worker routes", () => {
     await expect(runResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the test runner user.",
     });
+
+    const alarmResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/alarm",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(alarmResponse.status).toBe(401);
+    await expect(alarmResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+  });
+
+  it("runs the hosted-local test alarm route for correctly bound callers", async () => {
+    const stub = createUserRunnerStub({
+      runAlarmForTest: vi.fn(async () => ({ ok: true })),
+    });
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/alarm",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(stub.runAlarmForTest).toHaveBeenCalledWith({ userId: "member_123" });
   });
 
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
@@ -1876,6 +1919,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       nextWakeAt: null,
       status: "idle" as const,
     })),
+    runAlarmForTest: vi.fn(async () => ({ ok: true as const })),
     runnerStatus: vi.fn(async () => ({
       inFlight: false,
       mailboxLag: [],

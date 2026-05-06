@@ -13,6 +13,7 @@ export type HostedLocalE2eScenarioName =
   | "active-turn-latency"
   | "checkpoint-baseline"
   | "codex-gateway-prefix"
+  | "container-continuity"
   | "device-connect"
   | "mailbox-platform-env"
   | "linq-first-contact"
@@ -40,6 +41,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
     name: "checkpoint-baseline",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
+    manualOnly: true,
+    name: "container-continuity",
   },
   {
     file: "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",

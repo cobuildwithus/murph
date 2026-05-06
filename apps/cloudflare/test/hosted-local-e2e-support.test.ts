@@ -14,6 +14,10 @@ import {
   startAssistantProviderStubServer,
   stopHttpStubServer,
 } from "./helpers/hosted-local-e2e-support.js";
+import {
+  listHostedLocalE2eScenarios,
+  resolveHostedLocalE2eScenarios,
+} from "@murphai/hosted-local-harness/e2e";
 
 describe("mergeRequiredEnvProfile", () => {
   it("preserves the default hosted runner profiles when adding a required channel profile", () => {
@@ -202,5 +206,24 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     ).toEqual({
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "23456",
     });
+  });
+});
+
+describe("hosted local e2e scenario registration", () => {
+  it("keeps container-continuity manual-only while remaining addressable by name", () => {
+    const allScenarios = resolveHostedLocalE2eScenarios("all");
+    const containerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "container-continuity");
+
+    expect(containerContinuity).toMatchObject({
+      file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
+      manualOnly: true,
+      name: "container-continuity",
+    });
+    expect(allScenarios.map((scenario) => scenario.name)).not.toContain("container-continuity");
+    expect(resolveHostedLocalE2eScenarios("container-continuity")).toEqual([expect.objectContaining({
+      file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
+      manualOnly: true,
+      name: "container-continuity",
+    })]);
   });
 });
