@@ -1880,9 +1880,29 @@ function toResearchStudy(
     stance: appraisal?.stance,
     title: source?.title ?? entity.title,
     type: researchEvidenceToStudyType(evidence, source),
-    url: source?.url,
+    url: safeWebUrl(source?.url),
     year: source?.year,
   });
+}
+
+function safeWebUrl(value: string | null | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value);
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.username !== "" ||
+      url.password !== ""
+    ) {
+      return undefined;
+    }
+    return url.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function sortStudySourcesForDisplay(
