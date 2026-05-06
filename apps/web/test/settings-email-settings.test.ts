@@ -210,7 +210,7 @@ describe("HostedEmailSettings", () => {
     expect(container.textContent).toContain("Unverified");
 
     const sendCodeButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send new code"),
+      (candidate) => candidate.textContent?.includes("Send verification code"),
     );
     expect(sendCodeButton).toBeTruthy();
 
@@ -391,7 +391,7 @@ describe("HostedEmailSettings", () => {
       'input[id="settings-email-address"]',
     ) as HTMLInputElement | null;
     const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send new code"),
+      (candidate) => candidate.textContent?.includes("Send verification code"),
     );
     expect(emailInput).toBeTruthy();
     expect(sendButton).toBeTruthy();
@@ -457,7 +457,7 @@ describe("HostedEmailSettings", () => {
       'input[id="settings-email-address"]',
     ) as HTMLInputElement | null;
     const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send new code"),
+      (candidate) => candidate.textContent?.includes("Send verification code"),
     );
 
     await act(async () => {
@@ -505,7 +505,7 @@ describe("HostedEmailSettings", () => {
       'input[id="settings-email-address"]',
     ) as HTMLInputElement | null;
     const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send new code"),
+      (candidate) => candidate.textContent?.includes("Send verification code"),
     );
 
     await act(async () => {
@@ -550,7 +550,7 @@ describe("HostedEmailSettings", () => {
       'input[id="settings-email-address"]',
     ) as HTMLInputElement | null;
     const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send new code"),
+      (candidate) => candidate.textContent?.includes("Send verification code"),
     );
     expect(emailInput).toBeTruthy();
     expect(sendButton).toBeTruthy();
@@ -595,7 +595,7 @@ describe("HostedEmailSettings", () => {
       'input[id="settings-email-address"]',
     ) as HTMLInputElement | null;
     const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send new code"),
+      (candidate) => candidate.textContent?.includes("Send verification code"),
     );
 
     await act(async () => {
