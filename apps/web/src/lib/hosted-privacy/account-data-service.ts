@@ -115,8 +115,8 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_runtime_log",
     label: "Runtime logs",
     deletion: "live-delete",
-    export: "metadata-and-counts",
-    note: "Deletes per-user hosted runtime logs and redacted runtime JSON.",
+    export: "documented-only",
+    note: "Deletes per-user hosted runtime logs and redacted runtime JSON. Export omits runtime log rows and counts.",
   },
   {
     slug: "prisma.hosted_user_crypto_envelope",
@@ -449,7 +449,6 @@ export async function buildHostedDataExport(input: {
     mailboxItems,
     mailboxLaneCounters,
     workspace,
-    runtimeLogs,
     invites,
     consentEvents,
     consentGrants,
@@ -589,28 +588,6 @@ export async function buildHostedDataExport(input: {
       },
       where: { userId: memberId },
     }),
-    prisma.hostedRuntimeLog.findMany({
-      orderBy: { at: "desc" },
-      select: {
-        at: true,
-        attemptId: true,
-        checkpointVersion: true,
-        component: true,
-        createdAt: true,
-        errorCode: true,
-        eventCode: true,
-        leaseGeneration: true,
-        level: true,
-        mailboxLane: true,
-        mailboxSeqEnd: true,
-        mailboxSeqStart: true,
-        phase: true,
-        userId: true,
-        workspaceVersion: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { userId: memberId },
-    }),
     prisma.hostedInvite.findMany({
       orderBy: { createdAt: "desc" },
       select: {
@@ -746,7 +723,6 @@ export async function buildHostedDataExport(input: {
   const limitedDeviceSyncSignals = limitRowsForExport(deviceSyncSignals);
   const limitedMailboxItems = limitRowsForExport(mailboxItems);
   const limitedMailboxLaneCounters = limitRowsForExport(mailboxLaneCounters);
-  const limitedRuntimeLogs = limitRowsForExport(runtimeLogs);
   const limitedInvites = limitRowsForExport(invites);
   const limitedConsentEvents = limitRowsForExport(consentEvents);
   const limitedConsentGrants = limitRowsForExport(consentGrants);
@@ -772,7 +748,6 @@ export async function buildHostedDataExport(input: {
         linqDailyStates: limitedLinqDailyStates.meta,
         mailboxItems: limitedMailboxItems.meta,
         mailboxLaneCounters: limitedMailboxLaneCounters.meta,
-        runtimeLogs: limitedRuntimeLogs.meta,
         aiUsage: limitedAiUsage.meta,
         aiUsagePeriods: limitedAiUsagePeriods.meta,
       },
@@ -961,26 +936,6 @@ export async function buildHostedDataExport(input: {
         triggerKind: entry.triggerKind,
         turnIdPresent: Boolean(entry.turnId),
         updatedAt: entry.updatedAt,
-      })),
-    },
-    diagnostics: {
-      runtimeLogs: limitedRuntimeLogs.rows.map((log) => ({
-        at: log.at,
-        attemptIdPresent: Boolean(log.attemptId),
-        checkpointVersionPresent: log.checkpointVersion !== null,
-        component: log.component,
-        createdAt: log.createdAt,
-        errorCode: log.errorCode,
-        eventCode: log.eventCode,
-        idPresent: true,
-        leaseGenerationPresent: log.leaseGeneration !== null,
-        level: log.level,
-        mailboxLane: log.mailboxLane,
-        mailboxSeqEndPresent: log.mailboxSeqEnd !== null,
-        mailboxSeqStartPresent: log.mailboxSeqStart !== null,
-        phase: log.phase,
-        userId: log.userId,
-        workspaceVersionPresent: log.workspaceVersion !== null,
       })),
     },
   });
@@ -1238,7 +1193,6 @@ async function countHostedAccountData(input: {
     hostedMailboxPayload,
     hostedMailboxLaneCounter,
     hostedWorkspace,
-    hostedRuntimeLog,
     hostedUserCryptoEnvelope,
     hostedUserCryptoAudit,
     hostedInvite,
@@ -1265,7 +1219,6 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMailboxPayload.count({ where: { userId: memberId } }),
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberId } }),
     input.prisma.hostedWorkspace.count({ where: { userId: memberId } }),
-    input.prisma.hostedRuntimeLog.count({ where: { userId: memberId } }),
     countHostedUserCryptoEnvelopeRows(input.prisma, memberId),
     countHostedUserCryptoAuditRows(input.prisma, memberId),
     input.prisma.hostedInvite.count({ where: { memberId } }),
@@ -1305,7 +1258,6 @@ async function countHostedAccountData(input: {
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
     "prisma.hosted_member_routing": hostedMemberRouting,
-    "prisma.hosted_runtime_log": hostedRuntimeLog,
     "prisma.hosted_user_crypto_audit": hostedUserCryptoAudit,
     "prisma.hosted_user_crypto_envelope": hostedUserCryptoEnvelope,
     "prisma.hosted_web_internal_request_nonce": hostedWebInternalRequestNonce,

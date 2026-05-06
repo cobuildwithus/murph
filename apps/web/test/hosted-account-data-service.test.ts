@@ -211,6 +211,8 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
     expect(bySlug.get("prisma.hosted_mailbox_item")?.export).toBe("metadata-and-counts");
     expect(bySlug.get("prisma.hosted_mailbox_payload")?.export).toBe("not-exported-secret");
+    expect(bySlug.get("prisma.hosted_runtime_log")?.export).toBe("documented-only");
+    expect(bySlug.get("prisma.hosted_runtime_log")?.note).toContain("Export omits");
     expect(bySlug.get("cloudflare.runner_durable_object")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("cloudflare.r2_user_artifacts")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("providers.stripe_privy")?.deletion).toBe("documented-retention");
@@ -356,20 +358,10 @@ describe("buildHostedDataExport", () => {
           },
         ],
       },
-      diagnostics: {
-        runtimeLogs: [
-          {
-            attemptIdPresent: true,
-            checkpointVersionPresent: true,
-            idPresent: true,
-            leaseGenerationPresent: true,
-            mailboxSeqEndPresent: true,
-            mailboxSeqStartPresent: true,
-            workspaceVersionPresent: true,
-          },
-        ],
-      },
     });
+    expect(exported.counts).not.toHaveProperty("prisma.hosted_runtime_log");
+    expect(requireRecord(requireRecord(exported.limits).stores)).not.toHaveProperty("runtimeLogs");
+    expect(exported).not.toHaveProperty("diagnostics");
     const consent = requireRecord(exported.consent);
     expect(requireArray(consent.events)[0]).not.toHaveProperty("metadataJson");
     expect(exported.messaging).toMatchObject({
@@ -1122,29 +1114,12 @@ async function createHostedAccountDataExportPrisma(input: {
     hostedMemberIdentity: { count },
     hostedMemberRouting: { count },
     hostedRuntimeLog: {
-      count,
-      findMany: async () => [
-        {
-          at: new Date("2026-04-27T00:26:00.000Z"),
-          attemptId: "attempt-1",
-          checkpointVersion: 9n,
-          component: "runtime",
-          createdAt: new Date("2026-04-27T00:26:00.000Z"),
-          errorCode: null,
-          eventCode: "runtime.ok",
-          id: "runtime-log-1",
-          leaseGeneration: 3n,
-          level: "info",
-          mailboxLane: "conversation",
-          mailboxSeqEnd: 1n,
-          mailboxSeqStart: 1n,
-          outboxIntentRef: "secret-outbox-intent-ref",
-          phase: "assistant",
-          redactedJson: { message: "secret-runtime-diagnostic" },
-          userId: memberId,
-          workspaceVersion: 9n,
-        },
-      ],
+      count: async () => {
+        throw new Error("runtime log counts should not be exported");
+      },
+      findMany: async () => {
+        throw new Error("runtime log rows should not be exported");
+      },
     },
     hostedWorkspace: {
       count,
