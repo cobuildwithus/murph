@@ -76,6 +76,8 @@ Updated: 2026-05-06
 - 2026-05-06 status refresh latency decision: hosted queue-only auto-replies should not await status snapshot refresh before fast outbox dispatch; the status snapshot is operator metadata and can be refreshed by non-critical lanes after the user-visible send path is unblocked.
 - 2026-05-06 active-turn admission latency decision: hosted queue-only auto-replies should not install active-turn mailbox admission hooks because the request/commit boundary refreshes re-import and checkpoint mailbox state on the user-visible reply path; late same-conversation input can arrive through the next webhook/wake instead.
 - 2026-05-06 deploy unblock decision: write Health Commons generated artifacts through temp-file rename so concurrent deploy builds do not observe partially written generated files.
+- 2026-05-06 hot-path receipt fallback decision: hosted queue-only auto-replies skip the global turn-receipt fallback scan and rely on terminal evidence/cursors on the live send path; the receipt fallback remains enabled for non-hosted/recovery paths.
+- 2026-05-06 pre-scan input decision: automation passes refresh the assistant input source once before reading automation state and scanning so messages that arrive while a workspace restore is already in progress are imported before candidate selection.
 
 ## Current evidence
 
@@ -94,6 +96,8 @@ Updated: 2026-05-06
 - Code inspection after that probe found two awaited status snapshot refreshes on the hosted queue-only auto-reply path: one in the message turn cleanup and one in the automation pass after scanning. Both occur before the hosted runtime can fast-dispatch queued delivery effects, so they are now skipped only for hosted queue-only automation passes.
 - The post-status-skip live probe confirmed status refresh was skipped, but the first run cold-restored the base snapshot after deploy and the warm follow-up still spent roughly 8.3s inside scan while Codex itself took roughly 1.7s. Code inspection mapped that gap to hosted active-turn mailbox refresh/admission hooks that re-import/checkpoint during provider request boundaries.
 - The first active-turn admission deploy failed before Cloudflare rollout because the runner bundle build observed an unterminated generated declaration file. The local deploy build passes with atomic generated-artifact writes, which matches the failure mode.
+- The successful active-turn admission deploy exposed a new stale-restore edge: a post-deploy text appended while the prior invocation was already restoring, so skipping all active-turn refreshes caused the restored workspace to miss that input until a later invocation. The pre-scan input refresh fixes that without reintroducing provider-boundary refresh/checkpoint work.
+- The latest warm live probe restored in roughly 0.35s, but the auto-reply scan still took roughly 18.8s while Codex app-server work took roughly 2.4s. Code inspection found the auto-reply decision path was still calling `listAssistantTurnReceipts` with an effectively unbounded limit before every reply; that helper reads the whole turn receipt directory and matches the remaining warm-path scan gap.
 
 ## Verification
 
@@ -134,3 +138,5 @@ Updated: 2026-05-06
   - `pnpm --dir packages/assistant-engine typecheck`
   - `git diff --check`
   - `pnpm --workspace-concurrency=4 --filter @murphai/contracts --filter @murphai/runtime-state --filter @murphai/core --filter @murphai/gateway-core --filter @murphai/health-metrics --filter @murphai/health-commons --filter @murphai/importers --filter @murphai/device-syncd --filter @murphai/hosted-execution --filter @murphai/messaging-ingress --filter @murphai/parsers --filter @murphai/inboxd --filter @murphai/query --filter @murphai/operator-config --filter @murphai/vault-usecases --filter @murphai/inbox-services --filter @murphai/assistant-engine --filter @murphai/gateway-local --filter @murphai/assistantd --filter @murphai/assistant-cli --filter @murphai/assistant-runtime --filter @murphai/cloudflare-hosted-control --filter @murphai/setup-cli --filter @murphai/murph --filter @murphai/cloudflare-runner run build`
+  - `pnpm --dir packages/assistant-engine exec vitest run test/assistant-automation-runtime.test.ts --testNamePattern "hosted queue-only|input before recovery|timing traces"`
+  - `pnpm --dir packages/assistant-engine typecheck`

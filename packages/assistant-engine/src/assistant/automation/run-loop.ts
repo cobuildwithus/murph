@@ -85,6 +85,7 @@ type AssistantAutomationPassTimingStage =
   | 'cron-finished'
   | 'cron-status-finished'
   | 'diagnostic-recorded'
+  | 'input-refresh-finished'
   | 'outbox-drain-finished'
   | 'outbox-summary-finished'
   | 'recovery-finished'
@@ -917,6 +918,19 @@ export async function runAssistantAutomationPass(
     automationPassOutboxSent: outboxResult.sent,
     automationPassOutboxFailed: outboxResult.failed,
     automationPassOutboxQueued: outboxResult.queued,
+  })
+  const inputRefreshResult = applyCanonicalWrites
+    ? await inputSource.refresh({
+        phase: 'input_available',
+        signal: input.signal,
+      })
+    : null
+  emitTiming('input-refresh-finished', {
+    automationPassInputRefreshProgressed:
+      inputRefreshResult?.progressed ?? false,
+    automationPassInputRefreshSkipped: !applyCanonicalWrites,
+    automationPassInputRefreshSourceUnavailable:
+      inputRefreshResult?.reason === 'source_unavailable',
   })
   let state = await readAssistantAutomationState(input.vault)
   emitTiming('state-read')
