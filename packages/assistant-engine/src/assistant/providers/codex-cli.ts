@@ -78,8 +78,10 @@ const SAFE_CODEX_DIAGNOSTIC_METHODS = new Set([
 const SAFE_CODEX_RESUME_FAILURE_ERROR_PHRASES = new Set([
   'codex-turn-failed',
   'connection-lost',
+  'credits-exhausted',
   'input-output-field',
   'invalid-input',
+  'quota-exceeded',
   'rate-limit',
   'resume-stale',
   'status-failed',
@@ -757,6 +759,9 @@ function classifyCodexResumeFailureErrorKind(error: unknown): string {
   if (errorCode === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED') {
     return 'rpc-failed'
   }
+  if (errorCode === 'ASSISTANT_CODEX_USAGE_LIMIT') {
+    return 'usage-limit'
+  }
   if (errorCode === 'ASSISTANT_CODEX_FAILED') {
     return 'codex-failed'
   }
@@ -782,6 +787,8 @@ function collectCodexResumeFailureErrorPhrases(message: string): string[] {
   add('invalid-input', normalized.includes('invalid input'))
   add('resume-stale', normalized.includes('resume') && normalized.includes('stale'))
   add('usage-limit', normalized.includes('usage limit'))
+  add('quota-exceeded', normalized.includes('quota exceeded') || normalized.includes('current quota'))
+  add('credits-exhausted', normalized.includes('purchase more credits') || normalized.includes('out of credits') || normalized.includes('credit balance'))
   add('rate-limit', normalized.includes('rate limit') || normalized.includes('429'))
   add('timeout', normalized.includes('timeout') || normalized.includes('timed out'))
   add('connection-lost', normalized.includes('connection lost'))
@@ -793,6 +800,7 @@ function isCodexDiagnosticTraceError(error: unknown): boolean {
   const code = readCodexDiagnosticErrorCode(error)
   return (
     code === 'ASSISTANT_CODEX_FAILED' ||
+    code === 'ASSISTANT_CODEX_USAGE_LIMIT' ||
     code === 'ASSISTANT_CODEX_RESUME_STALE' ||
     code === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT' ||
     code === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED' ||
