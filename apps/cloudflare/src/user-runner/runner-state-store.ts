@@ -322,6 +322,38 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async scheduleIdleShutdownCheckpointIfStillQuiet(input: {
+    dueAt: string;
+    workspaceVersion: string;
+  }): Promise<
+    | {
+      record: RunnerStateRecord;
+      scheduled: false;
+    }
+    | {
+      record: RunnerStateRecord;
+      scheduled: true;
+    }
+  > {
+    const meta = this.requireMetaRowSync();
+    const currentRecord = this.readStateFromMetaSync(meta);
+    if (currentRecord.pendingNudge || currentRecord.inFlight) {
+      return {
+        record: currentRecord,
+        scheduled: false,
+      };
+    }
+
+    meta.idle_shutdown_checkpoint_due_at = normalizeIsoDateString(input.dueAt);
+    meta.idle_shutdown_checkpoint_workspace_version = input.workspaceVersion;
+    this.writeMetaRowSync(meta);
+
+    return {
+      record: this.readStateFromMetaSync(meta),
+      scheduled: true,
+    };
+  }
+
   async clearIdleShutdownCheckpoint(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     this.clearIdleShutdownCheckpointMetaSync(meta);

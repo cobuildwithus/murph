@@ -2115,6 +2115,59 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    }]);
 	  });
 
+	  it("preserves a fresh nudge when idle alarm application reenters during setAlarm", async () => {
+	    vi.useFakeTimers();
+	    vi.setSystemTime(new Date(FIXED_NOW));
+	    const workspace = createWorkspaceState({
+	      snapshotRef: createLayeredSnapshotRef("idle-alarm-application-race"),
+	      version: "4",
+	    });
+	    let nudgedDuringIdleAlarmApplication = false;
+	    let runnerForReentrantNudge: HostedUserRunner | null = null;
+	    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+	      onSetAlarm: async ({ scheduledTimeIso }) => {
+	        if (
+	          nudgedDuringIdleAlarmApplication
+	          || scheduledTimeIso !== "2026-04-27T00:04:55.000Z"
+	        ) {
+	          return;
+	        }
+	        nudgedDuringIdleAlarmApplication = true;
+	        if (!runnerForReentrantNudge) {
+	          throw new Error("Runner is not available for reentrant nudge.");
+	        }
+	        await runnerForReentrantNudge.nudgeHostedRunner();
+	      },
+	    });
+	    runnerForReentrantNudge = runner;
+	    await runner.bindUser("member_123");
+
+	    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+	      status: "idle",
+	    });
+
+	    expect(nudgedDuringIdleAlarmApplication).toBe(true);
+	    expect(invoke).toHaveBeenCalledOnce();
+	    expect(alarms).toContain("2026-04-27T00:04:55.000Z");
+	    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:04:55.000Z")).toHaveLength(1);
+	    expect(alarms.at(-1)).toBe(FIXED_NOW);
+	    expect(
+	      sql.exec(
+	        `SELECT idle_shutdown_checkpoint_due_at,
+	                idle_shutdown_checkpoint_workspace_version,
+	                next_wake_at,
+	                pending_nudge
+	         FROM runner_meta WHERE user_id = ?`,
+	        "member_123",
+	      ).toArray(),
+	    ).toEqual([{
+	      idle_shutdown_checkpoint_due_at: null,
+	      idle_shutdown_checkpoint_workspace_version: null,
+	      next_wake_at: FIXED_NOW,
+	      pending_nudge: 1,
+	    }]);
+	  });
+
 	  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
 	    vi.useFakeTimers();
 	    vi.setSystemTime(new Date(FIXED_NOW));
@@ -2367,6 +2420,7 @@ function createRunnerCryptoContextHarness(
 	    invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
 	    maxEventAttempts?: number;
 	    onDeleteAlarm?(input: { alarmCount: number }): Promise<void> | void;
+	    onSetAlarm?(input: { alarmCount: number; scheduledTimeIso: string }): Promise<void> | void;
 	    onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
 	    usageGateResponse?: Record<string, unknown>;
 	    usageGateStatus?: number;
@@ -2393,11 +2447,14 @@ function createRunnerCryptoContextHarness(
       values.set(key, value);
     },
     async setAlarm(scheduledTime: number | Date) {
-      alarms.push(
-        scheduledTime instanceof Date
-          ? scheduledTime.toISOString()
-          : new Date(scheduledTime).toISOString(),
-      );
+      const scheduledTimeIso = scheduledTime instanceof Date
+        ? scheduledTime.toISOString()
+        : new Date(scheduledTime).toISOString();
+      await options.onSetAlarm?.({
+        alarmCount: alarms.length + 1,
+        scheduledTimeIso,
+      });
+      alarms.push(scheduledTimeIso);
     },
     sql,
   };
@@ -2446,12 +2503,15 @@ function createRunnerCryptoContextHarness(
     {
       storage,
     },
-    readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-      ...(options.maxEventAttempts === undefined
-        ? {}
-        : { HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: String(options.maxEventAttempts) }),
-    })),
+    {
+      ...readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        ...(options.maxEventAttempts === undefined
+          ? {}
+          : { HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: String(options.maxEventAttempts) }),
+      })),
+      idleShutdownCheckpointsEnabled: true,
+    },
     new MemoryEncryptedR2Bucket(),
     TEST_RUNNER_RUNTIME_ENV_SOURCE,
     {

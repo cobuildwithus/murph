@@ -15,6 +15,7 @@ export interface HostedExecutionWorkerEnvironment {
   hostedCryptoEnv: string;
   hostedWebAllowHttpHosts?: readonly string[];
   hostedWebBaseUrl: string;
+  idleShutdownCheckpointsEnabled: boolean;
   maxEventAttempts: number;
   idleShutdownCheckpointSafetyMarginMs: number;
   retryDelayMs: number;
@@ -87,6 +88,9 @@ export function readHostedExecutionWorkerEnvironment(
         rejectHttpLoopbackInProduction: isProduction,
       },
     ),
+    // Temporary production hotfix: full idle-shutdown checkpoints currently
+    // exceed the stateless Worker artifact proxy memory budget on large workspaces.
+    idleShutdownCheckpointsEnabled: false,
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
       3,
