@@ -768,11 +768,7 @@ function pickHostedLocalStripeAuthorityEnv(input: {
       continue;
     }
 
-    const localEnvValue = input.localEnvFiles
-      .map((envFile) => Object.prototype.hasOwnProperty.call(envFile, key)
-        ? envFile[key]
-        : undefined)
-      .findLast((value) => value !== undefined);
+    const localEnvValue = pickLastDefinedEnvValue(input.localEnvFiles, key);
 
     if (localEnvValue !== undefined) {
       authorityEnv[key] = localEnvValue;
@@ -785,6 +781,20 @@ function pickHostedLocalStripeAuthorityEnv(input: {
   }
 
   return authorityEnv;
+}
+
+function pickLastDefinedEnvValue(
+  envFiles: Array<Record<string, string>>,
+  key: string,
+): string | undefined {
+  for (let index = envFiles.length - 1; index >= 0; index -= 1) {
+    const envFile = envFiles[index];
+    if (Object.prototype.hasOwnProperty.call(envFile, key)) {
+      return envFile[key];
+    }
+  }
+
+  return undefined;
 }
 
 function buildHostedLocalStripeBillingIsolationOverlay(
