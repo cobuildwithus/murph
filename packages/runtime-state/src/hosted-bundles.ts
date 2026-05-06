@@ -36,6 +36,7 @@ const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
 const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
 const HOSTED_CODEX_HOME_INCLUDED_HASH_LIMIT = 16;
 const HOSTED_CODEX_HOME_EXCLUDED_SUMMARY_LIMIT = 16;
+const HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT = 16;
 const HOSTED_HOT_STATE_MAX_FILES = 5_000;
 const HOSTED_HOT_STATE_MAX_INLINE_BYTES = 16 * 1024 * 1024;
 const HOSTED_HOT_STATE_MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
@@ -72,6 +73,18 @@ export interface HostedCodexHomeSnapshotDiagnostics {
   codexHomeSnapshotCandidateCount: number;
   codexHomeSnapshotExcludedClassSummary: string[];
   codexHomeSnapshotIncludedCount: number;
+}
+
+export interface HostedWorkspaceSnapshotSizeDiagnostics {
+  workspaceSnapshotClassSummary: string[];
+  workspaceSnapshotExternalArtifactBytes: number;
+  workspaceSnapshotExternalArtifactCount: number;
+  workspaceSnapshotFingerprintStatus: "disabled" | "enabled";
+  workspaceSnapshotIncludedFileCount: number;
+  workspaceSnapshotInlineBytes: number;
+  workspaceSnapshotLargestFiles: string[];
+  workspaceSnapshotMaxFileBytes: number;
+  workspaceSnapshotMaxFileClass: string | null;
 }
 
 export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
@@ -126,6 +139,9 @@ interface HostedExecutionContextSnapshotInput {
   operatorHomeRoot?: string | null;
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
+  workspaceSnapshotSizeDiagnosticsSink?: (
+    diagnostics: HostedWorkspaceSnapshotSizeDiagnostics,
+  ) => Promise<void> | void;
 }
 
 export async function snapshotHostedExecutionContext(
@@ -133,6 +149,7 @@ export async function snapshotHostedExecutionContext(
 ): Promise<{
   bundle: Uint8Array;
   codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
 }> {
   return await snapshotHostedExecutionContextWithProviderContinuityPolicy({
     ...input,
@@ -145,6 +162,7 @@ export async function snapshotHostedExecutionContextUnsafeForFixture(
 ): Promise<{
   bundle: Uint8Array;
   codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
 }> {
   return await snapshotHostedExecutionContextWithProviderContinuityPolicy({
     ...input,
@@ -159,41 +177,54 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
 ): Promise<{
   bundle: Uint8Array;
   codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
 }> {
   const vaultRoot = path.resolve(input.vaultRoot);
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
   const artifactSink = input.artifactSink;
   const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
+  const workspaceSnapshotHashSecret =
+    normalizeHostedCodexHomeSnapshotHashSecret(input.codexHomeSnapshotHashSecret);
+  const workspaceSnapshotSizeDiagnostics =
+    createHostedWorkspaceSnapshotSizeDiagnosticsCollector({
+      hashSecret: workspaceSnapshotHashSecret,
+    });
   const codexHomeSnapshotDiagnostics = operatorHomeRoot
     ? await collectHostedCodexHomeSnapshotDiagnostics({
-        hashSecret: input.codexHomeSnapshotHashSecret ?? null,
+        hashSecret: workspaceSnapshotHashSecret,
         operatorHomeRoot,
       })
     : null;
   const vaultBundle = await snapshotHostedBundleRoots({
-    externalizeFile: artifactSink
-      ? (() => {
-          const persistArtifact = artifactSink;
-          return async (artifact) => {
-            if (!shouldExternalizeWorkspaceArtifact(artifact)) {
-              return null;
-            }
+    externalizeFile: async (artifact) => {
+      const shouldExternalize = Boolean(artifactSink)
+        && shouldExternalizeWorkspaceArtifact(artifact);
+      workspaceSnapshotSizeDiagnostics.record({
+        artifact,
+        externalized: shouldExternalize,
+      });
+      if (!artifactSink || !shouldExternalize) {
+        return null;
+      }
 
-            const ref = createHostedWorkspaceArtifactRef(artifact.bytes);
-            await persistArtifact({
-              ...artifact,
-              ref,
-            });
-            return ref;
-          };
-        })()
-      : undefined,
+      const ref = createHostedWorkspaceArtifactRef(artifact.bytes);
+      await artifactSink({
+        ...artifact,
+        ref,
+      });
+      return ref;
+    },
     kind: "vault",
     materializedPreservedArtifactPaths: new Set(
       [...(input.materializedArtifactPaths ?? [])]
         .map((relativePath) => normalizeWorkspaceSnapshotArtifactPathKey(relativePath))
         .filter((artifactPathKey): artifactPathKey is string => artifactPathKey !== null),
     ),
+    onBeforeSerialize: async () => {
+      await input.workspaceSnapshotSizeDiagnosticsSink?.(
+        workspaceSnapshotSizeDiagnostics.finish(),
+      );
+    },
     preservedArtifacts: input.preservedArtifacts,
     roots: [
       {
@@ -233,6 +264,7 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
   return {
     bundle: vaultBundle,
     codexHomeSnapshotDiagnostics,
+    workspaceSnapshotSizeDiagnostics: workspaceSnapshotSizeDiagnostics.finish(),
   };
 }
 
@@ -592,6 +624,205 @@ function measureHostedAssistantRuntimeHotStateBundle(bundle: Uint8Array): {
     fileCount: archive.files.length,
     inlineBytes,
   };
+}
+
+interface HostedWorkspaceSnapshotClassMetrics {
+  externalBytes: number;
+  externalCount: number;
+  fileCount: number;
+  inlineBytes: number;
+}
+
+interface HostedWorkspaceSnapshotLargestFileMetric {
+  bytes: number;
+  className: string;
+  depth: number;
+  externalized: boolean;
+  extension: string;
+  relHash: string | null;
+  root: string;
+}
+
+function createHostedWorkspaceSnapshotSizeDiagnosticsCollector(input: {
+  hashSecret: string | null;
+}): {
+  finish(): HostedWorkspaceSnapshotSizeDiagnostics;
+  record(input: {
+    artifact: HostedBundleArtifactSnapshotInput;
+    externalized: boolean;
+  }): void;
+} {
+  const classMetrics = new Map<string, HostedWorkspaceSnapshotClassMetrics>();
+  const largestFiles: HostedWorkspaceSnapshotLargestFileMetric[] = [];
+  let externalArtifactBytes = 0;
+  let externalArtifactCount = 0;
+  let fileCount = 0;
+  let inlineBytes = 0;
+  let maxFileBytes = 0;
+  let maxFileClass: string | null = null;
+
+  return {
+    finish() {
+      return {
+        workspaceSnapshotClassSummary:
+          summarizeHostedWorkspaceSnapshotClasses(classMetrics),
+        workspaceSnapshotExternalArtifactBytes: externalArtifactBytes,
+        workspaceSnapshotExternalArtifactCount: externalArtifactCount,
+        workspaceSnapshotFingerprintStatus: input.hashSecret ? "enabled" : "disabled",
+        workspaceSnapshotIncludedFileCount: fileCount,
+        workspaceSnapshotInlineBytes: inlineBytes,
+        workspaceSnapshotLargestFiles:
+          summarizeHostedWorkspaceSnapshotLargestFiles(largestFiles),
+        workspaceSnapshotMaxFileBytes: maxFileBytes,
+        workspaceSnapshotMaxFileClass: maxFileClass,
+      };
+    },
+    record({ artifact, externalized }) {
+      const bytes = artifact.bytes.byteLength;
+      const className = classifyHostedWorkspaceSnapshotArtifact(artifact);
+      const metrics = classMetrics.get(className) ?? {
+        externalBytes: 0,
+        externalCount: 0,
+        fileCount: 0,
+        inlineBytes: 0,
+      };
+      metrics.fileCount += 1;
+      if (externalized) {
+        metrics.externalBytes += bytes;
+        metrics.externalCount += 1;
+        externalArtifactBytes += bytes;
+        externalArtifactCount += 1;
+      } else {
+        metrics.inlineBytes += bytes;
+        inlineBytes += bytes;
+      }
+      classMetrics.set(className, metrics);
+
+      fileCount += 1;
+      if (bytes > maxFileBytes) {
+        maxFileBytes = bytes;
+        maxFileClass = className;
+      }
+
+      largestFiles.push({
+        bytes,
+        className,
+        depth: hostedWorkspaceSnapshotPathDepth(artifact.path),
+        externalized,
+        extension: hostedWorkspaceSnapshotSafeExtension(artifact.path),
+        relHash: input.hashSecret
+          ? fingerprintHostedWorkspaceSnapshotRelativePath({
+              hashSecret: input.hashSecret,
+              relativePath: artifact.path,
+              root: artifact.root,
+            })
+          : null,
+        root: artifact.root,
+      });
+      largestFiles.sort((left, right) => right.bytes - left.bytes);
+      largestFiles.splice(HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT);
+    },
+  };
+}
+
+function summarizeHostedWorkspaceSnapshotClasses(
+  metrics: ReadonlyMap<string, HostedWorkspaceSnapshotClassMetrics>,
+): string[] {
+  return [...metrics.entries()]
+    .sort(([leftClass, left], [rightClass, right]) => {
+      const leftBytes = left.inlineBytes + left.externalBytes;
+      const rightBytes = right.inlineBytes + right.externalBytes;
+      return rightBytes - leftBytes || leftClass.localeCompare(rightClass);
+    })
+    .slice(0, HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT)
+    .map(([className, entry]) =>
+      [
+        `class=${className}`,
+        `files=${entry.fileCount}`,
+        `inlineBytes=${entry.inlineBytes}`,
+        `externalBytes=${entry.externalBytes}`,
+        `externalCount=${entry.externalCount}`,
+      ].join(","));
+}
+
+function summarizeHostedWorkspaceSnapshotLargestFiles(
+  files: readonly HostedWorkspaceSnapshotLargestFileMetric[],
+): string[] {
+  return files
+    .slice(0, HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT)
+    .map((entry) =>
+      [
+        `class=${entry.className}`,
+        `root=${entry.root}`,
+        `bytes=${entry.bytes}`,
+        `external=${entry.externalized ? 1 : 0}`,
+        `ext=${entry.extension}`,
+        `depth=${entry.depth}`,
+        `relHash=${entry.relHash ?? "disabled"}`,
+      ].join(","));
+}
+
+function classifyHostedWorkspaceSnapshotArtifact(
+  artifact: HostedBundleArtifactSnapshotInput,
+): string {
+  const relativePath = normalizeWorkspaceSnapshotRelativePath(artifact.path);
+
+  if (artifact.root === WORKSPACE_OPERATOR_HOME_ROOT) {
+    if (hasWorkspaceSnapshotPathPrefix(relativePath, HOSTED_CODEX_HOME_RELATIVE_PATH)) {
+      return "operator-codex-home";
+    }
+
+    return "operator-home-other";
+  }
+
+  if (artifact.root !== "vault") {
+    return "unknown-root";
+  }
+
+  if (hasWorkspaceSnapshotPathPrefix(relativePath, ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH)) {
+    return "runtime-assistant";
+  }
+
+  if (hasWorkspaceSnapshotPathPrefix(relativePath, RUNTIME_ROOT_RELATIVE_PATH)) {
+    return "runtime-other";
+  }
+
+  const firstSegment = relativePath.split(path.posix.sep).filter(Boolean)[0] ?? "root";
+  switch (firstSegment) {
+    case "bank":
+    case "derived":
+    case "journal":
+    case "ledger":
+    case "raw":
+      return firstSegment;
+    default:
+      return "vault-canonical";
+  }
+}
+
+function hostedWorkspaceSnapshotPathDepth(relativePath: string): number {
+  return normalizeWorkspaceSnapshotRelativePath(relativePath)
+    .split(path.posix.sep)
+    .filter(Boolean)
+    .length;
+}
+
+function hostedWorkspaceSnapshotSafeExtension(relativePath: string): string {
+  const extension = path.posix.extname(normalizeWorkspaceSnapshotRelativePath(relativePath))
+    .toLowerCase();
+  return extension && /^[.][a-z0-9]{1,12}$/u.test(extension) ? extension : "none";
+}
+
+function fingerprintHostedWorkspaceSnapshotRelativePath(input: {
+  hashSecret: string;
+  relativePath: string;
+  root: string;
+}): string {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.relativePath);
+  const hash = createHmac("sha256", input.hashSecret)
+    .update(`workspace_snapshot_rel:${input.root}:${normalizedRelativePath}`, "utf8")
+    .digest("hex");
+  return `h1_${hash.slice(0, 24)}`;
 }
 
 function assertHostedAssistantRuntimeHotStateBudget(input: {

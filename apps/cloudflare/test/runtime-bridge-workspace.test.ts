@@ -1227,6 +1227,122 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("SHOULD_NOT_APPEAR");
   });
 
+  it("logs redacted full checkpoint size diagnostics for idle shutdown snapshots", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    const operatorHomeRoot = `${vaultRoot}-operator-home`;
+    await mkdir(path.join(vaultRoot, "raw", "captures"), { recursive: true });
+    await mkdir(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"),
+      { recursive: true },
+    );
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "rollouts"), {
+      recursive: true,
+    });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
+      "{\"status\":\"active\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "rollouts", "state.json"),
+      "{\"state\":\"kept\"}\n",
+      "utf8",
+    );
+    const rawArtifactBytes = 300 * 1024;
+    await writeFile(
+      path.join(vaultRoot, "raw", "captures", "large-video.bin"),
+      new Uint8Array(rawArtifactBytes),
+    );
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact: async () => {},
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {
+        forwardedEnv: {
+          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
+        },
+      },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    const progressLog = entries.find((entry) =>
+      typeof entry === "object"
+      && entry !== null
+      && "eventCode" in entry
+      && entry.eventCode === "checkpoint.snapshot_size_progress");
+    const snapshotLog = entries.find((entry) =>
+      typeof entry === "object"
+      && entry !== null
+      && "eventCode" in entry
+      && entry.eventCode === "checkpoint.snapshot_finished");
+    expect(progressLog).toEqual(expect.objectContaining({
+      eventCode: "checkpoint.snapshot_size_progress",
+      redactedJson: expect.objectContaining({
+        checkpointReason: "idle_shutdown",
+        checkpointPolicy: "full",
+        workspaceSnapshotExternalArtifactBytes: rawArtifactBytes,
+        workspaceSnapshotExternalArtifactCount: 1,
+        workspaceSnapshotFingerprintStatus: "enabled",
+        workspaceSnapshotLargestFiles: expect.arrayContaining([
+          expect.stringMatching(
+            /^class=raw,root=vault,bytes=307200,external=1,ext=\.bin,depth=3,relHash=h1_[a-f0-9]{24}$/u,
+          ),
+        ]),
+      }),
+    }));
+    expect(snapshotLog).toEqual(expect.objectContaining({
+      eventCode: "checkpoint.snapshot_finished",
+      redactedJson: expect.objectContaining({
+        checkpointReason: "idle_shutdown",
+        checkpointPolicy: "full",
+        externalArtifactPutBytes: rawArtifactBytes,
+        externalArtifactPutCount: 1,
+        workspaceSnapshotClassSummary: expect.arrayContaining([
+          `class=raw,files=1,inlineBytes=0,externalBytes=${rawArtifactBytes},externalCount=1`,
+          expect.stringMatching(
+            /^class=runtime-assistant,files=1,inlineBytes=\d+,externalBytes=0,externalCount=0$/u,
+          ),
+        ]),
+        workspaceSnapshotExternalArtifactBytes: rawArtifactBytes,
+        workspaceSnapshotExternalArtifactCount: 1,
+        workspaceSnapshotFingerprintStatus: "enabled",
+        workspaceSnapshotIncludedFileCount: 4,
+        workspaceSnapshotLargestFiles: expect.arrayContaining([
+          expect.stringMatching(
+            /^class=raw,root=vault,bytes=307200,external=1,ext=\.bin,depth=3,relHash=h1_[a-f0-9]{24}$/u,
+          ),
+        ]),
+        workspaceSnapshotMaxFileBytes: rawArtifactBytes,
+        workspaceSnapshotMaxFileClass: "raw",
+      }),
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("large-video");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("session.json");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("state.json");
+  });
+
   it("decrypts sidecar mailbox payloads through the bridge using the sidecar payload schema", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
