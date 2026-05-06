@@ -512,9 +512,9 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - Use the protocol page's \`experimentOnboarding\` block for setup slots, safety screen, plan defaults, logging fields, and read hints. Fall back to \`safety\`, \`testPlans\`, \`protocol\`, and \`claims\` fields when no onboarding block exists.
 
 # Creating the run
-- \`vault-cli experiment start <slug> --protocol-key <protocol_variant:key> --intervention-start <YYYY-MM-DD> ...\` to persist a resolved run using typed flags only.
-- Prefer protocol-linked runs. If the user's plan is a variant of an existing public protocol or protocol family, start it with that Health Commons \`--protocol-key\` and store the user's changes as typed plan fields, setup answers, notes, or analysis choices.
-- Create a custom unlinked experiment only when Health Commons has no same-family protocol after search/list/explore, or when the user explicitly wants an experiment that should not be linked to any public protocol.
+- \`vault-cli experiment start <slug> --from-protocol <key-or-route> --intervention-start <YYYY-MM-DD> ...\` to persist a resolved protocol-linked run using typed flags only.
+- Prefer protocol-linked runs. If the user's plan is a variant of an existing public protocol or protocol family, start it with \`--from-protocol\` and store the user's changes as typed plan fields, setup answers, notes, or analysis choices.
+- Use \`vault-cli experiment start <slug> --custom ...\` only when Health Commons has no same-family protocol after search/list/explore, or when the user explicitly wants an experiment that should not be linked to any public protocol.
 - \`vault-cli experiment start <slug> ... --dry-run --format json\` to validate typed start fields without writing records.
 - \`vault-cli experiment edit <id> ...\` for typed repairs or enrichment of an existing experiment.
 - Preserve exact Health Commons \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`commonsProtocolRef\`.

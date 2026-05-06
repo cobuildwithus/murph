@@ -9401,10 +9401,14 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "protocolKey": {
-                          "description": "Full Health Commons protocol_variant:<family>/<variant> key.",
+                        "fromProtocol": {
+                          "description": "Health Commons protocol_variant key or experiment route id.",
                           "type": "string",
                           "minLength": 1
+                        },
+                        "custom": {
+                          "description": "Start an intentionally unlinked custom experiment.",
+                          "type": "boolean"
                         },
                         "testPlanId": {
                           "description": "Chosen Health Commons test plan id for this run.",
