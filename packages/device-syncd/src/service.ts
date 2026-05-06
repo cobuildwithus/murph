@@ -47,6 +47,7 @@ import type {
   HandleConnectionCallbackInput,
   HandleOAuthCallbackInput,
   HandleWebhookResult,
+  ListDeviceSyncAccountsInput,
   ProviderAuthTokens,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
@@ -97,7 +98,7 @@ export interface DeviceSyncService {
   describeProviders(): PublicProviderDescriptor[];
   describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor;
   summarize(): DeviceSyncServiceSummary;
-  listAccounts(provider?: string): PublicDeviceSyncAccount[];
+  listAccounts(input?: ListDeviceSyncAccountsInput): PublicDeviceSyncAccount[];
   getAccount(accountId: string): PublicDeviceSyncAccount | null;
   start(): void;
   stop(): void;
@@ -236,8 +237,8 @@ class DeviceSyncServiceController {
     return this.store.summarize();
   }
 
-  listAccounts(provider?: string): PublicDeviceSyncAccount[] {
-    return this.store.listAccounts(provider).map((account) => this.toPublicAccount(account));
+  listAccounts(input: ListDeviceSyncAccountsInput = {}): PublicDeviceSyncAccount[] {
+    return this.store.listAccounts(input).map((account) => this.toPublicAccount(account));
   }
 
   getAccount(accountId: string): PublicDeviceSyncAccount | null {
@@ -937,7 +938,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     describeProviders: () => controller.describeProviders(),
     describeProvider: (providerName) => controller.describeProvider(providerName),
     summarize: () => controller.summarize(),
-    listAccounts: (provider) => controller.listAccounts(provider),
+    listAccounts: (input) => controller.listAccounts(input),
     getAccount: (accountId) => controller.getAccount(accountId),
     start: () => controller.start(),
     stop: () => controller.stop(),

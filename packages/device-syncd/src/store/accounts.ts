@@ -17,6 +17,7 @@ import type {
   ProviderAuthTokens,
   StoredDeviceSyncAccountCredential,
   StoredDeviceSyncAccount,
+  ListDeviceSyncAccountsInput,
 } from "../types.ts";
 
 type SqliteRow = Record<string, unknown>;
@@ -661,13 +662,38 @@ export function mapAccountRow(row: StoredAccountRow): StoredDeviceSyncAccount {
   };
 }
 
-export function listAccounts(database: DatabaseSync, provider?: string): StoredDeviceSyncAccount[] {
-  const rows = (provider
+export function listAccounts(
+  database: DatabaseSync,
+  input: ListDeviceSyncAccountsInput = {},
+): StoredDeviceSyncAccount[] {
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (input.provider) {
+    conditions.push("connection.provider = ?");
+    params.push(input.provider);
+  }
+
+  if (input.sourceProviderSlug) {
+    conditions.push(`
+      exists (
+        select 1
+        from device_connection_source source
+        where source.connection_id = connection.id
+          and source.source_provider_slug = ?
+          and source.status <> 'disconnected'
+      )
+    `);
+    params.push(input.sourceProviderSlug);
+  }
+
+  const whereClause = conditions.length > 0 ? `where ${conditions.join(" and ")}` : "";
+  const rows = (conditions.length > 0
     ? database.prepare(`
         ${ACCOUNT_ROW_SELECT}
-        where connection.provider = ?
+        ${whereClause}
         order by updated_at desc, connection.id desc
-      `).all(provider)
+      `).all(...params)
     : database.prepare(`
         ${ACCOUNT_ROW_SELECT}
         order by updated_at desc, connection.id desc

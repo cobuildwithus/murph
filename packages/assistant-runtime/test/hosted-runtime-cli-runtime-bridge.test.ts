@@ -126,6 +126,18 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
             lastWebhookAt: null,
             nextReconcileAt: "2026-05-04T03:00:00.000Z",
           },
+          sources: [
+            {
+              displayName: "Garmin",
+              firstSeenAt: "2026-05-03T20:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-05-03T21:00:00.000Z",
+              resourceCount: 2,
+              sourceProviderSlug: "garmin",
+              status: "connected" as const,
+            },
+          ],
         },
       ],
       generatedAt: "2026-05-03T21:00:00.000Z",
@@ -150,15 +162,30 @@ test("hosted CLI runtime bridge lists device accounts from runtime snapshots", a
         url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
       },
       provider: "whoop",
+      sourceProvider: "garmin",
     });
 
     expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledWith({
       provider: "whoop",
+      sourceProviderSlug: "garmin",
     });
     assert.equal(result.provider, "whoop");
+    assert.equal(result.sourceProvider, "garmin");
     assert.equal(result.accounts.length, 1);
     assert.equal(result.accounts[0]?.provider, "whoop");
     assert.equal(result.accounts[0]?.status, "active");
+    assert.deepEqual(result.accounts[0]?.sources, [
+      {
+        displayName: "Garmin",
+        firstSeenAt: "2026-05-03T20:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-05-03T21:00:00.000Z",
+        resourceCount: 2,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      },
+    ]);
     assert.deepEqual(result.accounts[0]?.metadata, {});
     assert.doesNotMatch(
       JSON.stringify(result),

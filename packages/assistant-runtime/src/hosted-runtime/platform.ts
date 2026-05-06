@@ -193,6 +193,7 @@ export interface HostedRuntimeDeviceSyncPort {
   fetchSnapshot(input?: {
     connectionId?: string | null;
     provider?: string | null;
+    sourceProviderSlug?: string | null;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId">): Promise<
     HostedExecutionDeviceSyncDirtyPendingResponse

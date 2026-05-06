@@ -16,6 +16,7 @@ import {
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
   type HostedExecutionDeviceSyncRuntimeCredentialUpdate,
+  type HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot,
   type HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
@@ -31,6 +32,7 @@ import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import {
   hostedConnectionRecordArgs,
   type HostedDeviceSyncDirtyConnectionRecord,
+  type HostedDeviceConnectionSource,
   mapHostedConnectionRecord,
   type HostedConnectionRecord,
   type HostedPrismaTransactionClient,
@@ -64,6 +66,18 @@ export async function readHostedDeviceSyncRuntimeState(input: {
       userId: input.trustedUserId,
       ...(parsed.connectionId ? { id: parsed.connectionId } : {}),
       ...(parsed.provider ? { provider: parsed.provider } : {}),
+      ...(parsed.sourceProviderSlug
+        ? {
+            sources: {
+              some: {
+                sourceProviderSlug: parsed.sourceProviderSlug,
+                status: {
+                  not: "disconnected",
+                },
+              },
+            },
+          }
+        : {}),
     },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     ...hostedConnectionRecordArgs,
@@ -78,11 +92,13 @@ export async function readHostedDeviceSyncRuntimeState(input: {
       const durableConnection = storedAccount
         ? null
         : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
+      const sources = await controlPlane.store.listConnectionSources(record.id);
 
       return buildHostedRuntimeConnectionSnapshot(
         record,
         storedAccount,
         storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
+        sources.map(toHostedRuntimeConnectionSourceSnapshot),
       );
     }),
   );
@@ -389,6 +405,7 @@ function buildHostedRuntimeConnectionSnapshot(
   record: HostedConnectionRecord,
   storedAccount: HostedStoredDeviceSyncAccount | null,
   fallbackExternalAccountId: string | null = null,
+  sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[] = [],
 ): HostedRuntimeConnectionSnapshot {
   const mappedRecord = mapHostedConnectionRecord(record);
   const publicConnection = storedAccount
@@ -428,6 +445,7 @@ function buildHostedRuntimeConnectionSnapshot(
       lastWebhookAt: publicConnection.lastWebhookAt,
       nextReconcileAt: publicConnection.nextReconcileAt,
     },
+    sources,
     credential,
   };
 }
@@ -452,11 +470,48 @@ function buildPublicConnectionFromRuntimeSnapshot(
     nextReconcileAt: snapshot.localState.nextReconcileAt,
     provider: snapshot.connection.provider,
     scopes: [...snapshot.connection.scopes],
+    sources: snapshot.sources ?? [],
     setupExpiresAt: snapshot.connection.setupExpiresAt ?? null,
     setupPhase: snapshot.connection.setupPhase ?? null,
     status: normalizeHostedDeviceSyncLifecycleStatus(snapshot.connection.status),
     updatedAt: snapshot.connection.updatedAt ?? snapshot.connection.createdAt,
   };
+}
+
+const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
+  "sourceInstanceKeyFallback",
+]);
+
+function toHostedRuntimeConnectionSourceSnapshot(
+  source: HostedDeviceConnectionSource,
+): HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
+  return {
+    displayName: source.displayName,
+    firstSeenAt: source.firstSeenAt,
+    lastErrorCode: source.lastErrorCode,
+    lastErrorMessage: source.lastErrorMessage,
+    lastSeenAt: source.lastSeenAt,
+    resourceCount: countHostedRuntimeConnectionSourceResources(
+      source.resourceAvailabilitySummary,
+    ),
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+  };
+}
+
+function countHostedRuntimeConnectionSourceResources(
+  summary: HostedDeviceConnectionSource["resourceAvailabilitySummary"],
+): number {
+  if (!summary) {
+    return 0;
+  }
+
+  return Object.entries(summary).filter(([key, value]) =>
+    !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+    && value !== false
+    && value !== null
+    && value !== undefined
+  ).length;
 }
 
 function sortHostedRuntimeConnectionSnapshots(

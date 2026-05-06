@@ -3,6 +3,7 @@ import type {
   DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
+  ListDeviceSyncAccountsInput,
   DeviceSyncJobRecord,
   DeviceSyncProviderDescriptor,
   ListDeviceConnectionSourcesInput,
@@ -15,11 +16,13 @@ import type {
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 export type { DeviceSyncAccountSetupPhase } from "./client.ts";
+export type { DeviceSyncAccountSourceSummary } from "./client.ts";
 export type { DeviceConnectionSourceStatus } from "./client.ts";
 export type { DeviceConnectionSourceResourceAvailabilityValue } from "./client.ts";
 export type { DeviceConnectionSourceResourceAvailabilitySummary } from "./client.ts";
 export type { UpsertDeviceConnectionSourceInput } from "./client.ts";
 export type { ListDeviceConnectionSourcesInput } from "./client.ts";
+export type { ListDeviceSyncAccountsInput } from "./client.ts";
 export type { DeviceConnectionSourceRecord } from "./client.ts";
 export type { DeviceSyncJobRecord } from "./client.ts";
 

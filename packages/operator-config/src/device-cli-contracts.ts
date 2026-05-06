@@ -58,6 +58,22 @@ export const deviceSyncAccountStatusSchema = z.enum([
   'disconnected',
 ])
 
+export const deviceSyncAccountSourceSchema = z.object({
+  sourceProviderSlug: z.string().min(1),
+  displayName: z.string().min(1).nullable(),
+  status: z.enum([
+    'connected',
+    'unavailable',
+    'error',
+    'disconnected',
+  ]),
+  resourceCount: z.number().int().nonnegative(),
+  lastErrorCode: z.string().min(1).nullable(),
+  lastErrorMessage: z.string().min(1).nullable(),
+  firstSeenAt: isoTimestampSchema,
+  lastSeenAt: isoTimestampSchema,
+})
+
 export const deviceSyncProviderSchema = z.object({
   provider: z.string().min(1),
   source: z.enum(['catalog', 'local_control_plane']).optional(),
@@ -88,6 +104,7 @@ export const deviceSyncAccountSchema = z.object({
   lastErrorCode: z.string().min(1).nullable(),
   lastErrorMessage: z.string().min(1).nullable(),
   nextReconcileAt: isoTimestampSchema.nullable(),
+  sources: z.array(deviceSyncAccountSourceSchema).optional(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
 })
@@ -162,6 +179,7 @@ export const deviceAccountListResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema.optional(),
   local: deviceSyncLocalAvailabilitySchema.optional(),
   provider: z.string().min(1).nullable(),
+  sourceProvider: z.string().min(1).nullable().optional(),
   accounts: z.array(deviceSyncAccountSchema),
 })
 

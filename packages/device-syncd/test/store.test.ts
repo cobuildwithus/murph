@@ -621,6 +621,21 @@ test("device sync store keeps source instances distinct and lists them determini
       }).map((source) => source.sourceInstanceKey),
       ["src_oura_hash_a", "src_oura_hash_b"],
     );
+    assert.deepEqual(
+      store.listAccounts({ sourceProviderSlug: "oura" }).map((account) => ({
+        externalAccountId: account.externalAccountId,
+        sources: account.sources?.map((source) => source.sourceProviderSlug),
+      })),
+      [{
+        externalAccountId: "aggregator-account",
+        sources: ["dexcom", "oura", "oura"],
+      }],
+    );
+    assert.deepEqual(
+      store.listAccounts({ sourceProviderSlug: "garmin" }),
+      [],
+    );
+    assert.equal(store.getAccountById(connection.id)?.sources?.[0]?.resourceCount, 1);
 
     const updatedOuraA = store.upsertConnectionSource({
       connectionId: connection.id,

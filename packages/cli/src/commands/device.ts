@@ -24,6 +24,9 @@ const providerNameSchema = deviceSyncProviderKeySchema
 const connectTargetNameSchema = deviceSyncConnectTargetSchema
   .describe('Device connect target returned by device provider list, such as fitbit, garmin, whoop, or oura.')
 
+const sourceProviderNameSchema = deviceSyncConnectTargetSchema
+  .describe('Upstream device source provider such as fitbit, garmin, whoop, or oura.')
+
 const accountIdSchema = z
   .string()
   .min(1)
@@ -161,13 +164,18 @@ export function registerDeviceCommands(
     args: emptyArgsSchema,
     options: deviceControlOptionsSchema.extend({
       provider: providerNameSchema.optional(),
+      'source-provider': sourceProviderNameSchema.optional(),
     }),
     output: deviceAccountListResultSchema,
     async run({ options }) {
+      const sourceProvider = options['source-provider']
       return services.listAccounts({
         vault: options.vault,
         baseUrl: options.baseUrl,
         provider: options.provider ? normalizeProviderName(options.provider) : undefined,
+        ...(sourceProvider
+          ? { sourceProvider: normalizeConnectTargetName(sourceProvider) }
+          : {}),
       })
     },
   })
