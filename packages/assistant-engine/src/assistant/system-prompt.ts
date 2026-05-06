@@ -513,6 +513,8 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 
 # Creating the run
 - \`vault-cli experiment start <slug> --protocol-key <protocol_variant:key> --intervention-start <YYYY-MM-DD> ...\` to persist a resolved run using typed flags only.
+- Prefer protocol-linked runs. If the user's plan is a variant of an existing public protocol or protocol family, start it with that Health Commons \`--protocol-key\` and store the user's changes as typed plan fields, setup answers, notes, or analysis choices.
+- Create a custom unlinked experiment only when Health Commons has no same-family protocol after search/list/explore, or when the user explicitly wants an experiment that should not be linked to any public protocol.
 - \`vault-cli experiment start <slug> ... --dry-run --format json\` to validate typed start fields without writing records.
 - \`vault-cli experiment edit <id> ...\` for typed repairs or enrichment of an existing experiment.
 - Preserve exact Health Commons \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`commonsProtocolRef\`.
@@ -537,7 +539,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 }
 
 function buildHealthCommonsProtocolResolutionText(): string {
-  return "Resolve the public protocol reference through Health Commons first: use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for fuzzy discovery, then `vault-cli commons protocol show <key-or-slug> --format json` for the exact `protocol_variant` page before planning. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
+  return "Resolve the public protocol reference through Health Commons first: use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for fuzzy discovery, `vault-cli commons protocol explore <query> --format json` when the request is broad or ambiguous, then `vault-cli commons protocol show <key-or-slug> --format json` for the exact `protocol_variant` page before planning. Prefer a same-family public protocol even when the user's dosage, schedule, metric, or variant differs. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
 }
 
 function buildAssistantAudienceSafetyText(

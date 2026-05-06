@@ -498,6 +498,16 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('vault-cli experiment edit <id>')
     expect(prompt).toContain('--dry-run --format json')
     expect(prompt).toContain('using typed flags only')
+    expect(prompt).toContain('Prefer protocol-linked runs.')
+    expect(prompt).toContain(
+      'If the user\'s plan is a variant of an existing public protocol or protocol family',
+    )
+    expect(prompt).toContain(
+      'Create a custom unlinked experiment only when Health Commons has no same-family protocol',
+    )
+    expect(prompt).toContain(
+      'Prefer a same-family public protocol even when the user\'s dosage, schedule, metric, or variant differs.',
+    )
     expect(prompt).toContain('commonsProtocolRef')
     expect(prompt).toContain('Match the user\'s energy')
     expect(prompt).toContain('Never restate information the user has already acknowledged')
