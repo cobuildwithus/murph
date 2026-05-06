@@ -130,7 +130,15 @@ const cleanupHostedRunnerContainers = vi.fn<
   }) => Promise<void>
 >(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
-const spawnSync = vi.fn(() => ({
+const spawnSync = vi.fn<(
+  command: string,
+  args: readonly string[],
+  options?: unknown,
+) => {
+  error: undefined;
+  status: number;
+  stdout: string;
+}>(() => ({
   error: undefined,
   status: 0,
   stdout: "",
@@ -482,6 +490,48 @@ describe("hosted local dev stack", () => {
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     releaseFirstTermination();
     await stopPromise;
+  });
+
+  it("does not use global process cleanup for the Linq tunnel", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    resolveHostedLocalLinqWebhookSetup.mockResolvedValueOnce({
+      phoneNumbers: ["+15550100001"],
+      publicBaseUrl: "https://tunnel.example.test",
+      shouldRegister: false,
+      shouldStartTunnel: true,
+      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+      tunnelName: "dev",
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 111 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "linq-tunnel", pid: 112 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 113 }));
+
+    try {
+      const { startHostedLocalDevStack } = await import("./stack.ts");
+
+      const stack = await startHostedLocalDevStack({
+        env: process.env,
+      });
+      await stack.ready;
+      await stack.stop();
+
+      const pkillCalls = spawnSync.mock.calls.filter(([command]) => command === "pkill");
+      expect(pkillCalls.length).toBeGreaterThan(0);
+      expect(
+        pkillCalls.some(([, args]) => args.some((arg) => arg.includes("cloudflared"))),
+      ).toBe(false);
+      expect(spawnChildProcess).toHaveBeenCalledWith(
+        "linq-tunnel",
+        "cloudflared",
+        expect.any(Array),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    } finally {
+      platformSpy.mockRestore();
+    }
   });
 
   it("includes the local E2E parser toolchain when preparing a parser-enabled runner bundle", async () => {

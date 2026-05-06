@@ -1237,7 +1237,6 @@ function terminateKnownHostedLocalProcessResidue(input: {
   const patterns = [
     `wrangler dev.*--port ${input.workerPort}`,
     `workerd.*${escapeRegExp(`${input.workerHost}:${input.workerPort}`)}`,
-    "cloudflared tunnel.*cloudflared-linq-webhook",
     ...(input.stripeForwardUrl === null
       ? []
       : [`stripe listen --forward-to ${escapeRegExp(input.stripeForwardUrl)}`]),
