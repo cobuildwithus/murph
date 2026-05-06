@@ -101,6 +101,7 @@ export interface HostedWorkspaceRunnerPlatform
 
 export interface HostedWorkspaceRunnerAssistantPhaseInput {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  now?: () => string;
   platform: HostedRuntimePlatform;
   workspace: HostedWorkspaceState | null;
 }
@@ -274,6 +275,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   });
   const assistantPhaseInput = {
     initialMailboxImport,
+    now: input.now,
     platform,
     workspace: input.workspace,
   };
