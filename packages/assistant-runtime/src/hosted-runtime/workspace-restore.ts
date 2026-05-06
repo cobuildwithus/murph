@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   clearHostedAssistantRuntimeHotState,
+  clearHostedCodexContinuityRestoreRoot,
   hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
   repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   restoredWorkspaceRequiresHostedCodexProviderContinuity,
@@ -97,17 +98,28 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   let baseRestoreCacheHit = false;
   if (baseSnapshotRef) {
     const cachedBaseRestore = await readHostedWorkspaceBaseRestoreCache(restored.vaultRoot);
+    let useCachedBaseRestore = false;
 
     if (cachedBaseRestore && isHostedWorkspaceBaseRestoreCacheHit({
       cache: cachedBaseRestore,
       ref: baseSnapshotRef,
       vaultRoot: restored.vaultRoot,
     })) {
-      if (cachedBaseRestore.baseProvidesCodexProviderContinuity) {
-        await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
-          requireManifest: true,
-        });
+      try {
+        if (cachedBaseRestore.baseProvidesCodexProviderContinuity) {
+          await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
+            allowUnmanifestedCodexHomeFiles: true,
+            assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
+            requireManifest: true,
+          });
+        }
+        useCachedBaseRestore = true;
+      } catch {
+        await clearHostedWorkspaceBaseRestoreCacheBestEffort(restored.vaultRoot);
       }
+    }
+
+    if (useCachedBaseRestore) {
       baseRestoreCacheHit = true;
     } else {
       const baseBundle = await readHostedWorkspaceRuntimeBundle({
@@ -156,12 +168,23 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         vaultRoot: restored.vaultRoot,
       })
     ) {
-      await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
-        requireManifest: await restoredWorkspaceRequiresHostedCodexProviderContinuity({
-          vaultRoot: restored.vaultRoot,
-        }),
-      });
-      await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
+      try {
+        await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
+          allowUnmanifestedCodexHomeFiles: true,
+          assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
+          requireManifest: await restoredWorkspaceRequiresHostedCodexProviderContinuity({
+            vaultRoot: restored.vaultRoot,
+          }),
+        });
+        await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
+      } catch {
+        await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
+        await restoreHostedWorkspaceRuntimeHotLayer({
+          hotSnapshotRef,
+          input,
+          restored,
+        });
+      }
     } else {
       await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
       await restoreHostedWorkspaceRuntimeHotLayer({
@@ -277,6 +300,14 @@ async function writeHostedWorkspaceBaseRestoreCacheBestEffort(input: {
     );
   } catch {
     // Restore remains correct without the local cache marker; the next run will cold-restore base.
+  }
+}
+
+async function clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
+  try {
+    await rm(resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot), { force: true });
+  } catch {
+    // A stale base cache marker should not block cold restore from the source bundle.
   }
 }
 
@@ -458,19 +489,27 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
     ref: input.ref,
   });
 
-  await restoreHostedBundleRoots({
-    artifactResolver: createHostedArtifactResolver({
-      artifactStore: input.platform.artifactStore,
-    }),
-    bytes: bundle,
-    expectedKind: "vault",
-    roots: {
-      [HOSTED_OPERATOR_HOME_ROOT_KEY]: input.restored.operatorHomeRoot,
-      vault: input.restored.vaultRoot,
-    },
-    shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
-  });
-  await verifyRestoredHostedCodexContinuityManifest(input.restored.operatorHomeRoot);
+  await clearHostedCodexContinuityRestoreRoot(input.restored.operatorHomeRoot);
+  try {
+    await restoreHostedBundleRoots({
+      artifactResolver: createHostedArtifactResolver({
+        artifactStore: input.platform.artifactStore,
+      }),
+      bytes: bundle,
+      expectedKind: "vault",
+      roots: {
+        [HOSTED_OPERATOR_HOME_ROOT_KEY]: input.restored.operatorHomeRoot,
+        vault: input.restored.vaultRoot,
+      },
+      shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
+    });
+    await verifyRestoredHostedCodexContinuityManifest(input.restored.operatorHomeRoot, {
+      assistantStateRoot: resolveAssistantStatePaths(input.restored.vaultRoot).assistantStateRoot,
+    });
+  } catch (error) {
+    await clearHostedCodexContinuityRestoreRoot(input.restored.operatorHomeRoot);
+    throw error;
+  }
 }
 
 async function readHostedWorkspaceRuntimeBundle(input: {
