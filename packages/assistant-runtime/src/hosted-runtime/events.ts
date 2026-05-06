@@ -1186,7 +1186,7 @@ function readHostedAssistantLocalMessageTimingTrace(
 
   const stage = readHostedAssistantProviderDiagnosticAllowedString(
     record,
-    "localMessageTimingStage",
+    "localSendTimingStage",
     HOSTED_ASSISTANT_LOCAL_MESSAGE_TIMING_STAGE_VALUES,
   );
   if (!stage) {
@@ -1194,16 +1194,16 @@ function readHostedAssistantLocalMessageTimingTrace(
   }
 
   const details: HostedExecutionStructuredLogDetails = {
-    localMessageTimingStage: stage,
-    localMessageTimingTraceType: "local-message",
+    localSendTimingStage: stage,
+    localSendTimingTraceType: "local-send",
     providerTraceKind: "local_message.timing",
     schema: ASSISTANT_LOCAL_MESSAGE_TIMING_TRACE_SCHEMA,
   };
 
   for (const key of [
-    "localMessageDeliveryRequested",
-    "localMessageHosted",
-    "localMessageQueueOnly",
+    "localSendDeliveryRequested",
+    "localSendHosted",
+    "localSendQueueOnly",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,
@@ -1212,8 +1212,8 @@ function readHostedAssistantLocalMessageTimingTrace(
     );
   }
   for (const key of [
-    "localMessageElapsedMs",
-    "localMessageTotalElapsedMs",
+    "localSendElapsedMs",
+    "localSendTotalElapsedMs",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,

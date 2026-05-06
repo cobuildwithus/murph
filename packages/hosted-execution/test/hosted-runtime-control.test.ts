@@ -682,6 +682,36 @@ describe("hosted runtime control contracts", () => {
       failureAssistantProviderErrorBodyMessage: "provider rejected the request",
       safeErrorMessage: "Codex app-server failed before producing a reply.",
     });
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        localSendDeliveryRequested: true,
+        localSendElapsedMs: 321,
+        localSendHosted: true,
+        localSendQueueOnly: true,
+        localSendTimingStage: "delivery-finished",
+        localSendTimingTraceType: "local-send",
+        localSendTotalElapsedMs: 654,
+        providerTraceKind: "local_message.timing",
+        schema: "murph.assistant-local-message-timing.v1",
+      },
+    }).redactedJson).toEqual({
+      localSendDeliveryRequested: true,
+      localSendElapsedMs: 321,
+      localSendHosted: true,
+      localSendQueueOnly: true,
+      localSendTimingStage: "delivery-finished",
+      localSendTimingTraceType: "local-send",
+      localSendTotalElapsedMs: 654,
+      providerTraceKind: "local_message.timing",
+      schema: "murph.assistant-local-message-timing.v1",
+    });
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        localMessageTimingStage: "delivery-finished",
+      },
+    })).toThrow(/not allowed/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {
