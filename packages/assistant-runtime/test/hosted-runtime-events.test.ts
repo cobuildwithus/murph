@@ -490,6 +490,73 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("captures hosted provider turn timing without raw identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_provider_turn_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_provider_turn_timing",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        providerSessionId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-provider-turn-timing.v1",
+          type: "assistant.provider.turn_timing",
+          cwd: "/tmp/raw-path",
+          providerTurnActionCount: 0,
+          providerTurnElapsedMs: 4321,
+          providerTurnOk: true,
+          providerTurnRawEventCount: 12,
+          providerTurnStage: "codex-attempt-finished",
+          providerTurnTotalElapsedMs: 6789,
+          providerTurnUsagePresent: true,
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_provider_turn_timing",
+      level: "info",
+      message: "Hosted assistant provider turn timing captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        providerTraceKind: "provider.turn_timing",
+        providerTurnActionCount: 0,
+        providerTurnElapsedMs: 4321,
+        providerTurnOk: true,
+        providerTurnRawEventCount: 12,
+        providerTurnStage: "codex-attempt-finished",
+        providerTurnTotalElapsedMs: 6789,
+        providerTurnTraceType: "provider-turn",
+        providerTurnUsagePresent: true,
+        requestId: "req_123",
+        schema: "murph.assistant-provider-turn-timing.v1",
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+  });
+
   it("captures hosted automation pass timing without raw identifiers", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_automation_timing",
