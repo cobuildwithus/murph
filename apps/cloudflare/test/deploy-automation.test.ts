@@ -104,6 +104,47 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   HOSTED_CRYPTO_ENV: "production",
 } as const;
 
+function findRunCommandsWithGitHubInputInterpolation(
+  workflow: string,
+): Array<{ body: string; line: number }> {
+  const lines = workflow.split("\n");
+  const findings: Array<{ body: string; line: number }> = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const runMatch = /^(\s*)run:\s*(.*)$/u.exec(line);
+    if (!runMatch) {
+      continue;
+    }
+
+    const runIndent = runMatch[1]?.length ?? 0;
+    const rest = runMatch[2]?.trimEnd() ?? "";
+    let body = rest;
+
+    if (rest === "|" || rest === ">") {
+      const bodyLines: string[] = [];
+      for (let bodyIndex = index + 1; bodyIndex < lines.length; bodyIndex += 1) {
+        const bodyLine = lines[bodyIndex] ?? "";
+        const bodyIndent = bodyLine.match(/^\s*/u)?.[0].length ?? 0;
+        if (bodyLine.trim() !== "" && bodyIndent <= runIndent) {
+          break;
+        }
+        bodyLines.push(bodyLine);
+      }
+      body = bodyLines.join("\n");
+    }
+
+    if (body.includes("${{ inputs.")) {
+      findings.push({
+        body,
+        line: index + 1,
+      });
+    }
+  }
+
+  return findings;
+}
+
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
     const environment = readHostedDeployAutomationEnvironment({
@@ -402,7 +443,14 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}",
       "HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}",
-      "Container rollout: \\`${{ inputs.container_rollout }}\\`",
+      "DEPLOY_SUMMARY_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
+      "DEPLOY_SUMMARY_ENVIRONMENT: ${{ inputs.environment }}",
+      "DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC: ${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}",
+      "DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || 'environment default' }}",
+      "DEPLOY_SUMMARY_SMOKE_USER_ID: ${{ inputs.smoke_user_id || 'not-set' }}",
+      "printf -- '- Container rollout: `%s`\\n' \"${DEPLOY_SUMMARY_CONTAINER_ROLLOUT}\"",
+      "printf -- '- Runner idle TTL override: `%s`\\n' \"${DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS}\"",
+      "printf -- '- Smoke user id: `%s`\\n' \"${DEPLOY_SUMMARY_SMOKE_USER_ID}\"",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
       'MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"',
@@ -528,7 +576,8 @@ describe("hosted deploy automation helpers", () => {
     expect([
       ...workflow.matchAll(/pnpm --dir apps\/cloudflare verify:parallel/gmu),
     ]).toHaveLength(2);
-    expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
+    expect(findRunCommandsWithGitHubInputInterpolation(workflow)).toEqual([]);
+    expect(workflow).toContain("printf -- '- Container max instances: `%s`\\n' \"${CF_CONTAINER_MAX_INSTANCES}\"");
     expect(workflow).toContain(
       "Native container image: base prepared from \\`Dockerfile.cloudflare-hosted-runner-base\\`; app layer built from \\`Dockerfile.cloudflare-hosted-runner\\` during deploy",
     );
