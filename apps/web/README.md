@@ -37,6 +37,8 @@ The experiment detail page composes two narrow data sources:
 
 The UI receives the composed `Experiment` view model, but public protocol prose, citations, and commons revisions are never copied into private run state.
 
+The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
+
 ## Core responsibilities
 
 - Junction-backed Garmin connect plus Oura, Strava, and WHOOP OAuth start/callback flows

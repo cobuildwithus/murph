@@ -27,6 +27,7 @@ export type BrowserVaultSessionLoadResult =
   | { client: BrowserVaultQueryClient; replicaRef: HostedBrowserVaultReplicaRef; state: "ready" };
 
 export interface LoadBrowserVaultReplicaInput {
+  emptyOnUnauthorized?: boolean;
   endpoint?: string;
   fetchImpl?: typeof fetch;
   knownReplicaRef: HostedBrowserVaultReplicaRef | null;
@@ -36,6 +37,7 @@ export interface LoadBrowserVaultReplicaInput {
 const textDecoder = new TextDecoder();
 
 export async function loadBrowserVaultReplica({
+  emptyOnUnauthorized = true,
   endpoint = "/api/browser-vault/session",
   fetchImpl = fetch,
   knownReplicaRef,
@@ -60,7 +62,11 @@ export async function loadBrowserVaultReplica({
   });
 
   if (response.status === 401 || response.status === 403) {
-    return { state: "empty" };
+    if (emptyOnUnauthorized) {
+      return { state: "empty" };
+    }
+
+    throw new Error(`Browser vault session failed with HTTP ${response.status}: ${await readJsonErrorMessage(response)}`);
   }
 
   if (!response.ok) {

@@ -22,9 +22,7 @@ import {
   loadBrowserVaultReplica,
   normalizeBrowserVaultError,
 } from "@/src/lib/browser-vault/loader";
-import {
-  HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
-} from "@/src/lib/hosted-privacy/account-data-shared";
+import { HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE } from "@/src/lib/hosted-privacy/account-data-shared";
 
 import { ConnectedAccountCard } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
@@ -106,6 +104,8 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
 
     try {
       const result = await loadBrowserVaultReplica({
+        emptyOnUnauthorized: false,
+        endpoint: "/api/settings/vault-export/session",
         knownReplicaRef: null,
       });
 
@@ -124,11 +124,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       closeExportDialog();
       setSuccess("Your vault export downloaded. Keep the file somewhere private and secure.");
     } catch (requestError) {
-      setExportDialogError(requestError instanceof Error
-        ? normalizeBrowserVaultError(requestError) === "Your dashboard data is not available right now."
-          ? requestError.message
-          : normalizeBrowserVaultError(requestError)
-        : "Could not export your data right now.");
+      setExportDialogError(formatVaultExportError(requestError));
     } finally {
       setExportPending(false);
     }
@@ -230,7 +226,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
         value="Download your browser vault"
         meta="Private records, metrics, timelines, search rows, and summaries as JSON."
         action={
-          <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} type="button" variant="outline">
+          <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} size="lg" type="button" variant="outline">
             <DownloadIcon data-icon="inline-start" />
             {deletionSummary ? "Export unavailable" : exportPending ? "Exporting..." : "Export vault"}
           </Button>
@@ -243,7 +239,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
         value="Delete your Murph account data"
         meta="Permanently deletes your Murph data. Requires two confirmations."
         action={
-          <Button disabled={deletePending || deletionSummary !== null} onClick={openDialog} type="button" variant="destructive">
+          <Button disabled={deletePending || deletionSummary !== null} onClick={openDialog} size="lg" type="button" variant="destructive">
             <Trash2Icon data-icon="inline-start" />
             {deletionSummary ? "Deleted" : "Delete data"}
           </Button>
@@ -316,7 +312,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
                 value={exportConfirmationText}
                 onChange={(event) => setExportConfirmationText(event.target.value)}
                 aria-invalid={exportConfirmationText.length > 0 && !exportPhraseMatches}
-
                 placeholder={VAULT_EXPORT_CONFIRMATION_TEXT}
               />
             </div>
@@ -387,7 +382,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
                     value={confirmationPhrase}
                     onChange={(event) => setConfirmationPhrase(event.target.value)}
                     aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
-
                     placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                   />
                 </div>
@@ -445,6 +439,33 @@ function buildVaultExportFilename(generatedAt: string): string {
   return safeTimestamp
     ? `murph-vault-export-${safeTimestamp}.json`
     : DEFAULT_VAULT_EXPORT_FILENAME;
+}
+
+function formatVaultExportError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "Could not export your vault right now.";
+  }
+
+  if (error.message === "Your vault is not ready to export yet.") {
+    return error.message;
+  }
+
+  if (/HTTP 401/u.test(error.message)) {
+    return "Your session expired. Refresh and try again.";
+  }
+
+  if (/HTTP 403/u.test(error.message) && /consent/iu.test(error.message)) {
+    return "Accept the current Murph legal consent before exporting your vault.";
+  }
+
+  if (/HTTP 403/u.test(error.message)) {
+    return "Your session is not allowed to export your vault right now.";
+  }
+
+  const normalizedMessage = normalizeBrowserVaultError(error);
+  return normalizedMessage === "Your dashboard data is not available right now."
+    ? "Your vault export is not available right now. Try again after your dashboard finishes syncing."
+    : normalizedMessage;
 }
 
 function triggerJsonDownload(blob: Blob, filename: string): void {

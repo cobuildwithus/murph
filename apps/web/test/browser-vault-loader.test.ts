@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   isBrowserVaultAbortError,
+  loadBrowserVaultReplica,
   parseBrowserVaultSessionResponse,
 } from "@/src/lib/browser-vault/loader";
 import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
@@ -66,6 +67,40 @@ test("browser vault abort detection accepts DOM-style abort errors", () => {
   assert.equal(isBrowserVaultAbortError({ name: "AbortError" }), true);
   assert.equal(isBrowserVaultAbortError(new Error("not aborted")), false);
   assert.equal(isBrowserVaultAbortError(null), false);
+});
+
+test("browser vault loader treats unauthorized responses as empty by default", async () => {
+  const result = await loadBrowserVaultReplica({
+    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        message: "Sign in to continue.",
+      },
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 401,
+    })),
+    knownReplicaRef: null,
+  });
+
+  assert.deepEqual(result, { state: "empty" });
+});
+
+test("browser vault loader can surface unauthorized responses for privacy export", async () => {
+  await assert.rejects(
+    loadBrowserVaultReplica({
+      emptyOnUnauthorized: false,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        error: {
+          message: "Accept the current Murph legal consent before continuing.",
+        },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 403,
+      })),
+      knownReplicaRef: null,
+    }),
+    /HTTP 403: Accept the current Murph legal consent before continuing\./u,
+  );
 });
 
 function createReplicaRef() {

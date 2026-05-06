@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   requestHostedOnboardingJson: vi.fn(),
+  loadBrowserVaultReplica: vi.fn(),
   useStateValues: [] as unknown[],
 }));
 
@@ -47,6 +48,12 @@ vi.mock("react", async () => {
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+}));
+
+vi.mock("@/src/lib/browser-vault/loader", () => ({
+  loadBrowserVaultReplica: mocks.loadBrowserVaultReplica,
+  normalizeBrowserVaultError: (error: unknown) =>
+    error instanceof Error ? error.message : "Your dashboard data is not available right now.",
 }));
 
 vi.mock("../src/components/settings/connected-account-card", () => ({
@@ -93,6 +100,15 @@ let cleanupRender: (() => Promise<void> | void) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.loadBrowserVaultReplica.mockResolvedValue({
+    client: {
+      replica: createBrowserVaultReplicaForTest(),
+    },
+    replicaRef: {
+      dataVersion: "d".repeat(64),
+    },
+    state: "ready",
+  });
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     ok: true,
     result: {
@@ -124,6 +140,119 @@ afterEach(async () => {
 });
 
 describe("HostedDataPrivacySettings", () => {
+  test.each([
+    {
+      acknowledgedSensitiveDownload: false,
+      confirmationText: "EXPORT MY VAULT",
+      name: "without the sensitive-data acknowledgement",
+    },
+    {
+      acknowledgedSensitiveDownload: true,
+      confirmationText: "export my vault",
+      name: "without the exact confirmation phrase",
+    },
+  ])("does not export the browser vault $name", async ({
+    acknowledgedSensitiveDownload,
+    confirmationText,
+  }) => {
+    mockHostedVaultExportFlowState({
+      acknowledgedSensitiveDownload,
+      confirmationText,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const createObjectURL = vi.fn(() => "blob:vault-export");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window, "URL", {
+      configurable: true,
+      value: {
+        createObjectURL,
+        revokeObjectURL,
+      },
+    });
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    const button = findButton(container, "Download vault JSON");
+    assert.equal(button.disabled, true);
+
+    await act(async () => {
+      button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.loadBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  test("downloads the browser vault replica when the export flow is submitted", async () => {
+    mockHostedVaultExportFlowState();
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const downloadedBlobs: Blob[] = [];
+    const createObjectURL = vi.fn((blob: Blob) => {
+      downloadedBlobs.push(blob);
+      return "blob:vault-export";
+    });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window, "URL", {
+      configurable: true,
+      value: {
+        createObjectURL,
+        revokeObjectURL,
+      },
+    });
+    const clickDownloadLink = vi.fn();
+    Object.defineProperty(window.HTMLElement.prototype, "click", {
+      configurable: true,
+      value: clickDownloadLink,
+    });
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Download vault JSON", window);
+
+    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledWith({
+      emptyOnUnauthorized: false,
+      endpoint: "/api/settings/vault-export/session",
+      knownReplicaRef: null,
+    });
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:vault-export");
+    expect(clickDownloadLink).toHaveBeenCalledTimes(1);
+    assert.equal(downloadedBlobs.length, 1);
+    await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"schema\": \"murph.browser-vault-replica\"");
+    await expect(downloadedBlobs[0]?.text()).resolves.toContain("\"entity-title\"");
+  });
+
   test("sends the typed deletion confirmation phrase when the delete flow is submitted", async () => {
     mockHostedDataPrivacyDeleteFlowState();
 
@@ -145,7 +274,7 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    await clickButton(container, "Delete my Murph data", window);
+    await clickButton(container, "Delete my data", window);
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
@@ -159,6 +288,28 @@ describe("HostedDataPrivacySettings", () => {
     });
   });
 });
+
+function mockHostedVaultExportFlowState(input: {
+  acknowledgedSensitiveDownload?: boolean;
+  confirmationText?: string;
+} = {}) {
+  mocks.useStateValues = [
+    false,
+    true,
+    input.confirmationText ?? "EXPORT MY VAULT",
+    input.acknowledgedSensitiveDownload ?? true,
+    null,
+    false,
+    false,
+    "review",
+    "",
+    false,
+    false,
+    null,
+    null,
+    null,
+  ];
+}
 
 function mockHostedDataPrivacyDeleteFlowState() {
   mocks.useStateValues = [
@@ -179,6 +330,54 @@ function mockHostedDataPrivacyDeleteFlowState() {
   ];
 }
 
+function createBrowserVaultReplicaForTest() {
+  return {
+    assistantSummary: {
+      highlights: [],
+      latestDate: null,
+    },
+    entities: [
+      {
+        attributes: {},
+        bodyPreview: "entity-body",
+        date: "2026-04-29",
+        experimentSlug: null,
+        family: "journal",
+        id: "entity-1",
+        kind: "note",
+        links: [],
+        lookupIds: ["entity-1"],
+        occurredAt: "2026-04-29T01:02:03.000Z",
+        recordClass: "journal",
+        status: null,
+        stream: null,
+        tags: [],
+        title: "entity-title",
+      },
+    ],
+    generatedAt: "2026-04-29T01:02:03.000Z",
+    metricGoalProgressRows: [],
+    metricRows: [],
+    metricSelectionRows: [],
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: "health-vault-browser",
+      includedFamilies: ["journal"],
+      metricLookbackDays: 365,
+    },
+    schema: "murph.browser-vault-replica",
+    searchRows: [],
+    source: {
+      dataVersion: "d".repeat(64),
+      sourceBundleHash: "a".repeat(64),
+    },
+    sourceHealthRows: [],
+    timelineRows: [],
+    weeklySampleSummaries: [],
+  };
+}
+
 function createPassthrough(tagName: string) {
   return function PassthroughComponent(props: Record<string, unknown> & { children?: ReactNode }) {
     const { children, ...rest } = props;
@@ -191,13 +390,18 @@ async function clickButton(
   label: string,
   window: Window & typeof globalThis,
 ) {
-  const button = [...container.querySelectorAll("button")].find((candidate) =>
-    candidate.textContent?.includes(label));
-  assert.ok(button, `Button not found: ${label}`);
+  const button = findButton(container, label);
 
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
+}
+
+function findButton(container: HTMLElement, label: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find((candidate) =>
+    candidate.textContent?.includes(label));
+  assert.ok(button, `Button not found: ${label}`);
+  return button;
 }
 
 function loadLinkedom(): {
