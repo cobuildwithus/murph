@@ -178,6 +178,24 @@ export function canUpgradeHostedBillingPlanToEdge(input: {
     !isHostedPulseTrialBillingState(input);
 }
 
+export function canSwitchHostedBillingPlanToPulse(input: {
+  billingStatus?: unknown;
+  currentBillingPhase?: unknown;
+  currentBillingPlanCode?: unknown;
+  stripeCustomerId?: unknown;
+  stripeSubscriptionId?: unknown;
+  suspendedAt?: unknown;
+}): boolean {
+  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_edge_monthly" &&
+    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
+    input.billingStatus === "active" &&
+    !(input.suspendedAt instanceof Date) &&
+    typeof input.stripeCustomerId === "string" &&
+    input.stripeCustomerId.length > 0 &&
+    typeof input.stripeSubscriptionId === "string" &&
+    input.stripeSubscriptionId.length > 0;
+}
+
 export function requireHostedPulseTrialPolicy(
   policyVersion: string | null | undefined,
 ): HostedPulseTrialPolicy | null {

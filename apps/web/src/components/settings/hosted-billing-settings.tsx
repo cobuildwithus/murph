@@ -9,9 +9,13 @@ import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 export function HostedBillingSettings(props: {
   authenticated: boolean;
+  canSwitchToPulse?: boolean;
   canUpgradeToEdge?: boolean;
   currentBillingPhase?: unknown;
   currentBillingPlanCode?: unknown;
+  currentPeriodEnd?: Date | null;
+  scheduledBillingEffectiveAt?: Date | null;
+  scheduledBillingPlanCode?: unknown;
 }) {
   if (!props.authenticated) {
     return (
@@ -25,10 +29,28 @@ export function HostedBillingSettings(props: {
   const currentPlanCode = parseHostedBillingPlanCode(props.currentBillingPlanCode);
   const currentPlan = currentPlanCode ? getHostedBillingPlanDefinition(currentPlanCode) : null;
   const currentBillingPhase = parseHostedBillingPhase(props.currentBillingPhase);
+  const scheduledPlanCode = parseHostedBillingPlanCode(props.scheduledBillingPlanCode);
+  const scheduledPlan = scheduledPlanCode ? getHostedBillingPlanDefinition(scheduledPlanCode) : null;
+  const scheduledBillingEffectiveAt =
+    props.scheduledBillingEffectiveAt instanceof Date
+      ? props.scheduledBillingEffectiveAt
+      : null;
+  const hasPendingPulseSwitch =
+    currentPlanCode === "launch_edge_monthly" &&
+    scheduledPlanCode === "launch_monthly" &&
+    scheduledBillingEffectiveAt !== null;
   const currentPlanPrice = currentPlan
     ? `$${Math.round(currentPlan.recurringAmountUsdCents / 100)} / month`
     : "Syncing";
-  const billingActionHelperText = currentBillingPhase === "trial"
+  const pendingPulseSwitchDate = hasPendingPulseSwitch
+    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
+    : null;
+  const scheduledPlanPrice = scheduledPlan
+    ? `$${Math.round(scheduledPlan.recurringAmountUsdCents / 100)} / month`
+    : null;
+  const billingActionHelperText = hasPendingPulseSwitch
+    ? "Want to keep Edge? Contact support and we'll help."
+    : currentBillingPhase === "trial"
     ? "You're on a free trial"
     : null;
 
@@ -46,14 +68,34 @@ export function HostedBillingSettings(props: {
             {currentPlanPrice}
           </p>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Manage your plan and payment details.
-        </p>
+        {hasPendingPulseSwitch && pendingPulseSwitchDate ? (
+          <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+            <p>
+              Pulse starts on {pendingPulseSwitchDate}. Edge remains active until then.
+            </p>
+            {scheduledPlanPrice ? <p>Then {scheduledPlanPrice}</p> : null}
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Manage invoices, billing details, and payment methods.
+          </p>
+        )}
       </div>
       <HostedBillingSettingsAction
+        currentPeriodEnd={props.currentPeriodEnd?.toISOString() ?? null}
         helperText={billingActionHelperText}
+        showSwitchToPulse={props.canSwitchToPulse === true && !hasPendingPulseSwitch}
         showUpgrade={props.canUpgradeToEdge === true}
       />
     </div>
   );
+}
+
+function formatHostedBillingDate(value: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(value);
 }

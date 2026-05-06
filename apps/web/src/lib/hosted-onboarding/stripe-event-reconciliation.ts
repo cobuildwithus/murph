@@ -7,6 +7,10 @@ import {
 import type Stripe from "stripe";
 
 import {
+  clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
+  refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
+} from "./billing-plan-switch-to-pulse-service";
+import {
   applyStripeCheckoutCompleted,
   applyStripeCheckoutExpired,
   applyStripeDisputeUpdated,
@@ -241,6 +245,24 @@ async function processHostedStripeEventRecord(
         dispatchContext,
         prisma,
       );
+      return buildEmptyHostedStripeEventProcessingResult();
+    case "subscription_schedule.updated":
+      await refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx({
+        schedule: payload as Stripe.SubscriptionSchedule,
+        tx: prisma,
+      });
+      return buildEmptyHostedStripeEventProcessingResult();
+    case "subscription_schedule.released":
+    case "subscription_schedule.completed":
+    case "subscription_schedule.canceled":
+    case "subscription_schedule.aborted":
+      await clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx({
+        stripeSubscriptionScheduleId: (payload as Stripe.SubscriptionSchedule).id,
+        tx: prisma,
+      });
+      return buildEmptyHostedStripeEventProcessingResult();
+    case "subscription_schedule.created":
+    case "subscription_schedule.expiring":
       return buildEmptyHostedStripeEventProcessingResult();
     case "invoice.paid":
       return mapHostedStripeActivationOutcome(

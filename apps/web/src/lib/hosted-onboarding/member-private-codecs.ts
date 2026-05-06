@@ -34,6 +34,8 @@ const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA =
 const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-member-billing-ref.stripe-subscription-id";
+const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD =
+  "hosted-member-billing-ref.stripe-subscription-schedule-id";
 
 export interface HostedMemberIdentityPrivateState {
   phoneNumber: string | null;
@@ -63,6 +65,7 @@ export interface HostedMemberHomeLinqRoutePrivateState {
 export interface HostedMemberBillingPrivateState {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
+  stripeSubscriptionScheduleId: string | null;
 }
 
 export async function buildHostedMemberIdentityPrivateColumns(input: {
@@ -457,6 +460,7 @@ export async function buildHostedMemberBillingPrivateColumns(input: {
   prisma?: HostedWebEncryptionPrismaClient;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
+  stripeSubscriptionScheduleId?: string | null;
 }) {
   const encryptPrivateField = (field: string, value: string | null | undefined) =>
     encryptHostedWebNullableString({
@@ -474,10 +478,15 @@ export async function buildHostedMemberBillingPrivateColumns(input: {
     HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD,
     input.stripeSubscriptionId,
   );
+  const stripeSubscriptionScheduleIdEncrypted = await encryptPrivateField(
+    HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD,
+    input.stripeSubscriptionScheduleId,
+  );
 
   return {
     stripeCustomerIdEncrypted,
     stripeSubscriptionIdEncrypted,
+    stripeSubscriptionScheduleIdEncrypted,
   } as const;
 }
 
@@ -487,10 +496,12 @@ export async function readHostedMemberBillingPrivateState(
     | "memberId"
     | "stripeCustomerIdEncrypted"
     | "stripeSubscriptionIdEncrypted"
-  >,
+  > & {
+    stripeSubscriptionScheduleIdEncrypted?: string | null;
+  },
   prisma?: HostedWebEncryptionPrismaClient,
 ): Promise<HostedMemberBillingPrivateState> {
-  const [stripeCustomerId, stripeSubscriptionId] = await Promise.all([
+  const [stripeCustomerId, stripeSubscriptionId, stripeSubscriptionScheduleId] = await Promise.all([
     decryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
       memberId: billingRef.memberId,
@@ -503,10 +514,17 @@ export async function readHostedMemberBillingPrivateState(
       prisma,
       value: billingRef.stripeSubscriptionIdEncrypted,
     }),
+    decryptHostedWebNullableString({
+      field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD,
+      memberId: billingRef.memberId,
+      prisma,
+      value: billingRef.stripeSubscriptionScheduleIdEncrypted,
+    }),
   ]);
 
   return {
     stripeCustomerId,
     stripeSubscriptionId,
+    stripeSubscriptionScheduleId,
   };
 }

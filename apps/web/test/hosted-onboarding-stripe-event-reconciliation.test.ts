@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaymentFailed: vi.fn(),
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
+  clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx: vi.fn(),
+  refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   stripe: {
@@ -22,6 +24,13 @@ const mocks = vi.hoisted(() => ({
       retrieve: vi.fn(),
     },
   },
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service", () => ({
+  clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx:
+    mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
+  refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx:
+    mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
@@ -134,6 +143,8 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
     mocks.applyStripeRefundCreated.mockResolvedValue(undefined);
     mocks.applyStripeSubscriptionUpdated.mockResolvedValue(undefined);
+    mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx.mockResolvedValue(undefined);
+    mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
     mocks.resolveStripeCustomerContext.mockResolvedValue({
       customerId: null,
     });
@@ -373,6 +384,93 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
     );
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+  });
+
+  it("routes subscription schedule updates to pending switch refresh only", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionScheduleEvent("subscription_schedule.updated");
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx).toHaveBeenCalledWith({
+      schedule: event.data.object,
+      tx: prisma.client,
+    });
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "subscription_schedule.released",
+    "subscription_schedule.completed",
+    "subscription_schedule.canceled",
+    "subscription_schedule.aborted",
+  ] as const)("routes %s to pending switch cleanup only", async (type) => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionScheduleEvent(type);
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx).toHaveBeenCalledWith({
+      stripeSubscriptionScheduleId: "sched_123",
+      tx: prisma.client,
+    });
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "subscription_schedule.created",
+    "subscription_schedule.expiring",
+  ] as const)("ignores %s for local pending switch state", async (type) => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionScheduleEvent(type);
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx).not.toHaveBeenCalled();
+    expect(mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
   });
 
   it("routes invoice.payment_failed through the live Stripe subscription instead of the stale event payload", async () => {
@@ -720,6 +818,48 @@ function makeRefundCreatedEvent(): Stripe.Event {
       idempotency_key: null,
     },
     type: "refund.created",
+  });
+}
+
+function makeSubscriptionScheduleEvent(
+  type:
+    | "subscription_schedule.created"
+    | "subscription_schedule.updated"
+    | "subscription_schedule.released"
+    | "subscription_schedule.completed"
+    | "subscription_schedule.canceled"
+    | "subscription_schedule.aborted"
+    | "subscription_schedule.expiring",
+): Stripe.Event {
+  const scheduleStatusByType: Record<typeof type, Stripe.SubscriptionSchedule.Status> = {
+    "subscription_schedule.aborted": "canceled",
+    "subscription_schedule.canceled": "canceled",
+    "subscription_schedule.completed": "completed",
+    "subscription_schedule.created": "active",
+    "subscription_schedule.expiring": "active",
+    "subscription_schedule.released": "released",
+    "subscription_schedule.updated": "active",
+  };
+
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708804,
+    data: {
+      object: {
+        id: "sched_123",
+        object: "subscription_schedule",
+        status: scheduleStatusByType[type],
+      },
+    },
+    id: `evt_${type.replace(/\./gu, "_")}_123`,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type,
   });
 }
 

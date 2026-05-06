@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatHostedLandingPricingLongSummary,
   formatHostedLandingPricingShortSummary,
+  canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
   getHostedBillingPlanDefinition,
   isHostedPulseTrialBillingState,
@@ -83,6 +84,38 @@ describe("hosted billing launch plan Stripe configuration", () => {
     expect(isHostedPulseTrialBillingState({
       currentBillingPhase: "paid",
       currentCheckoutOffer: "pulse_trial_7d",
+    })).toBe(false);
+  });
+
+  it("keeps Pulse switch eligibility tied to paid Edge source state, active access, and Stripe refs", () => {
+    expect(canSwitchHostedBillingPlanToPulse({
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(true);
+    expect(canSwitchHostedBillingPlanToPulse({
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      suspendedAt: new Date("2026-05-06T00:00:00.000Z"),
+    })).toBe(false);
+    expect(canSwitchHostedBillingPlanToPulse({
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "",
+    })).toBe(false);
+    expect(canSwitchHostedBillingPlanToPulse({
+      billingStatus: "past_due",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
     })).toBe(false);
   });
 

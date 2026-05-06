@@ -91,7 +91,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Current plan/);
     assert.match(markup, /Pulse/);
     assert.match(markup, /\$8 \/ month/);
-    assert.match(markup, /Manage your plan and payment details\./);
+    assert.match(markup, /Manage invoices, billing details, and payment methods\./);
     assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
@@ -135,16 +135,19 @@ describe("HostedBillingSettings", () => {
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       authenticated: true,
+      canSwitchToPulse: true,
       canUpgradeToEdge: false,
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
+      currentPeriodEnd: new Date("2026-05-06T12:00:00.000Z"),
     }));
 
     assert.doesNotMatch(markup, /Upgrade to Edge/);
+    assert.match(markup, /Switch to Pulse/);
     assert.match(markup, /Edge/);
     assert.match(markup, /\$20 \/ month/);
     assert.match(markup, /Manage subscription/);
-    assert.match(markup, /Manage your plan and payment details\./);
+    assert.match(markup, /Manage invoices, billing details, and payment methods\./);
     assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
@@ -160,6 +163,28 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
     assert.match(markup, /Pulse/);
     assert.match(markup, /Manage subscription/);
+  });
+
+  test("renders a pending Pulse switch without another switch action", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canSwitchToPulse: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentPeriodEnd: new Date("2026-05-06T12:00:00.000Z"),
+      scheduledBillingEffectiveAt: new Date("2026-05-06T12:00:00.000Z"),
+      scheduledBillingPlanCode: "launch_monthly",
+    }));
+
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Edge/);
+    assert.match(markup, /Pulse starts on May 6, 2026\. Edge remains active until then\./);
+    assert.match(markup, /Then \$8 \/ month/);
+    assert.match(markup, /Manage subscription/);
+    assert.match(markup, /Want to keep Edge\? Contact support/);
+    assert.doesNotMatch(markup, /Switch to Pulse/);
   });
 
   test("posts the Edge upgrade request and refreshes on success", async () => {
@@ -188,6 +213,41 @@ describe("HostedBillingSettings", () => {
     });
     assert.equal(mocks.routerRefresh.mock.calls.length, 1);
     assert.equal(rendered.assign.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("posts the Pulse switch request and refreshes on success", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      effectiveAt: "2026-05-06T12:00:00.000Z",
+      scheduledBillingPlanCode: "launch_monthly",
+      status: "scheduled",
+    });
+    const { SwitchToPulseButton } = await import("@/src/components/settings/hosted-plan-switch-to-pulse-button");
+    const rendered = await renderClientComponent(createElement(SwitchToPulseButton, {
+      currentPeriodEnd: "2026-05-06T12:00:00.000Z",
+    }));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    assert.match(rendered.window.document.body.textContent ?? "", /Switch to Pulse at renewal\./);
+    assert.match(rendered.window.document.body.textContent ?? "", /Edge/);
+    assert.match(rendered.window.document.body.textContent ?? "", /Pulse/);
+    assert.match(rendered.window.document.body.textContent ?? "", /\$20\/mo/);
+    assert.match(rendered.window.document.body.textContent ?? "", /\$8\/mo/);
+
+    const confirmButton = findButtonByText(rendered.window.document, "Confirm switch", rendered.window);
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      url: "/api/settings/billing/switch-to-pulse",
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
 
     await rendered.cleanup();
   });
