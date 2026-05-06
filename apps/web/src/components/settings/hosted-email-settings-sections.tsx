@@ -22,6 +22,7 @@ import { ConnectedAccountCard, SettingsContactLink } from "./connected-account-c
 const MURPH_CONTACT_EMAIL = "murph@mail.withmurph.ai";
 
 export function HostedEmailSettingsContent(props: {
+  changeFlow?: boolean;
   currentEmail: HostedPrivyEmailAccount | null;
   currentVerifiedEmail: (HostedPrivyEmailAccount & { verifiedAt: number }) | null;
   emailAddress: string;
@@ -58,11 +59,13 @@ export function HostedEmailSettingsContent(props: {
 
   return (
     <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Email</h2>
-      </div>
+      {props.changeFlow ? null : (
+        <div className="space-y-2">
+          <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Email</h2>
+        </div>
+      )}
 
-      {currentEmail ? (
+      {props.changeFlow ? null : currentEmail ? (
         <ConnectedAccountCard
           value={currentEmail.address}
           meta={isVerified ? null : "Unverified"}
@@ -98,7 +101,7 @@ export function HostedEmailSettingsContent(props: {
         />
       )}
 
-      {currentEmail ? (
+      {currentEmail && !props.changeFlow ? (
         <SettingsContactLink
           href={`mailto:${MURPH_CONTACT_EMAIL}`}
           label={`Email Murph at ${MURPH_CONTACT_EMAIL}`}
@@ -108,33 +111,32 @@ export function HostedEmailSettingsContent(props: {
       ) : null}
 
       {canSendEmailUpdateCode ? (
-        <div className="space-y-2">
-          <Label htmlFor="settings-email-address">Email address</Label>
-          <div className="flex gap-2">
-            <Input
-              id="settings-email-address"
-              autoComplete="email"
-              inputMode="email"
-              placeholder="user@example.com"
-              ref={emailInputRef}
-              type="email"
-              value={emailAddress}
-              onChange={(event) => onChangeEmailAddress(event.currentTarget.value)}
-              className="h-10 px-3.5 text-sm"
-            />
-            <Button
-              type="button"
-              onClick={() => void onSendCode(emailInputRef.current?.value ?? emailAddress)}
-              disabled={isBusy}
-              className="shrink-0"
-            >
-              {isSyncingEmailRoute
-                ? "Syncing..."
-                : isSendingCode
-                  ? "Sending..."
-                  : "Send new code"}
-            </Button>
-          </div>
+        <div className="space-y-3">
+          <Label htmlFor="settings-email-address">{props.changeFlow ? "New email address" : "Email address"}</Label>
+          <Input
+            id="settings-email-address"
+            autoComplete="email"
+            inputMode="email"
+            inputSize="xl"
+            placeholder="user@example.com"
+            ref={emailInputRef}
+            type="email"
+            value={emailAddress}
+            onChange={(event) => onChangeEmailAddress(event.currentTarget.value)}
+          />
+          <Button
+            type="button"
+            onClick={() => void onSendCode(emailInputRef.current?.value ?? emailAddress)}
+            disabled={isBusy}
+            size="xl"
+            className="w-full"
+          >
+            {isSyncingEmailRoute
+              ? "Syncing..."
+              : isSendingCode
+                ? "Sending..."
+                : "Send verification code"}
+          </Button>
         </div>
       ) : null}
 

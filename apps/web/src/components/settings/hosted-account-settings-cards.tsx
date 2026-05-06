@@ -33,6 +33,7 @@ export function HostedAccountSettingsCards({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <PhoneSettingsCard
           phoneNumber={account.phone.number}
+          verified={Boolean(account.phone.verifiedAt)}
           murphPhoneNumber={murphPhoneNumber}
           onLink={() => setLinkMode("phone")}
         />
@@ -42,6 +43,7 @@ export function HostedAccountSettingsCards({
         />
         <EmailSettingsCard
           emailAddress={account.email.address}
+          verified={Boolean(account.email.verifiedAt)}
           onLink={() => setLinkMode("email")}
         />
       </div>
@@ -64,10 +66,12 @@ function PhoneSettingsCard({
   murphPhoneNumber,
   onLink,
   phoneNumber,
+  verified,
 }: {
   murphPhoneNumber?: string | null;
   onLink: () => void;
   phoneNumber: string | null;
+  verified: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -77,15 +81,16 @@ function PhoneSettingsCard({
       <ConnectedAccountCard
         value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
         variant={phoneNumber ? undefined : "empty"}
+        meta={phoneNumber && !verified ? "Unverified" : null}
         action={
           <Button type="button" size="sm" variant={phoneNumber ? "ghost" : "default"} onClick={onLink}>
-            {phoneNumber ? "Change" : "Link phone"}
+            {phoneNumber ? (verified ? "Change" : "Verify") : "Link phone"}
           </Button>
         }
       />
       {phoneNumber && murphPhoneNumber ? (
         <a className="text-sm font-medium text-primary hover:underline" href={`sms:${murphPhoneNumber}`}>
-          Message Murph
+          Text Murph
         </a>
       ) : null}
       <SettingsStatusLine message={null} tone="neutral" />
@@ -122,9 +127,11 @@ function TelegramSettingsCard({
 function EmailSettingsCard({
   emailAddress,
   onLink,
+  verified,
 }: {
   emailAddress: string | null;
   onLink: () => void;
+  verified: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -134,9 +141,10 @@ function EmailSettingsCard({
       <ConnectedAccountCard
         value={emailAddress ?? "Not connected"}
         variant={emailAddress ? undefined : "empty"}
+        meta={emailAddress && !verified ? "Unverified" : null}
         action={
           <Button type="button" size="sm" variant={emailAddress ? "ghost" : "default"} onClick={onLink}>
-            {emailAddress ? "Change" : "Link email"}
+            {emailAddress ? (verified ? "Change" : "Verify") : "Link email"}
           </Button>
         }
       />

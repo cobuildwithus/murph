@@ -19,6 +19,7 @@ interface HostedPhoneAuthProps {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  phoneFieldLabel?: string | null;
   phoneInputAutoFocus?: boolean;
   renderCaptcha?: boolean;
   sendCodeGated?: boolean;
@@ -34,6 +35,7 @@ export function HostedPhoneAuth({
   onCompleted,
   onLinked,
   onSignOut,
+  phoneFieldLabel,
   phoneInputAutoFocus = false,
   renderCaptcha = true,
   sendCodeGated = false,
@@ -67,6 +69,7 @@ export function HostedPhoneAuth({
       {renderCaptcha ? <HostedPrivyCaptcha /> : null}
       <HostedPhoneAuthFlow
         {...controller.sharedFlowProps}
+        phoneFieldLabel={phoneFieldLabel ?? controller.sharedFlowProps.phoneFieldLabel}
         phoneInputAutoFocus={phoneInputAutoFocus}
         sendCodeDisabled={controller.sharedFlowProps.sendCodeDisabled || sendCodeGated}
         size={size}

@@ -17,6 +17,7 @@ import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 export function HostedEmailSettings(props: {
   authenticated: boolean;
+  changeFlow?: boolean;
   initialEmail?: HostedEmailSettingsInitialEmail | null;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
@@ -51,6 +52,7 @@ export function HostedEmailSettings(props: {
   return (
     <div className="space-y-5">
       <HostedEmailSettingsContent
+        changeFlow={props.changeFlow}
         currentEmail={controller.effectiveCurrentEmail}
         currentVerifiedEmail={controller.effectiveVerifiedEmail}
         emailAddress={controller.emailAddress}
@@ -67,10 +69,12 @@ export function HostedEmailSettings(props: {
         onSyncVerifiedEmail={controller.handleSyncVerifiedEmail}
       />
 
-      <SettingsStatusLine
-        message={statusMessage}
-        tone={statusTone === "neutral" && controller.isSyncingEmailRoute ? "neutral" : statusTone}
-      />
+      {statusMessage ? (
+        <SettingsStatusLine
+          message={statusMessage}
+          tone={statusTone === "neutral" && controller.isSyncingEmailRoute ? "neutral" : statusTone}
+        />
+      ) : null}
 
       <HostedEmailVerificationDialog
         code={controller.code}
