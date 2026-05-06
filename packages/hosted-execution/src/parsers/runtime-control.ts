@@ -857,16 +857,34 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
 
 export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWorkspaceInvocationResult {
   const record = requireObject(value, "Hosted workspace invocation result");
+  const idleShutdownCheckpointed = record.idleShutdownCheckpointed === undefined
+    ? undefined
+    : requireBoolean(
+        record.idleShutdownCheckpointed,
+        "Hosted workspace invocation result idleShutdownCheckpointed",
+      );
+  const nextWakeAt = record.nextWakeAt === undefined
+    ? undefined
+    : readNullableString(
+        record.nextWakeAt,
+        "Hosted workspace invocation result nextWakeAt",
+      );
+  const status = parseHostedWorkspaceInvocationStatus(record.status);
+
+  if (idleShutdownCheckpointed === true && status !== "idle") {
+    throw new TypeError(
+      "Hosted workspace invocation result idleShutdownCheckpointed requires status idle.",
+    );
+  }
+  if (idleShutdownCheckpointed === true && nextWakeAt !== undefined && nextWakeAt !== null) {
+    throw new TypeError(
+      "Hosted workspace invocation result idleShutdownCheckpointed requires no nextWakeAt.",
+    );
+  }
 
   return {
-    ...(record.nextWakeAt === undefined
-      ? {}
-      : {
-          nextWakeAt: readNullableString(
-            record.nextWakeAt,
-            "Hosted workspace invocation result nextWakeAt",
-          ),
-        }),
+    ...(idleShutdownCheckpointed === undefined ? {} : { idleShutdownCheckpointed }),
+    ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
     ...(record.redactedStatus === undefined
       ? {}
       : {
@@ -875,7 +893,7 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
             "Hosted workspace invocation result redactedStatus",
           ),
         }),
-    status: parseHostedWorkspaceInvocationStatus(record.status),
+    status,
   };
 }
 

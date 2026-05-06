@@ -1680,8 +1680,13 @@ describe("HostedUserRunner runtime crypto context", () => {
       version: "4",
     });
     const destroyInstance = vi.fn(async () => {});
-    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+    const idleInvoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      idleShutdownCheckpointed: true,
+      status: "idle",
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
       destroyInstance,
+      invoke: idleInvoke,
       usageGateStatus: 500,
     });
     await runner.bindUser("member_123");
@@ -1697,33 +1702,158 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await runner.alarm();
 
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(idleInvoke).toHaveBeenCalledOnce();
+    expect(idleInvoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms).toContain("deleted");
-	    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalledWith(
-	      expect.objectContaining({
-	        path: HOSTED_WEB_USAGE_GATE_PATH,
-	      }),
-	    );
-	  });
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                next_wake_at,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      next_wake_at: null,
+      pending_nudge: 0,
+    }]);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: HOSTED_WEB_USAGE_GATE_PATH,
+      }),
+    );
+  });
 
-	  it("preserves a pending nudge alarm when work arrives during idle checkpoint cleanup", async () => {
-	    vi.useFakeTimers();
-	    vi.setSystemTime(new Date(FIXED_NOW));
+  it("does not finish idle-shutdown cleanup when the runtime only returns scheduled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-scheduled"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: "2026-04-27T00:00:45.000Z",
+      status: "scheduled",
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:45.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                next_wake_at,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      next_wake_at: "2026-04-27T00:00:45.000Z",
+      pending_nudge: 0,
+    }]);
+  });
+
+  it("does not finish idle-shutdown cleanup for an inconsistent checkpoint marker result", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-inconsistent-marker"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      idleShutdownCheckpointed: true,
+      nextWakeAt: "2026-04-27T00:00:45.000Z",
+      status: "scheduled",
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:45.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                next_wake_at,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      next_wake_at: "2026-04-27T00:00:45.000Z",
+      pending_nudge: 0,
+    }]);
+  });
+
+  it("preserves a pending nudge alarm when work arrives during idle checkpoint cleanup", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
 	    const workspace = createWorkspaceState({
 	      snapshotRef: createLayeredSnapshotRef("idle-cleanup-race"),
 	      version: "4",
 	    });
-	    let runner!: HostedUserRunner;
-	    const destroyInstance = vi.fn(async () => {
-	      await runner.nudgeHostedRunner();
-	    });
-	    const harness = createRunnerCryptoContextHarness(workspace, {
-	      destroyInstance,
-	    });
-	    ({ runner } = harness);
-	    const { alarms, invoke, sql } = harness;
+    let runner!: HostedUserRunner;
+    const destroyInstance = vi.fn(async () => {
+      await runner.nudgeHostedRunner();
+    });
+    const idleInvoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      idleShutdownCheckpointed: true,
+      status: "idle",
+    }));
+    const harness = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke: idleInvoke,
+    });
+    ({ runner } = harness);
+    const { alarms, sql } = harness;
 	    await runner.bindUser("member_123");
 	    sql.exec(
 	      `UPDATE runner_meta
@@ -1737,20 +1867,24 @@ describe("HostedUserRunner runtime crypto context", () => {
 
 	    await runner.alarm();
 
-	    expect(invoke).toHaveBeenCalledOnce();
+    expect(idleInvoke).toHaveBeenCalledOnce();
 	    expect(destroyInstance).toHaveBeenCalledOnce();
 	    expect(alarms.at(-1)).toBe(FIXED_NOW);
 	    expect(
-	      sql.exec(
-	        `SELECT next_wake_at,
-	                pending_nudge
-	         FROM runner_meta WHERE user_id = ?`,
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{
-	      next_wake_at: FIXED_NOW,
-	      pending_nudge: 1,
-	    }]);
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      next_wake_at: FIXED_NOW,
+      pending_nudge: 1,
+    }]);
 	  });
 
 	  it("skips an idle-shutdown checkpoint when a nudge arrives after preflight", async () => {
@@ -1792,10 +1926,19 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    expect(alarms.at(-1)).toBe(FIXED_NOW);
 	    expect(
 	      sql.exec(
-	        "SELECT pending_nudge, in_flight FROM runner_meta WHERE user_id = ?",
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{ in_flight: 0, pending_nudge: 1 }]);
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                pending_nudge,
+                in_flight
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      pending_nudge: 1,
+    }]);
 	  });
 
 	  it("does not schedule an idle-shutdown checkpoint when a nudge arrives during idle scheduling", async () => {
