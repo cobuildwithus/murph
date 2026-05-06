@@ -103,7 +103,13 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'For supported wearable connection requests, use `vault-cli device connect <provider> --format json`',
+      'For supported wearable connection requests that still need a link, use `vault-cli device connect <provider> --format json`',
+    )
+    expect(prompt).toContain(
+      'Before creating a connection link, first check visible context and `vault-cli device account list --provider <provider> --format json`',
+    )
+    expect(prompt).toContain(
+      'if that provider is already connected, acknowledge the existing connection instead of creating a new link',
     )
     expect(prompt).toContain(
       'put it on its own final line with no text after it',
@@ -654,6 +660,9 @@ describe('assistant conversation onboarding guidance', () => {
     expect(prompt).toContain('Identify data sources in one short message')
     expect(prompt).toContain(
       'if a supported hosted wearable connection is already visible in context',
+    )
+    expect(prompt).toContain(
+      'Before creating a connection link, first check visible context and `vault-cli device account list --provider <provider> --format json`',
     )
     expect(prompt).toContain(
       'do not ask them to send activity, steps, workouts, sleep, or recovery by message',
