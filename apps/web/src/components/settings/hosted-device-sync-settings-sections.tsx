@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -16,7 +15,7 @@ import {
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 
 import { ConnectedAccountCard } from "./connected-account-card";
-import { badgeClasses, sourceCardKey, sourceKey } from "./hosted-device-sync-settings-utils";
+import { sourceCardKey, sourceKey } from "./hosted-device-sync-settings-utils";
 
 export function HostedDeviceSyncSettingsContent(props: {
   disconnectTarget: HostedDeviceSyncSettingsSource | null;
@@ -32,7 +31,7 @@ export function HostedDeviceSyncSettingsContent(props: {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
             <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Wearables</h2>
-            <p className="text-sm leading-relaxed text-stone-500">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               Review, refresh, or disconnect wearable sources.
             </p>
           </div>
@@ -100,84 +99,29 @@ function HostedDeviceSyncSourceCard(props: {
     ? `${props.source.providerLabel} - ${props.source.displayName}`
     : props.source.providerLabel;
 
+  const timing = renderSourceTiming(props.source);
+
   return (
     <ConnectedAccountCard
-      label={props.source.headline}
       value={displayName}
-      meta={<SourceMeta source={props.source} />}
+      meta={timing}
       action={
-        <>
-          <Badge className={badgeClasses(props.source.tone)} variant="outline">
-            {props.source.statusLabel}
-          </Badge>
-          {props.source.secondaryAction?.kind === "disconnect" && props.source.connectionId ? (
-            <Button
-              type="button"
-              onClick={() => props.onDisconnectTargetChange(props.source)}
-              disabled={disconnectBusy}
-              size="sm"
-              variant="outline"
-            >
-              {disconnectBusy ? "Disconnecting..." : props.source.secondaryAction.label}
-            </Button>
-          ) : null}
-        </>
+        props.source.secondaryAction?.kind === "disconnect" && props.source.connectionId ? (
+          <Button
+            type="button"
+            onClick={() => props.onDisconnectTargetChange(props.source)}
+            disabled={disconnectBusy}
+            size="sm"
+            variant="outline"
+          >
+            {disconnectBusy ? "Disconnecting..." : props.source.secondaryAction.label}
+          </Button>
+        ) : null
       }
     />
   );
 }
 
-function SourceMeta(props: { source: HostedDeviceSyncSettingsSource }) {
-  const timing = renderSourceTiming(props.source);
-
-  return (
-    <span className="flex flex-col gap-1">
-      <span>{props.source.detail}</span>
-      {timing}
-      <UpstreamSources source={props.source} />
-    </span>
-  );
-}
-
-function UpstreamSources(props: { source: HostedDeviceSyncSettingsSource }) {
-  if (props.source.upstreamSources.length === 0) {
-    return null;
-  }
-
-  return (
-    <span className="mt-1 flex flex-wrap gap-1.5">
-      {props.source.upstreamSources.map((source, index) => (
-        <span
-          key={`${source.providerLabel}:${source.status}:${source.resourceCount}:${index}`}
-          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground"
-        >
-          <span className="min-w-0 max-w-full truncate [overflow-wrap:anywhere]">{source.providerLabel}</span>
-          {source.resourceCount > 0 ? (
-            <span className="shrink-0">{formatResourceCount(source.resourceCount)}</span>
-          ) : null}
-          <span className="shrink-0 text-muted-foreground/80">{formatUpstreamSourceStatus(source.status)}</span>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function formatResourceCount(count: number): string {
-  return `${count} ${count === 1 ? "resource" : "resources"}`;
-}
-
-function formatUpstreamSourceStatus(status: HostedDeviceSyncSettingsSource["upstreamSources"][number]["status"]): string {
-  switch (status) {
-    case "connected":
-      return "connected";
-    case "error":
-      return "needs attention";
-    case "unavailable":
-      return "unavailable";
-  }
-
-  return status;
-}
 
 export function HostedDeviceSyncDisconnectDialog(props: {
   disconnectPending: boolean;
