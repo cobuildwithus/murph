@@ -26,7 +26,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  parseHostedRuntimeChildResult,
   type HostedAssistantWorkspaceRuntimeJobInput,
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
@@ -34,6 +33,9 @@ import {
 import {
   runHostedExecutionChild,
 } from "../src/node-runner-child.ts";
+import type {
+  HostedExecutionRunnerChildResult,
+} from "../src/runner-job-transport.ts";
 import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
@@ -54,13 +56,13 @@ afterEach(async () => {
 
 describe("runHostedExecutionChild", () => {
   it("logs and writes a stable bootstrap failure result for invalid JSON input", async () => {
-    const stdout = { write: vi.fn() };
+    const sendResult = vi.fn();
     const setExitCode = vi.fn();
 
     await runHostedExecutionChild({
       readStandardInput: async () => "{not-json",
       setExitCode,
-      stdout,
+      sendResult,
     });
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -76,7 +78,7 @@ describe("runHostedExecutionChild", () => {
     );
     expect(setExitCode).toHaveBeenCalledWith(1);
 
-    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
     expect(payload).toEqual(
       expect.objectContaining({
         ok: false,
@@ -88,8 +90,32 @@ describe("runHostedExecutionChild", () => {
     );
   });
 
+  it("fails closed when launched without an IPC result channel", async () => {
+    const setExitCode = vi.fn();
+    const originalSend = process.send;
+
+    try {
+      Object.defineProperty(process, "send", {
+        configurable: true,
+        value: undefined,
+      });
+
+      await expect(runHostedExecutionChild({
+        readStandardInput: async () => "{not-json",
+        setExitCode,
+      })).rejects.toThrow("requires an IPC result channel");
+    } finally {
+      Object.defineProperty(process, "send", {
+        configurable: true,
+        value: originalSend,
+      });
+    }
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+  });
+
   it("logs and writes a stable bootstrap failure result for validation failures", async () => {
-    const stdout = { write: vi.fn() };
+    const sendResult = vi.fn();
     const setExitCode = vi.fn();
 
     await runHostedExecutionChild({
@@ -100,7 +126,7 @@ describe("runHostedExecutionChild", () => {
         },
       }),
       setExitCode,
-      stdout,
+      sendResult,
     });
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -116,7 +142,7 @@ describe("runHostedExecutionChild", () => {
     );
     expect(setExitCode).toHaveBeenCalledWith(1);
 
-    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
     expect(payload).toEqual(
       expect.objectContaining({
         ok: false,
@@ -135,7 +161,7 @@ describe("runHostedExecutionChild", () => {
     const consoleErrorSpy = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    const stdout = { write: vi.fn() };
+    const sendResult = vi.fn();
     const setExitCode = vi.fn();
     const runWorkspaceInProcess = vi.fn(async (
       _input: HostedAssistantWorkspaceRuntimeJobInput,
@@ -174,7 +200,7 @@ describe("runHostedExecutionChild", () => {
       }),
       runWorkspaceInProcess,
       setExitCode,
-      stdout,
+      sendResult,
     });
 
     expect(setExitCode).not.toHaveBeenCalled();
@@ -209,7 +235,7 @@ describe("runHostedExecutionChild", () => {
       vaultRoot: path.join(launcherRoot, "vault"),
     });
 
-    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
     expect(payload).toEqual({
       ok: true,
       result: {
@@ -240,7 +266,7 @@ describe("runHostedExecutionChild", () => {
     const launcherRoot = await mkdtemp(path.join(tmpdir(), "murph-node-runner-child-decode-"));
     cleanupPaths.push(launcherRoot);
     vi.spyOn(process, "cwd").mockReturnValue(launcherRoot);
-    const stdout = { write: vi.fn() };
+    const sendResult = vi.fn();
     const setExitCode = vi.fn();
     const importItem = createSystemMailboxImportItem("u_workspace_decode");
     const fetchMock = vi.fn(async (
@@ -308,12 +334,12 @@ describe("runHostedExecutionChild", () => {
       }),
       runWorkspaceInProcess,
       setExitCode,
-      stdout,
+      sendResult,
     });
 
     expect(setExitCode).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(readChildResult(stdout.write.mock.calls[0]?.[0])).toEqual({
+    expect(readChildResult(sendResult.mock.calls[0]?.[0])).toEqual({
       ok: true,
       result: {
         nextWakeAt: null,
@@ -323,7 +349,7 @@ describe("runHostedExecutionChild", () => {
   });
 
   it("rejects deprecated Codex app-server bridge env in the child runtime config", async () => {
-    const stdout = { write: vi.fn() };
+    const sendResult = vi.fn();
     const setExitCode = vi.fn();
     const runWorkspaceInProcess = vi.fn(async () => ({
       nextWakeAt: null,
@@ -355,13 +381,13 @@ describe("runHostedExecutionChild", () => {
       }),
       runWorkspaceInProcess,
       setExitCode,
-      stdout,
+      sendResult,
     });
 
     expect(runWorkspaceInProcess).not.toHaveBeenCalled();
     expect(setExitCode).toHaveBeenCalledWith(1);
 
-    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
     expect(payload.ok).toBe(false);
     expect(payload.error?.message).toContain(
       "MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN",
@@ -374,7 +400,7 @@ describe("runHostedExecutionChild", () => {
   });
 
   it("redacts runtime failure diagnostics before writing the child result payload", async () => {
-    const stdout = { write: vi.fn() };
+    const sendResult = vi.fn();
     const setExitCode = vi.fn();
     const runtimeError = new Error(
       'failed for person@example.test +15555550123 with OPENAI_API_KEY=fixture "MURPH_HOSTED_CLI_BRIDGE_TOKEN":"bridge-secret" OPENAI_API_KEY: "colon-secret" base_url = "https://gateway.example.test/v1" /tmp/hosted-runner/private-file',
@@ -413,11 +439,11 @@ describe("runHostedExecutionChild", () => {
       }),
       runWorkspaceInProcess,
       setExitCode,
-      stdout,
+      sendResult,
     });
 
     expect(setExitCode).toHaveBeenCalledWith(1);
-    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
 
     expect(payload.ok).toBe(false);
     expect(payload.error?.message).toContain("OPENAI_API_KEY=<redacted>");
@@ -448,12 +474,12 @@ describe("runHostedExecutionChild", () => {
   });
 });
 
-function readChildResult(chunk: unknown) {
-  if (typeof chunk !== "string") {
-    throw new Error("Expected the child to write a result payload.");
+function readChildResult(chunk: unknown): HostedExecutionRunnerChildResult {
+  if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) {
+    throw new Error("Expected the child to send a result payload.");
   }
 
-  return parseHostedRuntimeChildResult(chunk);
+  return chunk as HostedExecutionRunnerChildResult;
 }
 
 function createSystemMailboxImportItem(userId: string) {

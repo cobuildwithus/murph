@@ -7,6 +7,9 @@ import type {
   HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.ts";
 import {
+  createHostedExecutionRunnerChildResultMessage,
+} from "../src/runner-job-transport.ts";
+import {
   buildHostedRunnerChildRuntimeEnv,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
@@ -34,9 +37,13 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("node:child_process", () => ({
-  spawn: mocks.spawn,
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: mocks.spawn,
+  };
+});
 
 const HOSTED_SECRET_KEY_PATTERN =
   /(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|CLIENT_SECRET|PASSWORD)/iu;
@@ -362,10 +369,11 @@ async function serializeChildStdinPayload(
     });
 
     queueMicrotask(() => {
-      child.stdout.end(module.formatHostedExecutionChildResult({
+      child.emit("message", createHostedExecutionRunnerChildResultMessage({
         ok: true,
         result: createRunnerResult(),
       }));
+      child.stdout.end();
       child.emit("close", 0);
     });
 
