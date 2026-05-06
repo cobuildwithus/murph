@@ -75,9 +75,6 @@ const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
 const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
-// Temporary production hotfix: full idle-shutdown checkpoints currently exceed
-// the stateless Worker artifact proxy memory budget on large workspaces.
-const IDLE_SHUTDOWN_CHECKPOINTS_ENABLED = false;
 
 type HostedAiUsageGateDecision =
   | {
@@ -235,7 +232,7 @@ export class HostedUserRunner {
       return;
     }
 
-    if (dueAlarm.kind === "idle_shutdown_checkpoint" && !IDLE_SHUTDOWN_CHECKPOINTS_ENABLED) {
+    if (dueAlarm.kind === "idle_shutdown_checkpoint" && !this.env.idleShutdownCheckpointsEnabled) {
       await this.stateStore.clearIdleShutdownCheckpoint();
       await this.runtimeAlarmScheduler.syncNextWake({
         preferredWakeAt: record.nextWakeAt,
@@ -590,6 +587,7 @@ export class HostedUserRunner {
 
     if (!shouldRunHostedRunnerInvocation({
       dueWake: input.dueWake,
+      idleShutdownCheckpointsEnabled: this.env.idleShutdownCheckpointsEnabled,
       reason: input.reason,
       record: initialRecord,
     })) {
@@ -1163,7 +1161,7 @@ export class HostedUserRunner {
     }
 
     if (
-      IDLE_SHUTDOWN_CHECKPOINTS_ENABLED
+      this.env.idleShutdownCheckpointsEnabled
       && input.resultStatus === "idle"
       && input.fallbackNextWakeAt === null
     ) {
@@ -1304,33 +1302,49 @@ export class HostedUserRunner {
       };
     }
 
-	    if (!workspace || workspace.nextWakeAt || isHostedWorkspaceBaseOnlySnapshot(workspace)) {
-	      if (workspace?.nextWakeAt) {
-	        const record = await this.runtimeAlarmScheduler.syncNextWake({
-	          preferredWakeAt: workspace.nextWakeAt,
-	        });
-	        return {
-	          kind: "deferred",
-	          record,
-	        };
-	      }
-	      return null;
-	    }
+    if (!workspace || workspace.nextWakeAt || isHostedWorkspaceBaseOnlySnapshot(workspace)) {
+      if (workspace?.nextWakeAt) {
+        const record = await this.runtimeAlarmScheduler.syncNextWake({
+          preferredWakeAt: workspace.nextWakeAt,
+        });
+        return {
+          kind: "deferred",
+          record,
+        };
+      }
+      return null;
+    }
 
     const dueAt = new Date(Date.now() + resolveIdleShutdownCheckpointDelayMs({
       idleTtlMs: this.env.runnerIdleTtlMs,
       safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
     })).toISOString();
-    await this.stateStore.scheduleIdleShutdownCheckpoint({
+    const scheduledCheckpoint = await this.stateStore.scheduleIdleShutdownCheckpointIfStillQuiet({
       dueAt,
       workspaceVersion: workspace.version,
-	    });
-	    const record = await this.runtimeAlarmScheduler.syncNextWake({
-	      preferredWakeAt: null,
-	    });
+    });
+    if (!scheduledCheckpoint.scheduled) {
+      const record = await this.syncPendingWorkAlarm(scheduledCheckpoint.record);
+      return {
+        kind: "deferred",
+        record,
+      };
+    }
+
+    await this.runtimeAlarmScheduler.syncStoredAlarm();
+    const latestRecord = await this.stateStore.readState();
+    if (latestRecord.pendingNudge || latestRecord.inFlight) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
+      const record = await this.syncPendingWorkAlarm(latestRecord);
+      return {
+        kind: "deferred",
+        record,
+      };
+    }
+
     return {
       kind: "scheduled",
-      record,
+      record: latestRecord,
     };
   }
 
@@ -1798,10 +1812,11 @@ function safeCleanupErrorCode(error: unknown): string {
 
 function shouldRunHostedRunnerInvocation(input: {
   dueWake?: boolean;
+  idleShutdownCheckpointsEnabled: boolean;
   reason: HostedWorkspaceInvocationReason;
   record: RunnerStateRecord;
 }): boolean {
-  return (IDLE_SHUTDOWN_CHECKPOINTS_ENABLED && input.reason === "idle_shutdown_checkpoint")
+  return (input.idleShutdownCheckpointsEnabled && input.reason === "idle_shutdown_checkpoint")
     || input.reason === "manual"
     || input.record.pendingNudge
     || input.dueWake === true;
