@@ -1,4 +1,5 @@
 /.artifacts/
+.deepsec/
 node_modules/
 dist/
 coverage/
