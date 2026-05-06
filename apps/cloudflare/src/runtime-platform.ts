@@ -527,6 +527,10 @@ function createCloudflareRuntimeLivenessPort(input: {
           reason: "no_active_invocation",
         };
       }
+      const headers = new Headers({
+        "content-type": "application/json; charset=utf-8",
+      });
+      writeRunnerActiveInvocationLeaseHeaders(headers, lease);
 
       const response = await fetchHostedResponse({
         description: "Hosted runtime active invocation heartbeat",
@@ -537,9 +541,7 @@ function createCloudflareRuntimeLivenessPort(input: {
             leaseGeneration: lease.leaseGeneration,
             requestId: touchInput.requestId,
           }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
+          headers,
           method: "POST",
         },
         logFailures: false,
