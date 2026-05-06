@@ -74,6 +74,7 @@ import type {
   DeviceSyncJobRecord,
   DeviceSyncServiceSummary,
   ListDeviceConnectionSourcesInput,
+  ListDeviceSyncAccountsInput,
   OAuthStateRecord,
   ProviderAuthTokens,
   StoredDeviceConnectionSource,
@@ -152,16 +153,21 @@ export class SqliteDeviceSyncStore {
     return consumeOAuthState(this.database, state, now, expectedProvider);
   }
 
-  listAccounts(provider?: string): StoredDeviceSyncAccount[] {
-    return listStoredAccounts(this.database, provider);
+  listAccounts(input: ListDeviceSyncAccountsInput | string = {}): StoredDeviceSyncAccount[] {
+    return listStoredAccounts(
+      this.database,
+      normalizeAccountListInput(input),
+    ).map((account) => this.hydrateAccountSources(account));
   }
 
   getAccountById(accountId: string): StoredDeviceSyncAccount | null {
-    return getStoredAccountById(this.database, accountId);
+    const account = getStoredAccountById(this.database, accountId);
+    return account ? this.hydrateAccountSources(account) : null;
   }
 
   getAccountByExternalAccount(provider: string, externalAccountId: string): StoredDeviceSyncAccount | null {
-    return getStoredAccountByExternalAccount(this.database, provider, externalAccountId);
+    const account = getStoredAccountByExternalAccount(this.database, provider, externalAccountId);
+    return account ? this.hydrateAccountSources(account) : null;
   }
 
   upsertAccount(input: AccountUpsertInput): StoredDeviceSyncAccount {
@@ -178,6 +184,26 @@ export class SqliteDeviceSyncStore {
 
   listConnectionSources(input: ListDeviceConnectionSourcesInput): StoredDeviceConnectionSource[] {
     return listStoredConnectionSources(this.database, input);
+  }
+
+  private hydrateAccountSources(account: StoredDeviceSyncAccount): StoredDeviceSyncAccount {
+    const sources = listStoredConnectionSources(this.database, {
+      connectionId: account.id,
+    }).map((source) => ({
+      displayName: source.displayName,
+      firstSeenAt: source.firstSeenAt,
+      lastErrorCode: source.lastErrorCode,
+      lastErrorMessage: source.lastErrorMessage,
+      lastSeenAt: source.lastSeenAt,
+      resourceCount: countConnectionSourceResources(source.resourceAvailabilitySummary),
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: source.status,
+    }));
+
+    return {
+      ...account,
+      sources,
+    };
   }
 
   updateAccountTokens(
@@ -345,4 +371,32 @@ export class SqliteDeviceSyncStore {
   releaseWebhookTrace(provider: string, traceId: string): void {
     releaseDeviceSyncWebhookTrace(this.database, provider, traceId);
   }
+}
+
+const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
+  "sourceInstanceKeyFallback",
+]);
+
+function normalizeAccountListInput(
+  input: ListDeviceSyncAccountsInput | string,
+): ListDeviceSyncAccountsInput {
+  if (typeof input === "string") {
+    return { provider: input };
+  }
+
+  return {
+    ...(input.provider ? { provider: input.provider } : {}),
+    ...(input.sourceProviderSlug ? { sourceProviderSlug: input.sourceProviderSlug } : {}),
+  };
+}
+
+function countConnectionSourceResources(
+  summary: StoredDeviceConnectionSource["resourceAvailabilitySummary"],
+): number {
+  return Object.entries(summary).filter(([key, value]) =>
+    !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+    && value !== false
+    && value !== null
+    && value !== undefined
+  ).length;
 }

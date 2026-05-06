@@ -308,6 +308,18 @@ test('device account list service uses hosted CLI bridge in hosted runtime witho
             nextReconcileAt: '2026-05-04T03:00:00.000Z',
             provider: 'whoop',
             scopes: ['read:recovery'],
+            sources: [
+              {
+                displayName: 'Garmin',
+                firstSeenAt: '2026-05-03T20:00:00.000Z',
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSeenAt: '2026-05-03T21:00:00.000Z',
+                resourceCount: 2,
+                sourceProviderSlug: 'garmin',
+                status: 'connected',
+              },
+            ],
             setupExpiresAt: null,
             setupPhase: null,
             status: 'active',
@@ -315,6 +327,7 @@ test('device account list service uses hosted CLI bridge in hosted runtime witho
           },
         ],
         provider: 'whoop',
+        sourceProvider: 'garmin',
       }))
     })
   })
@@ -335,18 +348,21 @@ test('device account list service uses hosted CLI bridge in hosted runtime witho
 
     const result = await createIntegratedDeviceSyncServices().listAccounts({
       provider: 'whoop',
+      sourceProvider: 'garmin',
       vault: vaultRoot,
     })
 
     assert.equal(authorization, `Bearer ${bridgeToken}`)
     assert.equal(requestPath, '/device/accounts/list')
-    assert.deepEqual(requestBody, { provider: 'whoop' })
+    assert.deepEqual(requestBody, { provider: 'whoop', sourceProvider: 'garmin' })
     assert.equal(result.baseUrl, undefined)
     assert.equal(result.local, undefined)
     assert.equal(result.provider, 'whoop')
+    assert.equal(result.sourceProvider, 'garmin')
     assert.equal(result.accounts.length, 1)
     assert.equal(result.accounts[0]?.provider, 'whoop')
     assert.equal(result.accounts[0]?.status, 'active')
+    assert.equal(result.accounts[0]?.sources?.[0]?.sourceProviderSlug, 'garmin')
   } finally {
     vi.unstubAllEnvs()
     await new Promise<void>((resolve, reject) => {
@@ -391,6 +407,7 @@ test('device account list honors an explicit base URL in hosted runtime', async 
       await runCli<{
         baseUrl: string
         provider: string | null
+        sourceProvider: string | null
         accounts: Array<{ id: string }>
       }>([
         'device',
@@ -402,6 +419,8 @@ test('device account list honors an explicit base URL in hosted runtime', async 
         baseUrl,
         '--provider',
         'whoop',
+        '--source-provider',
+        'garmin',
       ], {
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
@@ -419,12 +438,13 @@ test('device account list honors an explicit base URL in hosted runtime', async 
 
     assert.equal(accounts.baseUrl, baseUrl)
     assert.equal(accounts.provider, 'whoop')
+    assert.equal(accounts.sourceProvider, 'garmin')
     assert.deepEqual(accounts.accounts.map((account) => account.id), [
       'acct_whoop_01',
     ])
     assert.equal(authorization, 'Bearer control-token-for-tests')
     assert.equal(requestPath, '/accounts')
-    assert.equal(requestQuery, '?provider=whoop')
+    assert.equal(requestQuery, '?provider=whoop&sourceProvider=garmin')
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {

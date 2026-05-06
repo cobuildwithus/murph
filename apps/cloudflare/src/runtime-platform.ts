@@ -794,11 +794,13 @@ function createHostedWebDeviceSyncPort(input: {
     async fetchSnapshot(runtimeInput: {
       connectionId?: string | null;
       provider?: string | null;
+      sourceProviderSlug?: string | null;
     } = {}) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
           ...(runtimeInput.provider ? { provider: runtimeInput.provider } : {}),
+          ...(runtimeInput.sourceProviderSlug ? { sourceProviderSlug: runtimeInput.sourceProviderSlug } : {}),
           userId: input.boundUserId,
         },
         boundUserId: input.boundUserId,

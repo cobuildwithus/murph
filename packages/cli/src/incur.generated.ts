@@ -53,7 +53,7 @@ declare module 'incur' {
       'condition scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'device account disconnect': { args: { accountId: string }; options: { vault: string; requestId?: string; baseUrl?: string } }
-      'device account list': { args: {}; options: { vault: string; requestId?: string; baseUrl?: string; provider?: string } }
+      'device account list': { args: {}; options: { vault: string; requestId?: string; baseUrl?: string; provider?: string; "source-provider"?: string } }
       'device account reconcile': { args: { accountId: string }; options: { vault: string; requestId?: string; baseUrl?: string } }
       'device account show': { args: { accountId: string }; options: { vault: string; requestId?: string; baseUrl?: string } }
       'device connect': { args: { provider: string }; options: { vault: string; requestId?: string; baseUrl?: string; returnTo?: string; open?: boolean } }

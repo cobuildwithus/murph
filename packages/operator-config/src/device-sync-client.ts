@@ -165,11 +165,15 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
     },
     async listAccounts(input: {
       provider?: string
+      sourceProvider?: string
     } = {}): Promise<{ accounts: DeviceSyncAccountRecord[] }> {
       const search = new URLSearchParams()
 
       if (input.provider) {
         search.set('provider', input.provider)
+      }
+      if (input.sourceProvider) {
+        search.set('sourceProvider', input.sourceProvider)
       }
 
       const path =

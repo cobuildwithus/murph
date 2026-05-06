@@ -152,6 +152,18 @@ describe("hosted CLI runtime bridge client", () => {
               nextReconcileAt: "2026-05-04T03:00:00.000Z",
               provider: "whoop",
               scopes: ["read:recovery"],
+              sources: [
+                {
+                  displayName: "Garmin",
+                  firstSeenAt: "2026-05-03T20:00:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-05-03T21:00:00.000Z",
+                  resourceCount: 2,
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
               setupExpiresAt: null,
               setupPhase: null,
               status: "active",
@@ -159,6 +171,7 @@ describe("hosted CLI runtime bridge client", () => {
             },
           ],
           provider: "whoop",
+          sourceProvider: "garmin",
         }),
         {
           headers: { "content-type": "application/json" },
@@ -174,13 +187,16 @@ describe("hosted CLI runtime bridge client", () => {
       },
       fetchImpl,
       provider: "whoop",
+      sourceProvider: "garmin",
     });
 
     assert.equal(requestedPath, "/device/accounts/list");
-    assert.deepEqual(requestBody, { provider: "whoop" });
+    assert.deepEqual(requestBody, { provider: "whoop", sourceProvider: "garmin" });
     assert.equal(result.provider, "whoop");
+    assert.equal(result.sourceProvider, "garmin");
     assert.equal(result.accounts[0]?.provider, "whoop");
     assert.equal(result.accounts[0]?.status, "active");
+    assert.equal(result.accounts[0]?.sources?.[0]?.sourceProviderSlug, "garmin");
   });
 
   it("rejects hosted device account metadata in bridge responses", async () => {

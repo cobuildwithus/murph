@@ -33,6 +33,7 @@ const hostedCliDeviceConnectLinkRequestSchema = z.object({
 
 const hostedCliDeviceAccountListRequestSchema = z.object({
   provider: z.string().trim().min(1).nullable().optional(),
+  sourceProvider: z.string().trim().min(1).nullable().optional(),
 }).strict();
 
 const hostedCliDeviceSyncAccountStatusSchema = z.enum([
@@ -40,6 +41,22 @@ const hostedCliDeviceSyncAccountStatusSchema = z.enum([
   "reauthorization_required",
   "disconnected",
 ]);
+
+const hostedCliDeviceSyncAccountSourceSchema = z.object({
+  displayName: z.string().min(1).nullable(),
+  firstSeenAt: z.string().min(1),
+  lastErrorCode: z.string().min(1).nullable(),
+  lastErrorMessage: z.string().min(1).nullable(),
+  lastSeenAt: z.string().min(1),
+  resourceCount: z.number().int().nonnegative(),
+  sourceProviderSlug: z.string().min(1),
+  status: z.enum([
+    "connected",
+    "unavailable",
+    "error",
+    "disconnected",
+  ]),
+}).strict();
 
 const hostedCliDeviceSyncAccountSetupPhaseSchema = z.enum([
   "pending_link",
@@ -65,6 +82,7 @@ const hostedCliDeviceSyncAccountSchema = z.object({
   nextReconcileAt: z.string().min(1).nullable(),
   provider: z.string().min(1),
   scopes: z.array(z.string().min(1)),
+  sources: z.array(hostedCliDeviceSyncAccountSourceSchema).optional(),
   setupExpiresAt: z.string().min(1).nullable().optional(),
   setupPhase: hostedCliDeviceSyncAccountSetupPhaseSchema.nullable().optional(),
   status: hostedCliDeviceSyncAccountStatusSchema,
@@ -74,6 +92,7 @@ const hostedCliDeviceSyncAccountSchema = z.object({
 const hostedCliDeviceAccountListResponseSchema = z.object({
   accounts: z.array(hostedCliDeviceSyncAccountSchema),
   provider: z.string().min(1).nullable(),
+  sourceProvider: z.string().min(1).nullable().optional(),
 }).strict();
 
 export type HostedCliDeviceConnectLinkRequest =
@@ -92,6 +111,7 @@ export interface HostedCliDeviceConnectLinkResponse {
 export interface HostedCliDeviceAccountListResponse {
   accounts: DeviceSyncAccountRecord[];
   provider: string | null;
+  sourceProvider?: string | null;
 }
 
 export interface HostedCliBridgeClientConfig {
@@ -183,10 +203,14 @@ export async function requestHostedCliDeviceAccountList(input: {
   bridge: HostedCliBridgeClientConfig;
   fetchImpl?: typeof fetch;
   provider?: string | null;
+  sourceProvider?: string | null;
   timeoutMs?: number;
 }): Promise<HostedCliDeviceAccountListResponse> {
   const payload = await requestHostedCliBridgeJson({
-    body: input.provider ? { provider: input.provider } : {},
+    body: {
+      ...(input.provider ? { provider: input.provider } : {}),
+      ...(input.sourceProvider ? { sourceProvider: input.sourceProvider } : {}),
+    },
     bridge: input.bridge,
     fetchImpl: input.fetchImpl,
     path: HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,

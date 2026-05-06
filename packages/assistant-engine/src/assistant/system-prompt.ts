@@ -459,7 +459,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. Before creating a connection link, first check visible context and \`vault-cli device account list --format json\`; if the requested provider is already connected, acknowledge the existing connection instead of creating a new link. Junction-backed sources such as Garmin may show up as a \`junction\` account rather than under the source provider name, so do not treat an empty \`--provider garmin\` result as proof that Garmin needs a new link. For supported wearable connection requests that still need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`authorizationUrl\`, and do not fabricate URLs. When sending that authorization URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`authorizationUrl\`, and do not fabricate URLs. When sending that authorization URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(): string {

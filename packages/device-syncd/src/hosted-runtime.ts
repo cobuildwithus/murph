@@ -1,4 +1,5 @@
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+import type { DeviceConnectionSourceStatus } from "./client.ts";
 
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
@@ -126,10 +127,22 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
   nextReconcileAt: string | null;
 }
 
+export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
+  sourceProviderSlug: string;
+  displayName: string | null;
+  status: DeviceConnectionSourceStatus;
+  resourceCount: number;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
   connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
   credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
   localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
+  sources?: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[];
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
@@ -141,6 +154,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
 export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
   connectionId?: string | null;
   provider?: string | null;
+  sourceProviderSlug?: string | null;
   userId: string;
 }
 
@@ -376,6 +390,14 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
     ...(record.provider === undefined
       ? {}
       : { provider: readNullableStringValue(record.provider, "Hosted device-sync runtime snapshot request provider") }),
+    ...(record.sourceProviderSlug === undefined
+      ? {}
+      : {
+          sourceProviderSlug: readNullableStringValue(
+            record.sourceProviderSlug,
+            "Hosted device-sync runtime snapshot request sourceProviderSlug",
+          ),
+        }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
   };
 }
@@ -790,6 +812,17 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
       record.localState,
       `Hosted device-sync runtime snapshot response connections[${index}].localState`,
     ),
+    ...(record.sources === undefined
+      ? {}
+      : {
+          sources: requireArray(
+            record.sources,
+            `Hosted device-sync runtime snapshot response connections[${index}].sources`,
+          ).map((source, sourceIndex) => parseHostedExecutionDeviceSyncRuntimeConnectionSource(
+            source,
+            `Hosted device-sync runtime snapshot response connections[${index}].sources[${sourceIndex}]`,
+          )),
+        }),
     ...parseHostedExecutionDeviceSyncRuntimeCredentialSnapshotFields(
       record,
       `Hosted device-sync runtime snapshot response connections[${index}]`,
@@ -954,6 +987,43 @@ function parseHostedExecutionDeviceSyncRuntimeLocalState(
     lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
     lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `${label}.lastWebhookAt`),
     nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `${label}.nextReconcileAt`),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
+  const record = requireObject(value, label);
+  const status = requireString(record.status, `${label}.status`);
+  const resourceCount = requireNumber(record.resourceCount, `${label}.resourceCount`);
+
+  if (
+    status !== "connected"
+    && status !== "unavailable"
+    && status !== "error"
+    && status !== "disconnected"
+  ) {
+    throw new TypeError(`${label}.status is invalid.`);
+  }
+
+  if (!Number.isInteger(resourceCount) || resourceCount < 0) {
+    throw new TypeError(`${label}.resourceCount must be a non-negative integer.`);
+  }
+
+  return {
+    displayName: readNullableStringValue(record.displayName, `${label}.displayName`),
+    firstSeenAt: requireIsoTimestamp(record.firstSeenAt, `${label}.firstSeenAt`),
+    lastErrorCode: sanitizeHostedRuntimeErrorCode(
+      readNullableStringValue(record.lastErrorCode, `${label}.lastErrorCode`),
+    ),
+    lastErrorMessage: sanitizeHostedRuntimeErrorText(
+      readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    ),
+    lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
+    resourceCount,
+    sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
+    status,
   };
 }
 

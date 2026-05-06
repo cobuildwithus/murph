@@ -342,7 +342,10 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     surface: "control",
     handle({ response, service, url }) {
       sendJson(response, 200, {
-        accounts: service.listAccounts(url.searchParams.get("provider") ?? undefined),
+        accounts: service.listAccounts({
+          provider: url.searchParams.get("provider") ?? undefined,
+          sourceProviderSlug: url.searchParams.get("sourceProvider") ?? undefined,
+        }),
       });
     },
   }),

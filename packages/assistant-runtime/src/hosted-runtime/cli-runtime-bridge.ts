@@ -143,11 +143,13 @@ async function handleHostedCliBridgeRequest(input: {
       const request = parseHostedCliDeviceAccountListRequest(body);
       try {
         const snapshot = await input.deviceSyncPort.fetchSnapshot({
-          provider: request.provider ?? null,
+          ...(request.provider ? { provider: request.provider } : {}),
+          ...(request.sourceProvider ? { sourceProviderSlug: request.sourceProvider } : {}),
         });
         writeHostedCliBridgeJson(input.response, 200, {
           accounts: snapshot.connections.map(hostedDeviceSyncSnapshotToAccount),
           provider: request.provider ?? null,
+          sourceProvider: request.sourceProvider ?? null,
         });
       } catch {
         writeHostedCliBridgeError(
@@ -223,6 +225,16 @@ function hostedDeviceSyncSnapshotToAccount(entry: HostedDeviceSyncSnapshotEntry)
     nextReconcileAt: entry.localState.nextReconcileAt,
     provider: entry.connection.provider,
     scopes: entry.connection.scopes,
+    sources: (entry.sources ?? []).map((source) => ({
+      displayName: source.displayName,
+      firstSeenAt: source.firstSeenAt,
+      lastErrorCode: source.lastErrorCode,
+      lastErrorMessage: source.lastErrorMessage,
+      lastSeenAt: source.lastSeenAt,
+      resourceCount: source.resourceCount,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: source.status,
+    })),
     setupExpiresAt: entry.connection.setupExpiresAt ?? null,
     setupPhase: entry.connection.setupPhase ?? null,
     status: entry.connection.status,

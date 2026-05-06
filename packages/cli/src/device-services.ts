@@ -60,6 +60,7 @@ export interface DeviceSyncServices {
     vault?: string
     baseUrl?: string
     provider?: string
+    sourceProvider?: string
   }): Promise<DeviceAccountListResult>
   showAccount(input: {
     vault?: string
@@ -246,11 +247,13 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
         const client = await createControlPlaneClient(input)
         const result = await client.listAccounts({
           provider: input.provider,
+          sourceProvider: input.sourceProvider,
         })
 
         return {
           baseUrl: client.baseUrl,
           provider: input.provider ?? null,
+          sourceProvider: input.sourceProvider ?? null,
           accounts: result.accounts,
         }
       }
@@ -263,11 +266,13 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
         const client = await createControlPlaneClient(input)
         const result = await client.listAccounts({
           provider: input.provider,
+          sourceProvider: input.sourceProvider,
         })
 
         return {
           baseUrl: client.baseUrl,
           provider: input.provider ?? null,
+          sourceProvider: input.sourceProvider ?? null,
           accounts: result.accounts,
         }
       }
@@ -288,6 +293,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
         return {
           local,
           provider: input.provider ?? null,
+          sourceProvider: input.sourceProvider ?? null,
           accounts: [],
         }
       }
@@ -298,12 +304,14 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       })
       const result = await client.listAccounts({
         provider: input.provider,
+        sourceProvider: input.sourceProvider,
       })
 
       return {
         baseUrl: client.baseUrl,
         local,
         provider: input.provider ?? null,
+        sourceProvider: input.sourceProvider ?? null,
         accounts: result.accounts,
       }
     },
@@ -357,11 +365,13 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
 
   async function listAccountsViaHostedBridge(input: {
     provider?: string
+    sourceProvider?: string
   }): Promise<DeviceAccountListResult> {
     const bridge = readRequiredHostedBridge('account list')
     const result = await requestHostedCliDeviceAccountList({
       bridge,
       provider: input.provider,
+      sourceProvider: input.sourceProvider,
     }).catch((error) => {
       const bridgeCode = error instanceof HostedCliBridgeRequestError
         ? error.code
@@ -379,6 +389,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
 
     return {
       provider: result.provider,
+      sourceProvider: result.sourceProvider,
       accounts: result.accounts,
     }
   }

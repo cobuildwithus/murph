@@ -84,8 +84,20 @@ export interface DeviceSyncAccountRecord {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   nextReconcileAt: string | null;
+  sources?: DeviceSyncAccountSourceSummary[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DeviceSyncAccountSourceSummary {
+  sourceProviderSlug: string;
+  displayName: string | null;
+  status: DeviceConnectionSourceStatus;
+  resourceCount: number;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
 }
 
 export interface DeviceConnectionSourceRecord {
@@ -121,6 +133,11 @@ export interface ListDeviceConnectionSourcesInput {
   connectionId: string;
   sourceProviderSlug?: string | null;
   status?: DeviceConnectionSourceStatus | null;
+}
+
+export interface ListDeviceSyncAccountsInput {
+  provider?: string | null;
+  sourceProviderSlug?: string | null;
 }
 
 export interface DeviceSyncJobRecord {
