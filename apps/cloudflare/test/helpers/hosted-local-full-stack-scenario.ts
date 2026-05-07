@@ -120,7 +120,10 @@ export async function startHostedLocalFullStackScenario(input: {
   localDatabaseUrl?: string;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
+  resetLocalDatabase?: boolean;
+  resetPersistDir?: boolean;
   requiredRunnerEnvProfile: string;
+  reuseLocalDatabase?: boolean;
   scenarioLabel: string;
   seedEnvironment?: NodeJS.ProcessEnv;
   streamLogs?: boolean;
@@ -131,6 +134,7 @@ export async function startHostedLocalFullStackScenario(input: {
   };
   const localDatabase = await resolveHostedLocalScenarioDatabase({
     databaseUrl: input.localDatabaseUrl,
+    reuseDatabase: input.reuseLocalDatabase === true,
     scenarioPrefix: input.persistDirPrefix,
   });
   const localDatabaseUrl = localDatabase.url;
@@ -198,7 +202,7 @@ export async function startHostedLocalFullStackScenario(input: {
       HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: oidcFixture.jwksUrl,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
       HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
-      MURPH_DEV_FORCE_RESET_LOCAL_DB: "1",
+      MURPH_DEV_FORCE_RESET_LOCAL_DB: input.resetLocalDatabase === false ? "0" : "1",
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
       ...(usePreparedRunnerBundle ? { MURPH_DEV_SKIP_RUNNER_BUNDLE: "1" } : {}),
       MURPH_DEV_WEB_PORT: String(webPort),
@@ -212,6 +216,7 @@ export async function startHostedLocalFullStackScenario(input: {
       env: runtimeEnv,
       persistDirOverride: input.persistDirOverride,
       persistDirPrefix: input.persistDirPrefix,
+      resetPersistDir: input.resetPersistDir,
       statusHeaders: (userId: string) => ({
         [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
       }),
@@ -353,10 +358,14 @@ interface HostedLocalScenarioDatabaseLease {
 
 async function resolveHostedLocalScenarioDatabase(input: {
   databaseUrl?: string;
+  reuseDatabase?: boolean;
   scenarioPrefix: string;
 }): Promise<HostedLocalScenarioDatabaseLease> {
   const explicitDatabaseUrl = input.databaseUrl?.trim();
-  if (explicitDatabaseUrl && shouldReuseExplicitHostedLocalScenarioDatabaseUrl()) {
+  if (
+    explicitDatabaseUrl
+    && (input.reuseDatabase === true || shouldReuseExplicitHostedLocalScenarioDatabaseUrl())
+  ) {
     return {
       cleanup: async () => {},
       url: explicitDatabaseUrl,
