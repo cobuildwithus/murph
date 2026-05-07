@@ -940,7 +940,10 @@ function buildHostedProviderCleanupRedactedStatus(input: {
 function shouldSkipDeviceSyncForAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  return input.initialMailboxImport.importResult.importedCount > 0;
+  return (
+    input.request.reason === "nudge"
+    || input.initialMailboxImport.importResult.importedCount > 0
+  );
 }
 
 function resolveSkippedDeviceSyncWakeAt(input: {
@@ -967,7 +970,10 @@ function resolveSkippedDeviceSyncWakeAt(input: {
     return existingWakeAt;
   }
 
-  if (input.input.request.reason === "alarm") {
+  if (
+    input.input.request.reason === "alarm"
+    || input.input.request.reason === "nudge"
+  ) {
     return new Date(nowMs + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString();
   }
 
@@ -1559,7 +1565,6 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
 }): boolean {
   return (
     input.input.request.reason === "nudge"
-    && input.input.initialMailboxImport.importResult.importedCount > 0
     && input.deliveryEffects.length > 0
     && input.deliveryEffects.every((effect) => effect.payload.transportIdempotent === true)
     && (input.assistantMetrics.postCheckpointRecord ?? null) === null

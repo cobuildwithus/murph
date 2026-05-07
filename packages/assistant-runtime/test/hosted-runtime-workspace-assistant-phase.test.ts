@@ -268,7 +268,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("keeps timer device-sync work enabled for webhook nudges without active input", async () => {
+  it("skips timer device-sync work for webhook nudges even before import sees active input", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       reason: "nudge",
@@ -276,7 +276,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
-        skipDeviceSync: false,
+        skipDeviceSync: true,
       }),
     );
   });
@@ -325,6 +325,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
       reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      progressed: true,
+    }));
+  });
+
+  it("schedules a near follow-up wake when a nudge skips a due device-sync wake", async () => {
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "nudge",
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
@@ -546,7 +570,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }],
     });
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      reason: "alarm",
+    }));
 
     expect(result.progressed).toBe(true);
     expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
@@ -754,7 +781,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     ]);
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      reason: "alarm",
+    }));
     await result.afterCheckpoint?.();
 
     expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
@@ -826,6 +856,42 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       .toHaveBeenCalledTimes(1);
   });
 
+  it("fast-dispatches idempotent nudge delivery when input is admitted during the active turn", async () => {
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_synthetic",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      reason: "nudge",
+    }));
+
+    expect(result.afterCheckpoint).toBeUndefined();
+    expect(result.checkpointReason).toBe("outbox_receipt");
+    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit)
+      .toHaveBeenCalledTimes(1);
+  });
+
   it("writes a warning outbox delivery summary when a committed delivery fails", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
@@ -852,7 +918,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     ]);
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      reason: "alarm",
+    }));
     await result.afterCheckpoint?.();
 
     expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
