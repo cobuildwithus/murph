@@ -86,7 +86,7 @@ Updated: 2026-05-06
 - 2026-05-06 late-input folding fix: hosted queue-only auto-replies use the existing active-turn admission hooks by default, while the hosted queue-only receipt fallback skip remains unchanged. The default-path hosted-local E2E folded late same-chat input into one provider request without a runtime flag.
 - 2026-05-06 fast-dispatch crash-window decision: add a runner-level Linq regression that restores the same pre-checkpoint workspace across a failed `outbox_receipt` checkpoint retry and asserts the stable idempotency key produces one external message.
 - 2026-05-06 preferred-input cursor decision: preferred assistant input ids are a cursor-safe overlay on the base scan, not a priority order; returned candidates stay cursor-sorted and `nextCursor` is derived from returned candidates so a newer preferred input cannot advance past older unprocessed input.
-- 2026-05-07 Linq stale-thread recovery decision: keep raw Linq recipient identifiers out of checkpointed delivery effects, but reattach the same live conversation wake's direct recipient only when a committed thread/explicit Linq delivery targets that wake's chat id. This preserves redacted persisted effects while allowing the Worker-owned provider effect to recover stale direct iMessage threads.
+- 2026-05-07 Linq stale-thread recovery decision: keep raw Linq recipient identifiers out of checkpointed delivery effects, but reattach the same live conversation wake's direct recipient and sender line only when a committed thread/explicit Linq delivery targets that wake's chat id or replies to that wake's provider message id. This preserves redacted persisted effects while allowing the Worker-owned provider effect to recover stale direct iMessage threads when exact-write targets are redacted.
 
 ## Current evidence
 
@@ -185,3 +185,9 @@ Updated: 2026-05-06
   - 2026-05-07 Linq recovery fix: `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-callbacks.test.ts` passed.
   - 2026-05-07 Linq recovery fix: `pnpm --dir packages/assistant-runtime typecheck` passed.
   - 2026-05-07 Linq recovery fix: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/runner-outbound.test.ts --no-coverage` passed.
+  - 2026-05-07 Linq redacted-target recovery fix: `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-callbacks.test.ts --testNamePattern "redacted|same-wake Linq direct recipient"` passed.
+  - 2026-05-07 Linq redacted-target recovery fix: `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-callbacks.test.ts` passed.
+  - 2026-05-07 Linq redacted-target recovery fix: `pnpm --dir packages/assistant-runtime typecheck` passed.
+  - 2026-05-07 Linq redacted-target recovery fix: `pnpm --filter @murphai/assistant-runtime run build` passed.
+  - 2026-05-07 Linq redacted-target recovery fix: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/runner-outbound.test.ts --no-coverage` passed.
+  - 2026-05-07 Linq redacted-target recovery fix: `pnpm --dir apps/cloudflare typecheck` passed.

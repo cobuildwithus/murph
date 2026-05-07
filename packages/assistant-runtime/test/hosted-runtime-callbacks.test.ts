@@ -828,6 +828,90 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("attaches same-wake Linq recovery context by reply id when the delivery target is redacted", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_hashed_target",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the current wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "ain_hashed_thread",
+      channel: "linq",
+      explicitTarget: "ain_hashed_thread",
+      transportIdempotent: true,
+    });
+    const sendLinq = vi.fn(async () => ({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_materialized",
+      target: "linq_chat_materialized",
+      targetKind: "thread" as const,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "ain_hashed_thread",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendLinq,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
+    expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
+    expect(sendLinq).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15559990000",
+      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      message: "hello from hosted",
+      replyToMessageId: "linq_message_current",
+      target: "ain_hashed_thread",
+      targetKind: "thread",
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
   it("routes hosted email thread deliveries through the shared effects port", async () => {
     const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: "<message_parent_123@example.test>",
