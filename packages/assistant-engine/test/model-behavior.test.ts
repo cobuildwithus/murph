@@ -133,6 +133,9 @@ describe('assistant local PDF evidence guidance', () => {
       'Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn',
     )
     expect(prompt).toContain(
+      '`vault-cli device account list --format json` shows an active user-facing provider account or connected upstream source',
+    )
+    expect(prompt).toContain(
       'offer to send a connection link',
     )
     expect(prompt).not.toContain('hosted connect helper is not exposed')
@@ -668,7 +671,16 @@ describe('assistant conversation onboarding guidance', () => {
     expect(prompt).toContain('Murph is a health context layer')
     expect(prompt).toContain('Identify data sources in one short message')
     expect(prompt).toContain(
+      'Before asking whether they use a wearable or app for sleep, workouts, activity, or recovery',
+    )
+    expect(prompt).toContain(
+      'run `vault-cli device account list --format json`',
+    )
+    expect(prompt).toContain(
       'if a supported hosted wearable connection is already visible in context',
+    )
+    expect(prompt).toContain(
+      'Name the underlying provider/source rather than bridge plumbing',
     )
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
@@ -681,6 +693,9 @@ describe('assistant conversation onboarding guidance', () => {
     )
     expect(prompt).toContain(
       'Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data',
+    )
+    expect(prompt).toContain(
+      'Ask whether they use a wearable/app, or offer a connection link, only when no connected wearable/app source is visible',
     )
     expect(prompt).toContain('WHOOP')
     expect(prompt).toContain('one lightweight, bounded experiment at a time')
