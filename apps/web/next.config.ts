@@ -239,11 +239,6 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
       ],
-      "/experiments/[experimentId]/results": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
-        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
-      ],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",

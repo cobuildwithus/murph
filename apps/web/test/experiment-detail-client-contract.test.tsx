@@ -110,7 +110,6 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import { ExperimentLayoutClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-layout-client";
-import { ResultsTabClient } from "../app/(dashboard)/experiments/[experimentId]/results/results-tab-client";
 
 const activeCleanups = new Set<() => Promise<void> | void>();
 const requireFromExperimentDetailClientTest = createRequire(import.meta.url);
@@ -185,30 +184,6 @@ test("passes the hosted start action slot into the experiment header", async () 
       }]
     | undefined)?.[0];
   expect(headerProps?.startAction).toBe(startAction);
-
-  await view.cleanup();
-});
-
-test("passes the hosted start action slot into the results empty-state CTA", async () => {
-  const protocol = createResultsPublicProjection();
-  const startAction = createElement("button", { type: "button" }, "server start action");
-  const view = await renderClient(
-    createElement(
-      ExperimentLayoutClient,
-      {
-        shell: createShell(),
-      },
-      createElement(ResultsTabClient, { protocol, startAction }),
-    ),
-  );
-
-  expect(mocks.resultsTab).toHaveBeenCalledTimes(1);
-  const resultsProps = (mocks.resultsTab.mock.calls.at(-1) as
-    | [{
-        startAction?: ReactNode;
-      }]
-    | undefined)?.[0];
-  expect(resultsProps?.startAction).toBe(startAction);
 
   await view.cleanup();
 });

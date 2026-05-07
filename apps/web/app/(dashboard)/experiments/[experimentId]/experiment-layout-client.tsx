@@ -10,7 +10,7 @@ import { ExperimentHeader } from "@/src/components/experiments/experiment-detail
 import { hasCurrentExperimentProtocolContract } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentShellProjection } from "@/src/lib/health-commons/experiment-projections";
 
-type ExperimentDetailTab = "protocol" | "research" | "results";
+type ExperimentDetailTab = "protocol" | "research";
 
 export function ExperimentLayoutClient({
   children,
@@ -80,10 +80,7 @@ function ExperimentLayoutInner({
   const basePath = `/experiments/${shell.id}`;
   const currentTab: ExperimentDetailTab = pathname === `${basePath}/research`
     ? "research"
-    : pathname === `${basePath}/results`
-      ? "results"
-      : "protocol";
-  const showHeaderStartAction = currentTab !== "results";
+    : "protocol";
 
   return (
     <div className="flex flex-col gap-8">
@@ -103,7 +100,7 @@ function ExperimentLayoutInner({
         baselineDays={experiment.baselineDays}
         completionPercent={undefined}
         description={experiment.description}
-        showStartAction={showHeaderStartAction}
+        showStartAction
         startAction={headerStartAction}
       />
 
@@ -117,7 +114,6 @@ function ExperimentLayoutInner({
               tabs={[
                 { value: "protocol", label: "Protocol", href: basePath },
                 { value: "research", label: "Research", href: `${basePath}/research` },
-                { value: "results", label: "Your Results", href: `${basePath}/results` },
               ]}
             />
             <span

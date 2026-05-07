@@ -214,7 +214,7 @@ function ConfidenceBadge({
   const { label, className } = tone[level];
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-3 py-1 font-mono text-[11px]/4 font-semibold uppercase tracking-[0.08em] ${className}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[9px]/3 font-semibold uppercase tracking-[0.08em] ${className}`}
     >
       {label}
     </span>

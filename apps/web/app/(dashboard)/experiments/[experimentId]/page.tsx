@@ -1,12 +1,16 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { ProtocolTab } from "@/src/components/experiments/experiment-detail/protocol-tab";
+import { ResultsSummarySkeleton } from "@/src/components/experiments/experiment-detail/results-summary";
 import {
   resolveHealthCommonsExperimentProtocolTab,
+  resolveHealthCommonsExperimentResultsPublic,
   resolveHealthCommonsExperimentShell,
 } from "@/src/lib/health-commons/experiment-projections";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import { ActiveRunSummaryClient } from "./active-run-summary-client";
 
 export async function generateMetadata({
   params,
@@ -41,11 +45,20 @@ export default async function ExperimentDetailPage({
     notFound();
   }
 
+  const resultsPublic = resolveHealthCommonsExperimentResultsPublic(experimentId);
+
   return (
-    <ProtocolTab
-      key={protocolTab.revision.pageRevisionId ?? protocolTab.id}
-      experiment={protocolTab}
-      researchHref={`/experiments/${protocolTab.id}/research`}
-    />
+    <div className="flex flex-col gap-10">
+      {resultsPublic && (
+        <Suspense fallback={<ResultsSummarySkeleton />}>
+          <ActiveRunSummaryClient protocol={resultsPublic} />
+        </Suspense>
+      )}
+      <ProtocolTab
+        key={protocolTab.revision.pageRevisionId ?? protocolTab.id}
+        experiment={protocolTab}
+        researchHref={`/experiments/${protocolTab.id}/research`}
+      />
+    </div>
   );
 }

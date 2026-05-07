@@ -13,13 +13,9 @@ import type {
   TrendData,
 } from "@/src/types/experiments";
 import { Button } from "@/src/components/ui/button";
-import { MetricCard } from "@/src/components/ui/metric-card";
 import { ConclusionCard } from "@/src/components/conclusion-card";
-import { ExperimentSchedule } from "./experiment-schedule";
-import { ExperimentSummaryTiles } from "./experiment-summary-tiles";
+import { ResultsSummary, ResultsSummarySkeleton } from "./results-summary";
 import { StartExperimentButton } from "./start-experiment-button";
-import { TrendChart } from "./trend-chart";
-import { ExperimentTimeline } from "./experiment-timeline";
 
 interface ResultsTabProps {
   experiment: ResultsTabExperiment;
@@ -70,10 +66,7 @@ export function ResultsTab({
   return (
     <div className="flex flex-col gap-10">
       {!hasPrivateRun && privateRunStatus === "loading" && (
-        <ResultsEmptyState
-          title="Loading your private run"
-          body="The public protocol is loaded. Murph is checking your encrypted browser-vault snapshot for an active or finished run linked to this protocol."
-        />
+        <ResultsSummarySkeleton />
       )}
 
       {!hasPrivateRun && privateRunStatus === "error" && (
@@ -132,7 +125,6 @@ export function ResultsTab({
         />
       )}
 
-      {isRunnable && <ExperimentSummaryTiles experiment={experiment} />}
 
       {isFinished && experiment.summary && (
         <div className="rounded-xl border border-border bg-card p-6">
@@ -145,35 +137,11 @@ export function ResultsTab({
         </div>
       )}
 
-      {experiment.signals.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-3">
-          {experiment.signals.map((signal) => (
-            <MetricCard
-              key={signal.label}
-              label={signal.label}
-              value={signal.value}
-              unit={signal.unit}
-              delta={signal.delta}
-              direction={signal.direction}
-              baseline={signal.baseline}
-              expected={signal.expected}
-            />
-          ))}
-        </div>
-      )}
-
-      {(experiment.trends.length > 0 || experiment.timeline.length > 0) && (
-        <div className="grid gap-4 md:grid-cols-[1fr_340px]">
-          <div className="flex flex-col gap-4">
-            {experiment.trends.map((trend) => (
-              <TrendChart key={trend.label} data={trend} />
-            ))}
-          </div>
-          {experiment.timeline.length > 0 ? <ExperimentTimeline events={experiment.timeline} /> : null}
-        </div>
-      )}
-
-      {experiment.schedule && <ExperimentSchedule schedule={experiment.schedule} />}
+      <ResultsSummary
+        signals={experiment.signals}
+        trends={experiment.trends}
+        schedule={experiment.schedule}
+      />
 
       {isRunnable && (
         <div className="flex flex-col gap-2">
