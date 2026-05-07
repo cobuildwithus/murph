@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   shouldShowHomeDeviceSyncStep: vi.fn(),
 }));
 
+vi.mock("server-only", () => ({}));
+
 vi.mock("next/link", () => ({
   default(props: {
     children?: ReactNode;

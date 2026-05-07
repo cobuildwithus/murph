@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 
+import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
+
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -9,6 +11,10 @@ import {
   UploadLabsActionFallback,
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
+import {
+  resolveDeviceSyncCompletionDialogModel,
+  type DeviceSyncCompletionSearchParams,
+} from "@/src/lib/device-sync/connect-completion";
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -20,9 +26,14 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Your personal health dashboard.",
 });
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams?: Promise<DeviceSyncCompletionSearchParams>;
+} = {}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
   const auth = await getHostedPageAuthSnapshot();
-  const [showDeviceStep, usageGate] = await Promise.all([
+  const [showDeviceStep, usageGate, completionDialog] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
       member: auth.authenticatedMember,
     }),
@@ -32,6 +43,10 @@ export default async function HomePage() {
           prisma: getPrisma(),
         })
       : Promise.resolve(null),
+    resolveDeviceSyncCompletionDialogModel({
+      member: auth.authenticatedMember,
+      searchParams: resolvedSearchParams,
+    }),
   ]);
   const usageLimitNotice =
     usageGate && !usageGate.allowed && usageGate.reason === "ai_usage_limit_exceeded"
@@ -46,6 +61,10 @@ export default async function HomePage() {
         title="Welcome to Murph"
         description="Sync your signals, pick an experiment, and see what actually makes you healthier."
       />
+
+      {completionDialog ? (
+        <DeviceSyncCompletionDialog model={completionDialog} />
+      ) : null}
 
       {usageLimitNotice ? (
         <UsageLimitBanner noticeCode={usageLimitNotice.code} />
