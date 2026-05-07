@@ -39,8 +39,16 @@ import {
 
 const temporaryPaths: string[] = [];
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
+const RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E =
+  process.env.MURPH_RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E === "1";
 const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
+const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
+  ? test
+  : test.skip;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
+const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
+const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
+  "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 
 afterEach(async () => {
   await Promise.all(
@@ -597,6 +605,159 @@ testHostedCodexAuthE2e(
   20_000,
 );
 
+testHostedCodexAutocompactionE2e(
+  "hosted Codex app-server auto-compacts oversized resumed context",
+  async () => {
+    const workspaceRoot = await createTemporaryDirectory();
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const rawContextMarker = `HOSTED_CODEX_AUTOCOMPACTION_RAW_${Date.now()}`;
+    const rawContext = Array.from(
+      { length: 12 },
+      (_, index) =>
+        `${rawContextMarker}_${String(index).padStart(3, "0")} synthetic oversized turn context.`,
+    ).join("\n");
+    const requests: string[] = [];
+    const requestUrls: string[] = [];
+    const compactionRequestIndexes = new Set<number>();
+    const server = await startResponsesStubServer({
+      requestUrls,
+      requests,
+      responseTextForRequest: (body, requestIndex, requestUrl) => {
+        if (requestIndex === 1) {
+          return "first assistant reply before auto-compaction";
+        }
+
+        if (
+          compactionRequestIndexes.size === 0
+          && (
+            requestUrl === "/v1/responses/compact"
+            || isResponsesAutocompactionRequest(body)
+          )
+        ) {
+          compactionRequestIndexes.add(requestIndex);
+          return `${HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL}: the first turn included a large synthetic context and received a brief reply.`;
+        }
+
+        return "second assistant reply after auto-compaction";
+      },
+      usageForRequest: (_body, requestIndex) =>
+        compactionRequestIndexes.has(requestIndex)
+          ? {
+              input_tokens: 300,
+              input_tokens_details: null,
+              output_tokens: 80,
+              output_tokens_details: null,
+              total_tokens: 380,
+            }
+          : {
+              input_tokens: 13_000,
+              input_tokens_details: null,
+              output_tokens: 500,
+              output_tokens_details: null,
+              total_tokens: 13_500,
+            },
+    });
+
+    try {
+      await mkdir(vaultRoot, { recursive: true });
+      const prepared = await prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+            `${readServerBaseUrl(server)}/v1`,
+          NODE_ENV: "test",
+          OPENAI_API_KEY: "hosted-autocompaction-e2e-key",
+          PATH: process.env.PATH ?? "",
+        },
+      });
+      const codexEnv = {
+        CODEX_HOME: prepared.runtimeEnv.CODEX_HOME,
+        HOME: operatorHomeRoot,
+        OPENAI_API_KEY: prepared.runtimeEnv.OPENAI_API_KEY,
+        PATH: prepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
+      };
+      const configOverrides = [
+        `model_auto_compact_token_limit=${HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT}`,
+      ];
+      const firstResult = await executeCodexAppServerTurn({
+        abortSignal: AbortSignal.timeout(60_000),
+        approvalPolicy: "never",
+        codexHome: prepared.runtimeEnv.CODEX_HOME,
+        configOverrides,
+        env: codexEnv,
+        prompt: [
+          "Please acknowledge this synthetic oversized hosted Codex context briefly.",
+          rawContext,
+        ].join("\n\n"),
+        sandbox: "danger-full-access",
+        workingDirectory: vaultRoot,
+      });
+      assert.equal(firstResult.finalMessage, "first assistant reply before auto-compaction");
+      assert.ok(firstResult.threadId);
+
+      const responseCountAfterFirstTurn = requests.length;
+      const secondResult = await executeCodexAppServerTurn({
+        abortSignal: AbortSignal.timeout(60_000),
+        approvalPolicy: "never",
+        codexHome: prepared.runtimeEnv.CODEX_HOME,
+        configOverrides,
+        env: codexEnv,
+        prompt: "Please use the compacted context and answer with a short second reply.",
+        resumeSessionId: firstResult.threadId,
+        sandbox: "danger-full-access",
+        workingDirectory: vaultRoot,
+      });
+
+      assert.equal(secondResult.finalMessage, "second assistant reply after auto-compaction");
+      assert.equal(secondResult.threadId, firstResult.threadId);
+      assert.equal(
+        compactionRequestIndexes.size > 0,
+        true,
+        "Expected real Codex app-server to issue a compaction Responses API request.",
+      );
+      const firstCompactionRequestIndex = Math.min(...compactionRequestIndexes);
+      const modelRequestIndexes = requestUrls
+        .map((requestUrl, index) => ({ index: index + 1, requestUrl }))
+        .filter(({ requestUrl }) => requestUrl === "/v1/responses");
+      const firstModelRequestIndex = modelRequestIndexes[0]?.index;
+      const lastModelRequestIndex = modelRequestIndexes.at(-1)?.index;
+      assert.ok(firstModelRequestIndex, "Expected the first turn to make a model request.");
+      assert.ok(lastModelRequestIndex, "Expected the resumed turn to make a model request.");
+      assert.equal(
+        firstCompactionRequestIndex < lastModelRequestIndex,
+        true,
+        "Expected auto-compaction to complete before the resumed hosted Codex model request.",
+      );
+      const firstTurnInput = readResponsesRequestInput(requests[firstModelRequestIndex - 1]!);
+      assert.equal(
+        firstTurnInput.includes(rawContextMarker),
+        true,
+        "Expected the first model request path to include the synthetic oversized context.",
+      );
+
+      const secondTurnInput = readResponsesRequestInput(
+        requests[lastModelRequestIndex - 1]!,
+      );
+      assert.equal(
+        secondTurnInput.includes(HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL),
+        true,
+        "Expected the resumed turn to include the compacted summary.",
+      );
+      assert.equal(
+        secondTurnInput.includes(rawContextMarker),
+        false,
+        "Expected the resumed turn to exclude the raw oversized context after compaction.",
+      );
+    } finally {
+      await closeHttpServer(server);
+    }
+  },
+  150_000,
+);
+
 test("hosted Codex runtime config rejects the removed local Codex provider", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
@@ -965,8 +1126,19 @@ async function startResponsesStubServer(input: {
   authorizationHeaders?: string[];
   requiredAuthorization?: string;
   requests: string[];
+  requestUrls?: string[];
   responseText?: string;
+  responseTextForRequest?: (
+    body: string,
+    requestIndex: number,
+    requestUrl: string,
+  ) => string;
   responseTexts?: readonly string[];
+  usageForRequest?: (
+    body: string,
+    requestIndex: number,
+    requestUrl: string,
+  ) => ResponsesStubUsage;
 }): Promise<Server> {
   const responseTexts = [...(input.responseTexts ?? [])];
   const server = createServer((request, response) => {
@@ -976,14 +1148,20 @@ async function startResponsesStubServer(input: {
     });
     request.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
+      const requestIndex = input.requests.length + 1;
       input.requests.push(body);
+      input.requestUrls?.push(request.url ?? "");
       input.authorizationHeaders?.push(
         typeof request.headers.authorization === "string"
           ? request.headers.authorization
           : "",
       );
 
-      if (request.method !== "POST" || request.url !== "/v1/responses") {
+      const requestUrl = request.url ?? "";
+      if (
+        request.method !== "POST"
+        || (requestUrl !== "/v1/responses" && requestUrl !== "/v1/responses/compact")
+      ) {
         response.statusCode = 404;
         response.end("not found");
         return;
@@ -1005,20 +1183,32 @@ async function startResponsesStubServer(input: {
       }
 
       response.setHeader("content-type", "application/json; charset=utf-8");
-      const responseText = responseTexts.shift() ?? input.responseText ?? "shim response";
+      const responseText =
+        input.responseTextForRequest?.(body, requestIndex, requestUrl)
+        ?? responseTexts.shift()
+        ?? input.responseText
+        ?? "shim response";
+      const usage = input.usageForRequest?.(body, requestIndex, requestUrl) ?? {
+        input_tokens: 24,
+        input_tokens_details: null,
+        output_tokens: 11,
+        output_tokens_details: null,
+        total_tokens: 35,
+      };
       const parsedBody = parseJsonObject(body);
       if (parsedBody?.stream === true) {
         writeResponsesStubStream({
           response,
-          responseId: `resp_hosted_codex_config_${input.requests.length}`,
+          responseId: `resp_hosted_codex_config_${requestIndex}`,
           responseText,
+          usage,
         });
         return;
       }
 
       response.end(JSON.stringify({
         created_at: Math.floor(Date.now() / 1000),
-        id: `resp_hosted_codex_config_${input.requests.length}`,
+        id: `resp_hosted_codex_config_${requestIndex}`,
         model: "gpt-5.5",
         output: [
           {
@@ -1029,18 +1219,12 @@ async function startResponsesStubServer(input: {
                 type: "output_text",
               },
             ],
-            id: `msg_hosted_codex_config_${input.requests.length}`,
+            id: `msg_hosted_codex_config_${requestIndex}`,
             role: "assistant",
             type: "message",
           },
         ],
-        usage: {
-          input_tokens: 24,
-          input_tokens_details: null,
-          output_tokens: 11,
-          output_tokens_details: null,
-          total_tokens: 35,
-        },
+        usage,
       }));
     });
   });
@@ -1055,6 +1239,14 @@ async function startResponsesStubServer(input: {
 
   return server;
 }
+
+type ResponsesStubUsage = {
+  input_tokens: number;
+  input_tokens_details: null;
+  output_tokens: number;
+  output_tokens_details: null;
+  total_tokens: number;
+};
 
 async function prepareLegacyBuiltInOpenAiCodexHome(input: {
   baseUrl: string;
@@ -1107,6 +1299,7 @@ function writeResponsesStubStream(input: {
   response: ServerResponse;
   responseId: string;
   responseText: string;
+  usage: ResponsesStubUsage;
 }): void {
   const messageId = `msg_${input.responseId}`;
   const outputItem = {
@@ -1128,13 +1321,7 @@ function writeResponsesStubStream(input: {
     model: "gpt-5.5",
     output: [outputItem],
     status: "completed",
-    usage: {
-      input_tokens: 24,
-      input_tokens_details: null,
-      output_tokens: 11,
-      output_tokens_details: null,
-      total_tokens: 35,
-    },
+    usage: input.usage,
   };
 
   input.response.statusCode = 200;
@@ -1172,7 +1359,35 @@ function writeResponsesStubSseEvent(
 
 function readResponsesRequestInput(body: string): string {
   const parsed = JSON.parse(body) as Record<string, unknown>;
-  return typeof parsed.input === "string" ? parsed.input : "";
+  return stringifyResponsesRequestInput(parsed.input);
+}
+
+function stringifyResponsesRequestInput(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  return JSON.stringify(value);
+}
+
+function isResponsesAutocompactionRequest(body: string): boolean {
+  const parsed = parseJsonObject(body);
+  const searchable = JSON.stringify({
+    input: parsed?.input,
+    instructions: parsed?.instructions,
+  }).toLowerCase();
+  return (
+    searchable.includes("summarize")
+    || searchable.includes("summary")
+  ) && (
+    searchable.includes("conversation")
+    || searchable.includes("context")
+    || searchable.includes("thread")
+  );
 }
 
 async function readHostedLocalCodexShimContinuityLog(codexHome: string): Promise<string> {
