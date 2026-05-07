@@ -1,6 +1,6 @@
 "use client";
 
-import { useLinkAccount, useUser } from "@privy-io/react-auth";
+import { useLinkAccount, usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
@@ -25,10 +25,12 @@ const MURPH_TELEGRAM_BOT_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
 
 export function HostedTelegramCardSettings(props: {
   authenticated: boolean;
+  autoLink?: boolean;
   initialTelegramAccount?: HostedTelegramSyncOverride | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
-  const { authenticated, initialTelegramAccount, onSynced } = props;
+  const { authenticated, autoLink, initialTelegramAccount, onSynced } = props;
+  const { authenticated: privyAuthenticated, ready: privyReady } = usePrivy();
   const { refreshUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
   const syncRequestSequenceRef = useRef(0);
@@ -47,6 +49,7 @@ export function HostedTelegramCardSettings(props: {
   });
   const currentTelegram = displayState.currentTelegram;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
+  const canUsePrivyTelegramLink = authenticated && privyReady && privyAuthenticated;
 
   const { linkTelegram } = useLinkAccount({
     onError: (_error, details) => {
@@ -141,12 +144,31 @@ export function HostedTelegramCardSettings(props: {
     syncLinkedTelegram,
   ]);
 
+  const autoLinkTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!autoLink || autoLinkTriggeredRef.current || !canUsePrivyTelegramLink) return;
+    if (currentTelegram) return;
+    autoLinkTriggeredRef.current = true;
+    void handleLinkTelegram();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLink, canUsePrivyTelegramLink]);
+
   async function handleLinkTelegram() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
     if (!authenticated) {
       setErrorMessage("Please sign in first to link Telegram.");
+      return;
+    }
+
+    if (!privyReady) {
+      setErrorMessage("Telegram linking is still loading. Try again in a moment.");
+      return;
+    }
+
+    if (!privyAuthenticated) {
+      setErrorMessage("Sign in again before linking Telegram.");
       return;
     }
 
@@ -184,7 +206,13 @@ export function HostedTelegramCardSettings(props: {
 
   const statusTone = errorMessage ? "destructive" : successMessage ? "success" : "neutral";
   const statusMessage =
-    errorMessage ?? successMessage ?? (isSyncingTelegram && !isQuietSyncingTelegram ? "Saving your Telegram connection…" : null);
+    errorMessage
+    ?? successMessage
+    ?? (isSyncingTelegram && !isQuietSyncingTelegram
+      ? "Saving your Telegram connection…"
+      : autoLink && !privyReady
+        ? "Preparing Telegram linking…"
+        : null);
 
   return (
     <div className="space-y-5">
@@ -200,7 +228,7 @@ export function HostedTelegramCardSettings(props: {
               <Button
                 type="button"
                 onClick={() => void handleLinkTelegram()}
-                disabled={isBusy}
+                disabled={isBusy || !privyReady}
                 variant="ghost"
                 size="sm"
                 className="text-muted-foreground hover:text-foreground"
@@ -230,7 +258,7 @@ export function HostedTelegramCardSettings(props: {
               type="button"
               size="sm"
               onClick={() => void handleLinkTelegram()}
-              disabled={isBusy}
+              disabled={isBusy || !privyReady}
             >
               {isLinkingTelegram ? "Connecting..." : "Link Telegram"}
             </Button>
