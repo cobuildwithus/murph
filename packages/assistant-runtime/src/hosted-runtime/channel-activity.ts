@@ -2,6 +2,7 @@ import type {
   AssistantChannelTypingDependencies,
 } from "@murphai/assistant-engine";
 import {
+  startAssistantChannelActivitySession,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
@@ -23,6 +24,7 @@ const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
 ] as const;
+const HOSTED_CHANNEL_TYPING_REFRESH_MS = 4_000;
 
 export function buildHostedLinqChannelEnv(input: {
   forwardedEnv: Readonly<Record<string, string>>;
@@ -78,18 +80,18 @@ export function createHostedAssistantChannelTypingDependencies(input: {
     startLinqTyping: async (request) => {
       const sendLinqChatAction = input.effectsPort?.sendLinqChatAction;
       if (sendLinqChatAction) {
-        await sendLinqChatAction({
-          action: "typing",
-          target: request.target,
+        return startAssistantChannelActivitySession({
+          refreshMs: HOSTED_CHANNEL_TYPING_REFRESH_MS,
+          signal: input.signal,
+          start: () => sendLinqChatAction({
+            action: "typing",
+            target: request.target,
+          }),
+          stop: () => sendLinqChatAction({
+            action: "typing_stop",
+            target: request.target,
+          }),
         });
-        return {
-          async stop() {
-            await sendLinqChatAction({
-              action: "typing_stop",
-              target: request.target,
-            });
-          },
-        };
       }
 
       return startLinqTypingIndicator(request, {
@@ -101,12 +103,16 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       });
     },
     startTelegramTyping: async (request) => {
-      if (input.effectsPort?.sendTelegramChatAction) {
-        await input.effectsPort.sendTelegramChatAction({
-          action: "typing",
-          target: request.target,
+      const sendTelegramChatAction = input.effectsPort?.sendTelegramChatAction;
+      if (sendTelegramChatAction) {
+        return startAssistantChannelActivitySession({
+          refreshMs: HOSTED_CHANNEL_TYPING_REFRESH_MS,
+          signal: input.signal,
+          start: () => sendTelegramChatAction({
+            action: "typing",
+            target: request.target,
+          }),
         });
-        return;
       }
 
       return startTelegramTypingIndicator(request, {

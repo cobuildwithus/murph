@@ -12,10 +12,16 @@ const mocks = vi.hoisted(() => ({
   startTelegramTypingIndicator: vi.fn(),
 }));
 
-vi.mock("@murphai/assistant-engine/assistant-channel-adapters", () => ({
-  startLinqTypingIndicator: mocks.startLinqTypingIndicator,
-  startTelegramTypingIndicator: mocks.startTelegramTypingIndicator,
-}));
+vi.mock("@murphai/assistant-engine/assistant-channel-adapters", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-channel-adapters")
+  >();
+  return {
+    ...actual,
+    startLinqTypingIndicator: mocks.startLinqTypingIndicator,
+    startTelegramTypingIndicator: mocks.startTelegramTypingIndicator,
+  };
+});
 
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
   markLinqChatRead: mocks.markLinqChatRead,
@@ -161,42 +167,61 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
 });
 
 test("hosted typing prefers provider effects when available", async () => {
-  const sendLinqChatAction = vi.fn(async () => undefined);
-  const sendTelegramChatAction = vi.fn(async () => undefined);
-  const typing = createHostedAssistantChannelTypingDependencies({
-    effectsPort: {
-      sendLinqChatAction,
-      sendTelegramChatAction,
-    },
-    forwardedEnv: {},
-    platformEnv: {},
-    userEnv: {},
-  });
+  vi.useFakeTimers();
+  try {
+    const sendLinqChatAction = vi.fn(async () => undefined);
+    const sendTelegramChatAction = vi.fn(async () => undefined);
+    const typing = createHostedAssistantChannelTypingDependencies({
+      effectsPort: {
+        sendLinqChatAction,
+        sendTelegramChatAction,
+      },
+      forwardedEnv: {},
+      platformEnv: {},
+      userEnv: {},
+    });
 
-  const linqHandle = await typing.startLinqTyping?.({
-    target: "linq_chat_123",
-  });
-  await linqHandle?.stop();
-  await typing.startTelegramTyping?.({
-    target: "telegram_chat_123",
-  });
+    const linqHandle = await typing.startLinqTyping?.({
+      target: "linq_chat_123",
+    });
+    await vi.advanceTimersByTimeAsync(8_100);
+    await linqHandle?.stop();
+    const telegramHandle = await typing.startTelegramTyping?.({
+      target: "telegram_chat_123",
+    });
+    await vi.advanceTimersByTimeAsync(4_100);
+    await telegramHandle?.stop();
 
-  assert.deepEqual(sendLinqChatAction.mock.calls, [
-    [{
+    assert.deepEqual(sendLinqChatAction.mock.calls, [
+      [{
+        action: "typing",
+        target: "linq_chat_123",
+      }],
+      [{
+        action: "typing",
+        target: "linq_chat_123",
+      }],
+      [{
+        action: "typing",
+        target: "linq_chat_123",
+      }],
+      [{
+        action: "typing_stop",
+        target: "linq_chat_123",
+      }],
+    ]);
+    assert.deepEqual(sendTelegramChatAction.mock.calls, [[{
       action: "typing",
-      target: "linq_chat_123",
-    }],
-    [{
-      action: "typing_stop",
-      target: "linq_chat_123",
-    }],
-  ]);
-  assert.deepEqual(sendTelegramChatAction.mock.calls, [[{
-    action: "typing",
-    target: "telegram_chat_123",
-  }]]);
-  assert.equal(mocks.startLinqTypingIndicator.mock.calls.length, 0);
-  assert.equal(mocks.startTelegramTypingIndicator.mock.calls.length, 0);
+      target: "telegram_chat_123",
+    }], [{
+      action: "typing",
+      target: "telegram_chat_123",
+    }]]);
+    assert.equal(mocks.startLinqTypingIndicator.mock.calls.length, 0);
+    assert.equal(mocks.startTelegramTypingIndicator.mock.calls.length, 0);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("hosted Linq mark-read prefers provider effects when available", async () => {

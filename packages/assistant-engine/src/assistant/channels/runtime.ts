@@ -204,6 +204,65 @@ export async function startTelegramTypingIndicator(
   )
 }
 
+export async function startAssistantChannelActivitySession(input: {
+  refresh?: ((signal: AbortSignal) => Promise<void>) | null
+  refreshMs: number
+  signal?: AbortSignal
+  start: (signal: AbortSignal) => Promise<void>
+  stop?: (() => Promise<void>) | null
+}): Promise<AssistantChannelActivityHandle> {
+  const linkedStopSignal = createLinkedAbortSignal(input.signal)
+  try {
+    await input.start(linkedStopSignal.signal)
+  } catch (error) {
+    linkedStopSignal.cleanup()
+    throw error
+  }
+
+  let refreshFailure: unknown = null
+  const refreshLoop = keepAssistantChannelActivitySessionAlive({
+    refresh: input.refresh ?? input.start,
+    refreshMs: input.refreshMs,
+    signal: linkedStopSignal.signal,
+  }).catch((error) => {
+    if (!linkedStopSignal.signal.aborted) {
+      refreshFailure = error
+    }
+  })
+
+  let stopped = false
+  return {
+    async stop() {
+      if (stopped) {
+        await refreshLoop
+        if (refreshFailure) {
+          throw refreshFailure
+        }
+        return
+      }
+
+      stopped = true
+      linkedStopSignal.controller.abort()
+      linkedStopSignal.cleanup()
+      await refreshLoop
+
+      let stopFailure: unknown = null
+      try {
+        await input.stop?.()
+      } catch (error) {
+        stopFailure = error
+      }
+
+      if (refreshFailure) {
+        throw refreshFailure
+      }
+      if (stopFailure) {
+        throw stopFailure
+      }
+    },
+  }
+}
+
 export async function startLinqTypingIndicator(
   input: {
     target: string
@@ -227,105 +286,49 @@ export async function startLinqTypingIndicator(
     )
   }
 
-  const linkedStopSignal = createLinkedAbortSignal(dependencies.signal)
-  try {
-    await startLinqChatTypingIndicator(
+  return startAssistantChannelActivitySession({
+    refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
+    signal: dependencies.signal,
+    start: (signal) => startLinqChatTypingIndicator(
       {
         chatId,
       },
       {
         env,
         fetchImplementation: dependencies.fetchImplementation,
-        signal: linkedStopSignal.signal,
+        signal,
       },
-    )
-  } catch (error) {
-    linkedStopSignal.cleanup()
-    throw error
-  }
-
-  let refreshFailure: unknown = null
-  const refreshLoop = keepLinqTypingIndicatorAlive({
-    chatId,
-    env,
-    fetchImplementation: dependencies.fetchImplementation,
-    refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
-    signal: linkedStopSignal.signal,
-  }).catch((error) => {
-    if (!linkedStopSignal.signal.aborted) {
-      refreshFailure = error
-    }
+    ),
+    stop: () => stopLinqChatTypingIndicator(
+      {
+        chatId,
+      },
+      {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+      },
+    ),
   })
-
-  let stopped = false
-  return {
-    async stop() {
-      if (stopped) {
-        await refreshLoop
-        if (refreshFailure) {
-          throw refreshFailure
-        }
-        return
-      }
-
-      stopped = true
-      linkedStopSignal.controller.abort()
-      linkedStopSignal.cleanup()
-      await refreshLoop
-      let stopFailure: unknown = null
-      try {
-        await stopLinqChatTypingIndicator(
-          {
-            chatId,
-          },
-          {
-            env,
-            fetchImplementation: dependencies.fetchImplementation,
-          },
-        )
-      } catch (error) {
-        stopFailure = error
-      }
-
-      if (refreshFailure) {
-        throw refreshFailure
-      }
-      if (stopFailure) {
-        throw stopFailure
-      }
-    },
-  }
 }
 
-async function keepLinqTypingIndicatorAlive(input: {
-  chatId: string
-  env: NodeJS.ProcessEnv
-  fetchImplementation?: LinqRuntimeDependencies['fetchImplementation']
+async function keepAssistantChannelActivitySessionAlive(input: {
+  refresh: (signal: AbortSignal) => Promise<void>
   refreshMs: number
   signal: AbortSignal
 }): Promise<void> {
   const refreshMs = Math.max(1, Math.trunc(input.refreshMs))
 
   while (!input.signal.aborted) {
-    await waitForLinqActivityRefresh(refreshMs, input.signal)
+    await waitForAssistantChannelActivityRefresh(refreshMs, input.signal)
     if (input.signal.aborted) {
       return
     }
 
-    await startLinqChatTypingIndicator(
-      {
-        chatId: input.chatId,
-      },
-      {
-        env: input.env,
-        fetchImplementation: input.fetchImplementation,
-        signal: input.signal,
-      },
-    )
+    await input.refresh(input.signal)
   }
 }
 
-function waitForLinqActivityRefresh(
+function waitForAssistantChannelActivityRefresh(
   delayMs: number,
   signal: AbortSignal,
 ): Promise<void> {
