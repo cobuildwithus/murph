@@ -626,8 +626,6 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
   input.assertRuntimeLiveness();
   const checkpointRequest = await raceHostedRuntimeLiveness(
     Promise.resolve(input.checkpointRequestBuilder.createRequest({
-      nextWakeAt: null,
-      nextWakeReason: null,
       reason: "idle_shutdown",
       redactedStatus: input.redactedStatus ?? null,
     })),
@@ -637,6 +635,7 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
   const checkpointPromise = input.workspacePort.checkpoint(checkpointRequest);
   let checkpoint: Awaited<typeof checkpointPromise>;
   let livenessInterrupted = false;
+  let livenessScheduledResult: HostedWorkspaceInvocationResult | null = null;
   try {
     checkpoint = await raceHostedRuntimeLiveness(
       checkpointPromise,
@@ -648,6 +647,7 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
       throw error;
     }
     livenessInterrupted = true;
+    livenessScheduledResult = scheduled;
     try {
       checkpoint = await checkpointPromise;
     } catch {
@@ -672,6 +672,11 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
 
   return {
     idleShutdownCheckpointed: true,
+    ...(checkpoint.workspace.nextWakeAt
+      ? { nextWakeAt: checkpoint.workspace.nextWakeAt }
+      : livenessScheduledResult?.nextWakeAt
+        ? { nextWakeAt: livenessScheduledResult.nextWakeAt }
+        : {}),
     ...(checkpoint.workspace.redactedStatus
       ? { redactedStatus: checkpoint.workspace.redactedStatus }
       : {}),

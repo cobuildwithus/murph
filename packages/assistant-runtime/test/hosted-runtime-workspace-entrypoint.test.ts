@@ -292,6 +292,74 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves future workspace wake during idle-shutdown checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+      checkpointWorkspace: (request) => createWorkspaceState({
+        nextWakeAt: request.nextWakeAt ?? null,
+        nextWakeReason: request.nextWakeReason ?? null,
+        redactedStatus: request.redactedStatus ?? null,
+        snapshotRef: request.snapshotRef,
+        version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+      }),
+      events,
+      workspace: createWorkspaceState({
+        nextWakeAt: "2026-04-20T08:10:00.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        version: "4",
+      }),
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_future_wake",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            workspacePort,
+          }),
+          vaultRoot,
+        });
+
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, "2026-04-20T08:10:00.000Z");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.deepEqual(result, {
+        idleShutdownCheckpointed: true,
+        nextWakeAt: "2026-04-20T08:10:00.000Z",
+        status: "idle",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("does not mark idle-shutdown checkpointed when no workspace exists", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
     const events: string[] = [];
@@ -622,6 +690,7 @@ describe("hosted workspace runtime entrypoint", () => {
       releaseCheckpoint();
       await expect(resultPromise).resolves.toEqual({
         idleShutdownCheckpointed: true,
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
         status: "idle",
       });
       assert.equal(checkpointRequests.length, 1);

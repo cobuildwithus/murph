@@ -1165,7 +1165,6 @@ export class HostedUserRunner {
     if (
       this.env.idleShutdownCheckpointsEnabled
       && input.resultStatus === "idle"
-      && input.fallbackNextWakeAt === null
     ) {
       const idleSchedule = await this.scheduleIdleShutdownCheckpointIfCurrent(input.userId);
       if (idleSchedule?.kind === "scheduled") {
@@ -1244,10 +1243,15 @@ export class HostedUserRunner {
       };
     }
     const workspace = workspaceRead.workspace;
+    const idleCheckpointDueAt = input.record.idleShutdownCheckpointDueAt;
+    const workspaceWakePreemptsIdleCheckpoint =
+      workspace?.nextWakeAt && idleCheckpointDueAt
+        ? Date.parse(workspace.nextWakeAt) <= Date.parse(idleCheckpointDueAt)
+        : Boolean(workspace?.nextWakeAt);
     if (
       !workspace
       || workspace.version !== input.expectedWorkspaceVersion
-      || workspace.nextWakeAt
+      || workspaceWakePreemptsIdleCheckpoint
       || isHostedWorkspaceBaseOnlySnapshot(workspace)
     ) {
       await this.stateStore.clearIdleShutdownCheckpoint();
@@ -1259,6 +1263,7 @@ export class HostedUserRunner {
         details: {
           expectedWorkspaceVersion: input.expectedWorkspaceVersion,
           hasNextWake: Boolean(workspace?.nextWakeAt),
+          nextWakePreemptsIdleCheckpoint: Boolean(workspaceWakePreemptsIdleCheckpoint),
           hasWorkspace: Boolean(workspace),
           workspaceAlreadyBaseOnly: workspace ? isHostedWorkspaceBaseOnlySnapshot(workspace) : false,
           workspaceVersionMatches: workspace?.version === input.expectedWorkspaceVersion,
@@ -1304,7 +1309,15 @@ export class HostedUserRunner {
       };
     }
 
-    if (!workspace || workspace.nextWakeAt || isHostedWorkspaceBaseOnlySnapshot(workspace)) {
+    const dueAt = new Date(Date.now() + resolveIdleShutdownCheckpointDelayMs({
+      idleTtlMs: this.env.runnerIdleTtlMs,
+      safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
+    })).toISOString();
+    const workspaceWakePreemptsIdleCheckpoint =
+      workspace?.nextWakeAt
+        ? Date.parse(workspace.nextWakeAt) <= Date.parse(dueAt)
+        : false;
+    if (!workspace || workspaceWakePreemptsIdleCheckpoint || isHostedWorkspaceBaseOnlySnapshot(workspace)) {
       if (workspace?.nextWakeAt) {
         const record = await this.runtimeAlarmScheduler.syncNextWake({
           preferredWakeAt: workspace.nextWakeAt,
@@ -1317,10 +1330,12 @@ export class HostedUserRunner {
       return null;
     }
 
-    const dueAt = new Date(Date.now() + resolveIdleShutdownCheckpointDelayMs({
-      idleTtlMs: this.env.runnerIdleTtlMs,
-      safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
-    })).toISOString();
+    if (workspace.nextWakeAt) {
+      await this.stateStore.syncNextWake({
+        preferredWakeAt: workspace.nextWakeAt,
+      });
+    }
+
     const scheduledCheckpoint = await this.stateStore.scheduleIdleShutdownCheckpointIfStillQuiet({
       dueAt,
       workspaceVersion: workspace.version,
@@ -1396,13 +1411,31 @@ export class HostedUserRunner {
       return;
     }
 
+    if (input.result.idleShutdownCheckpointed === true) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
+      await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: input.result.nextWakeAt ?? null,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          nextWakePresent: input.result.nextWakeAt !== undefined && input.result.nextWakeAt !== null,
+          resultStatus: input.result.status,
+        },
+        message: "Hosted runner preserved future wake after idle checkpoint.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return;
+    }
+
     const record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
       const scheduledRecord = await this.syncPendingWorkAlarm(record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
-          idleShutdownCheckpointed: input.result.idleShutdownCheckpointed === true,
+          idleShutdownCheckpointed: Boolean(input.result.idleShutdownCheckpointed),
           inFlight: record.inFlight,
           pendingNudge: record.pendingNudge,
         },
