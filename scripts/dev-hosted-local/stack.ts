@@ -102,6 +102,7 @@ export interface HostedLocalDevStack {
   kill(signal?: NodeJS.Signals): void;
   linqWebhookTargetUrl: string | null;
   runtimeEnv: NodeJS.ProcessEnv;
+  workerRuntimeEnv: NodeJS.ProcessEnv | null;
   stderrTail(maxChars?: number): string;
   stdoutTail(maxChars?: number): string;
   stop(signal?: NodeJS.Signals): Promise<void>;
@@ -704,6 +705,7 @@ export async function startHostedLocalDevStack(input: {
       ready,
       linqWebhookTargetUrl: linqWebhookSetup?.targetUrl ?? null,
       runtimeEnv,
+      workerRuntimeEnv,
       stderrTail: (maxChars?: number): string => tail(combineChildOutput(
         reportingChildren.map(
           (child) => `[${child.name}:stderr]\n${child.stderrText()}`,
