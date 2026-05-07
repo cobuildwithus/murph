@@ -1,4 +1,4 @@
-import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,9 @@ import {
 import {
   createHostedBrowserVaultReplicaStore,
 } from "../src/browser-vault-store.ts";
+import {
+  createHostedBundleStore,
+} from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import {
@@ -619,6 +622,28 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("exposes hosted-local test routes with the explicit test-route flag outside NODE_ENV=test", async () => {
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+        {
+          method: "GET",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      createWorkerEnv(createUserRunnerStub(), {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "production",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted artifact was not found.",
+    });
+  });
+
   it("requires hosted-local test route callers to be bound to the target user", async () => {
     const env = createWorkerEnv(createUserRunnerStub(), {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
@@ -640,6 +665,23 @@ describe("cloudflare worker routes", () => {
 
     expect(artifactResponse.status).toBe(401);
     await expect(artifactResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test artifact user.",
+    });
+
+    const artifactReadResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+        {
+          method: "GET",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(artifactReadResponse.status).toBe(401);
+    await expect(artifactReadResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the test artifact user.",
     });
 
@@ -676,6 +718,113 @@ describe("cloudflare worker routes", () => {
     await expect(alarmResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the test runner user.",
     });
+  });
+
+  it("stores and reads hosted-local test artifacts for correctly bound callers", async () => {
+    const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
+    const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const url =
+      `https://runner.example.test/__test/artifacts?userId=member_123&sha256=${artifactSha256}`;
+
+    const writeResponse = await worker.fetch(
+      await signControlRequest(new Request(url, {
+        body: artifactBytes,
+        method: "PUT",
+      }), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(writeResponse.status).toBe(200);
+    await expect(writeResponse.json()).resolves.toMatchObject({
+      ok: true,
+      sha256: artifactSha256,
+      size: artifactBytes.byteLength,
+      userId: "member_123",
+    });
+
+    const readResponse = await worker.fetch(
+      await signControlRequest(new Request(url, {
+        method: "GET",
+      }), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(artifactBytes);
+  });
+
+  it("reads hosted-local test bundle refs for correctly bound callers", async () => {
+    const bundleBytes = Buffer.from("bundle-payload\n", "utf8");
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const bundleStore = createHostedBundleStore({
+      bucket: env.BUNDLES,
+      key: getTestHostedRuntimeRootKey("runtime"),
+      keyId: "udrk:runtime:test-root",
+      userId: "member_123",
+    });
+    const bundleRef = await bundleStore.writeBundle("vault", bundleBytes);
+    const url = "https://runner.example.test/__test/artifacts"
+      + `?userId=member_123&sha256=${bundleRef.hash}`
+      + `&key=${encodeURIComponent(bundleRef.key)}&size=${bundleRef.size}`;
+
+    const readResponse = await worker.fetch(
+      await signControlRequest(new Request(url, {
+        method: "GET",
+      }), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(bundleBytes);
+  });
+
+  it("reads artifact-backed hosted-local workspace snapshot bundle refs", async () => {
+    const snapshotBytes = Buffer.from("workspace-snapshot-payload\n", "utf8");
+    const snapshotSha256 = createHash("sha256").update(snapshotBytes).digest("hex");
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const artifactUrl = `https://runner.example.test/__test/artifacts?userId=member_123&sha256=${snapshotSha256}`;
+    const bundleUrl = artifactUrl
+      + `&key=${encodeURIComponent(`cloudflare-workspace-snapshots/${snapshotSha256}.bundle`)}`
+      + `&size=${snapshotBytes.byteLength}`;
+
+    const writeResponse = await worker.fetch(
+      await signControlRequest(new Request(artifactUrl, {
+        body: snapshotBytes,
+        method: "PUT",
+      }), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+    expect(writeResponse.status).toBe(200);
+
+    const readResponse = await worker.fetch(
+      await signControlRequest(new Request(bundleUrl, {
+        method: "GET",
+      }), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(snapshotBytes);
   });
 
   it("runs the hosted-local test alarm route for correctly bound callers", async () => {

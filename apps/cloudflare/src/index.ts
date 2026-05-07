@@ -18,6 +18,7 @@ import {
   getHostedBrowserVaultReplicaStorageKeyId,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionBundleRef,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -67,6 +68,8 @@ import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import { handleLegacyHostedRunnerWakeQueue } from "./legacy-runner-wake-queue.ts";
 import {
   createHostedArtifactStore,
+  createHostedBundleStore,
+  isMissingHostedBundleError,
 } from "./bundle-store.ts";
 import {
   createBrowserVaultReplicaAadFields,
@@ -133,10 +136,10 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
       return isHostedWorkerTestEnvironment(context.env) ? null : notFound();
     },
     async handle(context) {
-      return handleTestArtifactSeedRoute(context);
+      return handleTestArtifactRoute(context);
     },
     match: matchExactPath("/__test/artifacts"),
-    methods: ["PUT"],
+    methods: ["GET", "PUT"],
     name: "test-artifact-seed",
     wrongMethodResponse: "not-found",
   },
@@ -569,7 +572,7 @@ function resolveDeployContainerSmokeObjectName(
     : "__deploy-smoke";
 }
 
-async function handleTestArtifactSeedRoute(
+async function handleTestArtifactRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
   if (!isHostedWorkerTestEnvironment(context.env)) {
@@ -578,6 +581,8 @@ async function handleTestArtifactSeedRoute(
 
   const userId = context.url.searchParams.get("userId")?.trim() ?? "";
   const sha256 = context.url.searchParams.get("sha256")?.trim() ?? "";
+  const bundleKey = context.url.searchParams.get("key")?.trim() ?? "";
+  const bundleSize = context.url.searchParams.get("size")?.trim() ?? "";
 
   if (!userId) {
     return json({ error: "userId is required." }, 400);
@@ -612,6 +617,61 @@ async function handleTestArtifactSeedRoute(
     resolveKeyById: crypto.resolveKeyById,
     userId,
   });
+  if (context.request.method === "GET") {
+    if (bundleKey) {
+      const parsedBundleSize = Number(bundleSize);
+      if (!Number.isSafeInteger(parsedBundleSize) || parsedBundleSize < 0) {
+        return json({ error: "size is required." }, 400);
+      }
+
+      if (isArtifactBackedHostedWorkspaceBundleKey(bundleKey, sha256)) {
+        return await readTestHostedArtifactResponse({
+          artifactStore,
+          expectedSize: parsedBundleSize,
+          sha256,
+        });
+      }
+
+      const bundleStore = createHostedBundleStore({
+        bucket: context.env.BUNDLES,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+        resolveKeyById: crypto.resolveKeyById,
+        userId,
+      });
+      const ref: HostedExecutionBundleRef = {
+        hash: sha256,
+        key: bundleKey,
+        size: parsedBundleSize,
+        updatedAt: "test-route",
+      };
+
+      try {
+        const bundle = await bundleStore.readBundle(ref);
+        if (!bundle) {
+          return json({ error: "Hosted artifact was not found." }, 404);
+        }
+
+        return new Response(bundle.slice(), {
+          headers: {
+            "content-type": "application/octet-stream",
+          },
+        });
+      } catch (error) {
+        if (isMissingHostedBundleError(error)) {
+          return json({ error: "Hosted artifact was not found." }, 404);
+        }
+        throw error;
+      }
+    }
+
+    return await readTestHostedArtifactResponse({
+      artifactStore,
+      sha256,
+    });
+  }
+
   const bytes = new Uint8Array(await context.request.arrayBuffer());
   await artifactStore.writeArtifact(sha256, bytes);
 
@@ -623,9 +683,38 @@ async function handleTestArtifactSeedRoute(
   });
 }
 
+async function readTestHostedArtifactResponse(input: {
+  artifactStore: ReturnType<typeof createHostedArtifactStore>;
+  expectedSize?: number;
+  sha256: string;
+}): Promise<Response> {
+  const artifact = await input.artifactStore.readArtifact(input.sha256);
+  if (!artifact) {
+    return json({ error: "Hosted artifact was not found." }, 404);
+  }
+
+  if (input.expectedSize !== undefined && artifact.byteLength !== input.expectedSize) {
+    return json({ error: "Hosted artifact size did not match the requested bundle ref." }, 409);
+  }
+
+  return new Response(artifact.slice(), {
+    headers: {
+      "content-type": "application/octet-stream",
+    },
+  });
+}
+
+function isArtifactBackedHostedWorkspaceBundleKey(
+  key: string,
+  sha256: string,
+): boolean {
+  return key === `cloudflare-workspace-snapshots/${sha256}.bundle`
+    || key === `cloudflare-workspace-hot-state/${sha256}.bundle`;
+}
+
 function isHostedWorkerTestEnvironment(env: WorkerEnvironmentSource): boolean {
   const stringEnv = asWorkerStringEnvironment(env);
-  return stringEnv.NODE_ENV === "test" && stringEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+  return stringEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
 }
 
 async function handleTestRunUntilIdleRoute(

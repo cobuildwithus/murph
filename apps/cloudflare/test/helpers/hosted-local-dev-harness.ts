@@ -26,6 +26,7 @@ export interface HostedLocalDevHarness {
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   runtimeEnv: NodeJS.ProcessEnv;
+  workerRuntimeEnv: NodeJS.ProcessEnv | null;
   stderrTail(maxChars?: number): string;
   stop(): Promise<void>;
   stdoutTail(maxChars?: number): string;
@@ -51,6 +52,7 @@ export async function startHostedLocalDevHarness(input: {
   env: NodeJS.ProcessEnv;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
+  resetPersistDir?: boolean;
   statusHeaders?: (userId: string) => HeadersInit;
   statusPath?: (userId: string) => string;
   streamLogs?: boolean;
@@ -90,8 +92,10 @@ export async function startHostedLocalDevHarness(input: {
   };
 
   try {
-    if (createdTempPersistDir === null) {
+    if (createdTempPersistDir === null && input.resetPersistDir !== false) {
       await rm(persistDir, { force: true, recursive: true });
+      await mkdir(persistDir, { recursive: true });
+    } else if (createdTempPersistDir === null) {
       await mkdir(persistDir, { recursive: true });
     }
 
@@ -154,6 +158,7 @@ export async function startHostedLocalDevHarness(input: {
         );
       },
       runtimeEnv: stack.runtimeEnv,
+      workerRuntimeEnv: stack.workerRuntimeEnv,
       stop,
       stdoutTail: (maxChars?: number): string => stack?.stdoutTail(maxChars) ?? "",
       stderrTail: (maxChars?: number): string => stack?.stderrTail(maxChars) ?? "",

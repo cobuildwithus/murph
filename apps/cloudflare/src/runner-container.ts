@@ -33,7 +33,7 @@ const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
-const RUNNER_DESTROY_TIMEOUT_MS = 5_000;
+const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
 const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
@@ -682,6 +682,7 @@ export class RunnerContainer extends Container {
   } = {}): Promise<void> {
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
+    const destroyTimeoutMs = readRunnerDestroyTimeoutMs(this.environment);
     let statusBeforeDestroy: string | null = null;
 
     try {
@@ -692,7 +693,7 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: null,
-        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+        destroyTimeoutMs,
         error,
         failClosed,
         context,
@@ -710,7 +711,7 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+        destroyTimeoutMs,
         failClosed,
         lifecycleStage: "destroy-requested",
         statusBeforeDestroy,
@@ -728,7 +729,7 @@ export class RunnerContainer extends Container {
       }
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: Date.now() - destroyStartedAt,
-        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+        destroyTimeoutMs,
         error,
         failClosed,
         context,
@@ -739,13 +740,13 @@ export class RunnerContainer extends Container {
     }
 
     try {
-      const stopWait = await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
+      const stopWait = await waitForRunnerContainerStop(this, destroyTimeoutMs);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
           destroyLatencyMs: Date.now() - destroyStartedAt,
           destroyPollCount: stopWait.pollCount,
-          destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+          destroyTimeoutMs,
           failClosed,
           lifecycleStage: "stopped",
           observedStatuses: stopWait.observedStatuses,
@@ -762,7 +763,7 @@ export class RunnerContainer extends Container {
       }
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: Date.now() - destroyStartedAt,
-        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+        destroyTimeoutMs,
         error,
         failClosed,
         context,
@@ -1386,6 +1387,25 @@ function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): num
   const parsed = readStrictPositiveIntegerEnv(raw);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new TypeError("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
+  }
+
+  return parsed;
+}
+
+function readRunnerDestroyTimeoutMs(source: RunnerContainerEnvironmentSource): number {
+  const raw = source.HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS;
+
+  if (raw === undefined || raw === null || raw === "") {
+    return DEFAULT_RUNNER_DESTROY_TIMEOUT_MS;
+  }
+
+  if (typeof raw !== "string") {
+    throw new TypeError("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS must be a string when configured.");
+  }
+
+  const parsed = readStrictPositiveIntegerEnv(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new TypeError("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS must be a positive integer.");
   }
 
   return parsed;

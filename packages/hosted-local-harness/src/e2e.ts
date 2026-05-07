@@ -22,7 +22,8 @@ export type HostedLocalE2eScenarioName =
   | "linq-webhook"
   | "snapshot-stress"
   | "telegram"
-  | "telegram-first-contact";
+  | "telegram-first-contact"
+  | "vault-persistence";
 
 export interface HostedLocalE2eScenario {
   aliases?: readonly HostedLocalE2eScenarioName[];
@@ -78,6 +79,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-snapshot-stress-e2e.test.ts",
     manualOnly: true,
     name: "snapshot-stress",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
+    manualOnly: true,
+    name: "vault-persistence",
   },
   {
     aliases: ["telegram"],
