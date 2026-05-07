@@ -108,6 +108,7 @@ describe("device sync settings routes", () => {
       },
     });
     mocks.listConnections.mockResolvedValue({
+      connectionSources: [],
       connections: [
         {
           accessTokenExpiresAt: null,
@@ -195,6 +196,66 @@ describe("device sync settings routes", () => {
       ok: true,
       status: {
         message: "Oura connected",
+        tone: "connected",
+      },
+    });
+  });
+
+  it("returns a Junction upstream wearable label in the minimized sidebar status", async () => {
+    mocks.listConnections.mockResolvedValueOnce({
+      connectionSources: [
+        {
+          connectionId: "dspc_junction_123",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-04-03T07:01:00.000Z",
+          resourceCount: 3,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      connections: [
+        {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-04-01T08:00:00.000Z",
+          createdAt: "2026-04-01T08:00:00.000Z",
+          displayName: "Junction",
+          id: "dspc_junction_123",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: "2026-04-03T07:00:00.000Z",
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: "2026-04-03T06:55:00.000Z",
+          lastWebhookAt: "2026-04-03T07:01:00.000Z",
+          metadata: {},
+          nextReconcileAt: "2026-04-03T16:00:00.000Z",
+          provider: "junction",
+          scopes: [],
+          status: "active",
+          updatedAt: "2026-04-03T07:05:00.000Z",
+        },
+      ],
+      providers: [
+        {
+          callbackPath: "/connect/junction/callback",
+          callbackUrl: "https://join.example.test/connect/junction/callback",
+          defaultScopes: [],
+          provider: "junction",
+          supportsWebhooks: true,
+          webhookPath: "/webhooks/junction",
+          webhookUrl: "https://join.example.test/webhooks/junction",
+        },
+      ],
+    });
+
+    const response = await settingsDeviceSyncSidebarStatusRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      status: {
+        message: "Garmin connected",
         tone: "connected",
       },
     });

@@ -423,6 +423,64 @@ test("summarizeSidebarDeviceSyncStatus reflects connected source state", () => {
   );
 });
 
+test("summarizeSidebarDeviceSyncStatus uses a single connected upstream source label", () => {
+  assert.deepEqual(
+    summarizeSidebarDeviceSyncStatus([
+      createDeviceSyncSource({
+        provider: "junction",
+        providerLabel: "Junction",
+        statusLabel: "Connected",
+        state: "active",
+        tone: "calm",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 3,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      }),
+    ]),
+    {
+      message: "Garmin connected",
+      tone: "connected",
+    },
+  );
+});
+
+test("summarizeSidebarDeviceSyncStatus summarizes multiple connected upstream sources", () => {
+  assert.deepEqual(
+    summarizeSidebarDeviceSyncStatus([
+      createDeviceSyncSource({
+        provider: "junction",
+        providerLabel: "Junction",
+        statusLabel: "Connected",
+        state: "active",
+        tone: "calm",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 3,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+          {
+            providerLabel: "Oura",
+            resourceCount: 2,
+            sourceProviderSlug: "oura",
+            status: "connected",
+          },
+        ],
+      }),
+    ]),
+    {
+      message: "2 wearables connected",
+      tone: "connected",
+    },
+  );
+});
+
 test("summarizeSidebarDeviceSyncStatus prioritizes reconnect and disconnected states", () => {
   assert.deepEqual(
     summarizeSidebarDeviceSyncStatus([
