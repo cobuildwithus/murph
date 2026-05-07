@@ -57,12 +57,15 @@ import {
 } from "./parsers/assertions.ts";
 import {
   buildHostedExecutionLayeredSnapshotRef,
+  buildHostedExecutionWorkingSnapshotRef,
   isHostedExecutionLayeredSnapshotRef,
+  isHostedExecutionWorkingSnapshotRef,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 import {
@@ -73,12 +76,15 @@ import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
 export {
   buildHostedExecutionLayeredSnapshotRef,
+  buildHostedExecutionWorkingSnapshotRef,
   isHostedExecutionLayeredSnapshotRef,
+  isHostedExecutionWorkingSnapshotRef,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 export {

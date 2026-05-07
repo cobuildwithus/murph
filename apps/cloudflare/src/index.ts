@@ -709,6 +709,7 @@ function isArtifactBackedHostedWorkspaceBundleKey(
   sha256: string,
 ): boolean {
   return key === `cloudflare-workspace-snapshots/${sha256}.bundle`
+    || key === `cloudflare-workspace-deltas/${sha256}.bundle`
     || key === `cloudflare-workspace-hot-state/${sha256}.bundle`;
 }
 

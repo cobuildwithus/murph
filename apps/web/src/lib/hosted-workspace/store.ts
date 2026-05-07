@@ -24,6 +24,7 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedBrowserVaultReplicaRef,
@@ -289,8 +290,6 @@ export async function checkpointHostedWorkspaceTx(input: {
 
   if (browserVaultReplicaRefPresent) {
     updateData.browserVaultReplicaRef = toNullablePrismaJson(browserVaultReplicaRef ?? null);
-  } else {
-    updateData.browserVaultReplicaRef = Prisma.DbNull;
   }
 
   const updated = await input.tx.hostedWorkspace.updateMany({
@@ -337,6 +336,16 @@ function assertHostedWorkspaceBrowserVaultReplicaCheckpointInvariant(input: {
   }
 
   if (!input.browserVaultReplicaRef) {
+    return;
+  }
+
+  const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(input.snapshotRef);
+  if (deltaSnapshotRef) {
+    if (input.browserVaultReplicaRef.sourceBundleHash !== deltaSnapshotRef.hash) {
+      throw new TypeError(
+        "Hosted workspace checkpoint browser-vault replica sourceBundleHash must match snapshot delta hash.",
+      );
+    }
     return;
   }
 

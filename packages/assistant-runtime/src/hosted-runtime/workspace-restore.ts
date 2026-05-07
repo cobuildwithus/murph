@@ -9,16 +9,20 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
   clearHostedAssistantRuntimeHotState,
   clearHostedCodexContinuityRestoreRoot,
+  createHostedPortableWorkspaceManifestFromBundle,
   hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
   repairLegacyHostedWorkspaceSnapshotProviderContinuity,
+  readHostedPortableWorkspaceManifestFromBundle,
   restoredWorkspaceRequiresHostedCodexProviderContinuity,
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,
+  restoreHostedWorkspaceWorkingDelta,
   verifyRestoredHostedCodexContinuityManifest,
 } from "@murphai/runtime-state/node";
 import {
@@ -86,9 +90,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   const restored = await createHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
   const snapshotRef = input.workspace?.snapshotRef ?? null;
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
+  const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
 
-  if (!baseSnapshotRef && !hotSnapshotRef) {
+  if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     return {
       ...restored,
       mode: "null-bootstrap",
@@ -99,8 +104,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (baseSnapshotRef) {
     const cachedBaseRestore = await readHostedWorkspaceBaseRestoreCache(restored.vaultRoot);
     let useCachedBaseRestore = false;
+    const canUseCachedBaseRestore = !deltaSnapshotRef;
 
-    if (cachedBaseRestore && isHostedWorkspaceBaseRestoreCacheHit({
+    if (canUseCachedBaseRestore && cachedBaseRestore && isHostedWorkspaceBaseRestoreCacheHit({
       cache: cachedBaseRestore,
       ref: baseSnapshotRef,
       vaultRoot: restored.vaultRoot,
@@ -132,6 +138,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         platform: input.platform,
         snapshotLayer: "base",
       });
+      if (deltaSnapshotRef) {
+        await clearHostedWorkspaceRuntimeLocalRoots(restored);
+      }
       await restoreHostedWorkspaceRuntimeBundle({
         bundle: baseRepair.bundle,
         platform: input.platform,
@@ -193,6 +202,39 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         restored,
       });
     }
+  }
+
+  if (deltaSnapshotRef) {
+    if (!baseSnapshotRef) {
+      throw new HostedWorkspaceRuntimeSnapshotRestoreError(deltaSnapshotRef.hash);
+    }
+    const baseBundle = await readHostedWorkspaceRuntimeBundle({
+      platform: input.platform,
+      ref: baseSnapshotRef,
+    });
+    const baseManifest =
+      readHostedPortableWorkspaceManifestFromBundle(baseBundle)
+        ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+    const deltaBundle = await readHostedWorkspaceRuntimeBundle({
+      platform: input.platform,
+      ref: deltaSnapshotRef,
+    });
+    await restoreHostedWorkspaceWorkingDelta({
+      artifactResolver: createHostedArtifactResolver({
+        artifactStore: input.platform.artifactStore,
+      }),
+      baseManifest,
+      baseSnapshotHash: baseSnapshotRef.hash,
+      bundle: deltaBundle,
+      roots: {
+        [HOSTED_OPERATOR_HOME_ROOT_KEY]: restored.operatorHomeRoot,
+        vault: restored.vaultRoot,
+      },
+      shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
+    });
+    await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
+      assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
+    });
   }
 
   return {
@@ -576,4 +618,24 @@ async function createHostedWorkspaceRuntimePrivateDirectory(directoryPath: strin
     recursive: true,
   });
   await chmod(directoryPath, 0o700);
+}
+
+async function clearHostedWorkspaceRuntimeLocalRoots(
+  restored: HostedRestoredExecutionContext,
+): Promise<void> {
+  await Promise.all([
+    rm(restored.operatorHomeRoot, {
+      force: true,
+      recursive: true,
+    }),
+    rm(restored.vaultRoot, {
+      force: true,
+      recursive: true,
+    }),
+  ]);
+  await Promise.all([
+    createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
+    createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
+    createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
+  ]);
 }

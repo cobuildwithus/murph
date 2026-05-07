@@ -13,6 +13,7 @@ import {
 import {
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceReadResponse,
+  readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -1831,6 +1832,7 @@ function isCommittedIdleShutdownCheckpointResult(input: HostedWorkspaceInvocatio
 
 function isHostedWorkspaceBaseOnlySnapshot(workspace: HostedWorkspaceState): boolean {
   return workspace.snapshotRef !== null
+    && readHostedExecutionSnapshotDeltaRef(workspace.snapshotRef) === null
     && readHostedExecutionSnapshotHotRef(workspace.snapshotRef) === null;
 }
 

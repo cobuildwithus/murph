@@ -30,6 +30,7 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -37,8 +38,10 @@ import {
 } from "../src/env.ts";
 import {
   buildHostedExecutionLayeredSnapshotRef,
+  buildHostedExecutionWorkingSnapshotRef,
   parseHostedExecutionSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "../src/parsers.ts";
 
@@ -106,7 +109,7 @@ describe("hosted execution coverage gaps", () => {
     })).toThrow(/runtimeRootKeyId/u);
   });
 
-  it("parses latest-hot layered snapshot refs without losing old full refs", () => {
+  it("parses latest-hot layered and working snapshot refs without losing old full refs", () => {
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -119,9 +122,19 @@ describe("hosted execution coverage gaps", () => {
       size: 42,
       updatedAt: "2026-05-04T00:01:00.000Z",
     };
+    const delta = {
+      hash: "c".repeat(64),
+      key: "cloudflare-workspace-deltas/delta.bundle",
+      size: 50,
+      updatedAt: "2026-05-04T00:02:00.000Z",
+    };
     const layered = buildHostedExecutionLayeredSnapshotRef({
       base,
       hot,
+    });
+    const working = buildHostedExecutionWorkingSnapshotRef({
+      base,
+      delta,
     });
 
     expect(layered).toEqual({
@@ -129,12 +142,23 @@ describe("hosted execution coverage gaps", () => {
       hot,
       schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
     });
+    expect(working).toEqual({
+      base,
+      delta,
+      schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+    });
     expect(parseHostedExecutionSnapshotRef(base)).toEqual(base);
     expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(base))).toEqual(base);
     expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(base))).toBeNull();
+    expect(readHostedExecutionSnapshotDeltaRef(parseHostedExecutionSnapshotRef(base))).toBeNull();
     expect(parseHostedExecutionSnapshotRef(layered)).toEqual(layered);
     expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(layered))).toEqual(base);
     expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(layered))).toEqual(hot);
+    expect(readHostedExecutionSnapshotDeltaRef(parseHostedExecutionSnapshotRef(layered))).toBeNull();
+    expect(parseHostedExecutionSnapshotRef(working)).toEqual(working);
+    expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(working))).toEqual(base);
+    expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(working))).toBeNull();
+    expect(readHostedExecutionSnapshotDeltaRef(parseHostedExecutionSnapshotRef(working))).toEqual(delta);
     expect(parseHostedExecutionSnapshotRef({
       base: null,
       hot: null,
@@ -152,6 +176,19 @@ describe("hosted execution coverage gaps", () => {
       base,
       schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
     })).toThrow(/hot is required/u);
+    expect(() => parseHostedExecutionSnapshotRef({
+      delta,
+      schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+    })).toThrow(/base is required/u);
+    expect(() => parseHostedExecutionSnapshotRef({
+      base,
+      schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+    })).toThrow(/delta is required/u);
+    expect(() => parseHostedExecutionSnapshotRef({
+      base: null,
+      delta,
+      schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+    })).toThrow(/Hosted execution snapshot ref\.base/u);
   });
 
   it("parses hosted AI usage billing mode with a disabled default", () => {

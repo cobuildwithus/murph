@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -288,6 +289,45 @@ describe("browser vault session route", () => {
       snapshotRef: createLayeredSnapshotRef({
         base: createSnapshotRef("a"),
         hot: createSnapshotRef("h"),
+      }),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef,
+      state: "not_modified",
+    });
+  });
+
+  it("returns not_modified when a working snapshot delta matches the current replica", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createWorkingSnapshotRef({
+        base: createSnapshotRef("b"),
+        delta: createSnapshotRef("a"),
       }),
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
@@ -682,6 +722,17 @@ function createLayeredSnapshotRef(input: {
     base: input.base,
     hot: input.hot,
     schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  };
+}
+
+function createWorkingSnapshotRef(input: {
+  base: ReturnType<typeof createSnapshotRef>;
+  delta: ReturnType<typeof createSnapshotRef>;
+}) {
+  return {
+    base: input.base,
+    delta: input.delta,
+    schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
   };
 }
 

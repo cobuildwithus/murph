@@ -17,6 +17,10 @@ import {
 import {
   isHostedBundleArtifactEntry,
   parseHostedBundleArchive,
+  readHostedBundleTextFile,
+  resolveHostedBundleRestorePath,
+  serializeHostedBundleArchive,
+  type HostedBundleArchiveFile,
   type HostedBundleArtifactRef,
   writeHostedBundleTextFile,
 } from "./hosted-bundle.ts";
@@ -35,6 +39,17 @@ const HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH =
   ".murph/hosted-codex-continuity.json";
 const HOSTED_CODEX_CONTINUITY_MANIFEST_SCHEMA =
   "murph.hosted-codex-continuity.v1";
+const HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT = "workspace-metadata";
+export const HOSTED_PORTABLE_WORKSPACE_MANIFEST_RELATIVE_PATH =
+  "hosted-portable-workspace-manifest.json";
+export const HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA =
+  "murph.hosted-portable-workspace-manifest.v1";
+export const HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION =
+  "hosted-workspace-snapshot-policy.2026-05-07";
+export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH =
+  "hosted-portable-workspace-delta.json";
+export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_SCHEMA =
+  "murph.portable-workspace-delta.v1";
 const HOSTED_CODEX_ROLLOUT_RELATIVE_PATH_PATTERN =
   /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/u;
 const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
@@ -170,6 +185,9 @@ export type HostedWorkspaceArtifactResolver = (
 
 interface HostedExecutionContextSnapshotInput {
   artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
+  artifactRefProvider?: (
+    input: HostedBundleArtifactSnapshotInput,
+  ) => HostedBundleArtifactRef | null | Promise<HostedBundleArtifactRef | null>;
   codexHomeSnapshotHashSecret?: string | null;
   materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot?: string | null;
@@ -216,6 +234,37 @@ export async function snapshotHostedExecutionContextUnsafeForFixture(
   });
 }
 
+export interface HostedPortableWorkspaceManifestFile {
+  artifact?: HostedBundleArtifactRef;
+  path: string;
+  root: string;
+  sha256: string;
+  size: number;
+}
+
+export interface HostedPortableWorkspaceManifest {
+  files: HostedPortableWorkspaceManifestFile[];
+  manifestHash: string;
+  policyVersion: typeof HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION;
+  schema: typeof HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA;
+}
+
+export interface HostedPortableWorkspaceDeltaTombstone {
+  path: string;
+  root: string;
+}
+
+export interface HostedPortableWorkspaceDeltaManifest {
+  baseManifestHash: string;
+  baseSnapshotHash: string;
+  effectiveManifestHash: string;
+  manifestHash: string;
+  policyVersion: typeof HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION;
+  schema: typeof HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_SCHEMA;
+  tombstones: HostedPortableWorkspaceDeltaTombstone[];
+  upserts: HostedPortableWorkspaceManifestFile[];
+}
+
 async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
   input: HostedExecutionContextSnapshotInput & {
     enforceProviderContinuity: boolean;
@@ -260,13 +309,22 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
   }
   const vaultBundle = await snapshotHostedBundleRoots({
     externalizeFile: async (artifact) => {
-      const shouldExternalize = Boolean(artifactSink)
-        && shouldExternalizeWorkspaceArtifact(artifact);
+      const shouldExternalize = shouldExternalizeWorkspaceArtifact(artifact);
+      const existingRef = shouldExternalize
+        ? await input.artifactRefProvider?.(artifact) ?? null
+        : null;
+      const willExternalize = shouldExternalize && (existingRef !== null || Boolean(artifactSink));
       workspaceSnapshotSizeDiagnostics.record({
         artifact,
-        externalized: shouldExternalize,
+        externalized: willExternalize,
       });
-      if (!artifactSink || !shouldExternalize) {
+      if (!willExternalize) {
+        return null;
+      }
+      if (existingRef) {
+        return existingRef;
+      }
+      if (!artifactSink) {
         return null;
       }
 
@@ -334,11 +392,431 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
           })) + "\n",
         })
       : vaultBundle;
+  const bundleWithPortableManifest =
+    writeHostedPortableWorkspaceManifestToBundle(bundleWithCodexContinuityManifest);
   return {
-    bundle: bundleWithCodexContinuityManifest,
+    bundle: bundleWithPortableManifest,
     codexHomeSnapshotDiagnostics,
     workspaceSnapshotSizeDiagnostics: workspaceSnapshotSizeDiagnostics.finish(),
   };
+}
+
+export function readHostedPortableWorkspaceManifestFromBundle(
+  bytes: Uint8Array | ArrayBuffer | null,
+): HostedPortableWorkspaceManifest | null {
+  const manifestText = readHostedBundleTextFile({
+    bytes,
+    expectedKind: "vault",
+    path: HOSTED_PORTABLE_WORKSPACE_MANIFEST_RELATIVE_PATH,
+    root: HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
+  });
+  if (!manifestText) {
+    return null;
+  }
+  return parseHostedPortableWorkspaceManifestJson(manifestText);
+}
+
+export function createHostedPortableWorkspaceManifestFromBundle(
+  bytes: Uint8Array | ArrayBuffer,
+): HostedPortableWorkspaceManifest {
+  const archive = parseHostedBundleArchive(bytes);
+  if (archive.kind !== "vault") {
+    throw new Error(`Hosted portable workspace manifest requires a vault bundle, got ${archive.kind}.`);
+  }
+
+  const files = archive.files
+    .filter((file) => file.root !== HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT)
+    .map((file): HostedPortableWorkspaceManifestFile => {
+      if (isHostedBundleArtifactEntry(file)) {
+        return {
+          artifact: file.artifact,
+          path: file.path,
+          root: file.root,
+          sha256: file.artifact.sha256,
+          size: file.artifact.byteSize,
+        };
+      }
+
+      const contents = Buffer.from(file.contentsBase64, "base64");
+      return {
+        path: file.path,
+        root: file.root,
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        size: contents.byteLength,
+      };
+    })
+    .sort(compareHostedPortableWorkspaceManifestFiles);
+
+  return finalizeHostedPortableWorkspaceManifest(files);
+}
+
+function writeHostedPortableWorkspaceManifestToBundle(
+  bytes: Uint8Array | ArrayBuffer,
+): Uint8Array {
+  const manifest = createHostedPortableWorkspaceManifestFromBundle(bytes);
+  return writeHostedBundleTextFile({
+    bytes,
+    kind: "vault",
+    path: HOSTED_PORTABLE_WORKSPACE_MANIFEST_RELATIVE_PATH,
+    root: HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
+    text: JSON.stringify(manifest) + "\n",
+  });
+}
+
+export function createHostedWorkspaceWorkingDeltaBundle(input: {
+  baseManifest: HostedPortableWorkspaceManifest;
+  baseSnapshotHash: string;
+  currentBundle: Uint8Array | ArrayBuffer;
+  preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
+}): {
+  bundle: Uint8Array;
+  manifest: HostedPortableWorkspaceDeltaManifest;
+} {
+  const currentManifest =
+    readHostedPortableWorkspaceManifestFromBundle(input.currentBundle)
+      ?? createHostedPortableWorkspaceManifestFromBundle(input.currentBundle);
+  if (
+    input.baseManifest.policyVersion !== HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION
+    || currentManifest.policyVersion !== HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION
+  ) {
+    throw new Error("Hosted workspace working delta requires matching portable manifest policy versions.");
+  }
+
+  const archive = parseHostedBundleArchive(input.currentBundle);
+  if (archive.kind !== "vault") {
+    throw new Error(`Hosted workspace working delta requires a vault bundle, got ${archive.kind}.`);
+  }
+
+  const baseFiles = new Map(input.baseManifest.files.map((file) => [
+    hostedPortableWorkspaceManifestFileKey(file),
+    file,
+  ]));
+  const currentFiles = new Map(currentManifest.files.map((file) => [
+    hostedPortableWorkspaceManifestFileKey(file),
+    file,
+  ]));
+  for (const artifact of input.preservedArtifacts ?? []) {
+    const key = `${artifact.root}:${normalizeWorkspaceSnapshotRelativePath(artifact.path)}`;
+    if (currentFiles.has(key)) {
+      continue;
+    }
+    currentFiles.set(key, {
+      artifact: artifact.ref,
+      path: normalizeWorkspaceSnapshotRelativePath(artifact.path),
+      root: artifact.root,
+      sha256: artifact.ref.sha256,
+      size: artifact.ref.byteSize,
+    });
+  }
+  const effectiveCurrentFiles = [...currentFiles.values()]
+    .sort(compareHostedPortableWorkspaceManifestFiles);
+  const effectiveCurrentManifest = finalizeHostedPortableWorkspaceManifest(effectiveCurrentFiles);
+  const upserts = effectiveCurrentManifest.files.filter((file) => {
+    const baseFile = baseFiles.get(hostedPortableWorkspaceManifestFileKey(file));
+    return !baseFile || !hostedPortableWorkspaceManifestFilesEqual(baseFile, file);
+  });
+  const tombstones = input.baseManifest.files
+    .filter((file) => !currentFiles.has(hostedPortableWorkspaceManifestFileKey(file)))
+    .map((file): HostedPortableWorkspaceDeltaTombstone => ({
+      path: file.path,
+      root: file.root,
+    }))
+    .sort(compareHostedPortableWorkspaceDeltaTombstones);
+  const archiveFiles = new Map(archive.files.map((file) => [
+    hostedPortableWorkspaceArchiveFileKey(file),
+    file,
+  ]));
+  const deltaFiles: HostedBundleArchiveFile[] = upserts.map((upsert) => {
+    const key = hostedPortableWorkspaceManifestFileKey(upsert);
+    const archiveFile = archiveFiles.get(key);
+    if (archiveFile) {
+      return archiveFile;
+    }
+    if (upsert.artifact) {
+      return {
+        artifact: upsert.artifact,
+        path: upsert.path,
+        root: upsert.root,
+      };
+    }
+    throw new Error(`Hosted workspace working delta upsert "${key}" is missing from the current bundle.`);
+  });
+  const manifest = finalizeHostedPortableWorkspaceDeltaManifest({
+    baseManifestHash: input.baseManifest.manifestHash,
+    baseSnapshotHash: input.baseSnapshotHash,
+    effectiveManifestHash: effectiveCurrentManifest.manifestHash,
+    tombstones,
+    upserts,
+  });
+
+  const deltaBundle = serializeHostedBundleArchive({
+    files: deltaFiles,
+    kind: "vault",
+    schema: archive.schema,
+  });
+
+  return {
+    bundle: writeHostedBundleTextFile({
+      bytes: deltaBundle,
+      kind: "vault",
+      path: HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH,
+      root: HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
+      text: JSON.stringify(manifest) + "\n",
+    }),
+    manifest,
+  };
+}
+
+export function readHostedPortableWorkspaceDeltaManifestFromBundle(
+  bytes: Uint8Array | ArrayBuffer | null,
+): HostedPortableWorkspaceDeltaManifest | null {
+  const manifestText = readHostedBundleTextFile({
+    bytes,
+    expectedKind: "vault",
+    path: HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH,
+    root: HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
+  });
+  if (!manifestText) {
+    return null;
+  }
+  return parseHostedPortableWorkspaceDeltaManifestJson(manifestText);
+}
+
+function parseHostedPortableWorkspaceManifestJson(
+  text: string,
+): HostedPortableWorkspaceManifest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Hosted portable workspace manifest is invalid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Hosted portable workspace manifest must be an object.");
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.schema !== HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA) {
+    throw new Error("Hosted portable workspace manifest schema is invalid.");
+  }
+  if (record.policyVersion !== HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION) {
+    throw new Error("Hosted portable workspace manifest policyVersion is invalid.");
+  }
+  if (!Array.isArray(record.files)) {
+    throw new Error("Hosted portable workspace manifest files must be an array.");
+  }
+  const files = record.files.map(parseHostedPortableWorkspaceManifestFile)
+    .sort(compareHostedPortableWorkspaceManifestFiles);
+  const manifest = finalizeHostedPortableWorkspaceManifest(files);
+  if (record.manifestHash !== manifest.manifestHash) {
+    throw new Error("Hosted portable workspace manifest hash mismatch.");
+  }
+  return manifest;
+}
+
+function parseHostedPortableWorkspaceManifestFile(
+  value: unknown,
+): HostedPortableWorkspaceManifestFile {
+  if (!value || typeof value !== "object") {
+    throw new Error("Hosted portable workspace manifest file must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const root = requireManifestString(record.root, "root");
+  const file: HostedPortableWorkspaceManifestFile = {
+    path: requireManifestString(record.path, "path"),
+    root,
+    sha256: requireManifestString(record.sha256, "sha256"),
+    size: requireManifestNumber(record.size, "size"),
+  };
+  if (record.artifact !== undefined) {
+    const artifact = record.artifact;
+    if (!artifact || typeof artifact !== "object") {
+      throw new Error("Hosted portable workspace manifest artifact must be an object.");
+    }
+    const artifactRecord = artifact as Record<string, unknown>;
+    file.artifact = {
+      byteSize: requireManifestNumber(artifactRecord.byteSize, "artifact.byteSize"),
+      sha256: requireManifestString(artifactRecord.sha256, "artifact.sha256"),
+    };
+  }
+  return file;
+}
+
+function parseHostedPortableWorkspaceDeltaManifestJson(
+  text: string,
+): HostedPortableWorkspaceDeltaManifest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Hosted portable workspace delta manifest is invalid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Hosted portable workspace delta manifest must be an object.");
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.schema !== HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_SCHEMA) {
+    throw new Error("Hosted portable workspace delta manifest schema is invalid.");
+  }
+  if (record.policyVersion !== HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION) {
+    throw new Error("Hosted portable workspace delta manifest policyVersion is invalid.");
+  }
+  if (!Array.isArray(record.upserts)) {
+    throw new Error("Hosted portable workspace delta manifest upserts must be an array.");
+  }
+  if (!Array.isArray(record.tombstones)) {
+    throw new Error("Hosted portable workspace delta manifest tombstones must be an array.");
+  }
+  const body = {
+    baseManifestHash: requireManifestString(record.baseManifestHash, "baseManifestHash"),
+    baseSnapshotHash: requireManifestString(record.baseSnapshotHash, "baseSnapshotHash"),
+    effectiveManifestHash: requireManifestString(record.effectiveManifestHash, "effectiveManifestHash"),
+    tombstones: record.tombstones.map(parseHostedPortableWorkspaceDeltaTombstone)
+      .sort(compareHostedPortableWorkspaceDeltaTombstones),
+    upserts: record.upserts.map(parseHostedPortableWorkspaceManifestFile)
+      .sort(compareHostedPortableWorkspaceManifestFiles),
+  };
+  const manifest = finalizeHostedPortableWorkspaceDeltaManifest(body);
+  if (record.manifestHash !== manifest.manifestHash) {
+    throw new Error("Hosted portable workspace delta manifest hash mismatch.");
+  }
+  return manifest;
+}
+
+function parseHostedPortableWorkspaceDeltaTombstone(
+  value: unknown,
+): HostedPortableWorkspaceDeltaTombstone {
+  if (!value || typeof value !== "object") {
+    throw new Error("Hosted portable workspace delta manifest tombstone must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    path: requireManifestString(record.path, "tombstone.path"),
+    root: requireManifestString(record.root, "tombstone.root"),
+  };
+}
+
+function finalizeHostedPortableWorkspaceManifest(
+  files: HostedPortableWorkspaceManifestFile[],
+): HostedPortableWorkspaceManifest {
+  const manifestBody: Omit<HostedPortableWorkspaceManifest, "manifestHash"> = {
+    files: files.map(canonicalizeHostedPortableWorkspaceManifestFile)
+      .sort(compareHostedPortableWorkspaceManifestFiles),
+    policyVersion: HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+    schema: HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
+  };
+  const manifestHash = createHash("sha256")
+    .update(JSON.stringify(manifestBody))
+    .digest("hex");
+  return {
+    ...manifestBody,
+    manifestHash,
+  };
+}
+
+function finalizeHostedPortableWorkspaceDeltaManifest(input: {
+  baseManifestHash: string;
+  baseSnapshotHash: string;
+  effectiveManifestHash: string;
+  tombstones: HostedPortableWorkspaceDeltaTombstone[];
+  upserts: HostedPortableWorkspaceManifestFile[];
+}): HostedPortableWorkspaceDeltaManifest {
+  const manifestBody: Omit<HostedPortableWorkspaceDeltaManifest, "manifestHash"> = {
+    baseManifestHash: input.baseManifestHash,
+    baseSnapshotHash: input.baseSnapshotHash,
+    effectiveManifestHash: input.effectiveManifestHash,
+    policyVersion: HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+    schema: HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_SCHEMA,
+    tombstones: [...input.tombstones].sort(compareHostedPortableWorkspaceDeltaTombstones),
+    upserts: input.upserts.map(canonicalizeHostedPortableWorkspaceManifestFile)
+      .sort(compareHostedPortableWorkspaceManifestFiles),
+  };
+  const manifestHash = createHash("sha256")
+    .update(JSON.stringify(manifestBody))
+    .digest("hex");
+  return {
+    ...manifestBody,
+    manifestHash,
+  };
+}
+
+function canonicalizeHostedPortableWorkspaceManifestFile(
+  file: HostedPortableWorkspaceManifestFile,
+): HostedPortableWorkspaceManifestFile {
+  return {
+    ...(file.artifact
+      ? {
+          artifact: {
+            byteSize: file.artifact.byteSize,
+            sha256: file.artifact.sha256,
+          },
+        }
+      : {}),
+    path: file.path,
+    root: file.root,
+    sha256: file.sha256,
+    size: file.size,
+  };
+}
+
+function compareHostedPortableWorkspaceManifestFiles(
+  left: HostedPortableWorkspaceManifestFile,
+  right: HostedPortableWorkspaceManifestFile,
+): number {
+  return `${left.root}:${left.path}`.localeCompare(`${right.root}:${right.path}`);
+}
+
+function compareHostedPortableWorkspaceDeltaTombstones(
+  left: HostedPortableWorkspaceDeltaTombstone,
+  right: HostedPortableWorkspaceDeltaTombstone,
+): number {
+  return `${left.root}:${left.path}`.localeCompare(`${right.root}:${right.path}`);
+}
+
+function hostedPortableWorkspaceManifestFileKey(
+  file: Pick<HostedPortableWorkspaceManifestFile, "path" | "root">,
+): string {
+  return `${file.root}:${file.path}`;
+}
+
+function hostedPortableWorkspaceArchiveFileKey(
+  file: Pick<HostedBundleArchiveFile, "path" | "root">,
+): string {
+  return `${file.root}:${file.path}`;
+}
+
+function hostedPortableWorkspaceManifestFilesEqual(
+  left: HostedPortableWorkspaceManifestFile,
+  right: HostedPortableWorkspaceManifestFile,
+): boolean {
+  return left.root === right.root
+    && left.path === right.path
+    && left.sha256 === right.sha256
+    && left.size === right.size
+    && hostedPortableWorkspaceArtifactRefsEqual(left.artifact ?? null, right.artifact ?? null);
+}
+
+function hostedPortableWorkspaceArtifactRefsEqual(
+  left: HostedBundleArtifactRef | null,
+  right: HostedBundleArtifactRef | null,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return left.sha256 === right.sha256 && left.byteSize === right.byteSize;
+}
+
+function requireManifestString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Hosted portable workspace manifest ${label} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function requireManifestNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Hosted portable workspace manifest ${label} must be a non-negative integer.`);
+  }
+  return value;
 }
 
 export async function snapshotHostedAssistantRuntimeHotState(input: {
@@ -609,6 +1087,70 @@ export async function restoreHostedExecutionContext(input: {
   };
 }
 
+export async function restoreHostedWorkspaceWorkingDelta(input: {
+  artifactResolver?: HostedWorkspaceArtifactResolver;
+  baseManifest: HostedPortableWorkspaceManifest;
+  baseSnapshotHash: string;
+  bundle: Uint8Array | ArrayBuffer;
+  roots: {
+    [WORKSPACE_OPERATOR_HOME_ROOT]?: string;
+    vault: string;
+  };
+  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+}): Promise<HostedPortableWorkspaceDeltaManifest> {
+  const manifest = readHostedPortableWorkspaceDeltaManifestFromBundle(input.bundle);
+  if (!manifest) {
+    throw new Error("Hosted workspace working delta manifest is missing.");
+  }
+  if (manifest.baseSnapshotHash !== input.baseSnapshotHash) {
+    throw new Error("Hosted workspace working delta base snapshot hash mismatch.");
+  }
+  if (manifest.baseManifestHash !== input.baseManifest.manifestHash) {
+    throw new Error("Hosted workspace working delta base manifest hash mismatch.");
+  }
+  verifyHostedWorkspaceWorkingDeltaEffectiveManifest({
+    baseManifest: input.baseManifest,
+    manifest,
+  });
+
+  for (const tombstone of manifest.tombstones) {
+    const root = input.roots[tombstone.root as keyof typeof input.roots];
+    if (!root) {
+      throw new Error(`Hosted workspace working delta tombstone root "${tombstone.root}" is not mapped.`);
+    }
+    const absolutePath = resolveHostedBundleRestorePath(root, tombstone.path);
+    await assertHostedWorkspaceWorkingDeltaTombstonePathHasNoSymlinks({
+      absolutePath,
+      path: tombstone.path,
+      root,
+    });
+    await rm(absolutePath, {
+      force: true,
+      recursive: true,
+    });
+  }
+
+  const restoreRoots: Record<string, string> = {
+    vault: input.roots.vault,
+  };
+  if (input.roots[WORKSPACE_OPERATOR_HOME_ROOT]) {
+    restoreRoots[WORKSPACE_OPERATOR_HOME_ROOT] = input.roots[WORKSPACE_OPERATOR_HOME_ROOT];
+  }
+
+  await restoreHostedBundleRoots({
+    artifactResolver: input.artifactResolver,
+    bytes: input.bundle,
+    expectedKind: "vault",
+    roots: restoreRoots,
+    shouldRestoreArtifact: input.shouldRestoreArtifact,
+  });
+  await verifyHostedWorkspaceWorkingDeltaUpserts({
+    manifest,
+    roots: input.roots,
+  });
+  return manifest;
+}
+
 export async function verifyRestoredHostedCodexContinuityManifest(
   operatorHomeRoot: string,
   options?: {
@@ -682,6 +1224,81 @@ export async function verifyRestoredHostedCodexContinuityManifest(
       allowedRolloutRelativePaths,
       operatorHomeRoot,
     });
+  }
+}
+
+async function verifyHostedWorkspaceWorkingDeltaUpserts(input: {
+  manifest: HostedPortableWorkspaceDeltaManifest;
+  roots: {
+    [WORKSPACE_OPERATOR_HOME_ROOT]?: string;
+    vault: string;
+  };
+}): Promise<void> {
+  for (const upsert of input.manifest.upserts) {
+    if (upsert.artifact) {
+      continue;
+    }
+    const root = input.roots[upsert.root as keyof typeof input.roots];
+    if (!root) {
+      throw new Error(`Hosted workspace working delta upsert root "${upsert.root}" is not mapped.`);
+    }
+    const bytes = await readFile(resolveHostedBundleRestorePath(root, upsert.path));
+    const actualHash = createHash("sha256").update(bytes).digest("hex");
+    if (actualHash !== upsert.sha256 || bytes.byteLength !== upsert.size) {
+      throw new Error("Hosted workspace working delta upsert verification failed.");
+    }
+  }
+}
+
+function verifyHostedWorkspaceWorkingDeltaEffectiveManifest(input: {
+  baseManifest: HostedPortableWorkspaceManifest;
+  manifest: HostedPortableWorkspaceDeltaManifest;
+}): void {
+  const effectiveFiles = new Map(input.baseManifest.files.map((file) => [
+    hostedPortableWorkspaceManifestFileKey(file),
+    file,
+  ]));
+  for (const tombstone of input.manifest.tombstones) {
+    effectiveFiles.delete(hostedPortableWorkspaceManifestFileKey(tombstone));
+  }
+  for (const upsert of input.manifest.upserts) {
+    effectiveFiles.set(hostedPortableWorkspaceManifestFileKey(upsert), upsert);
+  }
+
+  const effectiveManifest = finalizeHostedPortableWorkspaceManifest([...effectiveFiles.values()]);
+  if (effectiveManifest.manifestHash !== input.manifest.effectiveManifestHash) {
+    throw new Error("Hosted workspace working delta effective manifest hash mismatch.");
+  }
+}
+
+async function assertHostedWorkspaceWorkingDeltaTombstonePathHasNoSymlinks(input: {
+  absolutePath: string;
+  path: string;
+  root: string;
+}): Promise<void> {
+  const root = path.resolve(input.root);
+  let currentPath = root;
+  const segments = normalizeWorkspaceSnapshotRelativePath(input.path)
+    .split(path.posix.sep)
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    currentPath = path.join(currentPath, segment);
+    let entry;
+    try {
+      entry = await lstat(currentPath);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return;
+      }
+      throw error;
+    }
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Hosted workspace working delta tombstone path must not contain symlinks: ${input.path}`);
+    }
+    if (currentPath === input.absolutePath) {
+      return;
+    }
   }
 }
 
