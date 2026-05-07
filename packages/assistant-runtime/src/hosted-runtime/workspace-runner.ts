@@ -32,6 +32,9 @@ import type {
   HostedMailboxPostCheckpointEffectResult,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
+import {
+  writeHostedMailboxImportState,
+} from "./mailbox-state.ts";
 import type {
   HostedRuntimeActiveTurnInputCheckpointInput,
   HostedRuntimeMailboxPort,
@@ -105,6 +108,8 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
+  discardMailboxPostCheckpointEffects(): void;
+  latestMailboxImportCoveredByWorkspace(): boolean;
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
@@ -329,6 +334,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       checkpointRequestBuilder: checkpointRequestSession,
       expectedUserId: input.expectedUserId,
       initialMailboxImport,
+      vaultRoot: input.vaultRoot,
       workspacePort: input.platform.workspacePort,
     });
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
@@ -432,6 +438,7 @@ function withActiveTurnInputWorkspacePorts(input: {
       const result = await importHostedMailboxForWorkspaceRunner({
         checkpointRequestBuilder: input.checkpointRequestBuilder,
         checkpointReason: "active_turn_input",
+        deferCheckpoint: true,
         input: input.input,
         lanes: ["conversation"],
         requestId,
@@ -439,11 +446,13 @@ function withActiveTurnInputWorkspacePorts(input: {
       if (shouldRecordHostedActiveTurnMailboxRefreshResult(result)) {
         input.checkpointRequestBuilder.recordCheckpointResult(result);
       }
-      await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
-        checkpointRequestBuilder: input.checkpointRequestBuilder,
-        input: input.input,
-        phase: "active_turn_input",
-      });
+      if (result.checkpoint?.checkpointed === true) {
+        await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+          checkpointRequestBuilder: input.checkpointRequestBuilder,
+          input: input.input,
+          phase: "active_turn_input",
+        });
+      }
 
       return summarizeMailboxRefreshResult(result);
     },
@@ -697,6 +706,8 @@ function createHostedWorkspaceCheckpointRequestSession(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder,
 ): HostedWorkspaceCheckpointRequestSession {
   let expectedWorkspaceVersion: string | null = null;
+  let latestMailboxImportSequence = 0;
+  let latestWorkspaceMailboxImportSequence = 0;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
@@ -718,24 +729,33 @@ function createHostedWorkspaceCheckpointRequestSession(
         request,
       });
     },
+    discardMailboxPostCheckpointEffects() {
+      mailboxPostCheckpointEffects.splice(0);
+    },
     latestMailboxImport() {
       return latestMailboxImport;
+    },
+    latestMailboxImportCoveredByWorkspace() {
+      return latestMailboxImportSequence === latestWorkspaceMailboxImportSequence;
     },
     latestWorkspace() {
       return latestWorkspace;
     },
     recordCheckpointResult(result) {
+      latestMailboxImportSequence += 1;
       latestMailboxImport = result;
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
         latestWorkspace = result.checkpoint.workspace;
+        latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
       }
     },
     recordWorkspaceCheckpoint(response) {
       if (response.checkpointed) {
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
+        latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
       }
     },
     takeMailboxPostCheckpointEffects() {
@@ -1021,39 +1041,57 @@ async function checkpointHostedWorkspaceDeferredMailboxImportIfNeeded(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   expectedUserId: string;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  vaultRoot: string;
   workspacePort: HostedRuntimeWorkspacePort;
 }): Promise<void> {
+  const latestMailboxImport =
+    input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
   if (
-    !input.initialMailboxImport.checkpointDeferred
-    || input.checkpointRequestBuilder.latestWorkspace()
+    !latestMailboxImport.checkpointDeferred
+    || input.checkpointRequestBuilder.latestMailboxImportCoveredByWorkspace()
   ) {
     return;
   }
 
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
-    input.initialMailboxImport,
+    latestMailboxImport,
     {
       hostedMailboxImportCheckpointDeferred: true,
     },
   );
   const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
-    importResult: input.initialMailboxImport.importResult,
+    importResult: latestMailboxImport.importResult,
     nextWakeAt: null,
     nextWakeReason: null,
-    previousState: input.initialMailboxImport.previousState,
+    previousState: latestMailboxImport.previousState,
     reason: "import",
     redactedStatus,
-    state: input.initialMailboxImport.state,
+    state: latestMailboxImport.state,
   });
-  const checkpoint = await input.workspacePort.checkpoint({
-    ...checkpointRequest,
-    nextWakeAt: null,
-    nextWakeReason: null,
-    reason: "import",
-    redactedStatus,
-  });
+  let checkpoint: HostedWorkspaceCheckpointResponse;
+  try {
+    checkpoint = await input.workspacePort.checkpoint({
+      ...checkpointRequest,
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus,
+    });
+  } catch (error) {
+    input.checkpointRequestBuilder.discardMailboxPostCheckpointEffects();
+    await writeHostedMailboxImportState({
+      state: latestMailboxImport.previousState,
+      vaultRoot: input.vaultRoot,
+    });
+    throw error;
+  }
 
   if (checkpoint.workspace.userId !== input.expectedUserId) {
+    input.checkpointRequestBuilder.discardMailboxPostCheckpointEffects();
+    await writeHostedMailboxImportState({
+      state: latestMailboxImport.previousState,
+      vaultRoot: input.vaultRoot,
+    });
     throw new HostedMailboxImportCheckpointUserMismatchError({
       actualUserId: checkpoint.workspace.userId,
       expectedUserId: input.expectedUserId,
@@ -1061,6 +1099,11 @@ async function checkpointHostedWorkspaceDeferredMailboxImportIfNeeded(input: {
   }
 
   if (!checkpoint.checkpointed) {
+    input.checkpointRequestBuilder.discardMailboxPostCheckpointEffects();
+    await writeHostedMailboxImportState({
+      state: latestMailboxImport.previousState,
+      vaultRoot: input.vaultRoot,
+    });
     throw new HostedMailboxImportCheckpointConflictError(checkpoint);
   }
 

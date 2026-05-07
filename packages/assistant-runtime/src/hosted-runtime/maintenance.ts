@@ -196,6 +196,8 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
   return {
+    activeTurnInputIngested:
+      assistantResult.timings?.activeTurnInputIngested ?? false,
     assistantAutomationAfterStateElapsedMs:
       assistantResult.timings?.afterStateElapsedMs ?? null,
     assistantAutomationBeforeStateElapsedMs:
@@ -236,6 +238,7 @@ export async function runHostedAssistantAutomation(
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   timings?: {
+    activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;
     beforeStateElapsedMs: number;
     passElapsedMs: number;
@@ -248,7 +251,13 @@ export async function runHostedAssistantAutomation(
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;
+  let activeTurnInputIngested = false;
   const inputSource = createHostedAssistantInputSource({
+    onActiveTurnMailboxRefresh(result) {
+      if (result.progressed && result.reason === "ingested_input") {
+        activeTurnInputIngested = true;
+      }
+    },
     preferredInputIds,
     requestId,
     runtime,
@@ -374,6 +383,7 @@ export async function runHostedAssistantAutomation(
       progressed: result.progressed,
       redactedLogEntries,
       timings: {
+        activeTurnInputIngested,
         afterStateElapsedMs,
         beforeStateElapsedMs,
         passElapsedMs,

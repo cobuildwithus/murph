@@ -154,6 +154,7 @@ export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
 }
 
 export interface HostedMaintenanceMetrics {
+  activeTurnInputIngested?: boolean | null;
   assistantAutomationAfterStateElapsedMs?: number | null;
   assistantAutomationBeforeStateElapsedMs?: number | null;
   assistantAutomationElapsedMs?: number | null;

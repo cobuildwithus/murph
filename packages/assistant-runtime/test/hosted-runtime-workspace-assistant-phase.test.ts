@@ -283,18 +283,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("keeps timer device-sync work enabled for scheduled wakes without active input", async () => {
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+  it("skips timer device-sync work for scheduled wakes so background sync cannot hold the hot reply path", async () => {
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
       reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
     }));
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
         deferReceiptRecovery: false,
-        skipDeviceSync: false,
+        skipDeviceSync: true,
       }),
     );
+    expect(result.progressed).toBe(true);
+    expect(result.nextWakeAt).toBeNull();
   });
 
   it("preserves an existing workspace wake when active input skips device-sync work", async () => {
@@ -887,6 +901,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       reason: "nudge",
+    }));
+
+    expect(result.afterCheckpoint).toBeUndefined();
+    expect(result.checkpointReason).toBe("outbox_receipt");
+    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit)
+      .toHaveBeenCalledTimes(1);
+  });
+
+  it("fast-dispatches idempotent delivery for active-turn input admitted on an alarm wake", async () => {
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      activeTurnInputIngested: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_synthetic",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      reason: "alarm",
     }));
 
     expect(result.afterCheckpoint).toBeUndefined();

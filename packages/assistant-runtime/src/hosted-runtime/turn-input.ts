@@ -25,6 +25,7 @@ import {
 } from "./mailbox-checkpoint.ts";
 
 export function createHostedAssistantInputSource(input: {
+  onActiveTurnMailboxRefresh?: ((result: AssistantTurnInputRefreshResult) => void) | null;
   preferredInputIds?: readonly string[] | null;
   requestId: string;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
@@ -86,6 +87,7 @@ export function createHostedAssistantInputSource(input: {
             mailboxRefresh = await refreshMailboxForActiveTurnInput({
               requestId: input.requestId,
             });
+            input.onActiveTurnMailboxRefresh?.(mailboxRefresh);
           } catch (error) {
             emitHostedExecutionStructuredLog({
               component: "runtime",
