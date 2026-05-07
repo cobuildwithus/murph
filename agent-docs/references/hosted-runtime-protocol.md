@@ -258,10 +258,10 @@ instead. Checkpoint reasons are state-classed rather than workflow-labeled:
 full/base snapshots, while `system_mailbox_receipt`,
 `assistant_runtime_commit`, `provider_cleanup`, pre-delivery outbox, and mailbox
 import/acceptance checkpoints write hot state. The legacy `maintenance` reason
-remains accepted as a conservative full checkpoint for staged deploy
-compatibility, but normal runtime paths should emit an explicit state-class
-reason. Pre-delivery outbox sending must stay hot so user-visible delivery is
-not gated on compacting or validating large native Codex continuity artifacts.
+has been hard-cut from the current protocol; future broad background commits
+should add explicit state-class checkpoint reasons instead. Pre-delivery outbox
+sending must stay hot so user-visible delivery is not gated on compacting or
+validating large native Codex continuity artifacts.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint

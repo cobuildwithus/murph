@@ -1493,7 +1493,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       leaseGeneration: "9",
       nextWakeAt: null,
       nextWakeReason: null,
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       redactedStatus: {},
       snapshotRef: null,
     });

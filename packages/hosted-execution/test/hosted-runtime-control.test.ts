@@ -78,7 +78,6 @@ describe("hosted runtime control contracts", () => {
       "assistant_runtime_commit",
       "provider_cleanup",
       "system_mailbox_receipt",
-      "maintenance",
       "idle_shutdown",
     ]);
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.imported");
@@ -594,16 +593,23 @@ describe("hosted runtime control contracts", () => {
     };
 
     expect(parseHostedWorkspaceState(minimalWorkspace)).toEqual(minimalWorkspace);
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_2",
+      expectedWorkspaceVersion: "0",
+      leaseGeneration: "10",
+      reason: "maintenance",
+    })).toThrow(/Hosted workspace checkpoint reason/u);
+
     expect(parseHostedWorkspaceCheckpointRequest({
-      attemptId: "attempt_2",
+      attemptId: "attempt_3",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
     })).toEqual({
-      attemptId: "attempt_2",
+      attemptId: "attempt_3",
       expectedWorkspaceVersion: "0",
       leaseGeneration: "10",
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       snapshotRef: null,
     });
   });

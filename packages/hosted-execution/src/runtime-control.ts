@@ -337,7 +337,6 @@ export const HOSTED_WORKSPACE_CHECKPOINT_REASONS = [
   "assistant_runtime_commit",
   "provider_cleanup",
   "system_mailbox_receipt",
-  "maintenance",
   "idle_shutdown",
 ] as const;
 

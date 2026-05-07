@@ -123,7 +123,7 @@ describe("hosted workspace store", () => {
     const result = await checkpointHostedWorkspaceTx({
       browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_stale_hash"),
       expectedVersion: 4n,
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       snapshotRef: createBundleRef("snapshot_stale"),
       tx,
       userId: "member_workspace_1",
@@ -136,6 +136,22 @@ describe("hosted workspace store", () => {
         version: "6",
       },
     });
+  });
+
+  it("rejects legacy maintenance checkpoint reasons", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "maintenance",
+      snapshotRef: createBundleRef("snapshot_2"),
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/Hosted workspace checkpoint reason/u);
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
   });
 
   it("preserves optional wake and redacted status fields when a checkpoint omits them", async () => {
@@ -158,7 +174,7 @@ describe("hosted workspace store", () => {
     await checkpointHostedWorkspaceTx({
       browserVaultReplicaRef: createBrowserVaultReplicaRef(),
       expectedVersion: "4",
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       snapshotRef: createBundleRef("snapshot_2"),
       tx,
       userId: "member_workspace_1",
@@ -185,7 +201,7 @@ describe("hosted workspace store", () => {
 
     const result = await checkpointHostedWorkspaceTx({
       expectedVersion: "4",
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       snapshotRef: createBundleRef("snapshot_2"),
       tx,
       userId: "member_workspace_1",
@@ -222,7 +238,7 @@ describe("hosted workspace store", () => {
 
     await checkpointHostedWorkspaceTx({
       expectedVersion: "4",
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       snapshotRef: createBundleRef("snapshot_2"),
       tx,
       userId: "member_workspace_1",
@@ -257,7 +273,7 @@ describe("hosted workspace store", () => {
     const result = await checkpointHostedWorkspaceTx({
       browserVaultReplicaRef: null,
       expectedVersion: "4",
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       snapshotRef: createBundleRef("snapshot_2"),
       tx,
       userId: "member_workspace_1",
@@ -292,7 +308,7 @@ describe("hosted workspace store", () => {
     await expect(checkpointHostedWorkspaceTx({
       browserVaultReplicaRef: createBrowserVaultReplicaRef("different_snapshot_hash"),
       expectedVersion: "4",
-      reason: "maintenance",
+      reason: "canonical_runtime_commit",
       snapshotRef: createBundleRef("snapshot_2"),
       tx,
       userId: "member_workspace_1",

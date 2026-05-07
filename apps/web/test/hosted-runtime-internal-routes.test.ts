@@ -281,7 +281,7 @@ describe("hosted runtime internal web routes", () => {
         attemptId: "attempt_2",
         expectedWorkspaceVersion: "4",
         leaseGeneration: "3",
-        reason: "maintenance",
+        reason: "canonical_runtime_commit",
         browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_stale_hash"),
         snapshotRef: createBundleRef("snapshot_stale"),
       },
@@ -516,7 +516,7 @@ describe("hosted runtime internal web routes", () => {
         outboxIntentRef: null,
         phase: "checkpoint",
         redactedJson: {
-          checkpointReason: "maintenance",
+          checkpointReason: "canonical_runtime_commit",
         },
         userId: "member_routes_1",
         workspaceVersion: "5",

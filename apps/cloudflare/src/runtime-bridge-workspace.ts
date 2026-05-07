@@ -953,7 +953,6 @@ function resolveHostedWorkspaceCheckpointSnapshotMode(
     case "idle_shutdown":
     case "activation_bootstrap":
     case "canonical_runtime_commit":
-    case "maintenance":
       return "full";
     case "active_turn_acceptance":
     case "active_turn_input":
