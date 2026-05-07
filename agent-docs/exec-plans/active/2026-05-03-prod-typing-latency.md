@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-05-03
-Updated: 2026-05-06
+Updated: 2026-05-07
 
 ## Goal
 
@@ -88,6 +88,7 @@ Updated: 2026-05-06
 - 2026-05-06 preferred-input cursor decision: preferred assistant input ids are a cursor-safe overlay on the base scan, not a priority order; returned candidates stay cursor-sorted and `nextCursor` is derived from returned candidates so a newer preferred input cannot advance past older unprocessed input.
 - 2026-05-07 Linq stale-thread recovery decision: keep raw Linq recipient identifiers out of checkpointed delivery effects, but reattach the same live conversation wake's direct recipient and sender line only when a committed thread/explicit Linq delivery targets that wake's chat id or replies to that wake's provider message id. This preserves redacted persisted effects while allowing the Worker-owned provider effect to recover stale direct iMessage threads when exact-write targets are redacted.
 - 2026-05-07 Linq redacted-target delivery decision: when a same-wake provider effect carries transient raw direct-recipient proof and the persisted target is a hosted/redacted fingerprint, the Worker-owned Linq effect materializes the direct participant chat first with the proved sender line instead of trying the redacted target as a provider chat id. Fresh pending outbox intents also outrank older retryable intents at the single-effect hosted dispatch cap so stale retries do not block the live reply path.
+- 2026-05-07 immediate-nudge retry follow-up: fresh user nudges preserve the short immediate-drive fallback alarm even when the generic retry failure count has reached the max-attempt guard; alarm/manual/non-nudge retry scheduling still respects the max-attempt guard. This keeps fresh user input on the hot retry path without adding a broad checkpoint fallback or weakening idle/full-snapshot invariants.
 
 ## Current evidence
 
@@ -111,6 +112,7 @@ Updated: 2026-05-06
 - The post-nudge-RPC live probe confirmed the route-side nudge was down to a single fast Durable Object call, but the response still waited behind active runner work. Code inspection found the active-invocation heartbeat endpoint parsed the heartbeat and always returned `inputAvailable: false` without calling `recordActiveInvocationHeartbeat`, so active containers could not refresh liveness or learn that a live text arrived.
 - A later live iMessage probe showed the webhook append and nudge were immediate, but the first immediate runner drive failed after a few seconds with a child-result failure and then waited for the generic 30s retry alarm before restoring/importing. That retry delay, not the 44 MB base snapshot by itself, explained a large part of the latest 40s-plus gap.
 - 2026-05-07 production evidence after the immediate rollout showed assistant generation and outbox intent creation still progressing, but every committed Linq send effect returned 502 while Linq chat-action/delete effects succeeded. The failed sends were fast provider-effect failures, matching a stale thread send that could not enter direct-chat recovery because the checkpointed hosted delivery payload intentionally omitted raw contact identifiers.
+- 2026-05-07 post-reply hot probe: delivery recovered, but the hot probe appended while a previous wake was active and then a follow-up immediate nudge drive failed while recording a checkpoint. Cloudflare logs showed the generic retry-attempt guard exhausted and left the runner waiting for the older recovery alarm, explaining the >3s miss without pointing at a missing exact-write persistence path.
 
 ## Verification
 
@@ -201,3 +203,9 @@ Updated: 2026-05-06
   - 2026-05-07 Linq direct-materialization follow-up: `pnpm --dir apps/cloudflare typecheck` passed.
   - 2026-05-07 Linq direct-materialization follow-up: `git diff --check -- packages/assistant-runtime/src/hosted-runtime/callbacks.ts packages/assistant-runtime/src/hosted-provider-effects.ts packages/assistant-runtime/test/hosted-runtime-callbacks.test.ts packages/assistant-runtime/test/hosted-provider-effects.test.ts agent-docs/exec-plans/active/2026-05-03-prod-typing-latency.md` passed.
   - 2026-05-07 Linq direct-materialization follow-up: `pnpm typecheck` was blocked waiting on an unrelated existing `apps/web` verify lock; the waiting process was stopped without stopping the lock holder.
+  - 2026-05-07 immediate-nudge retry follow-up: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage --testNamePattern "immediate nudge retry|failed immediate nudge|backs off failed immediate"` passed.
+  - 2026-05-07 immediate-nudge retry follow-up: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage` passed.
+  - 2026-05-07 immediate-nudge retry follow-up: `pnpm --dir apps/cloudflare typecheck` passed.
+  - 2026-05-07 immediate-nudge retry follow-up: `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-03-prod-typing-latency.md` passed.
+  - 2026-05-07 immediate-nudge retry follow-up: `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts` reached `apps/cloudflare verify` and then blocked behind the unrelated existing `apps/web verify` workspace lock; the queued process was stopped without stopping the lock holder.
+  - 2026-05-07 immediate-nudge retry follow-up: `pnpm typecheck` was blocked behind the same unrelated existing `apps/web verify` workspace lock; the queued process was stopped without stopping the lock holder.
