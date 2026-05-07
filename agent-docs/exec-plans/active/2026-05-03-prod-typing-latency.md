@@ -86,6 +86,7 @@ Updated: 2026-05-06
 - 2026-05-06 late-input folding fix: hosted queue-only auto-replies use the existing active-turn admission hooks by default, while the hosted queue-only receipt fallback skip remains unchanged. The default-path hosted-local E2E folded late same-chat input into one provider request without a runtime flag.
 - 2026-05-06 fast-dispatch crash-window decision: add a runner-level Linq regression that restores the same pre-checkpoint workspace across a failed `outbox_receipt` checkpoint retry and asserts the stable idempotency key produces one external message.
 - 2026-05-06 preferred-input cursor decision: preferred assistant input ids are a cursor-safe overlay on the base scan, not a priority order; returned candidates stay cursor-sorted and `nextCursor` is derived from returned candidates so a newer preferred input cannot advance past older unprocessed input.
+- 2026-05-07 Linq stale-thread recovery decision: keep raw Linq recipient identifiers out of checkpointed delivery effects, but reattach the same live conversation wake's direct recipient only when a committed thread/explicit Linq delivery targets that wake's chat id. This preserves redacted persisted effects while allowing the Worker-owned provider effect to recover stale direct iMessage threads.
 
 ## Current evidence
 
@@ -108,6 +109,7 @@ Updated: 2026-05-06
 - The latest warm live probe restored in roughly 0.35s, but the auto-reply scan still took roughly 18.8s while Codex app-server work took roughly 2.4s. Code inspection found the auto-reply decision path was still calling `listAssistantTurnReceipts` with an effectively unbounded limit before every reply; that helper reads the whole turn receipt directory and matches the remaining warm-path scan gap.
 - The post-nudge-RPC live probe confirmed the route-side nudge was down to a single fast Durable Object call, but the response still waited behind active runner work. Code inspection found the active-invocation heartbeat endpoint parsed the heartbeat and always returned `inputAvailable: false` without calling `recordActiveInvocationHeartbeat`, so active containers could not refresh liveness or learn that a live text arrived.
 - A later live iMessage probe showed the webhook append and nudge were immediate, but the first immediate runner drive failed after a few seconds with a child-result failure and then waited for the generic 30s retry alarm before restoring/importing. That retry delay, not the 44 MB base snapshot by itself, explained a large part of the latest 40s-plus gap.
+- 2026-05-07 production evidence after the immediate rollout showed assistant generation and outbox intent creation still progressing, but every committed Linq send effect returned 502 while Linq chat-action/delete effects succeeded. The failed sends were fast provider-effect failures, matching a stale thread send that could not enter direct-chat recovery because the checkpointed hosted delivery payload intentionally omitted raw contact identifiers.
 
 ## Verification
 
@@ -179,3 +181,7 @@ Updated: 2026-05-06
   - After simplifying preferred input to a cursor-sorted overlay: `git diff --check -- packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/test/hosted-runtime-turn-input.test.ts agent-docs/exec-plans/active/2026-05-03-prod-typing-latency.md` passed.
   - After simplifying preferred input to a cursor-sorted overlay: `pnpm --dir packages/assistant-runtime typecheck` failed on unrelated hosted-usage/export drift; the previous `turn-input.ts` query-shape error was removed.
   - After simplifying preferred input to a cursor-sorted overlay: `pnpm typecheck` failed in `packages/hosted-execution/src/parsers/runtime-control.ts` because `@murphai/hosted-execution/assistant-usage` is not currently resolvable.
+  - 2026-05-07 Linq recovery fix: `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-callbacks.test.ts --testNamePattern "same-wake Linq direct recipient|injects effectsPort.sendLinq"` passed.
+  - 2026-05-07 Linq recovery fix: `pnpm --dir packages/assistant-runtime exec vitest run test/hosted-runtime-callbacks.test.ts` passed.
+  - 2026-05-07 Linq recovery fix: `pnpm --dir packages/assistant-runtime typecheck` passed.
+  - 2026-05-07 Linq recovery fix: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/runner-outbound.test.ts --no-coverage` passed.

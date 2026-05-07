@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import {
@@ -736,6 +737,89 @@ describe("hosted runtime callbacks", () => {
       targetKind: "thread",
     });
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("attaches same-wake Linq direct recipient context without checkpointing it", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_123",
+      linqMessage: {
+        chatId: "linq_chat_123",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_inbound_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_123",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const sendLinq = vi.fn(async () => ({
+      providerMessageId: "linq_message_123",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_inbound_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendLinq,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
+    expect(sendLinq).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: null,
+      idempotencyKey: "assistant-outbox:intent_123",
+      message: "hello from hosted",
+      replyToMessageId: "linq_message_inbound_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    });
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryChannel: "linq",

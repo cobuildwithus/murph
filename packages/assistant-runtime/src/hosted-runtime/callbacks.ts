@@ -289,9 +289,16 @@ async function deliverHostedCommittedAssistantDelivery(input: {
         },
         sendLinq: async (request) => {
           await assertHostedDeliveryLiveNow(input);
+          const directRecipientPhoneNumber =
+            normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
+            ?? readHostedWakeDirectLinqRecipientForDelivery({
+              target: request.target,
+              targetKind: request.targetKind ?? null,
+              wake: input.wake,
+            });
           const result = input.effectsPort.sendLinq
             ? await input.effectsPort.sendLinq({
-                directRecipientPhoneNumber: request.directRecipientPhoneNumber ?? null,
+                directRecipientPhoneNumber,
                 fromPhoneNumber: request.fromPhoneNumber ?? null,
                 idempotencyKey: request.idempotencyKey ?? null,
                 message: request.message,
@@ -344,6 +351,43 @@ async function deliverHostedCommittedAssistantDelivery(input: {
     });
     throw enrichedError;
   }
+}
+
+function readHostedWakeDirectLinqRecipientForDelivery(input: {
+  target: string;
+  targetKind: string | null;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  if (
+    input.targetKind !== "thread"
+    && input.targetKind !== "explicit"
+  ) {
+    return null;
+  }
+  if (
+    input.wake.kind !== "conversation.message"
+    || input.wake.message.channel !== "linq"
+  ) {
+    return null;
+  }
+  const target = normalizeHostedProviderText(input.target);
+  const wakeThread = normalizeHostedProviderText(
+    input.wake.message.linqMessage.chatId,
+  );
+  if (!target || target !== wakeThread) {
+    return null;
+  }
+  return normalizeHostedLinqDirectRecipient(input.wake.message.linqMessage.from);
+}
+
+function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.startsWith("+") ? normalized : null;
+}
+
+function normalizeHostedProviderText(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function assertHostedDeliveryLiveNow(input: {
