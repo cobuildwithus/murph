@@ -93,8 +93,28 @@ function describeSourceStatus(
   source: HostedDeviceSyncSettingsSource,
   tone: SidebarAccountStatusTone,
 ): SidebarAccountStatus {
+  const fragment = toSentenceFragment(source.statusLabel);
+  const connectedUpstreamSources = source.upstreamSources.filter(
+    (upstreamSource) => upstreamSource.status === "connected",
+  );
+  const [connectedUpstreamSource] = connectedUpstreamSources;
+
+  if (connectedUpstreamSources.length === 1 && connectedUpstreamSource) {
+    return {
+      message: `${connectedUpstreamSource.providerLabel} ${fragment}`,
+      tone,
+    };
+  }
+
+  if (connectedUpstreamSources.length > 1 && fragment === "connected") {
+    return {
+      message: `${connectedUpstreamSources.length} wearables connected`,
+      tone,
+    };
+  }
+
   return {
-    message: `${source.providerLabel} ${toSentenceFragment(source.statusLabel)}`,
+    message: `${source.providerLabel} ${fragment}`,
     tone,
   };
 }

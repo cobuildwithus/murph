@@ -10,8 +10,10 @@ import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboa
 export const GET = withJsonError(async (request: Request) => {
   const auth = await requireActiveHostedAppSessionFromRequest(request);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const { connections, providers } = await controlPlane.listConnections(auth.member.id);
+  const { connectionSources, connections, providers } =
+    await controlPlane.listConnections(auth.member.id);
   const sources = buildHostedDeviceSyncSettingsSources({
+    connectionSources,
     connections,
     providers,
   });
