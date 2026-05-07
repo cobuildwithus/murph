@@ -40,6 +40,7 @@ import {
 const temporaryPaths: string[] = [];
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
 const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
+const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 
 afterEach(async () => {
   await Promise.all(
@@ -107,6 +108,20 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(configMode, 0o600);
   const codexHomeMode = (await stat(result.codexHome)).mode & 0o777;
   assert.equal(codexHomeMode, 0o700);
+});
+
+test("hosted Cloudflare Codex config injects an auto-compaction limit below 250k tokens", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assertHostedCodexAutoCompactTokenLimitBelowCeiling(config);
 });
 
 test("hosted Codex runtime config strips legacy hosted assistant seed env before bootstrap", async () => {
@@ -1362,6 +1377,27 @@ function readHostedLocalCodexStubThreadId(messages: readonly Record<string, unkn
   }
 
   throw new Error("Expected hosted local Codex stub thread/start response.");
+}
+
+function assertHostedCodexAutoCompactTokenLimitBelowCeiling(config: string): void {
+  const matches = [...config.matchAll(/^model_auto_compact_token_limit\s*=\s*(\d+)$/gmu)];
+  assert.equal(
+    matches.length,
+    1,
+    "Hosted Codex config must inject exactly one model_auto_compact_token_limit setting.",
+  );
+
+  const limit = Number(matches[0]?.[1]);
+  assert.equal(
+    Number.isSafeInteger(limit) && limit > 0,
+    true,
+    "Hosted Codex config auto-compaction token limit must be a positive integer.",
+  );
+  assert.equal(
+    limit < HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING,
+    true,
+    "Hosted Codex config auto-compaction token limit must stay below 250k tokens.",
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
