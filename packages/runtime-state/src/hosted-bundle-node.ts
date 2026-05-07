@@ -1,5 +1,18 @@
+import { randomUUID } from "node:crypto";
+import { constants as fsConstants, type Dirent } from "node:fs";
+import {
+  chmod,
+  type FileHandle,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { chmod, lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 
 import {
   ensureAssistantStateDirectory,
@@ -25,6 +38,15 @@ const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
 const HOSTED_CODEX_HOME_DIRECTORY_MODE = 0o700;
 const HOSTED_CODEX_HOME_FILE_MODE = 0o600;
 const HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT = "workspace-metadata";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE";
+const HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA = "murph.hosted-checkpoint-debug-paths.v1";
+const HOSTED_CHECKPOINT_DEBUG_OUTPUT_OPEN_FLAGS = fsConstants.O_WRONLY
+  | fsConstants.O_CREAT
+  | fsConstants.O_NONBLOCK
+  | fsConstants.O_TRUNC
+  | fsConstants.O_NOFOLLOW;
+const HOSTED_CHECKPOINT_DEBUG_OUTPUT_NOT_REGULAR_ERROR = "Hosted checkpoint debug output path must be a regular file.";
 
 export interface HostedBundleArtifactSnapshotInput {
   absolutePath: string;
@@ -51,7 +73,7 @@ export interface HostedBundleRestoreRootMap {
   [rootKey: string]: string;
 }
 
-export async function snapshotHostedBundleRoots(input: {
+export interface HostedBundleSnapshotRootsInput {
   assertSnapshotLive?: () => Promise<void> | void;
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   kind: HostedExecutionBundleKind;
@@ -62,7 +84,57 @@ export async function snapshotHostedBundleRoots(input: {
   shouldIncludePreservedArtifact?: (
     input: HostedBundleArtifactLocation,
   ) => boolean | Promise<boolean>;
-}): Promise<Uint8Array | null> {
+}
+
+type HostedCheckpointDebugEntrySource = "explicit" | "preserved" | "walk";
+type HostedCheckpointDebugEntryType = "artifact" | "directory" | "file" | "other" | "symlink" | "unknown";
+type HostedCheckpointDebugDecision = "descend" | "exclude" | "include";
+type HostedCheckpointDebugReason =
+  | "already_included"
+  | "externalized"
+  | "inline"
+  | "not_live"
+  | "not_regular_file"
+  | "policy_excluded"
+  | "policy_included"
+  | "preserved_artifact"
+  | "unsupported_type";
+type HostedCheckpointDebugStatus = "completed" | "empty" | "failed";
+
+interface HostedCheckpointDebugEntry {
+  bytes?: number;
+  decision: HostedCheckpointDebugDecision;
+  depth: number;
+  path: string;
+  reason: HostedCheckpointDebugReason;
+  root: string;
+  source: HostedCheckpointDebugEntrySource;
+  type: HostedCheckpointDebugEntryType;
+}
+
+interface HostedCheckpointDebugTrace {
+  record: (entry: HostedCheckpointDebugEntry) => void;
+  setArchiveFileCount: (count: number) => void;
+  write: (status: HostedCheckpointDebugStatus) => Promise<void>;
+}
+
+export async function snapshotHostedBundleRoots(input: HostedBundleSnapshotRootsInput): Promise<Uint8Array | null> {
+  const debugTrace = createHostedCheckpointDebugTrace(input.kind);
+
+  try {
+    const bundle = await snapshotHostedBundleRootsWithDebugTrace(input, debugTrace);
+    await debugTrace?.write(bundle ? "completed" : "empty");
+    return bundle;
+  } catch (error) {
+    await tryWriteHostedCheckpointDebugTrace(debugTrace, "failed");
+    throw error;
+  }
+}
+
+async function snapshotHostedBundleRootsWithDebugTrace(
+  input: HostedBundleSnapshotRootsInput,
+  debugTrace: HostedCheckpointDebugTrace | null,
+): Promise<Uint8Array | null> {
   const files: HostedBundleArchiveFile[] = [];
   const includedPaths = new Set<string>();
   let includedRootCount = 0;
@@ -100,27 +172,34 @@ export async function snapshotHostedBundleRoots(input: {
       includedPaths,
       await collectBundleFiles({
         assertSnapshotLive: input.assertSnapshotLive,
+        debugTrace,
         externalizeFile: input.externalizeFile,
         root: root.root,
         rootKey: root.rootKey,
         shouldIncludeRelativePath: root.shouldIncludeRelativePath ?? (() => true),
       }),
+      "walk",
+      debugTrace,
     );
     appendHostedBundleFiles(
       files,
       includedPaths,
       await collectExplicitBundleFiles({
         assertSnapshotLive: input.assertSnapshotLive,
+        debugTrace,
         explicitFiles: root.explicitFiles ?? [],
         includedPaths,
         externalizeFile: input.externalizeFile,
         root: root.root,
         rootKey: root.rootKey,
       }),
+      "explicit",
+      debugTrace,
     );
   }
 
   if (includedRootCount === 0) {
+    debugTrace?.setArchiveFileCount(0);
     return null;
   }
 
@@ -134,6 +213,14 @@ export async function snapshotHostedBundleRoots(input: {
     const normalizedPath = normalizeBundlePath(artifact.path);
     const preservedPathKey = `${artifact.root}:${normalizedPath}`;
     if (includedPaths.has(preservedPathKey)) {
+      recordHostedCheckpointDebugEntry(debugTrace, {
+        decision: "exclude",
+        path: normalizedPath,
+        reason: "already_included",
+        root: artifact.root,
+        source: "preserved",
+        type: "artifact",
+      });
       continue;
     }
 
@@ -143,6 +230,14 @@ export async function snapshotHostedBundleRoots(input: {
         path: normalizedPath,
       });
       if (!shouldIncludePreservedArtifact) {
+        recordHostedCheckpointDebugEntry(debugTrace, {
+          decision: "exclude",
+          path: normalizedPath,
+          reason: "policy_excluded",
+          root: artifact.root,
+          source: "preserved",
+          type: "artifact",
+        });
         continue;
       }
     }
@@ -154,9 +249,26 @@ export async function snapshotHostedBundleRoots(input: {
         roots: includedRootsByKey.get(artifact.root) ?? [],
       }))
     ) {
+      recordHostedCheckpointDebugEntry(debugTrace, {
+        decision: "exclude",
+        path: normalizedPath,
+        reason: "not_live",
+        root: artifact.root,
+        source: "preserved",
+        type: "artifact",
+      });
       continue;
     }
 
+    recordHostedCheckpointDebugEntry(debugTrace, {
+      bytes: artifact.ref.byteSize,
+      decision: "include",
+      path: normalizedPath,
+      reason: "preserved_artifact",
+      root: artifact.root,
+      source: "preserved",
+      type: "artifact",
+    });
     files.push({
       artifact: artifact.ref,
       path: normalizedPath,
@@ -167,6 +279,7 @@ export async function snapshotHostedBundleRoots(input: {
 
   await input.assertSnapshotLive?.();
   await input.onBeforeSerialize?.();
+  debugTrace?.setArchiveFileCount(files.length);
 
   return serializeHostedBundleArchive({
     files,
@@ -435,8 +548,217 @@ function isHostedCodexHomeRestorePath(input: {
     || normalizedRelativePath.startsWith(`${HOSTED_CODEX_HOME_RELATIVE_PATH}/`);
 }
 
+function createHostedCheckpointDebugTrace(kind: HostedExecutionBundleKind): HostedCheckpointDebugTrace | null {
+  if (!isHostedCheckpointDebugPathsEnabled(process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_ENV])) {
+    return null;
+  }
+
+  const outputPath = resolveHostedCheckpointDebugOutputPath();
+  const createdAt = new Date().toISOString();
+  const entries: HostedCheckpointDebugEntry[] = [];
+  let archiveFileCount: number | null = null;
+
+  return {
+    record(entry) {
+      entries.push(entry);
+    },
+    setArchiveFileCount(count) {
+      archiveFileCount = count;
+    },
+    async write(status) {
+      await writeHostedCheckpointDebugTraceFile(
+        outputPath,
+        `${JSON.stringify({
+          schema: HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA,
+          createdAt,
+          kind,
+          status,
+          summary: summarizeHostedCheckpointDebugEntries(entries, archiveFileCount),
+          entries,
+        }, null, 2)}\n`,
+      );
+    },
+  };
+}
+
+function isHostedCheckpointDebugPathsEnabled(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "no" && normalized !== "off";
+}
+
+function resolveHostedCheckpointDebugOutputPath(): string {
+  const configuredPath = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV]?.trim();
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  return path.join(
+    tmpdir(),
+    `murph-hosted-checkpoint-debug-${process.pid}-${Date.now()}-${randomUUID()}.json`,
+  );
+}
+
+async function writeHostedCheckpointDebugTraceFile(
+  outputPath: string,
+  contents: string,
+): Promise<void> {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+
+  let handle: FileHandle;
+  try {
+    handle = await open(
+      outputPath,
+      HOSTED_CHECKPOINT_DEBUG_OUTPUT_OPEN_FLAGS,
+      HOSTED_CODEX_HOME_FILE_MODE,
+    );
+  } catch (error) {
+    if (getNodeErrorCode(error) === "ELOOP") {
+      throw new Error("Hosted checkpoint debug output path must not be a symbolic link.");
+    }
+    if (isHostedCheckpointDebugOutputNotRegularError(error)) {
+      throw new Error(HOSTED_CHECKPOINT_DEBUG_OUTPUT_NOT_REGULAR_ERROR);
+    }
+
+    throw error;
+  }
+
+  try {
+    const outputStat = await handle.stat();
+    if (!outputStat.isFile()) {
+      throw new Error(HOSTED_CHECKPOINT_DEBUG_OUTPUT_NOT_REGULAR_ERROR);
+    }
+
+    await handle.chmod(HOSTED_CODEX_HOME_FILE_MODE);
+    await handle.writeFile(contents, "utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+function isHostedCheckpointDebugOutputNotRegularError(error: unknown): boolean {
+  const code = getNodeErrorCode(error);
+  return code === "EISDIR" || code === "ENOTDIR" || code === "ENXIO";
+}
+
+async function tryWriteHostedCheckpointDebugTrace(
+  trace: HostedCheckpointDebugTrace | null,
+  status: HostedCheckpointDebugStatus,
+): Promise<void> {
+  try {
+    await trace?.write(status);
+  } catch {
+    return;
+  }
+}
+
+function recordHostedCheckpointDebugEntry(
+  trace: HostedCheckpointDebugTrace | null,
+  entry: Omit<HostedCheckpointDebugEntry, "depth">,
+): void {
+  if (!trace) {
+    return;
+  }
+
+  const normalizedPath = normalizeBundlePath(entry.path);
+  trace.record({
+    ...entry,
+    path: normalizedPath,
+    depth: getHostedCheckpointDebugPathDepth(normalizedPath),
+  });
+}
+
+function getHostedCheckpointDebugPathDepth(relativePath: string): number {
+  return relativePath.split(path.posix.sep).filter(Boolean).length;
+}
+
+function getHostedCheckpointDebugEntryType(entry: Dirent): HostedCheckpointDebugEntryType {
+  if (entry.isDirectory()) {
+    return "directory";
+  }
+
+  if (entry.isFile()) {
+    return "file";
+  }
+
+  if (entry.isSymbolicLink()) {
+    return "symlink";
+  }
+
+  return "other";
+}
+
+function getHostedBundleArchiveFileByteSize(file: HostedBundleArchiveFile): number {
+  if (isHostedBundleArtifactEntry(file)) {
+    return file.artifact.byteSize;
+  }
+
+  return Buffer.byteLength(file.contentsBase64, "base64");
+}
+
+function summarizeHostedCheckpointDebugEntries(
+  entries: readonly HostedCheckpointDebugEntry[],
+  archiveFileCount: number | null,
+): {
+  archiveFileCount: number | null;
+  artifactCount: number;
+  descendedDirectoryCount: number;
+  directoryCount: number;
+  entryCount: number;
+  excludedDecisionCount: number;
+  fileCount: number;
+  includedDecisionCount: number;
+  otherCount: number;
+  symlinkCount: number;
+  unknownCount: number;
+} {
+  const summary = {
+    archiveFileCount,
+    artifactCount: 0,
+    descendedDirectoryCount: 0,
+    directoryCount: 0,
+    entryCount: entries.length,
+    excludedDecisionCount: 0,
+    fileCount: 0,
+    includedDecisionCount: 0,
+    otherCount: 0,
+    symlinkCount: 0,
+    unknownCount: 0,
+  };
+
+  for (const entry of entries) {
+    if (entry.decision === "descend") {
+      summary.descendedDirectoryCount += 1;
+    } else if (entry.decision === "include") {
+      summary.includedDecisionCount += 1;
+    } else if (entry.decision === "exclude") {
+      summary.excludedDecisionCount += 1;
+    }
+
+    if (entry.type === "artifact") {
+      summary.artifactCount += 1;
+    } else if (entry.type === "directory") {
+      summary.directoryCount += 1;
+    } else if (entry.type === "file") {
+      summary.fileCount += 1;
+    } else if (entry.type === "symlink") {
+      summary.symlinkCount += 1;
+    } else if (entry.type === "unknown") {
+      summary.unknownCount += 1;
+    } else {
+      summary.otherCount += 1;
+    }
+  }
+
+  return summary;
+}
+
 async function collectBundleFiles(input: {
   assertSnapshotLive?: () => Promise<void> | void;
+  debugTrace: HostedCheckpointDebugTrace | null;
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   root: string;
   rootKey: string;
@@ -454,14 +776,31 @@ async function collectBundleFiles(input: {
     const relativePath = relativeDirectory
       ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
       : entry.name;
+    const entryType = getHostedCheckpointDebugEntryType(entry);
 
     if (!input.shouldIncludeRelativePath(relativePath)) {
+      recordHostedCheckpointDebugEntry(input.debugTrace, {
+        decision: "exclude",
+        path: relativePath,
+        reason: "policy_excluded",
+        root: input.rootKey,
+        source: "walk",
+        type: entryType,
+      });
       continue;
     }
 
     const absolutePath = path.join(directoryPath, entry.name);
 
     if (entry.isDirectory()) {
+      recordHostedCheckpointDebugEntry(input.debugTrace, {
+        decision: "descend",
+        path: relativePath,
+        reason: "policy_included",
+        root: input.rootKey,
+        source: "walk",
+        type: "directory",
+      });
       files.push(
         ...(await collectBundleFiles({
           ...input,
@@ -472,6 +811,14 @@ async function collectBundleFiles(input: {
     }
 
     if (!entry.isFile()) {
+      recordHostedCheckpointDebugEntry(input.debugTrace, {
+        decision: "exclude",
+        path: relativePath,
+        reason: "unsupported_type",
+        root: input.rootKey,
+        source: "walk",
+        type: entryType,
+      });
       continue;
     }
 
@@ -489,6 +836,15 @@ async function collectBundleFiles(input: {
 
     if (artifact) {
       await input.assertSnapshotLive?.();
+      recordHostedCheckpointDebugEntry(input.debugTrace, {
+        bytes: artifact.byteSize,
+        decision: "include",
+        path: normalizedPath,
+        reason: "externalized",
+        root: input.rootKey,
+        source: "walk",
+        type: "file",
+      });
       files.push({
         artifact,
         path: normalizedPath,
@@ -497,6 +853,15 @@ async function collectBundleFiles(input: {
       continue;
     }
 
+    recordHostedCheckpointDebugEntry(input.debugTrace, {
+      bytes: bytes.byteLength,
+      decision: "include",
+      path: normalizedPath,
+      reason: "inline",
+      root: input.rootKey,
+      source: "walk",
+      type: "file",
+    });
     files.push({
       contentsBase64: Buffer.from(bytes).toString("base64"),
       path: normalizedPath,
@@ -509,6 +874,7 @@ async function collectBundleFiles(input: {
 
 async function collectExplicitBundleFiles(input: {
   assertSnapshotLive?: () => Promise<void> | void;
+  debugTrace: HostedCheckpointDebugTrace | null;
   explicitFiles: readonly string[];
   includedPaths: ReadonlySet<string>;
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
@@ -523,10 +889,26 @@ async function collectExplicitBundleFiles(input: {
   for (const normalizedPath of normalizedPaths) {
     await input.assertSnapshotLive?.();
     if (input.includedPaths.has(`${input.rootKey}:${normalizedPath}`)) {
+      recordHostedCheckpointDebugEntry(input.debugTrace, {
+        decision: "exclude",
+        path: normalizedPath,
+        reason: "already_included",
+        root: input.rootKey,
+        source: "explicit",
+        type: "file",
+      });
       continue;
     }
 
     if (!(await isBundledRegularFilePath(input.root, normalizedPath))) {
+      recordHostedCheckpointDebugEntry(input.debugTrace, {
+        decision: "exclude",
+        path: normalizedPath,
+        reason: "not_regular_file",
+        root: input.rootKey,
+        source: "explicit",
+        type: "unknown",
+      });
       throw new Error(`Hosted bundle explicit file is not a regular file for root "${input.rootKey}".`);
     }
 
@@ -547,6 +929,15 @@ async function collectExplicitBundleFiles(input: {
 
     if (artifact) {
       await input.assertSnapshotLive?.();
+      recordHostedCheckpointDebugEntry(input.debugTrace, {
+        bytes: artifact.byteSize,
+        decision: "include",
+        path: normalizedPath,
+        reason: "externalized",
+        root: input.rootKey,
+        source: "explicit",
+        type: "file",
+      });
       files.push({
         artifact,
         path: normalizedPath,
@@ -555,6 +946,15 @@ async function collectExplicitBundleFiles(input: {
       continue;
     }
 
+    recordHostedCheckpointDebugEntry(input.debugTrace, {
+      bytes: bytes.byteLength,
+      decision: "include",
+      path: normalizedPath,
+      reason: "inline",
+      root: input.rootKey,
+      source: "explicit",
+      type: "file",
+    });
     files.push({
       contentsBase64: Buffer.from(bytes).toString("base64"),
       path: normalizedPath,
@@ -569,11 +969,22 @@ function appendHostedBundleFiles(
   files: HostedBundleArchiveFile[],
   includedPaths: Set<string>,
   candidates: readonly HostedBundleArchiveFile[],
+  source: HostedCheckpointDebugEntrySource,
+  debugTrace: HostedCheckpointDebugTrace | null,
 ): void {
   for (const candidate of candidates) {
     const normalizedPath = normalizeBundlePath(candidate.path);
     const pathKey = `${candidate.root}:${normalizedPath}`;
     if (includedPaths.has(pathKey)) {
+      recordHostedCheckpointDebugEntry(debugTrace, {
+        bytes: getHostedBundleArchiveFileByteSize(candidate),
+        decision: "exclude",
+        path: normalizedPath,
+        reason: "already_included",
+        root: candidate.root,
+        source,
+        type: isHostedBundleArtifactEntry(candidate) ? "artifact" : "file",
+      });
       continue;
     }
 
@@ -692,10 +1103,18 @@ async function assertHostedBundleRestorePathHasNoSymlinks(
 }
 
 function isMissingPathError(error: unknown): boolean {
-  return Boolean(
+  return getNodeErrorCode(error) === "ENOENT";
+}
+
+function getNodeErrorCode(error: unknown): string | null {
+  if (
     error
     && typeof error === "object"
     && "code" in error
-    && error.code === "ENOENT",
-  );
+    && typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+
+  return null;
 }
