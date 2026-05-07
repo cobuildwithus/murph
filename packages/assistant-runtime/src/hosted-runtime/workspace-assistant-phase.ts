@@ -941,10 +941,8 @@ function buildHostedProviderCleanupRedactedStatus(input: {
 function shouldSkipDeviceSyncForAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  return (
-    input.request.reason === "nudge"
-    || input.initialMailboxImport.importResult.importedCount > 0
-  );
+  void input;
+  return true;
 }
 
 function shouldDeferReceiptRecoveryForAssistantPhase(
@@ -980,14 +978,20 @@ function resolveSkippedDeviceSyncWakeAt(input: {
     return existingWakeAt;
   }
 
-  if (
-    input.input.request.reason === "alarm"
-    || input.input.request.reason === "nudge"
-  ) {
+  if (shouldRescheduleSkippedDeviceSyncWake(input.input)) {
     return new Date(nowMs + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString();
   }
 
   return null;
+}
+
+function shouldRescheduleSkippedDeviceSyncWake(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  return (
+    input.request.reason === "nudge"
+    || input.initialMailboxImport.importResult.importedCount > 0
+  );
 }
 
 async function writeHostedSystemMailboxRuntimeLog(input: {
@@ -1574,7 +1578,11 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): boolean {
   return (
-    input.input.request.reason === "nudge"
+    (
+      input.input.request.reason === "nudge"
+      || input.input.initialMailboxImport.importResult.importedCount > 0
+      || input.assistantMetrics.activeTurnInputIngested === true
+    )
     && input.deliveryEffects.length > 0
     && input.deliveryEffects.every((effect) => effect.payload.transportIdempotent === true)
     && (input.assistantMetrics.postCheckpointRecord ?? null) === null

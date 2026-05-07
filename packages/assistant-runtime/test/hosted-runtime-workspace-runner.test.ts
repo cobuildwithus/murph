@@ -1459,15 +1459,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "active_turn_input",
         "active_turn_acceptance",
         "canonical_runtime_commit",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1", "2", "3"],
+        ["0", "1", "2"],
       );
-      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
         acceptedInputCount: 1,
         hostedMailboxBlockedCount: 0,
         hostedMailboxConversationImportedSeq: "2",
@@ -1477,7 +1476,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxSystemImportedSeq: "0",
         providerRequestOrdinal: 0,
       });
-      assert.deepEqual(checkpointRequests[3]?.redactedStatus, {
+      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
         hostedMailboxBlockedCount: 0,
         hostedMailboxConversationImportedSeq: "2",
         hostedMailboxFetchedCount: 1,
@@ -1512,8 +1511,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         redactedJson: {
           blockCodes: [],
           blockedCount: 0,
-          checkpointDeferred: false,
-          checkpointed: true,
+          checkpointDeferred: true,
+          checkpointed: false,
           conversationSeqEnd: "2",
           conversationSeqStart: "1",
           fetchedCount: 1,
@@ -1648,19 +1647,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
-      assert.equal(result.latestWorkspace?.version, "4");
+      assert.equal(result.latestWorkspace?.version, "3");
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "active_turn_input",
         "active_turn_acceptance",
         "outbox_sending",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1", "2", "3"],
+        ["0", "1", "2"],
       );
-      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
         acceptedInputCount: 2,
         hostedMailboxBlockedCount: 0,
         hostedMailboxConversationImportedSeq: "2",
@@ -1670,7 +1668,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxSystemImportedSeq: "0",
         providerRequestOrdinal: 1,
       });
-      assert.deepEqual(checkpointRequests[3]?.redactedStatus, {
+      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
         hostedMailboxBlockedCount: 0,
         hostedMailboxConversationImportedSeq: "2",
         hostedMailboxFetchedCount: 1,
@@ -1695,10 +1693,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "refresh:start",
         "import:2",
         "optional:log",
-        "optional:active-turn-projection",
-        "optional:log",
         "refresh:done",
         "accepted",
+        "optional:active-turn-projection",
+        "optional:log",
       ]);
     } finally {
       warn.mockRestore();
@@ -2828,7 +2826,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("rolls back only the active-turn mailbox state when the second checkpoint is stale", async () => {
+  test("rolls back only the active-turn mailbox state when the deferred import checkpoint is stale", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -2842,7 +2840,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
-      checkpointed: (request) => request.reason !== "active_turn_input",
+      checkpointed: (request) => request.reason !== "import" || request.expectedWorkspaceVersion !== "1",
     });
 
     try {
@@ -2892,7 +2890,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.ok(caught instanceof HostedMailboxImportCheckpointConflictError);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "active_turn_input",
+        "import",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
