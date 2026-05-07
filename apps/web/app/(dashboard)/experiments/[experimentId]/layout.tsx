@@ -4,7 +4,10 @@ import { notFound } from "next/navigation";
 import {
   listHealthCommonsExperimentRouteParams,
 } from "@/src/lib/health-commons/experiment-browse";
-import { resolveHealthCommonsExperimentShell } from "@/src/lib/health-commons/experiment-projections";
+import {
+  resolveHealthCommonsExperimentResultsPublic,
+  resolveHealthCommonsExperimentShell,
+} from "@/src/lib/health-commons/experiment-projections";
 import { ExperimentLayoutClient } from "./experiment-layout-client";
 import {
   ExperimentStartButtonFallback,
@@ -29,6 +32,7 @@ export default async function ExperimentDetailLayout({
     notFound();
   }
 
+  const resultsPublic = resolveHealthCommonsExperimentResultsPublic(experimentId);
   const protocolDays = Math.max(1, shell.durationDays - shell.baselineDays);
 
   return (
@@ -43,8 +47,10 @@ export default async function ExperimentDetailLayout({
           )}
         >
           <HostedExperimentStartButton
+            activeRunProtocol={resultsPublic}
             protocolDays={protocolDays}
             protocolTitle={shell.title}
+            resultsHref={`/experiments/${shell.id}#results`}
           />
         </Suspense>
       }

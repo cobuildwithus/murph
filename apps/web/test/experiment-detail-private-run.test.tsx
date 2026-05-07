@@ -11,7 +11,10 @@ import { describe, expect, it } from "vitest";
 
 import { ExperimentSchedule } from "@/src/components/experiments/experiment-detail/experiment-schedule";
 import { ResultsTab } from "@/src/components/experiments/experiment-detail/results-tab";
-import { TrendChart } from "@/src/components/experiments/experiment-detail/trend-chart";
+import {
+  TrendChart,
+  buildTrendChartPoints,
+} from "@/src/components/experiments/experiment-detail/trend-chart";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
@@ -531,6 +534,49 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(trendMarkup).not.toContain("Expected");
+  });
+
+  it("bridges shown history into the first baseline point", () => {
+    const hiddenHistoryPoints = buildTrendChartPoints({
+      label: "Resting Heart Rate",
+      unit: "bpm",
+      startDate: "2026-04-01",
+      history: [
+        { day: -6, value: 64 },
+        { day: -3, value: 63 },
+      ],
+      baseline: [
+        { day: 1, value: 62 },
+        { day: 2, value: 61 },
+      ],
+      active: [{ day: 8, value: 60 }],
+      baselineAvg: 61.5,
+      currentValue: 60,
+      delta: "-1.5 bpm",
+    }, false);
+    const shownHistoryPoints = buildTrendChartPoints({
+      label: "Resting Heart Rate",
+      unit: "bpm",
+      startDate: "2026-04-01",
+      history: [
+        { day: -6, value: 64 },
+        { day: -3, value: 63 },
+      ],
+      baseline: [
+        { day: 1, value: 62 },
+        { day: 2, value: 61 },
+      ],
+      active: [{ day: 8, value: 60 }],
+      baselineAvg: 61.5,
+      currentValue: 60,
+      delta: "-1.5 bpm",
+    }, true);
+
+    expect(hiddenHistoryPoints.some((point) => point.history !== undefined)).toBe(false);
+    expect(shownHistoryPoints).toEqual(expect.arrayContaining([
+      expect.objectContaining({ day: -3, history: 63 }),
+      expect.objectContaining({ day: 1, baseline: 62, history: 62 }),
+    ]));
   });
 
   it("formats converted percent expected ranges with measured biomarker units", async () => {
