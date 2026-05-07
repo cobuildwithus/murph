@@ -16,6 +16,7 @@ export {
   sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  startAssistantChannelActivitySession,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from './channels/runtime.js'

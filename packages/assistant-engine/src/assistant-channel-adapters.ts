@@ -14,6 +14,7 @@ export {
   sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  startAssistantChannelActivitySession,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "./assistant/channel-adapters.ts";
