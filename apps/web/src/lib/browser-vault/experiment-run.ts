@@ -2,6 +2,7 @@ import {
   isActiveOverviewExperimentStatus,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentBiomarkerResult,
+  type BrowserVaultExperimentExpectedDirection,
   type BrowserVaultExperimentExpectedRange,
   type BrowserVaultExperimentResultsLookup,
   type BrowserVaultExperimentResultsView,
@@ -124,7 +125,7 @@ function mapExperimentResultsProjection(
       : undefined,
     analysisAvailableOn,
     signals: buildSignals(results),
-    trends: buildTrends(results),
+    trends: buildTrends(client, results),
     timeline: buildPrivateRunTimeline({
       analysisAvailableOn,
       baselineDays: resolveResultBaselineDays(results, protocol),
@@ -252,6 +253,7 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
         unit,
         delta: formatDelta(biomarker.deltaAbs, unit),
         direction,
+        sentiment: resolveSignalSentiment(direction, biomarker.expectedEffect.direction),
         baseline: biomarker.baseline.mean !== null
           ? formatValueWithUnit(biomarker.baseline.mean, unit)
           : undefined,
@@ -261,7 +263,12 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
     });
 }
 
-function buildTrends(results: BrowserVaultExperimentResultsView): TrendData[] {
+const HISTORY_LOOKBACK_DAYS = 30;
+
+function buildTrends(
+  client: BrowserVaultQueryClient,
+  results: BrowserVaultExperimentResultsView,
+): TrendData[] {
   const runStart = results.experiment.windows.baselineStart ?? results.experiment.startedOn;
 
   return results.biomarkers
@@ -291,9 +298,13 @@ function buildTrends(results: BrowserVaultExperimentResultsView): TrendData[] {
         return [];
       }
 
+      const history = buildHistoryPoints(client, biomarker, runStart);
+
       return [{
         label: biomarker.label,
         unit,
+        startDate: runStart,
+        history,
         baseline,
         active,
         expectedRange: buildExpectedRangePoints(biomarker, results.experiment),
@@ -302,6 +313,31 @@ function buildTrends(results: BrowserVaultExperimentResultsView): TrendData[] {
         delta: biomarker.deltaAbs === null ? "" : formatDelta(biomarker.deltaAbs, unit),
       }];
     });
+}
+
+function buildHistoryPoints(
+  client: BrowserVaultQueryClient,
+  biomarker: BrowserVaultExperimentBiomarkerResult,
+  runStart: string,
+): { day: number; value: number }[] {
+  if (!biomarker.sourceMetric) {
+    return [];
+  }
+
+  const historyStart = addDaysToIsoDate(runStart, -HISTORY_LOOKBACK_DAYS);
+  const points: { day: number; value: number }[] = [];
+
+  for (const row of client.metrics.series({ metricKey: biomarker.sourceMetric.metricKey })) {
+    if (row.date >= runStart) break;
+    if (row.date < historyStart) continue;
+    if (typeof row.value !== "number" || !Number.isFinite(row.value)) continue;
+    points.push({
+      day: -daysBetweenInclusive(row.date, runStart) + 1,
+      value: roundMetric(row.value),
+    });
+  }
+
+  return points;
 }
 
 function buildExpectedRangePoints(
@@ -381,19 +417,19 @@ function buildSchedule(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection["schedule"] {
   const schedule = results.schedule;
-  if (!schedule) {
-    return undefined;
-  }
-
   const windows = results.experiment.windows;
-  const firstCellDate = schedule.cells[0]?.localDate ?? null;
-  const lastCellDate = schedule.cells.at(-1)?.localDate ?? null;
+  const firstCellDate = schedule?.cells[0]?.localDate ?? null;
+  const lastCellDate = schedule?.cells.at(-1)?.localDate ?? null;
   const startDate = minIsoDate(windows.baselineStart, windows.interventionStart, firstCellDate);
   const endDate = maxIsoDate(windows.baselineEnd, windows.interventionEnd, lastCellDate);
 
   if (!startDate || !endDate) {
     return undefined;
   }
+
+  const todayLocalDate = schedule
+    ? formatIsoDateInTimeZone(results.asOf, schedule.timeZone)
+    : results.asOf.slice(0, 10);
 
   const weeks = buildScheduleWeeks({
     baselineEnd: windows.baselineEnd,
@@ -402,12 +438,13 @@ function buildSchedule(
     interventionStart: windows.interventionStart,
     schedule,
     startDate,
-    todayLocalDate: formatIsoDateInTimeZone(results.asOf, schedule.timeZone),
+    todayLocalDate,
   });
 
   return {
     cadence: formatScheduleCadence(results),
     dose: formatScheduleDose(results),
+    loggedSessions: results.progress?.adherence.loggedSessions ?? schedule?.completedSessions,
     weeks,
   };
 }
@@ -417,13 +454,13 @@ function buildScheduleWeeks(input: {
   baselineStart: string | null;
   endDate: string;
   interventionStart: string | null;
-  schedule: BrowserVaultExperimentScheduleResult;
+  schedule: BrowserVaultExperimentScheduleResult | null;
   startDate: string;
   todayLocalDate: string;
 }): ScheduleWeek[] {
-  const scheduleByDate = new Map(
-    input.schedule.cells.map((cell) => [cell.localDate, cell]),
-  );
+  const scheduleByDate = input.schedule
+    ? groupScheduleCellsByDate(input.schedule.cells)
+    : new Map<string, BrowserVaultExperimentScheduleResult["cells"]>();
   const weeks: ScheduleWeek[] = [];
   let protocolWeekIndex = 1;
 
@@ -433,34 +470,52 @@ function buildScheduleWeeks(input: {
     weekStart = addDaysToIsoDate(weekStart, 7)
   ) {
     const weekEnd = minIsoDate(addDaysToIsoDate(weekStart, 6), input.endDate) ?? input.endDate;
-    const cells = dateRange(weekStart, weekEnd).map((date) => {
-      const scheduledCell = scheduleByDate.get(date);
-      const kind = resolveScheduleCellKind({
+    const cells: ScheduleCell[] = dateRange(weekStart, weekEnd).flatMap<ScheduleCell>((date) => {
+      const scheduledCells = scheduleByDate.get(date) ?? [];
+      const baselineKind = resolveScheduleCellKind({
         baselineEnd: input.baselineEnd,
         baselineStart: input.baselineStart,
         date,
-        scheduledCell,
+        todayLocalDate: input.todayLocalDate,
       });
 
-      return {
+      if (baselineKind) {
+        return [{
+          columnStart: isoDateWeekdayColumn(date),
+          dayLabel: formatWeekday(date),
+          date: formatShortDate(date),
+          kind: baselineKind,
+          detail: formatScheduleCellDetail(baselineKind),
+          isToday: date === input.todayLocalDate,
+        } satisfies ScheduleCell];
+      }
+
+      if (scheduledCells.length === 0) {
+        return [];
+      }
+
+      return scheduledCells.map((scheduledCell): ScheduleCell => ({
+        columnStart: isoDateWeekdayColumn(date),
         dayLabel: formatWeekday(date),
         date: formatShortDate(date),
-        kind,
-        detail: formatScheduleCellDetail(kind, scheduledCell),
+        kind: scheduledCell.kind,
+        detail: formatScheduleCellDetail(scheduledCell.kind, scheduledCell),
         isToday: date === input.todayLocalDate,
-      } satisfies ScheduleCell;
+      } satisfies ScheduleCell));
     });
 
     const isPreProtocolWeek = input.interventionStart
       ? weekEnd < input.interventionStart
       : cells.every((cell) => cell.kind === "baseline");
 
-    weeks.push({
-      label: isPreProtocolWeek ? "Baseline" : `Week ${protocolWeekIndex}`,
-      dateRange: formatDateRange(weekStart, weekEnd),
-      summary: isPreProtocolWeek ? "Baseline window" : summarizeScheduleWeek(cells),
-      cells,
-    });
+    if (cells.length > 0) {
+      weeks.push({
+        label: isPreProtocolWeek ? "Baseline" : `Week ${protocolWeekIndex}`,
+        dateRange: formatDateRange(weekStart, weekEnd),
+        summary: isPreProtocolWeek ? "Baseline window" : summarizeScheduleWeek(cells),
+        cells,
+      });
+    }
     if (!isPreProtocolWeek) {
       protocolWeekIndex += 1;
     }
@@ -469,26 +524,33 @@ function buildScheduleWeeks(input: {
   return weeks;
 }
 
+function groupScheduleCellsByDate(
+  cells: readonly BrowserVaultExperimentScheduleResult["cells"][number][],
+): Map<string, BrowserVaultExperimentScheduleResult["cells"]> {
+  const byDate = new Map<string, BrowserVaultExperimentScheduleResult["cells"]>();
+  for (const cell of cells) {
+    const existing = byDate.get(cell.localDate) ?? [];
+    existing.push(cell);
+    byDate.set(cell.localDate, existing);
+  }
+  return byDate;
+}
+
 function resolveScheduleCellKind(input: {
   baselineEnd: string | null;
   baselineStart: string | null;
   date: string;
-  scheduledCell?: BrowserVaultExperimentScheduleResult["cells"][number];
-}): ScheduleCellKind {
+  todayLocalDate: string;
+}): ScheduleCellKind | null {
   if (dateInRange(input.date, input.baselineStart, input.baselineEnd)) {
     return "baseline";
   }
+  return null;
+}
 
-  switch (input.scheduledCell?.kind) {
-    case "completed":
-    case "partial":
-    case "missed":
-    case "skipped":
-    case "scheduled":
-      return input.scheduledCell.kind;
-    default:
-      return "rest";
-  }
+function isoDateWeekdayColumn(value: string): number {
+  const day = new Date(`${value}T00:00:00.000Z`).getUTCDay();
+  return day === 0 ? 7 : day;
 }
 
 function formatScheduleCellDetail(
@@ -500,8 +562,14 @@ function formatScheduleCellDetail(
       return "Done";
     case "partial":
       return "Partial";
+    case "missed":
+      return "Not logged";
+    case "failed":
+      return "Not met";
+    case "unknown":
+      return "Unknown";
     case "scheduled":
-      return scheduledCell?.localTime;
+      return scheduledCell?.localTime ?? undefined;
     default:
       return undefined;
   }
@@ -519,18 +587,46 @@ function summarizeScheduleWeek(cells: readonly ScheduleCell[]): string | undefin
   const parts = [
     formatCount(countScheduleCells(cells, "completed"), "done"),
     formatCount(countScheduleCells(cells, "partial"), "partial"),
-    formatCount(countScheduleCells(cells, "skipped"), "skipped"),
-    formatCount(countScheduleCells(cells, "missed"), "missed"),
+    formatCount(countScheduleCells(cells, "missed"), "not logged"),
+    formatCount(countScheduleCells(cells, "failed"), "not met"),
+    formatCount(countScheduleCells(cells, "unknown"), "unknown"),
     formatCount(countScheduleCells(cells, "scheduled"), "scheduled"),
   ].filter((part): part is string => Boolean(part));
 
-  return parts.length > 0 ? parts.join(" · ") : "Rest days";
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+function readTargetCountPerDay(
+  calendar: BrowserVaultExperimentResultsView["experiment"]["runPlan"]["adherenceTargets"][number]["calendar"],
+): number {
+  switch (calendar.kind) {
+    case "daily":
+    case "weekdays":
+      return calendar.targetCountPerDay ?? 1;
+    case "explicitDates":
+      return Math.max(1, ...calendar.dates.map((date) => date.targetCount ?? 1));
+  }
 }
 
 function formatScheduleCadence(results: BrowserVaultExperimentResultsView): string {
+  const adherenceTarget = results.experiment.runPlan.adherenceTargets[0];
+  if (adherenceTarget) {
+    const targetCount = readTargetCountPerDay(adherenceTarget.calendar);
+    const countPrefix = targetCount > 1 ? `${targetCount}x ` : "";
+    if (adherenceTarget.calendar.kind === "daily") {
+      return `${countPrefix}Daily${adherenceTarget.calendar.localTime ? ` at ${adherenceTarget.calendar.localTime}` : ""}`;
+    }
+    if (adherenceTarget.calendar.kind === "weekdays") {
+      return `${countPrefix}${adherenceTarget.calendar.weekdays.map(formatWeekdayName).join(", ")}${
+        adherenceTarget.calendar.localTime ? ` at ${adherenceTarget.calendar.localTime}` : ""
+      }`;
+    }
+    return `${adherenceTarget.label} target`;
+  }
+
   const schedule = results.experiment.runPlan.schedule;
   if (!schedule) {
-    return "Logged sessions";
+    return "Logged days";
   }
 
   if (schedule.kind === "dailyLocal") {
@@ -547,8 +643,13 @@ function formatScheduleCadence(results: BrowserVaultExperimentResultsView): stri
 
 function formatScheduleDose(results: BrowserVaultExperimentResultsView): string | undefined {
   const schedule = results.schedule;
-  const target = results.experiment.runPlan.targetSessions;
-  const minimum = results.experiment.runPlan.minimumUsefulSessions;
+  const adherenceTarget = results.experiment.runPlan.adherenceTargets[0];
+  const target =
+    adherenceTarget?.rollup?.targetCompletions ??
+    results.experiment.runPlan.targetSessions;
+  const minimum =
+    adherenceTarget?.rollup?.minimumUsefulCompletions ??
+    results.experiment.runPlan.minimumUsefulSessions;
 
   if (!schedule && target === null && minimum === null) {
     return undefined;
@@ -559,8 +660,9 @@ function formatScheduleDose(results: BrowserVaultExperimentResultsView): string 
     minimum !== null ? `${minimum} minimum useful` : undefined,
     schedule ? formatCount(schedule.completedSessions, "done") : undefined,
     schedule ? formatCount(schedule.partialSessions, "partial") : undefined,
-    schedule ? formatCount(schedule.skippedSessions, "skipped") : undefined,
-    schedule ? formatCount(schedule.missedSessions, "missed") : undefined,
+    schedule ? formatCount(schedule.missedSessions, "not logged") : undefined,
+    schedule ? formatCount(schedule.failedSessions, "not met") : undefined,
+    schedule ? formatCount(schedule.unknownSessions, "unknown") : undefined,
   ].filter((part): part is string => Boolean(part));
 
   return parts.length > 0 ? parts.join(" · ") : undefined;
@@ -591,11 +693,11 @@ function buildRunSummary(
     return `${phaseLabel} in progress`;
   }
 
-  const sessionPart = adherence
-    ? ` with ${adherence.loggedSessions} logged session${adherence.loggedSessions === 1 ? "" : "s"}`
+  const adherencePart = adherence
+    ? ` with ${adherence.loggedSessions} logged target${adherence.loggedSessions === 1 ? "" : "s"}`
     : "";
 
-  return `${phaseLabel}${sessionPart}: ${primary.label} is ${formatDelta(primary.deltaAbs, primary.unit ?? undefined)} from baseline.`;
+  return `${phaseLabel}${adherencePart}: ${primary.label} is ${formatDelta(primary.deltaAbs, primary.unit ?? undefined)} from baseline.`;
 }
 
 function buildRunSummaryDetail(
@@ -956,12 +1058,11 @@ function formatAdherenceDetail(
   const parts = [
     `${adherence.loggedSessions} logged`,
     formatCount(adherence.partialSessions, "partial"),
-    formatCount(adherence.skippedSessions, "skipped"),
-    formatCount(adherence.missedSessions, "missed"),
+    formatCount(adherence.missedSessions, "not logged"),
     adherence.targetSessions !== null ? `${adherence.targetSessions} target` : undefined,
   ].filter((part): part is string => Boolean(part));
 
-  return `Session adherence is ${adherence.status.replaceAll("_", " ")} (${parts.join(" · ")}).`;
+  return `Adherence is ${adherence.status.replaceAll("_", " ")} (${parts.join(" · ")}).`;
 }
 
 function formatExpectedSignalText(
@@ -1003,6 +1104,21 @@ function resolveSignalDirection(
   }
 
   return deltaAbs > 0 ? "up" : "down";
+}
+
+function resolveSignalSentiment(
+  direction: "up" | "down" | "neutral",
+  expectedDirection: BrowserVaultExperimentExpectedDirection | null,
+): "positive" | "negative" | "neutral" {
+  if (direction === "neutral" || !expectedDirection) {
+    return "neutral";
+  }
+
+  const movingAsExpected =
+    (direction === "down" && (expectedDirection === "decrease" || expectedDirection === "stabilize")) ||
+    (direction === "up" && (expectedDirection === "increase" || expectedDirection === "stabilize"));
+
+  return movingAsExpected ? "positive" : "negative";
 }
 
 function formatDelta(value: number, unit: string | null | undefined): string {

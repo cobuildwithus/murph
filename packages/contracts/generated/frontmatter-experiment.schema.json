@@ -243,6 +243,320 @@
           "type": "string",
           "format": "date"
         },
+        "adherenceTargets": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "targetId": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "baseline",
+                  "intervention",
+                  "run"
+                ]
+              },
+              "calendar": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "daily"
+                      },
+                      "timeZone": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 64
+                      },
+                      "localTime": {
+                        "type": "string",
+                        "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                      },
+                      "targetCountPerDay": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "timeZone"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "weekdays"
+                      },
+                      "timeZone": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 64
+                      },
+                      "weekdays": {
+                        "minItems": 1,
+                        "maxItems": 7,
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 6
+                        },
+                        "uniqueItems": true
+                      },
+                      "localTime": {
+                        "type": "string",
+                        "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                      },
+                      "targetCountPerDay": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "timeZone",
+                      "weekdays"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "explicitDates"
+                      },
+                      "timeZone": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 64
+                      },
+                      "dates": {
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "localDate": {
+                              "type": "string",
+                              "format": "date"
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 160
+                            },
+                            "localTime": {
+                              "type": "string",
+                              "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                            },
+                            "targetCount": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          },
+                          "required": [
+                            "localDate"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "timeZone",
+                      "dates"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "evidence": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "linkedEventCount"
+                      },
+                      "eventKind": {
+                        "type": "string",
+                        "enum": [
+                          "intervention_session",
+                          "supplement_intake",
+                          "medication_intake",
+                          "activity_session",
+                          "measurement"
+                        ]
+                      },
+                      "missing": {
+                        "type": "string",
+                        "enum": [
+                          "missed_after_grace",
+                          "unknown"
+                        ]
+                      },
+                      "partialCredit": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "eventKind",
+                      "missing"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "metricThreshold"
+                      },
+                      "metricKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          ">=",
+                          "<=",
+                          "==",
+                          "between"
+                        ]
+                      },
+                      "value": {
+                        "type": "number"
+                      },
+                      "min": {
+                        "type": "number"
+                      },
+                      "max": {
+                        "type": "number"
+                      },
+                      "missing": {
+                        "type": "string",
+                        "enum": [
+                          "unknown",
+                          "failed_after_grace"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "metricKey",
+                      "op",
+                      "missing"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "metricPresence"
+                      },
+                      "metricKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "missing": {
+                        "type": "string",
+                        "enum": [
+                          "missed_after_grace",
+                          "unknown"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "metricKey",
+                      "missing"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "grace": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "hours": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "hours"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "days": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "days"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "rollup": {
+                "type": "object",
+                "properties": {
+                  "targetCompletions": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "minimumUsefulCompletions": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "targetId",
+              "label",
+              "phase",
+              "calendar",
+              "evidence"
+            ],
+            "additionalProperties": false
+          },
+          "uniqueItems": true
+        },
         "modality": {
           "type": "string",
           "minLength": 1,

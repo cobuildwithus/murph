@@ -271,7 +271,7 @@ describe("experiment detail private-run composition", () => {
       status: "active",
     }));
     expect(privateRun?.nextStep).toEqual(expect.objectContaining({
-      context: "Session adherence is not started (0 logged).",
+      context: "Adherence is not started (0 logged).",
       title: "Continue the protocol",
       when: "Day 6",
     }));
@@ -642,7 +642,7 @@ describe("experiment detail private-run composition", () => {
     ]);
   });
 
-  it("renders partial and skipped schedule cells from real browser-vault sessions", async () => {
+  it("renders partial and not-logged schedule cells from real browser-vault sessions", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
@@ -709,13 +709,13 @@ describe("experiment detail private-run composition", () => {
 
     const interventionKinds = privateRun?.schedule?.weeks
       .flatMap((week) => week.cells)
-      .filter((cell) => cell.kind !== "baseline" && cell.kind !== "rest")
+      .filter((cell) => cell.kind !== "baseline")
       .map((cell) => cell.kind);
 
     expect(interventionKinds).toEqual([
       "completed",
       "partial",
-      "skipped",
+      "missed",
       "scheduled",
       "scheduled",
     ]);
@@ -725,10 +725,88 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(scheduleMarkup).toContain("Partial");
-    expect(scheduleMarkup).toContain("Skipped");
+    expect(scheduleMarkup).toContain("Not logged");
     expect(scheduleMarkup).toContain("5 planned");
     expect(scheduleMarkup).not.toContain("2 done");
     expect(scheduleMarkup).not.toContain("1 missed");
+  });
+
+  it("preserves same-day planned target cells in the schedule UI projection", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-09T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_multi",
+            runPlan: {
+              baselineEnd: "2026-04-07",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-08",
+              interventionStart: "2026-04-08",
+              adherenceTargets: [
+                {
+                  targetId: "sauna-a",
+                  label: "Sauna A",
+                  phase: "intervention",
+                  calendar: {
+                    kind: "explicitDates",
+                    timeZone: "America/New_York",
+                    dates: [{ localDate: "2026-04-08", label: "Sauna A" }],
+                  },
+                  evidence: {
+                    kind: "linkedEventCount",
+                    eventKind: "intervention_session",
+                    missing: "missed_after_grace",
+                  },
+                },
+                {
+                  targetId: "sauna-b",
+                  label: "Sauna B",
+                  phase: "intervention",
+                  calendar: {
+                    kind: "explicitDates",
+                    timeZone: "America/New_York",
+                    dates: [{ localDate: "2026-04-08", label: "Sauna B" }],
+                  },
+                  evidence: {
+                    kind: "linkedEventCount",
+                    eventKind: "intervention_session",
+                    missing: "missed_after_grace",
+                  },
+                },
+              ],
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna multi-target run",
+          }),
+          id: "exp_sauna_multi",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Multiple planned targets can share a day.",
+          tags: ["sauna"],
+          title: "Private sauna multi-target run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    const interventionCells = privateRun?.schedule?.weeks
+      .flatMap((week) => week.cells)
+      .filter((cell) => cell.kind !== "baseline");
+
+    expect(interventionCells).toHaveLength(2);
+    expect(interventionCells?.map((cell) => cell.kind)).toEqual(["scheduled", "scheduled"]);
   });
 
   it("starts protocol week numbering from the real intervention window", async () => {

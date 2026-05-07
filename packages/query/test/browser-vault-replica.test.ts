@@ -173,6 +173,69 @@ test("browser vault replicas validate schema", () => {
   );
 });
 
+test("browser vault replica keeps only browser-supported adherence targets", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "c".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("experiment", "exp_adherence", {
+          frontmatter: {
+            runPlan: {
+              baselineStart: "2026-04-01",
+              baselineEnd: "2026-04-07",
+              interventionStart: "2026-04-08",
+              interventionEnd: "2026-04-14",
+              adherenceTargets: [
+                {
+                  targetId: "sauna",
+                  label: "Sauna",
+                  phase: "intervention",
+                  calendar: {
+                    kind: "daily",
+                    timeZone: "America/New_York",
+                  },
+                  evidence: {
+                    kind: "linkedEventCount",
+                    eventKind: "intervention_session",
+                    missing: "missed_after_grace",
+                  },
+                },
+                {
+                  targetId: "steps",
+                  label: "Step floor",
+                  phase: "intervention",
+                  calendar: {
+                    kind: "daily",
+                    timeZone: "America/New_York",
+                  },
+                  evidence: {
+                    kind: "metricThreshold",
+                    metricKey: "steps",
+                    op: ">=",
+                    value: 8000,
+                    missing: "unknown",
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const experiment = parseBrowserVaultReplica(replica).entities[0];
+  const runPlan = experiment?.attributes.runPlan;
+  assert.ok(runPlan && typeof runPlan === "object" && !Array.isArray(runPlan));
+  const targets = (runPlan as Record<string, unknown>).adherenceTargets;
+  assert.ok(Array.isArray(targets));
+  assert.equal(targets.length, 1);
+  assert.equal((targets[0] as Record<string, unknown>).targetId, "sauna");
+});
+
 test("browser vault replica projects experiment event fields only for relevant event kinds", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-04-20T12:00:00.000Z",

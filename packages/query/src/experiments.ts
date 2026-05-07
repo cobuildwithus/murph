@@ -14,6 +14,11 @@ import {
 
 import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
+  buildExperimentAdherenceCalendar,
+  synthesizeLegacySessionAdherenceTargets,
+  type ExperimentAdherenceObservation,
+} from "./experiment-adherence.ts";
+import {
   readExperimentProtocolProjectionFields,
   type ExperimentProtocolProjectionFields,
 } from "./protocols.ts";
@@ -214,6 +219,9 @@ interface ExperimentSummaryContext {
 }
 
 type QueryExperimentFrontmatter = ExperimentFrontmatter;
+type QueryExperimentAdherenceTarget = NonNullable<
+  NonNullable<ExperimentFrontmatter["runPlan"]>["adherenceTargets"]
+>[number];
 
 interface MetricWindowPoint {
   date: string;
@@ -510,14 +518,35 @@ function resolveExpectedDirection(
 }
 
 function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
-  const targetSessions = context.frontmatter.runPlan?.targetSessions ?? null;
-  const minimumUsefulSessions = context.frontmatter.runPlan?.minimumUsefulSessions ?? null;
-  const expectedSessionsByNow = computeExpectedSessionsByNow(
-    context.frontmatter,
-    context.asOf,
-    targetSessions,
-  );
-  const completedSessions = context.completedSessions;
+  const targets =
+    context.frontmatter.runPlan?.adherenceTargets ??
+    synthesizeLegacySessionAdherenceTargets({
+      runPlan: context.frontmatter.runPlan,
+    });
+  const targetSessions =
+    targets[0]?.rollup?.targetCompletions ??
+    context.frontmatter.runPlan?.targetSessions ??
+    null;
+  const minimumUsefulSessions =
+    targets[0]?.rollup?.minimumUsefulCompletions ??
+    context.frontmatter.runPlan?.minimumUsefulSessions ??
+    null;
+  const adherenceCalendar = targets.length > 0
+    ? buildExperimentAdherenceCalendar({
+        asOf: context.asOf,
+        observations: buildAdherenceObservations(context, targets),
+        targets,
+        windows: buildWindowSummary(context.frontmatter),
+      })
+    : null;
+  const completedSessions = adherenceCalendar?.summary.satisfiedCount ?? context.completedSessions;
+  const expectedSessionsByNow = adherenceCalendar
+    ? adherenceCalendar.cells.filter((cell) => cell.status !== "scheduled").length
+    : computeExpectedSessionsByNow(
+        context.frontmatter,
+        context.asOf,
+        targetSessions,
+      );
 
   let status: ExperimentAdherenceStatus = "unknown";
   if (completedSessions === 0) {
@@ -545,6 +574,55 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     status,
     targetSessions,
   };
+}
+
+function buildAdherenceObservations(
+  context: ExperimentSummaryContext,
+  targets: readonly QueryExperimentAdherenceTarget[],
+): ExperimentAdherenceObservation[] {
+  const observations: ExperimentAdherenceObservation[] = [];
+
+  for (const target of targets ?? []) {
+    switch (target.evidence.kind) {
+      case "linkedEventCount":
+        const linkedEvidence = target.evidence;
+        observations.push(...context.events
+          .filter((event) => event.kind === linkedEvidence.eventKind)
+          .map((event) => ({
+            evidenceId: event.entityId,
+            eventKind: event.kind,
+            localDate:
+              readStringAttribute(event, "scheduledLocalDate") ??
+              readStringAttribute(event, "sessionLocalDate") ??
+              (event.occurredAt
+                ? toLocalDayKey(new Date(event.occurredAt), target.calendar.timeZone)
+                : event.date ?? context.asOf),
+            status: readExperimentSessionStatus(event),
+            targetId: target.targetId,
+          })));
+        break;
+      case "metricPresence":
+      case "metricThreshold":
+        const metricEvidence = target.evidence;
+        for (const [date, summary] of context.summariesByDate) {
+          const metric = resolveAdherenceMetric(metricEvidence.metricKey, summary);
+          if (!metric || typeof metric.selection.value !== "number") {
+            continue;
+          }
+          const value = metric.selection.value;
+          observations.push({
+            evidenceId: metric.selection.recordIds[0] ?? `${metricEvidence.metricKey}:${date}`,
+            localDate: date,
+            metricKey: metricEvidence.metricKey,
+            targetId: target.targetId,
+            value,
+          });
+        }
+        break;
+    }
+  }
+
+  return observations;
 }
 
 function buildCoverageSummary(input: {
@@ -1127,6 +1205,50 @@ function resolveBiomarkerMetric(
   }
 
   return null;
+}
+
+function resolveAdherenceMetric(
+  metricKey: string,
+  summary: WearableDaySummary | null,
+): WearableResolvedMetric | null {
+  if (!summary) {
+    return null;
+  }
+
+  switch (metricKey.trim()) {
+    case "steps":
+      return summary.activity?.steps ?? null;
+    case "resting-heart-rate":
+    case "resting_heart_rate":
+      return summary.recovery?.restingHeartRate ?? null;
+    case "hrv":
+      return summary.recovery?.hrv ?? summary.sleep?.hrv ?? null;
+    case "sleep-efficiency":
+      return summary.sleep?.sleepEfficiency ?? null;
+    default:
+      return resolveBiomarkerMetric(metricKey, summary);
+  }
+}
+
+function readStringAttribute(entity: CanonicalEntity, key: string): string | null {
+  const value = (entity.attributes as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readExperimentSessionStatus(
+  entity: CanonicalEntity,
+): ExperimentAdherenceObservation["status"] {
+  const status = readStringAttribute(entity, "sessionStatus");
+  switch (status) {
+    case "partial":
+      return "partial";
+    case "missed":
+      return "missed";
+    case "skipped":
+      return "skipped";
+    default:
+      return "completed";
+  }
 }
 
 function resolveProgressPhase(

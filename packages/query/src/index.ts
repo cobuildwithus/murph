@@ -69,6 +69,9 @@ export {
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "./experiments.ts";
+export {
+  synthesizeLegacySessionAdherenceTargets,
+} from "./experiment-adherence.ts";
 export type {
   ExperimentAdherenceStatus,
   ExperimentCoverageStatus,

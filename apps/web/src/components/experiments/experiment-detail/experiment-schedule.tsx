@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Check, CircleSlash, Minus, X } from "lucide-react";
+import { Check, Minus, X } from "lucide-react";
 
 import type {
   ExperimentSchedule,
@@ -16,22 +16,126 @@ const CELL_VARIANT: Record<ScheduleCellKind, string> = {
   baseline: "border border-secondary/30 bg-secondary/30 text-foreground/60",
   completed: "border border-ring/40 bg-ring/15 text-foreground",
   partial: "border border-secondary/60 bg-secondary/20 text-foreground",
-  missed: "border border-destructive/50 bg-destructive/15 text-destructive",
-  skipped: "border border-muted-foreground/30 bg-muted/40 text-muted-foreground",
+  missed: "border border-muted-foreground/35 bg-muted/25 text-muted-foreground",
+  failed: "border border-secondary/60 bg-secondary/15 text-foreground",
+  unknown: "border border-border/60 bg-muted/20 text-muted-foreground",
   scheduled: "border border-ring/50 bg-transparent text-ring",
-  rest: "border border-border/40 bg-transparent text-muted-foreground/60",
-  upcoming: "border border-border/30 bg-transparent text-muted-foreground/60",
 };
 
 const LEGEND_ENTRIES: { kind: ScheduleCellKind; label: string }[] = [
   { kind: "baseline", label: "Baseline" },
   { kind: "completed", label: "Completed" },
   { kind: "partial", label: "Partial" },
-  { kind: "missed", label: "Missed" },
-  { kind: "skipped", label: "Skipped" },
+  { kind: "missed", label: "Not logged" },
+  { kind: "failed", label: "Not met" },
+  { kind: "unknown", label: "Unknown" },
   { kind: "scheduled", label: "Scheduled" },
-  { kind: "rest", label: "Rest" },
 ];
+
+export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps) {
+  const stats = tallyTargetStats(schedule);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          Adherence
+        </span>
+        <span className="text-xs text-muted-foreground">{schedule.cadence}</span>
+      </div>
+      <div className="flex flex-col gap-2">
+        {schedule.weeks.map((week) => (
+          <div key={week.label} className="flex flex-col gap-1">
+            {week.dateRange && (
+              <WeekDateRange dateRange={week.dateRange} />
+            )}
+            <div className="grid grid-cols-7 gap-1">
+              {week.cells.map((cell, idx) => (
+                <CompactCellView key={idx} cell={cell} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {stats.due > 0 && (
+        <div className="flex items-baseline justify-between border-t border-border/50 pt-3">
+          <span className="text-xs text-muted-foreground">
+            {stats.completed} of {stats.due} due
+          </span>
+          <span className="font-serif text-sm font-semibold text-foreground">
+            {stats.adherencePercent}%
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function tallyTargetStats(schedule: ExperimentSchedule) {
+  const cells = schedule.weeks.flatMap((week) => week.cells);
+  const completed = cells.filter((c) => c.kind === "completed").length;
+  const partial = cells.filter((c) => c.kind === "partial").length;
+  const missed = cells.filter((c) => c.kind === "missed").length;
+  const failed = cells.filter((c) => c.kind === "failed").length;
+  const unknown = cells.filter((c) => c.kind === "unknown").length;
+  const due = completed + partial + missed + failed + unknown;
+  const adherencePercent = due > 0 ? Math.round((completed / due) * 100) : 0;
+  return { completed, due, adherencePercent };
+}
+
+function WeekDateRange({ dateRange }: { dateRange: string }) {
+  const parts = dateRange.split(/\s*[–—-]\s*/);
+  if (parts.length === 2) {
+    return (
+      <div className="flex justify-between text-[9px] text-muted-foreground/70">
+        <span>{parts[0]}</span>
+        <span>{parts[1]}</span>
+      </div>
+    );
+  }
+  return <span className="text-[9px] text-right text-muted-foreground/70">{dateRange}</span>;
+}
+
+function CompactCellView({ cell }: { cell: ScheduleCell }) {
+  return (
+    <div
+      className={cn(
+        "relative flex h-9 flex-col items-center justify-center rounded",
+        CELL_VARIANT[cell.kind],
+      )}
+      style={cell.columnStart ? { gridColumnStart: cell.columnStart } : undefined}
+      title={cell.date ? `${cell.dayLabel} · ${cell.date}` : cell.dayLabel}
+    >
+      {cell.isToday && (
+        <span
+          aria-label="Today"
+          className="absolute right-0.5 top-0.5 size-1 rounded-full bg-primary"
+        />
+      )}
+      <span className="font-mono text-[8px] uppercase tracking-wide text-muted-foreground">
+        {cell.dayLabel}
+      </span>
+      {renderCompactCellBody(cell)}
+    </div>
+  );
+}
+
+function renderCompactCellBody(cell: ScheduleCell): ReactNode {
+  switch (cell.kind) {
+    case "completed":
+      return <Check className="size-2.5" strokeWidth={3} />;
+    case "partial":
+      return <Minus aria-label="Partial" className="size-2.5" strokeWidth={3} />;
+    case "missed":
+      return <X aria-label="Not logged" className="size-2.5" strokeWidth={2} />;
+    case "failed":
+      return <X aria-label="Not met" className="size-2.5" strokeWidth={2} />;
+    case "unknown":
+      return <span className="font-mono text-[10px]">?</span>;
+    default:
+      return null;
+  }
+}
 
 export function ExperimentSchedule({ schedule }: ExperimentScheduleProps) {
   return (
@@ -39,7 +143,7 @@ export function ExperimentSchedule({ schedule }: ExperimentScheduleProps) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1.5">
           <span className="font-mono text-[10px] uppercase tracking-widest text-chart-5">
-            Schedule
+            Plan
           </span>
           <span className="font-serif text-xl font-semibold text-foreground">
             {schedule.cadence}
@@ -94,7 +198,7 @@ export function ExperimentSchedule({ schedule }: ExperimentScheduleProps) {
         </span>
         <span>
           Want to change the schedule? Ask Murph — your cadence, baseline,
-          and logged sessions are already loaded.
+          and logged adherence data are already loaded.
         </span>
       </p>
     </section>
@@ -139,9 +243,11 @@ function renderCellBody(cell: ScheduleCell): ReactNode {
         </span>
       );
     case "missed":
-      return <X aria-label="Missed" className="size-3.5" strokeWidth={2} />;
-    case "skipped":
-      return <CircleSlash aria-label="Skipped" className="size-3.5" strokeWidth={2} />;
+      return <X aria-label="Not logged" className="size-3.5" strokeWidth={2} />;
+    case "failed":
+      return <X aria-label="Not met" className="size-3.5" strokeWidth={2} />;
+    case "unknown":
+      return <span className="font-mono text-xs">?</span>;
     case "scheduled":
       return cell.detail ? (
         <span className="text-[11px] font-medium">{cell.detail}</span>

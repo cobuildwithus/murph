@@ -340,10 +340,61 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
     "value",
   ]) {
     if (source[key] !== undefined && isBrowserSafeJson(source[key])) {
-      allowed[key] = cloneJson(source[key]);
+      allowed[key] = key === "runPlan"
+        ? projectSafeRunPlan(source[key])
+        : cloneJson(source[key]);
     }
   }
 
+  return allowed;
+}
+
+function projectSafeRunPlan(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return cloneJson(value);
+  }
+
+  const source = value as Record<string, unknown>;
+  const projected = cloneRecord(source);
+  if (Array.isArray(source.adherenceTargets)) {
+    const targets = source.adherenceTargets
+      .map(projectBrowserSafeAdherenceTarget)
+      .filter((target): target is Record<string, unknown> => target !== null);
+    if (targets.length > 0) {
+      projected.adherenceTargets = targets;
+    } else {
+      delete projected.adherenceTargets;
+    }
+  }
+
+  return projected;
+}
+
+function projectBrowserSafeAdherenceTarget(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const target = value as Record<string, unknown>;
+  const evidence = target.evidence;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    return null;
+  }
+
+  const evidenceRecord = evidence as Record<string, unknown>;
+  if (
+    evidenceRecord.kind !== "linkedEventCount" ||
+    evidenceRecord.eventKind !== "intervention_session"
+  ) {
+    return null;
+  }
+
+  const allowed: Record<string, unknown> = {};
+  for (const key of ["targetId", "label", "phase", "calendar", "evidence", "grace", "rollup"]) {
+    if (target[key] !== undefined && isBrowserSafeJson(target[key])) {
+      allowed[key] = cloneJson(target[key]);
+    }
+  }
   return allowed;
 }
 
