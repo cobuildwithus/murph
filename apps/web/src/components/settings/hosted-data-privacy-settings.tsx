@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { DownloadIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon } from "lucide-react";
 
 import {
   HostedOnboardingApiError,
@@ -25,7 +25,6 @@ import {
 } from "@/src/lib/browser-vault/loader";
 import { HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE } from "@/src/lib/hosted-privacy/account-data-shared";
 
-import { ConnectedAccountCard } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 interface HostedAccountDeleteResponse {
@@ -217,30 +216,34 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
         </Alert>
       ) : null}
 
-      <ConnectedAccountCard
-        label="Export vault"
-        value="Download your browser vault"
-        meta="Private records, metrics, timelines, search rows, and summaries as JSON."
-        action={
-          <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} size="lg" type="button" variant="outline">
-            <DownloadIcon data-icon="inline-start" />
-            {deletionSummary ? "Export unavailable" : exportPending ? "Exporting..." : "Export vault"}
+      <div className="divide-y divide-[rgba(196,168,130,0.25)]">
+        <div className="flex items-center justify-between pb-4">
+          <div className="min-w-0">
+            <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+              Export vault
+            </span>
+            <p className="font-serif text-base tracking-tight text-foreground">
+              Download your data as JSON
+            </p>
+          </div>
+          <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} size="default" type="button" variant="ghost">
+            {deletionSummary ? "Unavailable" : exportPending ? "Exporting..." : "Export"}
           </Button>
-        }
-      />
-
-      <ConnectedAccountCard
-        className="border-destructive/30 bg-destructive/5"
-        label="Delete data"
-        value="Delete your Murph account data"
-        meta="Permanently deletes your Murph data. Requires two confirmations."
-        action={
-          <Button disabled={deletePending || deletionSummary !== null} onClick={openDialog} size="lg" type="button" variant="destructive">
-            <Trash2Icon data-icon="inline-start" />
-            {deletionSummary ? "Deleted" : "Delete data"}
+        </div>
+        <div className="flex items-center justify-between pt-4">
+          <div className="min-w-0">
+            <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+              Delete data
+            </span>
+            <p className="font-serif text-base tracking-tight text-foreground">
+              Permanently delete your Murph data
+            </p>
+          </div>
+          <Button disabled={deletePending || deletionSummary !== null} onClick={openDialog} size="default" type="button" variant="destructive">
+            {deletionSummary ? "Deleted" : "Delete"}
           </Button>
-        }
-      />
+        </div>
+      </div>
 
       {deletionSummary ? (
         <Alert role="status" aria-live="polite">
