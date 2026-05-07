@@ -586,6 +586,101 @@ describe("HostedUserRunner runtime crypto context", () => {
     ]);
   });
 
+  it("starts a fresh nudge follow-up after an active invocation fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return activeInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner } = createRunnerCryptoContextHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    activeInvocation.reject(new Error("active invocation failed"));
+
+    await expect(activeRun).rejects.toThrow("active invocation failed");
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(alarms).toContain("2026-04-27T00:00:45.100Z");
+    expect(alarms).toContain("2026-04-27T00:00:30.100Z");
+  });
+
+  it("starts a fresh nudge follow-up when the active invocation releases during nudge alarm application", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return activeInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    let activeRun: Promise<unknown> | null = null;
+    let releasedActiveDuringNudgeAlarm = false;
+    const { alarms, runner } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      onSetAlarm: async ({ scheduledTimeIso }) => {
+        if (
+          releasedActiveDuringNudgeAlarm
+          || scheduledTimeIso !== "2026-04-27T00:00:45.100Z"
+        ) {
+          return;
+        }
+        if (!activeRun) {
+          throw new Error("Active invocation promise is not available.");
+        }
+        releasedActiveDuringNudgeAlarm = true;
+        activeInvocation.reject(new Error("active invocation failed during nudge"));
+        await activeRun.catch(() => {});
+      },
+    });
+    await runner.bindUser("member_123");
+
+    activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: true,
+      immediateDriveStarted: true,
+    });
+
+    expect(releasedActiveDuringNudgeAlarm).toBe(true);
+    await expect(activeRun).rejects.toThrow("active invocation failed during nudge");
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(alarms).toContain("2026-04-27T00:00:45.100Z");
+    expect(alarms).toContain("2026-04-27T00:00:30.100Z");
+  });
+
   it("treats alarms during a live invocation as recovery-only while the pending nudge follows after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

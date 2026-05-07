@@ -442,12 +442,18 @@ export class HostedUserRunner {
     const record = await this.markPendingNudgeAndApplyAlarm({
       preferredWakeAt,
     });
-    const immediateDriveStarted = alreadyRunning
-      ? false
-      : this.startDetachedRunnerDrive({
-          reason: "nudge",
-          userId: runningRecord.userId,
-        });
+    let immediateDriveStarted = false;
+    if (activeInThisIsolate && runningRecord.inFlight) {
+      immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
+        reason: "nudge",
+        userId: record.userId,
+      });
+    } else if (!alreadyRunning) {
+      immediateDriveStarted = this.startDetachedRunnerDrive({
+        reason: "nudge",
+        userId: record.userId,
+      });
+    }
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -1650,6 +1656,22 @@ export class HostedUserRunner {
       });
 
     return true;
+  }
+
+  private queueOrStartRunnerDriveAfterInvocation(input: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  }): boolean {
+    if (this.invocationLock !== null) {
+      this.pendingRunnerDriveAfterInvocation = input;
+      return false;
+    }
+
+    const started = this.startDetachedRunnerDrive(input);
+    if (!started) {
+      this.pendingRunnerDriveAfterInvocation = input;
+    }
+    return started;
   }
 
   private async tryReadStateForRetryScheduling(): Promise<RunnerStateRecord | null> {

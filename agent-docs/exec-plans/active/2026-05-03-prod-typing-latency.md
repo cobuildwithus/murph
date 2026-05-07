@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-05-03
-Updated: 2026-05-07
+Updated: 2026-05-08
 
 ## Goal
 
@@ -94,6 +94,7 @@ Updated: 2026-05-07
 - 2026-05-07 hosted receipt-recovery latency decision: fresh hosted nudge/import passes defer the global failed-turn receipt recovery scan until after the live reply path. If the normal scan replies, the pass schedules an immediate follow-up wake for recovery; if no fresh reply is produced, receipt recovery still runs in the same pass after the normal scan.
 - 2026-05-07 alarm/live-input latency decision: assistant-phase alarm wakes no longer run timer-lane device sync in the foreground; dedicated `device-sync.wake` system mailbox work remains the sync owner. Active-turn mailbox refreshes also defer their own checkpoint and rely on active-turn acceptance, assistant/outbox, or idle deferred-import fallback checkpoints, keeping live delivery on the same hot exact-write policy without a pre-reply `active_turn_input` or `outbox_sending` checkpoint.
 - 2026-05-07 hot-reply model latency decision: production hosted hot-reply deploys require the latency profile `HOSTED_ASSISTANT_MODEL=gpt-5.4-mini` plus `HOSTED_ASSISTANT_REASONING_EFFORT=low`. This does not change checkpoint placement: live import/assistant/canonical/outbox checkpoints remain hot and legacy `{base,delta}` compaction remains limited to `activation_bootstrap`.
+- 2026-05-07 active-failure nudge decision: when a fresh nudge arrives while the same Durable Object isolate is still running a persisted in-flight invocation, queue a nudge follow-up drive for lock release. If the active invocation releases during the nudge alarm await, start the detached nudge drive immediately instead of leaving the pending drive stranded. Keep the persisted-in-flight guard so idle checkpoint alarm reentries still preserve the pending nudge rather than consuming it. This covers failed active invocations before normal post-completion scheduling without adding broad checkpoint fallback or changing hot checkpoint placement.
 
 ## Current evidence
 
@@ -123,6 +124,7 @@ Updated: 2026-05-07
 - 2026-05-07 post-device-sync-skip evidence: live probes replied and no longer wrote the pre-send `outbox_sending` checkpoint, but warm-path assistant automation was still roughly 9s while Codex app-server timing was roughly 3.9s. The remaining live gap was therefore in automation pass envelope work before fast dispatch, with receipt recovery as the next critical pre-scan candidate.
 - 2026-05-07 post-receipt-deferral evidence: a fresh live text appended immediately while an older alarm invocation was already running. The runner eventually imported that text through active-turn input, but only after roughly 130s of timer-lane device sync and then wrote a hot `active_turn_input` checkpoint plus a pre-send `outbox_sending` checkpoint. This confirmed the remaining miss was foreground alarm maintenance work plus active-turn checkpointing, not a missing mailbox append or broad snapshot fallback.
 - 2026-05-07 post-alarm-input deploy evidence: live replies work and no longer wait on foreground device sync, broad checkpoint fallback, or a pre-send `outbox_sending` checkpoint. The remaining hot live probes still missed the 3s target because the provider app-server turn took roughly 3-4s on the full hosted model even with low reasoning, so the production hot path now needs the smaller allowed model profile rather than another checkpoint-policy change.
+- 2026-05-07 post-model-profile evidence: provider timing fell under the target, but a follow-up live text still waited behind a stale active invocation after a container/runtime failure from the deploy rollout. The mailbox append and nudge were immediate, but the nudge was coalesced while the Durable Object still had an in-flight invocation, then import happened only on the later backstop. The active-failure nudge patch adds a direct follow-up after the active lock releases, including the race where the lock releases while the nudge path is awaiting alarm application.
 
 ## Verification
 
@@ -241,3 +243,9 @@ Updated: 2026-05-07
   - 2026-05-07 receipt-recovery deferral: `pnpm --dir packages/assistant-engine typecheck` passed.
   - 2026-05-07 receipt-recovery deferral: `pnpm --filter @murphai/assistant-runtime typecheck` passed.
   - 2026-05-07 receipt-recovery deferral: `git diff --check -- packages/assistant-engine/src/assistant/automation/run-loop.ts packages/assistant-engine/test/assistant-automation-runtime.test.ts packages/assistant-runtime/src/hosted-runtime/maintenance.ts packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts` passed.
+  - 2026-05-07 active-failure nudge follow-up: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage --testNamePattern "fresh nudge follow-up"` passed.
+  - 2026-05-07 active-failure nudge follow-up: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage --testNamePattern "active invocation releases during nudge"` passed.
+  - 2026-05-07 active-failure nudge follow-up: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage` passed.
+  - 2026-05-07 active-failure nudge follow-up: `pnpm --dir apps/cloudflare typecheck` passed.
+  - 2026-05-07 active-failure nudge follow-up: `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-03-prod-typing-latency.md` passed.
+  - 2026-05-07 active-failure nudge follow-up: `pnpm typecheck` and `pnpm --dir apps/cloudflare verify` were blocked behind the unrelated existing `apps/web verify` workspace lock; the queued waiting processes were stopped without stopping the lock holder.
