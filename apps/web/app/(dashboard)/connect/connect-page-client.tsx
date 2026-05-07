@@ -435,7 +435,8 @@ function resolveCallbackSourceLabel(input: {
     return source.name;
   }
 
-  return formatHostedDeviceSyncProviderLabel(input.provider ?? "source");
+  const providerLabel = formatHostedDeviceSyncProviderLabel(input.provider ?? "source");
+  return providerLabel === "Wearable source" ? "your wearable source" : providerLabel;
 }
 
 function resolveCallbackSourceId(

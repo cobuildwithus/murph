@@ -1112,6 +1112,19 @@ test("ConnectPage shows callback success with the original source label", async 
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
 });
 
+test("ConnectPage avoids intermediary provider names when callback source metadata is missing", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "connected",
+    }),
+  }));
+
+  assert.match(markup, /Connected your wearable source\./);
+  assert.doesNotMatch(markup, /Junction/u);
+});
+
 test("ConnectPage shows callback errors with the original source label", async () => {
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage({

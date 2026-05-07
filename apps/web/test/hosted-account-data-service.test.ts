@@ -335,6 +335,7 @@ describe("buildHostedDataExport", () => {
             lastErrorMessagePresent: false,
             metadataPresent: true,
             providerAccountLinked: true,
+            providerLabel: "WHOOP",
             scopesPresent: true,
             tokenVersionPresent: true,
           },
@@ -343,6 +344,7 @@ describe("buildHostedDataExport", () => {
           {
             connectionIdPresent: true,
             idPresent: true,
+            providerLabel: "WHOOP",
             revokeWarningMessagePresent: false,
             traceIdPresent: true,
           },
@@ -353,6 +355,7 @@ describe("buildHostedDataExport", () => {
             expectedTokenVersionPresent: true,
             idPresent: true,
             keyVersionPresent: true,
+            providerLabel: "WHOOP",
             sessionIdPresent: true,
             tokenVersionPresent: true,
           },
@@ -362,6 +365,10 @@ describe("buildHostedDataExport", () => {
     expect(exported.counts).not.toHaveProperty("prisma.hosted_runtime_log");
     expect(requireRecord(requireRecord(exported.limits).stores)).not.toHaveProperty("runtimeLogs");
     expect(exported).not.toHaveProperty("diagnostics");
+    const wearables = requireRecord(exported.wearables);
+    expect(requireRecord(requireArray(wearables.deviceConnections)[0])).not.toHaveProperty("provider");
+    expect(requireRecord(requireArray(wearables.deviceSyncSignals)[0])).not.toHaveProperty("provider");
+    expect(requireRecord(requireArray(wearables.deviceTokenAudits)[0])).not.toHaveProperty("provider");
     const consent = requireRecord(exported.consent);
     expect(requireArray(consent.events)[0]).not.toHaveProperty("metadataJson");
     expect(exported.messaging).toMatchObject({
@@ -437,6 +444,39 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("consent-event-1");
     expect(serialized).not.toContain("trace-1");
     expect(serialized).not.toContain("secret-consent-metadata");
+  });
+
+  it("uses wearable source labels instead of intermediary provider ids in export data", async () => {
+    const exported = await buildHostedDataExport({
+      memberId: "member_123",
+      prisma: await createHostedAccountDataExportPrismaForTest({
+        deviceConnectionRows: [
+          makeDeviceConnectionExportRowForTest({
+            displayName: "Junction",
+            provider: "junction",
+            sources: [{ sourceProviderSlug: "garmin", status: "connected" }],
+          }),
+        ],
+        deviceSyncSignalRows: [
+          makeDeviceSyncSignalRowForTest({ provider: "junction" }),
+        ],
+        deviceTokenAuditRows: [
+          makeDeviceTokenAuditRowForTest({ provider: "junction" }),
+        ],
+      }),
+    });
+    const wearables = requireRecord(exported.wearables);
+    const deviceConnection = requireRecord(requireArray(wearables.deviceConnections)[0]);
+    const deviceSyncSignal = requireRecord(requireArray(wearables.deviceSyncSignals)[0]);
+    const deviceTokenAudit = requireRecord(requireArray(wearables.deviceTokenAudits)[0]);
+    const serializedWearables = JSON.stringify(wearables);
+
+    expect(deviceConnection.providerLabel).toBe("Garmin");
+    expect(deviceConnection.displayName).toBeNull();
+    expect(deviceSyncSignal.providerLabel).toBe("Garmin");
+    expect(deviceTokenAudit.providerLabel).toBe("Garmin");
+    expect(serializedWearables).not.toContain("junction");
+    expect(serializedWearables).not.toContain("Junction");
   });
 
   it("bounds large stores and reports truncation metadata", async () => {
@@ -560,6 +600,7 @@ describe("deleteHostedAccountData", () => {
           id: "dsc_junction",
           provider: "junction",
           providerAccountBlindIndex: "blind-index",
+          sources: [{ sourceProviderSlug: "garmin", status: "connected" }],
         },
       ],
       onTransaction: () => order.push("prisma"),
@@ -578,7 +619,7 @@ describe("deleteHostedAccountData", () => {
       {
         connectionId: "dsc_junction",
         errorCode: null,
-        provider: "junction",
+        providerLabel: "Garmin",
         status: "warning",
         warningCode: "CONNECTION_SECRET_MISSING",
       },
@@ -670,9 +711,97 @@ async function encryptHostedMailboxPayloadForFixture(input: {
   });
 }
 
+function makeDeviceConnectionExportRowForTest(input: {
+  displayName?: string | null;
+  memberId?: string;
+  metadataJson?: Record<string, unknown> | null;
+  provider?: string;
+  sources?: { sourceProviderSlug: string; status: string }[];
+} = {}) {
+  const memberId = input.memberId ?? "member_123";
+
+  return {
+    connectedAt: new Date("2026-04-27T00:07:00.000Z"),
+    createdAt: new Date("2026-04-27T00:07:00.000Z"),
+    displayName: input.displayName ?? "WHOOP",
+    id: "device-1",
+    accessTokenExpiresAt: new Date("2026-04-27T00:07:30.000Z"),
+    keyVersion: "v1",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSyncCompletedAt: new Date("2026-04-27T00:08:00.000Z"),
+    lastSyncErrorAt: null,
+    lastSyncStartedAt: new Date("2026-04-27T00:07:45.000Z"),
+    lastWebhookAt: new Date("2026-04-27T00:07:40.000Z"),
+    metadataJson: input.metadataJson ?? { shallow: "metadata" },
+    nextReconcileAt: new Date("2026-04-27T00:12:00.000Z"),
+    provider: input.provider ?? "whoop",
+    providerAccountBlindIndex: "secret-provider-account-blind-index",
+    scopesJson: ["read:profile"],
+    sources: input.sources ?? [{ sourceProviderSlug: "whoop", status: "connected" }],
+    status: "active",
+    tokenVersion: 2,
+    updatedAt: new Date("2026-04-27T00:09:00.000Z"),
+    userId: memberId,
+  };
+}
+
+function makeDeviceSyncSignalRowForTest(input: {
+  connectionId?: string | null;
+  memberId?: string;
+  provider?: string;
+} = {}) {
+  const memberId = input.memberId ?? "member_123";
+
+  return {
+    connectionId: input.connectionId ?? "device-1",
+    createdAt: new Date("2026-04-27T00:15:00.000Z"),
+    eventType: "webhook",
+    id: 1,
+    kind: "provider-webhook",
+    nextReconcileAt: null,
+    occurredAt: new Date("2026-04-27T00:14:00.000Z"),
+    provider: input.provider ?? "whoop",
+    reason: "sync",
+    resourceCategory: "sleep",
+    revokeWarningCode: null,
+    revokeWarningMessage: null,
+    traceId: "trace-1",
+    userId: memberId,
+  };
+}
+
+function makeDeviceTokenAuditRowForTest(input: {
+  connectionId?: string;
+  memberId?: string;
+  provider?: string;
+} = {}) {
+  const memberId = input.memberId ?? "member_123";
+
+  return {
+    action: "refresh",
+    channel: "background",
+    connectionId: input.connectionId ?? "device-1",
+    createdAt: new Date("2026-04-27T00:16:00.000Z"),
+    expectedTokenVersion: 1,
+    forceRefresh: false,
+    id: 1,
+    keyVersion: "v1",
+    provider: input.provider ?? "whoop",
+    refreshOutcome: "success",
+    sessionId: "session-1",
+    tokenVersion: 2,
+    tokenVersionChanged: true,
+    userId: memberId,
+  };
+}
+
 async function createHostedAccountDataExportPrisma(input: {
   aiUsageRows?: ReturnType<typeof makeHostedAiUsageRowForTest>[];
   aiUsagePeriodRows?: ReturnType<typeof makeHostedAiUsagePeriodRowForTest>[];
+  deviceConnectionRows?: ReturnType<typeof makeDeviceConnectionExportRowForTest>[];
+  deviceSyncSignalRows?: ReturnType<typeof makeDeviceSyncSignalRowForTest>[];
+  deviceTokenAuditRows?: ReturnType<typeof makeDeviceTokenAuditRowForTest>[];
 } = {}) {
   const count = async () => 1;
   const memberId = "member_123";
@@ -803,31 +932,8 @@ async function createHostedAccountDataExportPrisma(input: {
     deviceBrowserAssertionNonce: { count },
     deviceConnection: {
       count,
-      findMany: async () => [
-        {
-          connectedAt: new Date("2026-04-27T00:07:00.000Z"),
-          createdAt: new Date("2026-04-27T00:07:00.000Z"),
-          displayName: "WHOOP",
-          id: "device-1",
-          accessTokenExpiresAt: new Date("2026-04-27T00:07:30.000Z"),
-          keyVersion: "v1",
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSyncCompletedAt: new Date("2026-04-27T00:08:00.000Z"),
-          lastSyncErrorAt: null,
-          lastSyncStartedAt: new Date("2026-04-27T00:07:45.000Z"),
-          lastWebhookAt: new Date("2026-04-27T00:07:40.000Z"),
-          metadataJson: { shallow: "metadata" },
-          nextReconcileAt: new Date("2026-04-27T00:12:00.000Z"),
-          provider: "whoop",
-          providerAccountBlindIndex: "secret-provider-account-blind-index",
-          scopesJson: ["read:profile"],
-          status: "active",
-          tokenVersion: 2,
-          updatedAt: new Date("2026-04-27T00:09:00.000Z"),
-          userId: memberId,
-        },
-      ],
+      findMany: async () =>
+        input.deviceConnectionRows ?? [makeDeviceConnectionExportRowForTest({ memberId })],
     },
     deviceOauthSession: {
       count,
@@ -835,45 +941,13 @@ async function createHostedAccountDataExportPrisma(input: {
     },
     deviceSyncSignal: {
       count,
-      findMany: async () => [
-        {
-          connectionId: "device-1",
-          createdAt: new Date("2026-04-27T00:15:00.000Z"),
-          eventType: "webhook",
-          id: 1,
-          kind: "provider-webhook",
-          nextReconcileAt: null,
-          occurredAt: new Date("2026-04-27T00:14:00.000Z"),
-          provider: "whoop",
-          reason: "sync",
-          resourceCategory: "sleep",
-          revokeWarningCode: null,
-          revokeWarningMessage: null,
-          traceId: "trace-1",
-          userId: memberId,
-        },
-      ],
+      findMany: async () =>
+        input.deviceSyncSignalRows ?? [makeDeviceSyncSignalRowForTest({ memberId })],
     },
     deviceTokenAudit: {
       count,
-      findMany: async () => [
-        {
-          action: "refresh",
-          channel: "background",
-          connectionId: "device-1",
-          createdAt: new Date("2026-04-27T00:16:00.000Z"),
-          expectedTokenVersion: 1,
-          forceRefresh: false,
-          id: 1,
-          keyVersion: "v1",
-          provider: "whoop",
-          refreshOutcome: "success",
-          sessionId: "session-1",
-          tokenVersion: 2,
-          tokenVersionChanged: true,
-          userId: memberId,
-        },
-      ],
+      findMany: async () =>
+        input.deviceTokenAuditRows ?? [makeDeviceTokenAuditRowForTest({ memberId })],
     },
     deviceWebhookTrace: { count },
     deviceAgentSession: {
@@ -1159,6 +1233,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     id: string;
     provider: string;
     providerAccountBlindIndex: string;
+    sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   onTransaction: () => void;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {

@@ -47,7 +47,7 @@ interface HostedAccountDeleteResponse {
     providerRevocations: Array<{
       connectionId: string;
       errorCode: string | null;
-      provider: string;
+      providerLabel: string;
       status: string;
       warningCode: string | null;
     }>;
@@ -256,7 +256,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
                 <ul className="flex list-disc flex-col gap-1 pl-5">
                   {deletionSummary.providerRevocations.map((revocation) => (
                     <li key={revocation.connectionId}>
-                      {formatProviderName(revocation.provider)}: {formatProviderRevocationResult(revocation)}
+                      {revocation.providerLabel}: {formatProviderRevocationResult(revocation)}
                     </li>
                   ))}
                 </ul>
@@ -494,10 +494,6 @@ function formatCloudflareCleanupResult(result: CloudflareCleanupSummary): string
   return details.length > 0
     ? `partially completed (${details.join("; ")})`
     : "attempted; detailed cleanup status was unavailable";
-}
-
-function formatProviderName(value: string): string {
-  return value.toUpperCase();
 }
 
 function formatProviderRevocationResult(result: ProviderRevocationSummary): string {
