@@ -214,7 +214,7 @@ test("HomePage shows the connected dialog with the signed-in member's assigned M
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP is now available in your connected sources\./);
+  assert.match(markup, /WHOOP is ready\. Say hi to start exploring your data\./);
   assert.match(markup, /data-device-sync-icon="watch"/);
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
@@ -286,10 +286,10 @@ test("HomePage uses connect source labels for Junction-backed targets", async ()
   }));
 
   assert.match(markup, /Fitbit is connected/);
-  assert.match(markup, /Fitbit is now available in your connected sources\./);
+  assert.match(markup, /Fitbit is ready\. Say hi to start exploring your data\./);
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20Fitbit"/);
   assert.doesNotMatch(markup, /Junction is connected/);
-  assert.doesNotMatch(markup, /Junction is now available/);
+  assert.doesNotMatch(markup, /Junction is ready/);
   assert.doesNotMatch(markup, /I%20just%20connected%20my%20Junction/);
 });
 
@@ -315,7 +315,7 @@ test("HomePage keeps a continue-only dialog when there is no messaging destinati
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP is connected and ready in Murph\. No extra step is needed\./);
+  assert.match(markup, /WHOOP is ready\. Murph will start learning from your data\./);
   assert.match(markup, />Continue exploring</);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
