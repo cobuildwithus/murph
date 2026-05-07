@@ -1,12 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
-import { ConnectedAccountCard, SettingsStatusLine } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
@@ -28,23 +27,44 @@ export function HostedAccountSettingsCards({
 }) {
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(null);
 
+  const phoneNumber = account.phone.number;
+  const phoneVerified = Boolean(account.phone.verifiedAt);
+  const telegramUserId = account.telegram.telegramUserId;
+  const emailAddress = account.email.address;
+  const emailVerified = Boolean(account.email.verifiedAt);
+
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <PhoneSettingsCard
-          phoneNumber={account.phone.number}
-          verified={Boolean(account.phone.verifiedAt)}
-          murphPhoneNumber={murphPhoneNumber}
-          onLink={() => setLinkMode("phone")}
+      <div className="divide-y divide-[rgba(196,168,130,0.25)]">
+        <SettingsRow
+          label="Phone"
+          value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
+          empty={!phoneNumber}
+          action={
+            <Button type="button" size="default" variant={phoneNumber ? "ghost" : "default"} onClick={() => setLinkMode("phone")}>
+              {phoneNumber ? (phoneVerified ? "Change" : "Verify") : "Link phone"}
+            </Button>
+          }
         />
-        <TelegramSettingsCard
-          telegramUserId={account.telegram.telegramUserId}
-          onLink={() => setLinkMode("telegram")}
+        <SettingsRow
+          label="Telegram"
+          value={telegramUserId ? `Telegram user ${telegramUserId}` : "Not connected"}
+          empty={!telegramUserId}
+          action={
+            <Button type="button" size="default" variant={telegramUserId ? "ghost" : "secondary"} onClick={() => setLinkMode("telegram")}>
+              {telegramUserId ? "Change" : "Connect"}
+            </Button>
+          }
         />
-        <EmailSettingsCard
-          emailAddress={account.email.address}
-          verified={Boolean(account.email.verifiedAt)}
-          onLink={() => setLinkMode("email")}
+        <SettingsRow
+          label="Email"
+          value={emailAddress ?? "Not connected"}
+          empty={!emailAddress}
+          action={
+            <Button type="button" size="default" variant={emailAddress ? "ghost" : "default"} onClick={() => setLinkMode("email")}>
+              {emailAddress ? (emailVerified ? "Change" : "Verify") : "Link email"}
+            </Button>
+          }
         />
       </div>
       {linkMode ? (
@@ -62,93 +82,23 @@ export function HostedAccountSettingsCards({
   );
 }
 
-function PhoneSettingsCard({
-  murphPhoneNumber,
-  onLink,
-  phoneNumber,
-  verified,
-}: {
-  murphPhoneNumber?: string | null;
-  onLink: () => void;
-  phoneNumber: string | null;
-  verified: boolean;
+function SettingsRow(props: {
+  action?: ReactNode;
+  empty?: boolean;
+  label: string;
+  value: string;
 }) {
   return (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Phone</h2>
+    <div className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
+      <div className="min-w-0">
+        <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
+          {props.label}
+        </span>
+        <p className={`font-serif text-base tracking-tight ${props.empty ? "text-muted-foreground" : "text-foreground"}`}>
+          {props.value}
+        </p>
       </div>
-      <ConnectedAccountCard
-        value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
-        variant={phoneNumber ? undefined : "empty"}
-        meta={phoneNumber && !verified ? "Unverified" : null}
-        action={
-          <Button type="button" size="sm" variant={phoneNumber ? "ghost" : "default"} onClick={onLink}>
-            {phoneNumber ? (verified ? "Change" : "Verify") : "Link phone"}
-          </Button>
-        }
-      />
-      {phoneNumber && murphPhoneNumber ? (
-        <a className="text-sm font-medium text-primary hover:underline" href={`sms:${murphPhoneNumber}`}>
-          Text Murph
-        </a>
-      ) : null}
-      <SettingsStatusLine message={null} tone="neutral" />
-    </div>
-  );
-}
-
-function TelegramSettingsCard({
-  onLink,
-  telegramUserId,
-}: {
-  onLink: () => void;
-  telegramUserId: string | null;
-}) {
-  return (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Telegram</h2>
-      </div>
-      <ConnectedAccountCard
-        value={telegramUserId ? `Telegram user ${telegramUserId}` : "Not connected"}
-        variant={telegramUserId ? undefined : "empty"}
-        action={
-          <Button type="button" size="sm" variant={telegramUserId ? "ghost" : "default"} onClick={onLink}>
-            {telegramUserId ? "Change" : "Link Telegram"}
-          </Button>
-        }
-      />
-      <SettingsStatusLine message={null} tone="neutral" />
-    </div>
-  );
-}
-
-function EmailSettingsCard({
-  emailAddress,
-  onLink,
-  verified,
-}: {
-  emailAddress: string | null;
-  onLink: () => void;
-  verified: boolean;
-}) {
-  return (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Email</h2>
-      </div>
-      <ConnectedAccountCard
-        value={emailAddress ?? "Not connected"}
-        variant={emailAddress ? undefined : "empty"}
-        meta={null}
-        action={
-          <Button type="button" size="sm" variant={emailAddress ? "ghost" : "default"} onClick={onLink}>
-            {emailAddress ? (verified ? "Change" : "Verify") : "Link email"}
-          </Button>
-        }
-      />
-      <SettingsStatusLine message={null} tone="neutral" />
+      {props.action ? <div className="shrink-0">{props.action}</div> : null}
     </div>
   );
 }
