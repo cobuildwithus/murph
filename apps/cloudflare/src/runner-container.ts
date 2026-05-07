@@ -30,6 +30,7 @@ import {
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
+const RUNNER_CONTROL_HEALTH_URL = "http://container/internal/control-health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
@@ -443,6 +444,11 @@ export class RunnerContainer extends Container {
     if (!isRunnerContainerStopped(status) && this.runnerControlToken) {
       try {
         await assertRunnerHealthy(this, Math.min(input.timeoutMs, readyTimeoutMs));
+        await assertRunnerControlAuthorized(
+          this,
+          this.runnerControlToken,
+          Math.min(input.timeoutMs, readyTimeoutMs),
+        );
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -1260,6 +1266,30 @@ async function assertRunnerHealthy(
 
   if (!response.ok) {
     throw new Error(`Hosted runner container health check returned HTTP ${response.status}.`);
+  }
+}
+
+async function assertRunnerControlAuthorized(
+  container: RunnerContainer,
+  runnerControlToken: string,
+  timeoutMs: number,
+): Promise<void> {
+  const response = await container.containerFetch(
+    RUNNER_CONTROL_HEALTH_URL,
+    {
+      headers: {
+        authorization: `Bearer ${runnerControlToken}`,
+      },
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    },
+    RUNNER_PORT,
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Hosted runner container control health check returned HTTP ${response.status}.`,
+    );
   }
 }
 

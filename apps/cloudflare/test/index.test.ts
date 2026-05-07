@@ -622,7 +622,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("exposes hosted-local test routes with the explicit test-route flag outside NODE_ENV=test", async () => {
+  it("keeps hosted-local test routes hidden outside NODE_ENV=test", async () => {
     const response = await worker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/artifacts?userId=member_123&sha256=fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
@@ -640,7 +640,7 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted artifact was not found.",
+      error: "Not found",
     });
   });
 

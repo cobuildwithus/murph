@@ -118,6 +118,7 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
     usage: {
       input_tokens: 24,
       output_tokens: 11,
+      total_tokens: 35,
     },
   };
 }

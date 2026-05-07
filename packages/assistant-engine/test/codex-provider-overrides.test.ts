@@ -53,4 +53,13 @@ describe('Codex provider config overrides', () => {
 
     expect(overrides).toBeUndefined()
   })
+
+  it('allows hosted-local test provider ids to use the prewritten Codex config', () => {
+    const overrides = mergeCodexConfigOverrides({
+      modelProvider: 'openai-local-test',
+      showThinkingTraces: false,
+    })
+
+    expect(overrides).toBeUndefined()
+  })
 })

@@ -714,7 +714,8 @@ function isArtifactBackedHostedWorkspaceBundleKey(
 
 function isHostedWorkerTestEnvironment(env: WorkerEnvironmentSource): boolean {
   const stringEnv = asWorkerStringEnvironment(env);
-  return stringEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+  return stringEnv.NODE_ENV === "test"
+    && stringEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
 }
 
 async function handleTestRunUntilIdleRoute(

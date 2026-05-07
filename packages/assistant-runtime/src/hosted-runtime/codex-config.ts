@@ -13,6 +13,7 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
   type AssistantCodexModelProviderConfig,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
@@ -78,7 +79,6 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
 const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
-const HOSTED_CODEX_LOCAL_TEST_MODEL_PROVIDER_ID = "openai-local-test";
 
 export interface HostedCodexRuntimeEnvironmentInput {
   operatorHomeRoot: string;
@@ -253,7 +253,7 @@ function resolveHostedCodexModelProviderConfig(input: {
 
   return {
     ...providerConfig,
-    id: HOSTED_CODEX_LOCAL_TEST_MODEL_PROVIDER_ID,
+    id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
     baseUrl: url.toString(),
   };
 }

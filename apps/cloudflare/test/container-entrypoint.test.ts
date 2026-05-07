@@ -433,6 +433,38 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
+  it("requires the startup control token for control-health probes", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const rejected = await fetch(`http://127.0.0.1:${address.port}/internal/control-health`, {
+      headers: {
+        authorization: "Bearer stale-token",
+      },
+    });
+    expect(rejected.status).toBe(401);
+    await expect(rejected.json()).resolves.toEqual({ error: "Unauthorized" });
+
+    const accepted = await fetch(`http://127.0.0.1:${address.port}/internal/control-health`, {
+      headers: {
+        authorization: "Bearer runner-token",
+      },
+    });
+    expect(accepted.status).toBe(200);
+    await expect(accepted.json()).resolves.toMatchObject({
+      ok: true,
+      service: "cloudflare-hosted-runner-node",
+    });
+  });
+
   it("logs a structured listen failure when the container cannot start", async () => {
     await expect(startHostedContainerEntrypoint({
       controlToken: "runner-token",
