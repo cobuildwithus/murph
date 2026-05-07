@@ -88,6 +88,16 @@ export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
+  if (shouldMaterializeHostedProviderLinqDirectThreadFirst(request)) {
+    const recovered = await materializeHostedProviderLinqDirectThread({
+      dependencies,
+      request,
+    });
+    if (recovered) {
+      return recovered;
+    }
+  }
+
   try {
     return await sendHostedProviderLinqMessageDirect(request, dependencies);
   } catch (error) {
@@ -190,21 +200,19 @@ async function maybeRecoverHostedProviderMissingLinqThread(input: {
     return null;
   }
 
+  return await materializeHostedProviderLinqDirectThread(input);
+}
+
+async function materializeHostedProviderLinqDirectThread(input: {
+  dependencies: HostedProviderEffectDependencies;
+  request: HostedRuntimeLinqSendRequest;
+}): Promise<HostedRuntimeLinqSendResponse | null> {
   const recipient = normalizeDirectLinqRecipient(input.request.directRecipientPhoneNumber);
   if (!recipient) {
     return null;
   }
 
-  let senders: string[];
-  try {
-    const probed = await probeLinqApi({
-      env: input.dependencies.env,
-      signal: input.dependencies.signal,
-    });
-    senders = normalizeLinqSenderPhoneNumbers(probed.phoneNumbers);
-  } catch {
-    return null;
-  }
+  const senders = await resolveHostedProviderLinqRecoverySenders(input);
 
   for (const sender of senders) {
     try {
@@ -237,6 +245,50 @@ async function maybeRecoverHostedProviderMissingLinqThread(input: {
   }
 
   return null;
+}
+
+async function resolveHostedProviderLinqRecoverySenders(input: {
+  dependencies: HostedProviderEffectDependencies;
+  request: HostedRuntimeLinqSendRequest;
+}): Promise<string[]> {
+  const sender = normalizeDirectLinqRecipient(input.request.fromPhoneNumber);
+  if (sender) {
+    return [sender];
+  }
+
+  try {
+    const probed = await probeLinqApi({
+      env: input.dependencies.env,
+      signal: input.dependencies.signal,
+    });
+    return normalizeLinqSenderPhoneNumbers(probed.phoneNumbers);
+  } catch {
+    return [];
+  }
+}
+
+function shouldMaterializeHostedProviderLinqDirectThreadFirst(
+  request: HostedRuntimeLinqSendRequest,
+): boolean {
+  return (
+    (request.targetKind === "thread" || request.targetKind === "explicit")
+    && normalizeDirectLinqRecipient(request.directRecipientPhoneNumber) !== null
+    && looksLikeHostedProviderRedactedLinqTarget(request.target)
+  );
+}
+
+function looksLikeHostedProviderRedactedLinqTarget(
+  value: string | null | undefined,
+): boolean {
+  const target = value?.trim() ?? "";
+  return (
+    /^h1_[a-f0-9]{24}$/iu.test(target)
+    || /(?:^|:)hid_[A-Za-z0-9_-]+/u.test(target)
+    || /(?:^|:)ain_[A-Za-z0-9_-]+/u.test(target)
+    || target.includes("hbid:")
+    || target.includes("hbidx:")
+    || target.startsWith("[redacted")
+  );
 }
 
 function looksLikeMissingLinqChatError(error: unknown): error is VaultCliError {
