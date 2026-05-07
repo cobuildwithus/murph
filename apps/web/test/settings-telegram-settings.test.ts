@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -18,11 +18,13 @@ const mocks = vi.hoisted(() => ({
   refreshUser: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   useLinkAccount: vi.fn(),
+  usePrivy: vi.fn(),
   useUser: vi.fn(),
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
   useLinkAccount: mocks.useLinkAccount,
+  usePrivy: mocks.usePrivy,
   useUser: mocks.useUser,
 }));
 
@@ -72,6 +74,10 @@ describe("ConnectTelegram", () => {
       runTriggered: true,
       telegramUserId: "12345",
       telegramUsername: "murph_user",
+    });
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      ready: true,
     });
     mocks.useLinkAccount.mockImplementation((callbacks: LinkAccountCallbacks) => {
       mocks.linkAccountCallbacks = callbacks;
@@ -444,6 +450,10 @@ describe("HostedTelegramCardSettings", () => {
       telegramUserId: "67890",
       telegramUsername: "new_user",
     });
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      ready: true,
+    });
     mocks.useLinkAccount.mockImplementation((callbacks: LinkAccountCallbacks) => {
       mocks.linkAccountCallbacks = callbacks;
 
@@ -557,6 +567,104 @@ describe("HostedTelegramCardSettings", () => {
       telegramUserId: "67890",
       telegramUsername: "new_user",
     });
+  });
+
+  it("does not auto-link Telegram before Privy is ready", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      ready: false,
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        autoLink: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link Telegram"),
+    );
+
+    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(linkButton?.disabled).toBe(true);
+    expect(container.textContent).toContain("Preparing Telegram linking");
+  });
+
+  it("keeps the manual Telegram link button inert before Privy is ready", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      ready: false,
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link Telegram"),
+    );
+
+    expect(linkButton?.disabled).toBe(true);
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+  });
+
+  it("auto-links Telegram once Privy becomes ready and authenticated", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    const privyState = {
+      authenticated: false,
+      ready: false,
+    };
+    let forceRender: (() => void) | null = null;
+    function PrivyReadyHarness() {
+      const [, setRenderCount] = useState(0);
+
+      useEffect(() => {
+        forceRender = () => setRenderCount((value) => value + 1);
+        return () => {
+          forceRender = null;
+        };
+      }, []);
+
+      return createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        autoLink: true,
+        initialTelegramAccount: null,
+      });
+    }
+    mocks.usePrivy.mockImplementation(() => privyState);
+
+    const { cleanup } = await renderClientComponent(createElement(PrivyReadyHarness));
+    cleanupRender = cleanup;
+
+    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+
+    await act(async () => {
+      privyState.authenticated = true;
+      privyState.ready = true;
+      forceRender?.();
+    });
+
+    expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
   it("does not notify its parent for quiet background Telegram resync", async () => {
