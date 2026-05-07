@@ -999,8 +999,21 @@ function normalizeTimeseriesUnit(resource: string, rawUnit: string | undefined, 
   if (resource === "hrv" && normalized === "rmssd") {
     return fallbackUnit;
   }
+  if (resource === "respiratory_rate" && isRespiratoryRateUnitAlias(normalized)) {
+    return fallbackUnit;
+  }
 
   return rawUnit ?? fallbackUnit;
+}
+
+function isRespiratoryRateUnitAlias(unit: string | undefined): boolean {
+  return unit === undefined
+    || unit === "bpm"
+    || unit === "rpm"
+    || unit === "breaths/min"
+    || unit === "breaths/minute"
+    || unit === "breaths per minute"
+    || unit === "breaths_per_minute";
 }
 
 function shouldEmitQueryableSample(
