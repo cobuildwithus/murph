@@ -262,6 +262,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
+        deferReceiptRecovery: true,
         preferredInputIds: ["ain_00000000000000000000000000000001"],
         skipDeviceSync: true,
       }),
@@ -276,6 +277,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
+        deferReceiptRecovery: true,
         skipDeviceSync: true,
       }),
     );
@@ -289,6 +291,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
+        deferReceiptRecovery: false,
         skipDeviceSync: false,
       }),
     );

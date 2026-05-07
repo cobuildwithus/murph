@@ -4587,6 +4587,116 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
+  it('defers receipt recovery after fresh hosted queue-only replies', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-07T00:00:00.000Z'))
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        checkpointRequired: true,
+        considered: 1,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 1,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const result = await runLoop.runAssistantAutomationPass({
+      deferReceiptRecovery: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-hosted-fresh-reply',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.recoverAssistantAutoReplies).not.toHaveBeenCalled()
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({
+      nextWakeAt: '2026-05-07T00:00:00.000Z',
+      progressed: true,
+      replies: {
+        checkpointRequired: true,
+        considered: 1,
+        replied: 1,
+      },
+    })
+  })
+
+  it('runs deferred receipt recovery after the scan when no fresh reply is produced', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    runLoopMocks.recoverAssistantAutoReplies.mockResolvedValueOnce({
+      considered: 1,
+      failed: 0,
+      nextWakeAt: null,
+      progressed: true,
+      replied: 1,
+      skipped: 0,
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const result = await runLoop.runAssistantAutomationPass({
+      deferReceiptRecovery: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-hosted-idle-recovery',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledOnce()
+    expect(
+      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      runLoopMocks.recoverAssistantAutoReplies.mock.invocationCallOrder[0] ?? 0,
+    )
+    expect(result).toMatchObject({
+      progressed: true,
+      replies: {
+        considered: 1,
+        replied: 1,
+      },
+    })
+  })
+
   it('skips status refresh on hosted queue-only automation passes', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
