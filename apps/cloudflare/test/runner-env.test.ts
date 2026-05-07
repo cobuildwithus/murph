@@ -178,6 +178,27 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
+  it("forwards explicit hosted checkpoint debug env into runner containers", () => {
+    expect(buildHostedRunnerContainerEnv({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS: "1",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE: "/tmp/checkpoint-debug.json",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG: "1",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT: "20000",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
+    })).toEqual({
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS: "1",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE: "/tmp/checkpoint-debug.json",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG: "1",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT: "20000",
+      MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
+      NODE_ENV: "production",
+    });
+  });
+
   it("does not forward the Linq webhook verification secret into the runner", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,

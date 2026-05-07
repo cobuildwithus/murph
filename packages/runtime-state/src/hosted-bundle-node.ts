@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { constants as fsConstants, type Dirent } from "node:fs";
 import {
   chmod,
@@ -40,7 +40,15 @@ const HOSTED_CODEX_HOME_FILE_MODE = 0o600;
 const HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT = "workspace-metadata";
 const HOSTED_CHECKPOINT_DEBUG_PATHS_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS";
 const HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW";
 const HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA = "murph.hosted-checkpoint-debug-paths.v1";
+const HOSTED_CHECKPOINT_DEBUG_LOG_ENTRY_CHUNK_SIZE = 250;
+const HOSTED_CHECKPOINT_DEBUG_MAX_LOG_ENTRY_LIMIT = 20_000;
+const HOSTED_CHECKPOINT_DEBUG_SUMMARY_LOG_EVENT = "murph.hosted-checkpoint-debug.summary";
+const HOSTED_CHECKPOINT_DEBUG_ENTRIES_LOG_EVENT = "murph.hosted-checkpoint-debug.entries";
+const HOSTED_CHECKPOINT_DEBUG_LOG_HASH_SECRET_ENV = "HOSTED_LOG_FINGERPRINT_SECRET";
 const HOSTED_CHECKPOINT_DEBUG_OUTPUT_OPEN_FLAGS = fsConstants.O_WRONLY
   | fsConstants.O_CREAT
   | fsConstants.O_NONBLOCK
@@ -116,6 +124,46 @@ interface HostedCheckpointDebugTrace {
   record: (entry: HostedCheckpointDebugEntry) => void;
   setArchiveFileCount: (count: number) => void;
   write: (status: HostedCheckpointDebugStatus) => Promise<void>;
+}
+
+interface HostedCheckpointDebugSummary {
+  archiveFileCount: number | null;
+  artifactCount: number;
+  descendedDirectoryCount: number;
+  directoryCount: number;
+  entryCount: number;
+  excludedDecisionCount: number;
+  fileCount: number;
+  includedDecisionCount: number;
+  otherCount: number;
+  symlinkCount: number;
+  unknownCount: number;
+}
+
+interface HostedCheckpointDebugArtifact {
+  createdAt: string;
+  entries: HostedCheckpointDebugEntry[];
+  kind: HostedExecutionBundleKind;
+  schema: typeof HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA;
+  status: HostedCheckpointDebugStatus;
+  summary: HostedCheckpointDebugSummary;
+}
+
+interface HostedCheckpointDebugLogConfig {
+  enabled: boolean;
+  entryLimit: number | null;
+  entryLimitError: string | null;
+  rawPaths: boolean;
+}
+
+type HostedCheckpointDebugLogEntry = Omit<HostedCheckpointDebugEntry, "path"> & {
+  pathHash: string;
+  path?: string;
+};
+
+interface HostedCheckpointDebugLogLimitResult {
+  entryLimit: number | null;
+  error: string | null;
 }
 
 export async function snapshotHostedBundleRoots(input: HostedBundleSnapshotRootsInput): Promise<Uint8Array | null> {
@@ -554,6 +602,7 @@ function createHostedCheckpointDebugTrace(kind: HostedExecutionBundleKind): Host
   }
 
   const outputPath = resolveHostedCheckpointDebugOutputPath();
+  const logConfig = resolveHostedCheckpointDebugLogConfig();
   const createdAt = new Date().toISOString();
   const entries: HostedCheckpointDebugEntry[] = [];
   let archiveFileCount: number | null = null;
@@ -566,17 +615,17 @@ function createHostedCheckpointDebugTrace(kind: HostedExecutionBundleKind): Host
       archiveFileCount = count;
     },
     async write(status) {
-      await writeHostedCheckpointDebugTraceFile(
-        outputPath,
-        `${JSON.stringify({
-          schema: HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA,
-          createdAt,
-          kind,
-          status,
-          summary: summarizeHostedCheckpointDebugEntries(entries, archiveFileCount),
-          entries,
-        }, null, 2)}\n`,
-      );
+      const artifact: HostedCheckpointDebugArtifact = {
+        schema: HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA,
+        createdAt,
+        kind,
+        status,
+        summary: summarizeHostedCheckpointDebugEntries(entries, archiveFileCount),
+        entries,
+      };
+
+      await writeHostedCheckpointDebugTraceFile(outputPath, `${JSON.stringify(artifact, null, 2)}\n`);
+      writeHostedCheckpointDebugLog(artifact, logConfig);
     },
   };
 }
@@ -600,6 +649,157 @@ function resolveHostedCheckpointDebugOutputPath(): string {
     tmpdir(),
     `murph-hosted-checkpoint-debug-${process.pid}-${Date.now()}-${randomUUID()}.json`,
   );
+}
+
+function resolveHostedCheckpointDebugLogConfig(): HostedCheckpointDebugLogConfig {
+  const limit = readHostedCheckpointDebugLogEntryLimit(
+    process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT_ENV],
+  );
+
+  return {
+    enabled: isHostedCheckpointDebugPathsEnabled(
+      process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_ENV],
+    ),
+    entryLimit: limit.entryLimit,
+    entryLimitError: limit.error,
+    rawPaths: isHostedCheckpointDebugPathsEnabled(
+      process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW_ENV],
+    ),
+  };
+}
+
+function readHostedCheckpointDebugLogEntryLimit(value: string | undefined): HostedCheckpointDebugLogLimitResult {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return {
+      entryLimit: null,
+      error: "missing_log_limit",
+    };
+  }
+
+  if (!/^[0-9]+$/u.test(normalized)) {
+    return {
+      entryLimit: null,
+      error: "invalid_log_limit",
+    };
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isSafeInteger(parsed) || parsed > HOSTED_CHECKPOINT_DEBUG_MAX_LOG_ENTRY_LIMIT) {
+    return {
+      entryLimit: null,
+      error: "invalid_log_limit",
+    };
+  }
+
+  return {
+    entryLimit: parsed,
+    error: null,
+  };
+}
+
+function writeHostedCheckpointDebugLog(
+  artifact: HostedCheckpointDebugArtifact,
+  config: HostedCheckpointDebugLogConfig,
+): void {
+  if (!config.enabled) {
+    return;
+  }
+
+  const entriesToLog = config.entryLimit === null
+    ? []
+    : artifact.entries.slice(0, config.entryLimit);
+  const omittedEntryCount = Math.max(0, artifact.entries.length - entriesToLog.length);
+
+  console.error(
+    HOSTED_CHECKPOINT_DEBUG_SUMMARY_LOG_EVENT,
+    JSON.stringify({
+      schema: artifact.schema,
+      createdAt: artifact.createdAt,
+      kind: artifact.kind,
+      status: artifact.status,
+      summary: artifact.summary,
+      logEntryLimit: config.entryLimit,
+      loggedEntryCount: entriesToLog.length,
+      omittedEntryCount,
+      entryLogMode: config.entryLimit === null
+        ? "disabled"
+        : config.rawPaths ? "raw" : "hashed",
+      entryLoggingDisabledReason: config.entryLimitError,
+    }),
+  );
+
+  if (config.entryLimit === null) {
+    return;
+  }
+
+  const logEntries = entriesToLog.map((entry) =>
+    toHostedCheckpointDebugLogEntry(entry, config)
+  );
+
+  if (entriesToLog.length === 0) {
+    console.error(
+      HOSTED_CHECKPOINT_DEBUG_ENTRIES_LOG_EVENT,
+      JSON.stringify({
+        schema: artifact.schema,
+        kind: artifact.kind,
+        status: artifact.status,
+        chunkIndex: 0,
+        chunkCount: 0,
+        startIndex: 0,
+        entryCount: 0,
+        omittedEntryCount,
+        entries: [],
+      }),
+    );
+    return;
+  }
+
+  const chunkCount = Math.ceil(entriesToLog.length / HOSTED_CHECKPOINT_DEBUG_LOG_ENTRY_CHUNK_SIZE);
+  for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+    const startIndex = chunkIndex * HOSTED_CHECKPOINT_DEBUG_LOG_ENTRY_CHUNK_SIZE;
+    const entries = logEntries.slice(
+      startIndex,
+      startIndex + HOSTED_CHECKPOINT_DEBUG_LOG_ENTRY_CHUNK_SIZE,
+    );
+    console.error(
+      HOSTED_CHECKPOINT_DEBUG_ENTRIES_LOG_EVENT,
+      JSON.stringify({
+        schema: artifact.schema,
+        kind: artifact.kind,
+        status: artifact.status,
+        chunkIndex,
+        chunkCount,
+        startIndex,
+        entryCount: entries.length,
+        omittedEntryCount,
+        entries,
+      }),
+    );
+  }
+}
+
+function toHostedCheckpointDebugLogEntry(
+  entry: HostedCheckpointDebugEntry,
+  config: HostedCheckpointDebugLogConfig,
+): HostedCheckpointDebugLogEntry {
+  const { path: relativePath, ...rest } = entry;
+  return {
+    ...rest,
+    pathHash: hashHostedCheckpointDebugPath(entry),
+    ...(config.rawPaths ? { path: relativePath } : {}),
+  };
+}
+
+function hashHostedCheckpointDebugPath(entry: HostedCheckpointDebugEntry): string {
+  const secret = process.env[HOSTED_CHECKPOINT_DEBUG_LOG_HASH_SECRET_ENV]?.trim();
+  const input = `${entry.root}\0${entry.path}`;
+
+  if (secret) {
+    return createHmac("sha256", secret).update(input).digest("hex");
+  }
+
+  return createHash("sha256").update(input).digest("hex");
 }
 
 async function writeHostedCheckpointDebugTraceFile(
@@ -702,19 +902,7 @@ function getHostedBundleArchiveFileByteSize(file: HostedBundleArchiveFile): numb
 function summarizeHostedCheckpointDebugEntries(
   entries: readonly HostedCheckpointDebugEntry[],
   archiveFileCount: number | null,
-): {
-  archiveFileCount: number | null;
-  artifactCount: number;
-  descendedDirectoryCount: number;
-  directoryCount: number;
-  entryCount: number;
-  excludedDecisionCount: number;
-  fileCount: number;
-  includedDecisionCount: number;
-  otherCount: number;
-  symlinkCount: number;
-  unknownCount: number;
-} {
+): HostedCheckpointDebugSummary {
   const summary = {
     archiveFileCount,
     artifactCount: 0,

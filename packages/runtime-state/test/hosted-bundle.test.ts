@@ -3,7 +3,7 @@ import { chmod, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import {
   sameHostedBundlePayloadRef,
@@ -45,25 +45,42 @@ import {
 
 const HOSTED_CHECKPOINT_DEBUG_PATHS_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS";
 const HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW";
 const HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA = "murph.hosted-checkpoint-debug-paths.v1";
+const HOSTED_CHECKPOINT_DEBUG_SUMMARY_LOG_EVENT = "murph.hosted-checkpoint-debug.summary";
+const HOSTED_CHECKPOINT_DEBUG_ENTRIES_LOG_EVENT = "murph.hosted-checkpoint-debug.entries";
 
 async function withHostedCheckpointDebugEnv(
   input: {
     enabled?: string;
+    log?: string;
+    logLimit?: string;
+    logRaw?: string;
     outputFile?: string;
   },
   run: () => Promise<void>,
 ): Promise<void> {
   const previousEnabled = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_ENV];
   const previousOutputFile = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV];
+  const previousLog = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_ENV];
+  const previousLogLimit = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT_ENV];
+  const previousLogRaw = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW_ENV];
 
   try {
     setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_ENV, input.enabled);
     setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV, input.outputFile);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_ENV, input.log);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT_ENV, input.logLimit);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW_ENV, input.logRaw);
     await run();
   } finally {
     setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_ENV, previousEnabled);
     setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV, previousOutputFile);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_ENV, previousLog);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT_ENV, previousLogLimit);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW_ENV, previousLogRaw);
   }
 }
 
@@ -108,6 +125,19 @@ function readHostedCheckpointDebugEntries(
   }
 
   return entries;
+}
+
+function findHostedCheckpointDebugLog(
+  calls: readonly unknown[][],
+  eventName: string,
+): Record<string, unknown> {
+  const call = calls.find((candidate) => candidate[0] === eventName);
+  assert.ok(call, `missing checkpoint debug log ${eventName}`);
+  const payload = call[1];
+  if (typeof payload !== "string") {
+    throw new TypeError(`checkpoint debug log ${eventName} payload must be a string`);
+  }
+  return parseHostedCheckpointDebugArtifact(payload);
 }
 
 function assertHostedCheckpointDebugEntry(
@@ -361,6 +391,7 @@ test("hosted bundle explicit file snapshots check liveness before externalizing"
 
 test("hosted checkpoint debug paths are disabled by default", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-checkpoint-debug-disabled-"));
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
     const root = path.join(workspaceRoot, "root");
@@ -368,7 +399,7 @@ test("hosted checkpoint debug paths are disabled by default", async () => {
     await mkdir(root, { recursive: true });
     await writeFile(path.join(root, "keep.txt"), "keep\n", "utf8");
 
-    await withHostedCheckpointDebugEnv({ outputFile: debugOutputPath }, async () => {
+    await withHostedCheckpointDebugEnv({ log: "1", outputFile: debugOutputPath }, async () => {
       const bundle = await snapshotHostedBundleRoots({
         kind: "vault",
         roots: [{ root, rootKey: "vault" }],
@@ -377,7 +408,9 @@ test("hosted checkpoint debug paths are disabled by default", async () => {
     });
 
     await assert.rejects(readFile(debugOutputPath, "utf8"), isMissingTestPathError);
+    assert.equal(consoleError.mock.calls.length, 0);
   } finally {
+    consoleError.mockRestore();
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
@@ -562,6 +595,158 @@ test("hosted checkpoint debug paths record walker decisions", async () => {
       type: "artifact",
     });
   } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted checkpoint debug paths can stream bounded logs", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-checkpoint-debug-log-"));
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    const root = path.join(workspaceRoot, "root");
+    const debugOutputPath = path.join(workspaceRoot, "checkpoint-debug.json");
+    await mkdir(path.join(root, "nested"), { recursive: true });
+    await writeFile(path.join(root, "first.txt"), "first\n", "utf8");
+    await writeFile(path.join(root, "nested", "second.txt"), "second\n", "utf8");
+    await writeFile(path.join(root, "third.txt"), "third\n", "utf8");
+
+    await withHostedCheckpointDebugEnv({
+      enabled: "1",
+      log: "1",
+      logLimit: "2",
+      outputFile: debugOutputPath,
+    }, async () => {
+      const bundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root, rootKey: "vault" }],
+      });
+      assert.ok(bundle);
+    });
+
+    const joinedLogs = consoleError.mock.calls.flat().join("\n");
+    assert.equal(joinedLogs.includes(workspaceRoot), false);
+    assert.equal(joinedLogs.includes(root), false);
+    assert.equal(joinedLogs.includes(debugOutputPath), false);
+
+    const summaryLog = findHostedCheckpointDebugLog(
+      consoleError.mock.calls,
+      HOSTED_CHECKPOINT_DEBUG_SUMMARY_LOG_EVENT,
+    );
+    const entriesLog = findHostedCheckpointDebugLog(
+      consoleError.mock.calls,
+      HOSTED_CHECKPOINT_DEBUG_ENTRIES_LOG_EVENT,
+    );
+    assert.equal(summaryLog.schema, HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA);
+    assert.equal(summaryLog.kind, "vault");
+    assert.equal(summaryLog.status, "completed");
+    assert.equal(summaryLog.logEntryLimit, 2);
+    assert.equal(summaryLog.loggedEntryCount, 2);
+    assert.equal(summaryLog.omittedEntryCount, 2);
+    assert.equal(summaryLog.entryLogMode, "hashed");
+    assert.equal(summaryLog.entryLoggingDisabledReason, null);
+    assert.equal(entriesLog.chunkIndex, 0);
+    assert.equal(entriesLog.chunkCount, 1);
+    assert.equal(entriesLog.entryCount, 2);
+    assert.equal(entriesLog.omittedEntryCount, 2);
+
+    const loggedEntries = readHostedCheckpointDebugEntries(entriesLog);
+    assert.equal(loggedEntries.length, 2);
+    assert.equal(loggedEntries[0]?.decision, "include");
+    assert.equal(loggedEntries[0]?.source, "walk");
+    assert.equal(loggedEntries[0]?.type, "file");
+    assert.equal(typeof loggedEntries[0]?.pathHash, "string");
+    assert.equal("path" in (loggedEntries[0] ?? {}), false);
+  } finally {
+    consoleError.mockRestore();
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted checkpoint debug paths require an explicit log limit for streamed entries", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-checkpoint-debug-log-limit-"));
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    const root = path.join(workspaceRoot, "root");
+    const debugOutputPath = path.join(workspaceRoot, "checkpoint-debug.json");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "keep.txt"), "keep\n", "utf8");
+
+    await withHostedCheckpointDebugEnv({
+      enabled: "1",
+      log: "1",
+      outputFile: debugOutputPath,
+    }, async () => {
+      const bundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root, rootKey: "vault" }],
+      });
+      assert.ok(bundle);
+    });
+
+    const summaryLog = findHostedCheckpointDebugLog(
+      consoleError.mock.calls,
+      HOSTED_CHECKPOINT_DEBUG_SUMMARY_LOG_EVENT,
+    );
+    assert.equal(summaryLog.logEntryLimit, null);
+    assert.equal(summaryLog.loggedEntryCount, 0);
+    assert.equal(summaryLog.omittedEntryCount, 1);
+    assert.equal(summaryLog.entryLogMode, "disabled");
+    assert.equal(summaryLog.entryLoggingDisabledReason, "missing_log_limit");
+    assert.equal(
+      consoleError.mock.calls.some((call) => call[0] === HOSTED_CHECKPOINT_DEBUG_ENTRIES_LOG_EVENT),
+      false,
+    );
+  } finally {
+    consoleError.mockRestore();
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted checkpoint debug paths require an explicit unsafe flag for raw path logs", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-checkpoint-debug-log-raw-"));
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    const root = path.join(workspaceRoot, "root");
+    const debugOutputPath = path.join(workspaceRoot, "checkpoint-debug.json");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "keep.txt"), "keep\n", "utf8");
+
+    await withHostedCheckpointDebugEnv({
+      enabled: "1",
+      log: "1",
+      logLimit: "1",
+      logRaw: "1",
+      outputFile: debugOutputPath,
+    }, async () => {
+      const bundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root, rootKey: "vault" }],
+      });
+      assert.ok(bundle);
+    });
+
+    const summaryLog = findHostedCheckpointDebugLog(
+      consoleError.mock.calls,
+      HOSTED_CHECKPOINT_DEBUG_SUMMARY_LOG_EVENT,
+    );
+    const entriesLog = findHostedCheckpointDebugLog(
+      consoleError.mock.calls,
+      HOSTED_CHECKPOINT_DEBUG_ENTRIES_LOG_EVENT,
+    );
+    assert.equal(summaryLog.entryLogMode, "raw");
+    const loggedEntries = readHostedCheckpointDebugEntries(entriesLog);
+    assertHostedCheckpointDebugEntry(loggedEntries, {
+      decision: "include",
+      path: "keep.txt",
+      source: "walk",
+      type: "file",
+    });
+    assert.equal(typeof loggedEntries[0]?.pathHash, "string");
+  } finally {
+    consoleError.mockRestore();
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
