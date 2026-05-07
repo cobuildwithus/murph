@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionLinqConversationMessagePayload,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -292,6 +293,15 @@ async function deliverHostedCommittedAssistantDelivery(input: {
           const directRecipientPhoneNumber =
             normalizeHostedLinqDirectRecipient(request.directRecipientPhoneNumber)
             ?? readHostedWakeDirectLinqRecipientForDelivery({
+              replyToMessageId: request.replyToMessageId ?? null,
+              target: request.target,
+              targetKind: request.targetKind ?? null,
+              wake: input.wake,
+            });
+          const fromPhoneNumber =
+            normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
+            ?? readHostedWakeLinqSenderForDelivery({
+              replyToMessageId: request.replyToMessageId ?? null,
               target: request.target,
               targetKind: request.targetKind ?? null,
               wake: input.wake,
@@ -299,7 +309,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
           const result = input.effectsPort.sendLinq
             ? await input.effectsPort.sendLinq({
                 directRecipientPhoneNumber,
-                fromPhoneNumber: request.fromPhoneNumber ?? null,
+                fromPhoneNumber,
                 idempotencyKey: request.idempotencyKey ?? null,
                 message: request.message,
                 replyToMessageId: request.replyToMessageId ?? null,
@@ -354,30 +364,71 @@ async function deliverHostedCommittedAssistantDelivery(input: {
 }
 
 function readHostedWakeDirectLinqRecipientForDelivery(input: {
+  replyToMessageId: string | null;
   target: string;
   targetKind: string | null;
   wake: HostedRuntimeEvent;
 }): string | null {
+  if (!isSameHostedLinqWakeDelivery(input)) {
+    return null;
+  }
+  return normalizeHostedLinqDirectRecipient(input.wake.message.linqMessage.from);
+}
+
+function readHostedWakeLinqSenderForDelivery(input: {
+  replyToMessageId: string | null;
+  target: string;
+  targetKind: string | null;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  if (!isSameHostedLinqWakeDelivery(input)) {
+    return null;
+  }
+  return normalizeHostedLinqDirectRecipient(
+    input.wake.message.phoneLookupKey
+      ?? (input.wake.message.contactKind === "phone"
+        ? input.wake.message.contactLookupKey
+        : null),
+  );
+}
+
+function isSameHostedLinqWakeDelivery(input: {
+  replyToMessageId: string | null;
+  target: string;
+  targetKind: string | null;
+  wake: HostedRuntimeEvent;
+}): input is {
+  replyToMessageId: string | null;
+  target: string;
+  targetKind: string | null;
+  wake: Extract<HostedRuntimeEvent, { kind: "conversation.message" }> & {
+    message: HostedExecutionLinqConversationMessagePayload;
+  };
+} {
   if (
     input.targetKind !== "thread"
     && input.targetKind !== "explicit"
   ) {
-    return null;
+    return false;
   }
   if (
     input.wake.kind !== "conversation.message"
     || input.wake.message.channel !== "linq"
   ) {
-    return null;
+    return false;
   }
   const target = normalizeHostedProviderText(input.target);
   const wakeThread = normalizeHostedProviderText(
     input.wake.message.linqMessage.chatId,
   );
-  if (!target || target !== wakeThread) {
-    return null;
+  if (target && target === wakeThread) {
+    return true;
   }
-  return normalizeHostedLinqDirectRecipient(input.wake.message.linqMessage.from);
+  const replyToMessageId = normalizeHostedProviderText(input.replyToMessageId);
+  const wakeMessageId = normalizeHostedProviderText(
+    input.wake.message.linqMessage.messageId,
+  );
+  return Boolean(replyToMessageId && replyToMessageId === wakeMessageId);
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {
