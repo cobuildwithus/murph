@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { initializeVault } from "@murphai/core";
+import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+  initializeVault,
+  runCanonicalWrite,
+} from "@murphai/core";
 import {
   resolveAssistantStatePaths,
   resolveRuntimePaths,
@@ -1099,6 +1104,112 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("checkpoints exact hosted canonical writes without a full workspace snapshot", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactPutCalls: Array<{ byteLength: number; sha256: string }> = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const artifactLabelsByHash = new Map<string, string>();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        artifactBytesByHash,
+        artifactLabelsByHash,
+        artifactPutCalls,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "0" }),
+        }),
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot(snapshotInput) {
+          events.push(`snapshot:${snapshotInput.reason}`);
+          assert.equal(snapshotInput.reason, "canonical_runtime_commit");
+          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
+          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+          artifactLabelsByHash.set(hotHash, "canonical-hot-state");
+          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          return {
+            snapshotRef: createBundleRef({
+              hash: hotHash,
+              key: "users/bundles/member-synthetic/canonical-hot.bundle.json",
+              size: hotSnapshot.bundle.byteLength,
+            }),
+          };
+        },
+        async importItem() {
+          throw new Error("Mailbox import should not run without mailbox items.");
+        },
+        platform,
+        async runAssistantPhase(input) {
+          await runCanonicalWrite({
+            vaultRoot: input.restored.vaultRoot,
+            operationType: "hosted_canonical_write_test",
+            summary: "Persist hosted canonical write receipt.",
+            occurredAt: TEST_NOW,
+            mutate: async ({ batch }) => {
+              await batch.stageTextWrite("journal/2026-04-27.md", "exact hosted note\n");
+            },
+          });
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
+
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "artifact.put:unlabeled-artifact",
+        "snapshot:canonical_runtime_commit",
+        "workspace.checkpoint",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+      ]);
+      assert.ok(checkpointRequests[0]?.snapshotRef);
+      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteActionCount, 1);
+      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWritePayloadCount, 1);
+      assert.equal(artifactPutCalls.length, 1);
+      assert.equal(
+        await readFile(path.join(vaultRoot, "journal", "2026-04-27.md"), "utf8"),
+        "exact hosted note\n",
+      );
+      const receiptRoot = path.join(
+        resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+        "receipts",
+        "canonical-writes",
+      );
+      const receiptFiles = await readdir(receiptRoot);
+      const receiptFile = receiptFiles.find((entry) => entry.endsWith(".json"));
+      assert.ok(receiptFile);
+      assert.deepEqual(receiptFiles.sort(), ["payloads", receiptFile].sort());
+      const receipt = JSON.parse(await readFile(path.join(receiptRoot, receiptFile), "utf8"));
+      assert.equal(receipt.schema, HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION);
+      assert.equal(
+        await readFile(
+          path.join(
+            receiptRoot,
+            "payloads",
+            `${sha256Hex(Buffer.from("exact hosted note\n", "utf8"))}.bin`,
+          ),
+          "utf8",
+        ),
+        "exact hosted note\n",
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("does not run assistant outbox phase when mailbox import fails before checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -1719,6 +1830,39 @@ describe("hosted workspace runtime entrypoint", () => {
         "{\"session\":\"latest\"}\n",
         "utf8",
       );
+      const exactPayload = Buffer.from("restored exact hosted note\n", "utf8");
+      const exactPayloadHash = sha256Hex(exactPayload);
+      const canonicalReceiptRoot = path.join(hotAssistantRoot, "receipts", "canonical-writes");
+      const canonicalPayloadRoot = path.join(canonicalReceiptRoot, "payloads");
+      await mkdir(canonicalPayloadRoot, { recursive: true });
+      await writeFile(path.join(canonicalPayloadRoot, `${exactPayloadHash}.bin`), exactPayload);
+      await writeFile(
+        path.join(canonicalReceiptRoot, "op_synthetic_canonical_restore.json"),
+        `${JSON.stringify({
+          actions: [
+            {
+              byteLength: exactPayload.byteLength,
+              contentRef: {
+                byteSize: exactPayload.byteLength,
+                sha256: exactPayloadHash,
+              },
+              effect: "create",
+              kind: "text_upsert",
+              sha256: exactPayloadHash,
+              targetRelativePath: "journal/2026-04-28.md",
+            },
+          ],
+          committedAt: TEST_NOW,
+          createdAt: TEST_NOW,
+          occurredAt: TEST_NOW,
+          operationId: "op_synthetic_canonical_restore",
+          operationType: "hosted_canonical_write_test",
+          schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+          summary: "Restore hosted canonical write receipt.",
+          updatedAt: TEST_NOW,
+        }, null, 2)}\n`,
+        "utf8",
+      );
       const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
         vaultRoot: sourceHotVaultRoot,
       });
@@ -1774,6 +1918,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(artifactGetCalls, [baseHash, hotHash]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
+      assert.equal(
+        await readFile(path.join(vaultRoot, "journal", "2026-04-28.md"), "utf8"),
+        "restored exact hosted note\n",
+      );
       await assert.rejects(
         readFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent-old.json"), "utf8"),
       );
@@ -2831,6 +2979,10 @@ function readArtifactEventLabel(
   sha256: string,
 ): string {
   return labelsByHash?.get(sha256) ?? "unlabeled-artifact";
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function requireEventIndex(events: readonly string[], event: string): number {

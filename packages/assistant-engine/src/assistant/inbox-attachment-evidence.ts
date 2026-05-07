@@ -1,5 +1,5 @@
-import { copyFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
+import { runCanonicalWrite } from '@murphai/core'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import type {
   AssistantInputAttachmentEvidence,
@@ -210,17 +210,24 @@ export async function materializeAssistantInputAttachmentRawArtifactRefs(input: 
           sourcePath,
           'file path',
         )
-        const targetAbsolutePath = await resolveAssistantVaultPath(
-          input.vaultRoot,
-          targetPath,
-          'file path',
-        )
-        await mkdir(path.dirname(targetAbsolutePath), { recursive: true })
-        // `raw/assistant-input/**` is the assistant-owned raw evidence
-        // namespace for event-owned attachment evidence. These copies keep
-        // prompts decoupled from inbox capture layout while preserving durable
-        // vault-relative artifact handles.
-        await copyFile(sourceAbsolutePath, targetAbsolutePath)
+        const mediaType = normalizeContentType(attachment.mime) ??
+          'application/octet-stream'
+        await runCanonicalWrite({
+          vaultRoot: input.vaultRoot,
+          operationType: 'assistant_input_raw_artifact',
+          summary: `Materialize assistant input raw artifact ${targetPath}`,
+          mutate: async ({ batch }) => {
+            await batch.stageRawCopy({
+              sourcePath: sourceAbsolutePath,
+              targetRelativePath: targetPath,
+              originalFileName:
+                normalizeAssistantInputFileName(attachment.fileName) ??
+                path.basename(targetPath),
+              mediaType,
+              allowExistingMatch: true,
+            })
+          },
+        })
       }
       refs.set(index, targetPath)
     } catch {

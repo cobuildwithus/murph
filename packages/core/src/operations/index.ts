@@ -28,14 +28,27 @@ export type {
 } from "./canonical-write-lock.ts";
 export {
   isProtectedCanonicalPath,
+  HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV,
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   listProtectedCanonicalPaths,
   readRecoverableStoredWriteOperation,
   isTerminalWriteOperationStatus,
   listWriteOperationMetadataPaths,
+  applyHostedCanonicalWriteReceipt,
   readStoredWriteOperation,
+  resolveHostedCanonicalWritePayloadFilePath,
   runCanonicalWrite,
+  withHostedCanonicalWritePort,
   WriteBatch,
   WRITE_OPERATION_DIRECTORY,
   WRITE_OPERATION_SCHEMA_VERSION,
 } from "./write-batch.ts";
-export type { RecoverableStoredWriteOperation } from "./write-batch.ts";
+export type {
+  HostedCanonicalWritePayload,
+  HostedCanonicalWritePort,
+  HostedCanonicalWritePersistenceInput,
+  HostedCanonicalWriteReceipt,
+  HostedCanonicalWriteReceiptAction,
+  HostedCanonicalWriteReceiptContentRef,
+  RecoverableStoredWriteOperation,
+} from "./write-batch.ts";

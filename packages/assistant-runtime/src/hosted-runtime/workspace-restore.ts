@@ -1,6 +1,14 @@
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  applyHostedCanonicalWriteReceipt,
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+  resolveHostedCanonicalWritePayloadFilePath,
+  type HostedCanonicalWriteReceiptAction,
+  type HostedCanonicalWriteReceiptContentRef,
+  type HostedCanonicalWriteReceipt,
+} from "@murphai/core";
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
@@ -237,6 +245,11 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     });
   }
 
+  await applyHostedCanonicalWriteReceiptsFromRestoredRuntime({
+    platform: input.platform,
+    vaultRoot: restored.vaultRoot,
+  });
+
   return {
     ...restored,
     mode: "snapshot",
@@ -277,6 +290,242 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
     ref: input.hotSnapshotRef,
     restored: input.restored,
   });
+}
+
+async function applyHostedCanonicalWriteReceiptsFromRestoredRuntime(input: {
+  platform: HostedRuntimePlatform;
+  vaultRoot: string;
+}): Promise<void> {
+  const receiptRoot = path.join(
+    resolveAssistantStatePaths(input.vaultRoot).assistantStateRoot,
+    "receipts",
+    "canonical-writes",
+  );
+  let entries: string[];
+  try {
+    entries = await readdir(receiptRoot);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return;
+    }
+    throw error;
+  }
+
+  const receipts: HostedCanonicalWriteReceipt[] = [];
+  for (const entry of entries.filter((value) => value.endsWith(".json")).sort()) {
+    const parsed = parseHostedCanonicalWriteReceiptForRestore(
+      await readFile(path.join(receiptRoot, entry), "utf8"),
+    );
+    if (parsed) {
+      receipts.push(parsed);
+    }
+  }
+
+  receipts.sort((left, right) =>
+    left.committedAt.localeCompare(right.committedAt)
+    || left.operationId.localeCompare(right.operationId)
+  );
+
+  for (const receipt of receipts) {
+    await applyHostedCanonicalWriteReceipt({
+      readPayload: async (ref) =>
+        await readHostedCanonicalWritePayloadForRestore({
+          platform: input.platform,
+          receiptRoot,
+          ref,
+        }),
+      receipt,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+}
+
+async function readHostedCanonicalWritePayloadForRestore(input: {
+  platform: HostedRuntimePlatform;
+  receiptRoot: string;
+  ref: HostedCanonicalWriteReceiptContentRef;
+}): Promise<Uint8Array | ArrayBuffer | null> {
+  try {
+    return await readFile(resolveHostedCanonicalWritePayloadFilePath({
+      receiptRoot: input.receiptRoot,
+      sha256: input.ref.sha256,
+    }));
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      throw error;
+    }
+  }
+
+  return await input.platform.artifactStore.get(input.ref.sha256);
+}
+
+function parseHostedCanonicalWriteReceiptForRestore(
+  raw: string,
+): HostedCanonicalWriteReceipt | null {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isPlainObject(parsed)) {
+    throw new Error("Hosted canonical write receipt must be an object.");
+  }
+  if (
+    parsed.schema !== HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION &&
+    parsed.schemaVersion === HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION
+  ) {
+    return null;
+  }
+  if (parsed.schema !== HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION) {
+    throw new Error("Hosted canonical write receipt schema is invalid.");
+  }
+  if (
+    typeof parsed.operationId !== "string" ||
+    typeof parsed.operationType !== "string" ||
+    typeof parsed.summary !== "string" ||
+    typeof parsed.createdAt !== "string" ||
+    typeof parsed.updatedAt !== "string" ||
+    typeof parsed.occurredAt !== "string" ||
+    typeof parsed.committedAt !== "string" ||
+    !Array.isArray(parsed.actions)
+  ) {
+    throw new Error("Hosted canonical write receipt fields are invalid.");
+  }
+
+  const actions = parsed.actions.map(parseHostedCanonicalWriteReceiptActionForRestore);
+  return {
+    schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+    operationId: parsed.operationId,
+    operationType: parsed.operationType,
+    summary: parsed.summary,
+    createdAt: parsed.createdAt,
+    updatedAt: parsed.updatedAt,
+    occurredAt: parsed.occurredAt,
+    committedAt: parsed.committedAt,
+    actions,
+  };
+}
+
+function parseHostedCanonicalWriteReceiptActionForRestore(
+  raw: unknown,
+): HostedCanonicalWriteReceiptAction {
+  if (!isPlainObject(raw) || typeof raw.kind !== "string") {
+    throw new Error("Hosted canonical write receipt action is invalid.");
+  }
+  if (typeof raw.targetRelativePath !== "string") {
+    throw new Error("Hosted canonical write receipt action target is invalid.");
+  }
+
+  switch (raw.kind) {
+    case "text_upsert": {
+      if (
+        !isSha256(raw.sha256) ||
+        !isNonNegativeInteger(raw.byteLength) ||
+        !isTextUpsertEffect(raw.effect)
+      ) {
+        throw new Error("Hosted canonical text write receipt action is invalid.");
+      }
+      const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
+      return {
+        kind: "text_upsert",
+        targetRelativePath: raw.targetRelativePath,
+        sha256: raw.sha256,
+        byteLength: raw.byteLength,
+        effect: raw.effect,
+        ...(contentRef ? { contentRef } : {}),
+      };
+    }
+    case "jsonl_append": {
+      if (
+        !isSha256(raw.appendSha256) ||
+        !isNonNegativeInteger(raw.appendByteLength) ||
+        (raw.originalSize !== null && !isNonNegativeInteger(raw.originalSize))
+      ) {
+        throw new Error("Hosted canonical JSONL append receipt action is invalid.");
+      }
+      const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
+      return {
+        kind: "jsonl_append",
+        targetRelativePath: raw.targetRelativePath,
+        appendSha256: raw.appendSha256,
+        appendByteLength: raw.appendByteLength,
+        originalSize: raw.originalSize,
+        ...(contentRef ? { contentRef } : {}),
+      };
+    }
+    case "raw_upsert": {
+      if (
+        !isSha256(raw.sha256) ||
+        !isNonNegativeInteger(raw.byteLength) ||
+        typeof raw.mediaType !== "string" ||
+        typeof raw.originalFileName !== "string" ||
+        !isRawUpsertEffect(raw.effect)
+      ) {
+        throw new Error("Hosted canonical raw write receipt action is invalid.");
+      }
+      const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
+      if (!contentRef) {
+        throw new Error("Hosted canonical raw write receipt action is missing content.");
+      }
+      return {
+        kind: "raw_upsert",
+        targetRelativePath: raw.targetRelativePath,
+        sha256: raw.sha256,
+        byteLength: raw.byteLength,
+        mediaType: raw.mediaType,
+        originalFileName: raw.originalFileName,
+        effect: raw.effect,
+        contentRef,
+      };
+    }
+    case "delete": {
+      if (typeof raw.existedBefore !== "boolean") {
+        throw new Error("Hosted canonical delete receipt action is invalid.");
+      }
+      return {
+        kind: "delete",
+        targetRelativePath: raw.targetRelativePath,
+        existedBefore: raw.existedBefore,
+      };
+    }
+    default:
+      throw new Error("Hosted canonical write receipt action kind is invalid.");
+  }
+}
+
+function parseHostedCanonicalWriteReceiptContentRef(
+  raw: unknown,
+): HostedCanonicalWriteReceiptContentRef | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!isPlainObject(raw) || !isSha256(raw.sha256) || !isNonNegativeInteger(raw.byteSize)) {
+    throw new Error("Hosted canonical write receipt content ref is invalid.");
+  }
+  return {
+    sha256: raw.sha256,
+    byteSize: raw.byteSize,
+  };
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isTextUpsertEffect(value: unknown): value is "create" | "update" | "reuse" {
+  return value === "create" || value === "update" || value === "reuse";
+}
+
+function isRawUpsertEffect(value: unknown): value is "copy" | "reuse" {
+  return value === "copy" || value === "reuse";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return isPlainObject(error) && error.code === "ENOENT";
 }
 
 async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {

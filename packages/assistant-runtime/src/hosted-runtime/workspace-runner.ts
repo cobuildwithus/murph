@@ -1,6 +1,11 @@
 import {
   buildHostedExecutionSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
+import {
+  withHostedCanonicalWritePort,
+  type HostedCanonicalWritePersistenceInput,
+  type HostedCanonicalWritePort,
+} from "@murphai/core";
 import type {
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointReason,
@@ -289,6 +294,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     };
   }
 
+  const runAssistantPhase = input.runAssistantPhase;
   const platform = withActiveTurnInputWorkspacePorts({
     initialMailboxImport,
     checkpointRequestBuilder: checkpointRequestSession,
@@ -301,9 +307,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     platform,
     workspace: input.workspace,
   };
+  const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
+    checkpointRequestBuilder: checkpointRequestSession,
+    initialMailboxImport,
+    input,
+  });
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   try {
-    assistantPhaseResult = await input.runAssistantPhase(assistantPhaseInput);
+    assistantPhaseResult = await withHostedCanonicalWritePort(
+      hostedCanonicalWritePort,
+      () => runAssistantPhase(assistantPhaseInput),
+    );
     await checkpointHostedWorkspaceAssistantPhase({
       assistantPhaseResult,
       checkpointRequestBuilder: checkpointRequestSession,
@@ -322,7 +336,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
     let postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
     try {
-      postCheckpoint = await assistantPhaseResult.afterCheckpoint?.();
+      postCheckpoint = await withHostedCanonicalWritePort(
+        hostedCanonicalWritePort,
+        async () => await assistantPhaseResult.afterCheckpoint?.(),
+      );
     } catch (error) {
       await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
         error,
@@ -567,6 +584,69 @@ function shouldRecordHostedActiveTurnMailboxRefreshResult(
     || result.importResult.importedCount > 0
     || result.importResult.blocked.length > 0
   );
+}
+
+function createHostedWorkspaceCanonicalWritePort(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  input: HostedWorkspaceRunnerInput;
+}): HostedCanonicalWritePort {
+  return {
+    async persistCanonicalWrite(persistenceInput: HostedCanonicalWritePersistenceInput) {
+      for (const payload of persistenceInput.payloads) {
+        await input.input.platform.artifactStore.put({
+          bytes: payload.bytes,
+          sha256: payload.sha256,
+        });
+      }
+
+      const mailboxImport =
+        input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
+      const latestWorkspace =
+        input.checkpointRequestBuilder.latestWorkspace()
+        ?? input.initialMailboxImport.checkpoint?.workspace
+        ?? input.input.workspace
+        ?? null;
+      const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
+        mailboxImport,
+        {
+          hostedCanonicalWriteActionCount: persistenceInput.receipt.actions.length,
+          hostedCanonicalWriteOperationId: persistenceInput.receipt.operationId,
+          hostedCanonicalWritePayloadCount: persistenceInput.payloads.length,
+        },
+      );
+      const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
+        importResult: mailboxImport.importResult,
+        ...(
+          latestWorkspace
+            ? hostedWorkspaceScheduledWake(latestWorkspace)
+            : { nextWakeAt: null, nextWakeReason: null }
+        ),
+        previousState: mailboxImport.state,
+        reason: "canonical_runtime_commit",
+        redactedStatus,
+        state: mailboxImport.state,
+      });
+      const checkpoint = await input.input.platform.workspacePort.checkpoint({
+        ...checkpointRequest,
+        reason: "canonical_runtime_commit",
+        redactedStatus,
+      });
+
+      if (checkpoint.workspace.userId !== input.input.expectedUserId) {
+        throw new HostedMailboxImportCheckpointUserMismatchError({
+          actualUserId: checkpoint.workspace.userId,
+          expectedUserId: input.input.expectedUserId,
+        });
+      }
+
+      if (!checkpoint.checkpointed) {
+        throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+      }
+
+      input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
+    },
+  };
 }
 
 async function checkpointHostedWorkspacePostAssistantPhase(input: {
