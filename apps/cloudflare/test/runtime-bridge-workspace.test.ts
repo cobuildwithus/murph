@@ -58,7 +58,7 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("writes activation bootstrap checkpoints as bounded hot state", async () => {
+  it("writes activation bootstrap checkpoints as full base snapshots", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "state"), {
@@ -97,19 +97,20 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("activation_bootstrap"));
-    const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
+    const snapshotRef = requireBundleRef(result.snapshotRef);
 
-    expect(snapshotRef.base).toBeNull();
-    expect(snapshotRef.hot).toEqual(expect.objectContaining({
+    expect(snapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u),
       size: expect.any(Number),
     }));
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.hot?.hash,
+      sha256: snapshotRef.hash,
     }));
-    expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(result).not.toHaveProperty("browserVaultReplicaRef");
+    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
+      sourceBundleHash: snapshotRef.hash,
+    }));
   });
 
   it("lets web CAS own workspace version conflicts", async () => {
@@ -140,9 +141,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("activation_bootstrap"));
-    const snapshotRef = requireLayeredSnapshotRef(result.snapshotRef);
+    const snapshotRef = requireBundleRef(result.snapshotRef);
 
-    expect(snapshotRef.hot).toEqual(expect.objectContaining({
+    expect(snapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
     }));
     expect(putArtifact).toHaveBeenCalled();
@@ -2282,11 +2283,11 @@ type CheckpointReason = (typeof HOSTED_WORKSPACE_CHECKPOINT_REASONS)[number];
 
 function expectedCheckpointSnapshotMode(reason: CheckpointReason): "full" | "hot" {
   switch (reason) {
+    case "activation_bootstrap":
     case "idle_shutdown":
       return "full";
     case "active_turn_acceptance":
     case "active_turn_input":
-    case "activation_bootstrap":
     case "assistant_runtime_commit":
     case "canonical_runtime_commit":
     case "import":

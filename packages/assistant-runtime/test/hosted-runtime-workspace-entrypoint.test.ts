@@ -13,6 +13,8 @@ import {
   resolveAssistantStatePaths,
   resolveRuntimePaths,
   sha256HostedBundleHex,
+  createHostedPortableWorkspaceManifestFromBundle,
+  createHostedWorkspaceWorkingDeltaBundle,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
   writeHostedBundleTextFile,
@@ -37,6 +39,7 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionLayeredSnapshotRef,
+  buildHostedExecutionWorkingSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
@@ -1589,6 +1592,165 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("compacts restored legacy working snapshots before mailbox import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
+    const sourceCurrentVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-current-"));
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const artifactGetCalls: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+
+    try {
+      await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
+      const baseState = createEmptyHostedMailboxImportState();
+      baseState.watermarks.conversation = "2";
+      const baseSourceBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const baseBundle = writeMailboxImportStateToBundle(baseSourceBundle, baseState);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const baseManifest = createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+
+      await writeFile(path.join(sourceCurrentVaultRoot, "note.md"), "current note\n", "utf8");
+      const currentState = createEmptyHostedMailboxImportState();
+      currentState.watermarks.conversation = "3";
+      const currentSourceBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceCurrentVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const currentBundle = writeMailboxImportStateToBundle(currentSourceBundle, currentState);
+      const delta = createHostedWorkspaceWorkingDeltaBundle({
+        baseManifest,
+        baseSnapshotHash: baseHash,
+        currentBundle,
+      });
+      const deltaHash = sha256HostedBundleHex(delta.bundle);
+      const artifactBytesByHash = new Map([
+        [baseHash, baseBundle],
+        [deltaHash, delta.bundle],
+      ]);
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            reason: "manual",
+            workspaceVersion: "9",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(
+              `snapshot:${snapshotInput.reason}:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`,
+            );
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "activation_bootstrap"
+                  ? "b".repeat(64)
+                  : "c".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(item.item.laneSeq);
+            events.push(`import:${item.item.laneSeq}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            artifactGetCalls,
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_legacy_current",
+                  laneSeq: "3",
+                }),
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_legacy_next",
+                  laneSeq: "4",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                redactedStatus: {
+                  hostedMailboxConversationImportedSeq: "3",
+                },
+                snapshotRef: buildHostedExecutionWorkingSnapshotRef({
+                  base: createBundleRef({
+                    hash: baseHash,
+                    key: "users/bundles/member-synthetic/base.bundle.json",
+                    size: baseBundle.byteLength,
+                  }),
+                  delta: createBundleRef({
+                    hash: deltaHash,
+                    key: "users/bundles/member-synthetic/delta.bundle.json",
+                    size: delta.bundle.byteLength,
+                  }),
+                }),
+                version: "9",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            events.push("assistant");
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(artifactGetCalls, [baseHash, baseHash, deltaHash]);
+      assert.deepEqual(imported, ["4"]);
+      assert.equal(fetchRequests.length, 1);
+      assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
+      assert.deepEqual(events, [
+        "workspace.read",
+        "snapshot:activation_bootstrap:3",
+        "workspace.checkpoint",
+        "mailbox.fetch",
+        "import:4",
+        "snapshot:import:4",
+        "workspace.checkpoint",
+        "assistant",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.expectedWorkspaceVersion,
+      ]), [
+        ["activation_bootstrap", "9"],
+        ["import", "10"],
+      ]);
+      assert.equal(
+        await readFile(path.join(vaultRoot, "note.md"), "utf8"),
+        "current note\n",
+      );
+      assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
+      await rm(sourceCurrentVaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("fetches mailbox rows from the authoritative restored watermark", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -3068,8 +3230,20 @@ function createMailboxImportStateBundle(input: HostedMailboxImportState): {
   bytes: Uint8Array;
   hash: string;
 } {
-  const bytes = writeHostedBundleTextFile({
-    bytes: null,
+  const bytes = writeMailboxImportStateToBundle(null, input);
+
+  return {
+    bytes,
+    hash: sha256HostedBundleHex(bytes),
+  };
+}
+
+function writeMailboxImportStateToBundle(
+  bytes: Uint8Array | null,
+  input: HostedMailboxImportState,
+): Uint8Array {
+  return writeHostedBundleTextFile({
+    bytes,
     kind: "vault",
     path: HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
     root: "vault",
@@ -3079,11 +3253,6 @@ function createMailboxImportStateBundle(input: HostedMailboxImportState): {
       value: input,
     }),
   });
-
-  return {
-    bytes,
-    hash: sha256HostedBundleHex(bytes),
-  };
 }
 
 function createMailboxPort(input: {
