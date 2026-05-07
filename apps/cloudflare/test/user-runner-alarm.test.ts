@@ -889,11 +889,13 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(alarmRun).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toEqual([
-      "2026-04-27T00:00:01.000Z",
-      "2026-04-27T00:00:46.100Z",
-      "2026-04-27T00:05:00.000Z",
-    ]);
+    await vi.waitFor(() =>
+      expect(alarms).toEqual([
+        "2026-04-27T00:00:01.000Z",
+        "2026-04-27T00:00:46.100Z",
+        "2026-04-27T00:05:00.000Z",
+      ])
+    );
   });
 
   it("keeps a newly observed persisted-only invocation pending until the orphan grace deadline", async () => {
@@ -1640,6 +1642,42 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    }]);
   });
 
+  it("schedules idle-shutdown checkpoint before a later workspace wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      snapshotRef: createLayeredSnapshotRef("idle-before-later-wake"),
+      version: "4",
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+        nextWakeAt: "2026-04-27T00:10:00.000Z",
+        status: "idle",
+      })),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(alarms.at(-1)).toBe("2026-04-27T00:04:55.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:55.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: "2026-04-27T00:10:00.000Z",
+    }]);
+  });
+
   it("clears a pending idle-shutdown checkpoint when a new nudge arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1728,6 +1766,61 @@ describe("HostedUserRunner runtime crypto context", () => {
         path: HOSTED_WEB_USAGE_GATE_PATH,
       }),
     );
+  });
+
+  it("runs due idle-shutdown checkpoint before a later workspace wake and preserves the wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      snapshotRef: createLayeredSnapshotRef("idle-run-before-later-wake"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const idleInvoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      idleShutdownCheckpointed: true,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      status: "idle",
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke: idleInvoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?,
+           next_wake_at = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "2026-04-27T00:10:00.000Z",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(idleInvoke).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(alarms.at(-1)).toBe("2026-04-27T00:10:00.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                next_wake_at,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      next_wake_at: "2026-04-27T00:10:00.000Z",
+      pending_nudge: 0,
+    }]);
   });
 
   it("does not retry a committed idle-shutdown checkpoint when cleanup alarm deletion fails", async () => {
@@ -1859,6 +1952,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       }),
     );
   });
+
   it("does not finish idle-shutdown cleanup when the runtime only returns scheduled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
