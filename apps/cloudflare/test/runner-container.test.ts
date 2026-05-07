@@ -816,6 +816,59 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("restarts a warm shell when the control token no longer matches the container process", async () => {
+    let controlHealthChecks = 0;
+    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/control-health")) {
+          controlHealthChecks += 1;
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 401,
+          });
+        }
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+    Object.assign(container, {
+      runnerControlToken: "stale-control-token",
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_restart_after_failed_control_health"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(controlHealthChecks).toBe(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toBe(true);
+  });
+
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 

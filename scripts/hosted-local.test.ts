@@ -61,6 +61,7 @@ describe("hosted-local harness", () => {
       "test:e2e:workers:local",
       "test:e2e:full-stack:local",
       "test:e2e:smoke:local",
+      "test:e2e:runner-control-token:local",
       "test:e2e:runner-python:local",
     ]);
 
@@ -93,17 +94,26 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("codex-gateway-prefix")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",
     );
+    expect(resolveHostedLocalE2eScenarios("codex-container-continuity")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "active-turn-latency",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "codex-gateway-prefix",
     );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
+      "codex-container-continuity",
+    );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "active-turn-latency",
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "codex-gateway-prefix",
+    );
+    expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
+      "codex-container-continuity",
     );
   });
 

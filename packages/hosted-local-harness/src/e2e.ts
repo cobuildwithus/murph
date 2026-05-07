@@ -12,6 +12,7 @@ export type HostedLocalE2eScenarioName =
   | "all"
   | "active-turn-latency"
   | "checkpoint-baseline"
+  | "codex-container-continuity"
   | "codex-gateway-prefix"
   | "container-continuity"
   | "device-connect"
@@ -47,6 +48,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
     manualOnly: true,
     name: "container-continuity",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
+    manualOnly: true,
+    name: "codex-container-continuity",
   },
   {
     file: "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",

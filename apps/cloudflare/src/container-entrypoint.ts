@@ -159,10 +159,12 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      if (
-        request.method !== "POST"
-        || requestUrl.pathname !== "/internal/workspace-invocation"
-      ) {
+      const isControlHealthRequest =
+        request.method === "GET" && requestUrl.pathname === "/internal/control-health";
+      const isWorkspaceInvocationRequest =
+        request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
+
+      if (!isControlHealthRequest && !isWorkspaceInvocationRequest) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
@@ -196,6 +198,16 @@ export async function startHostedContainerEntrypoint(input: {
         writeJsonResponse(response, 401, {
           error: "Unauthorized",
         });
+        return;
+      }
+
+      if (isControlHealthRequest) {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({
+          ok: true,
+          service: "cloudflare-hosted-runner-node",
+        }));
         return;
       }
 
