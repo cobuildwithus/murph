@@ -25,8 +25,9 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-    HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+    HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
     HOSTED_ASSISTANT_PROVIDER: "openai",
+    HOSTED_ASSISTANT_REASONING_EFFORT: "low",
     HOSTED_WEB_BASE_URL: "https://app.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
     HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
@@ -314,6 +315,51 @@ describe("deploy preflight helpers", () => {
     ).toContain(
       "HOSTED_ASSISTANT_MODEL must be one of gpt-5.4-mini, gpt-5.5 for hosted AI usage allowance pricing.",
     );
+  });
+
+  it("requires the production hot-reply latency profile", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.4-mini.",
+    );
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_REASONING_EFFORT: undefined,
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
+    );
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(
+      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
+    );
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv(),
+        { deployWorker: true },
+      ),
+    ).toEqual(expect.not.arrayContaining([
+      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.4-mini.",
+      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
+    ]));
   });
 
   it("allows deploys without Junction runtime env", () => {

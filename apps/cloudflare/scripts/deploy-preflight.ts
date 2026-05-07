@@ -36,6 +36,8 @@ const HOSTED_DEPLOY_CONTEXTS = [
   "production",
 ] as const;
 const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
+const PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_MODEL = "gpt-5.4-mini";
+const PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_REASONING_EFFORT = "low";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -194,6 +196,9 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   const hostedAssistantModel = normalizeOptionalString(source.HOSTED_ASSISTANT_MODEL);
   const hostedAssistantProvider = normalizeOptionalString(source.HOSTED_ASSISTANT_PROVIDER);
+  const hostedAssistantReasoningEffort = normalizeOptionalString(
+    source.HOSTED_ASSISTANT_REASONING_EFFORT,
+  );
   if (hostedAssistantProvider !== REQUIRED_HOSTED_ASSISTANT_PROVIDER) {
     errors.push(
       `HOSTED_ASSISTANT_PROVIDER must be ${REQUIRED_HOSTED_ASSISTANT_PROVIDER} for hosted runner execution.`,
@@ -245,6 +250,24 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   if (deployContext !== "production") {
     return errors;
+  }
+
+  if (
+    hostedAssistantModel
+    && hostedAssistantModel !== PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_MODEL
+  ) {
+    errors.push(
+      `production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_MODEL=${PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_MODEL}.`,
+    );
+  }
+
+  if (
+    hostedAssistantReasoningEffort
+    !== PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_REASONING_EFFORT
+  ) {
+    errors.push(
+      `production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=${PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_REASONING_EFFORT}.`,
+    );
   }
 
   if (hostedCryptoEnv && hostedCryptoEnv !== "production") {
