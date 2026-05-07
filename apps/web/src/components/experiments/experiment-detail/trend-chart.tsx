@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -22,6 +24,10 @@ interface TrendChartProps {
 }
 
 const chartConfig = {
+  history: {
+    label: "History",
+    color: "#D4C4A8",
+  },
   baseline: {
     label: "Baseline",
     color: "#D4C4A8",
@@ -36,50 +42,32 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
-type SeriesKey = "baseline" | "active" | "expectedRange";
+type SeriesKey = "history" | "baseline" | "active" | "expectedRange";
 
 const SERIES: Record<SeriesKey, { label: string; swatch: string }> = {
+  history: { label: "History", swatch: "border-t border-dotted border-secondary/60" },
   baseline: { label: "Baseline", swatch: "border-t border-dashed border-secondary" },
   active: { label: "Active", swatch: "h-px bg-ring" },
   expectedRange: { label: "Expected", swatch: "h-2 rounded-sm bg-ring/20" },
 };
 
-interface ChartPoint {
+export interface TrendChartPoint {
   day: number;
+  history?: number;
   baseline?: number;
   active?: number;
   expectedRange?: [number, number];
 }
 
 export function TrendChart({ data, className }: TrendChartProps) {
+  const hasHistory = data.history.length > 0;
+  const [showHistory, setShowHistory] = useState(false);
   const chartId = data.label.replace(/\s+/g, "-").toLowerCase();
   const lastBaselinePoint = data.baseline[data.baseline.length - 1];
   const baselineEnd = lastBaselinePoint?.day ?? 0;
-  const lastBaselineValue = lastBaselinePoint?.value;
   const expectedRange = data.expectedRange ?? [];
   const hasExpectedRange = expectedRange.length > 0;
-  const allDays = new Set<number>([
-    ...data.baseline.map((p) => p.day),
-    ...data.active.map((p) => p.day),
-    ...expectedRange.map((p) => p.day),
-  ]);
-  const baselineByDay = new Map(data.baseline.map((p) => [p.day, p.value]));
-  const activeByDay = new Map(data.active.map((p) => [p.day, p.value]));
-  const expectedByDay = new Map(
-    expectedRange.map((p) => [p.day, [p.low, p.high] as [number, number]]),
-  );
-  const deduped: ChartPoint[] = [...allDays]
-    .sort((a, b) => a - b)
-    .map((day) => ({
-      day,
-      baseline: day <= baselineEnd ? baselineByDay.get(day) : undefined,
-      active: day > baselineEnd
-        ? activeByDay.get(day)
-        : day === baselineEnd
-          ? activeByDay.get(day) ?? lastBaselineValue
-          : undefined,
-      expectedRange: expectedByDay.get(day),
-    }));
+  const deduped = buildTrendChartPoints(data, showHistory);
 
   return (
     <div
@@ -99,6 +87,19 @@ export function TrendChart({ data, className }: TrendChartProps) {
             </span>
           )}
           <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+            {hasHistory && (
+              <button
+                type="button"
+                onClick={() => setShowHistory((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1.5 transition-opacity",
+                  showHistory ? "opacity-100" : "opacity-50 hover:opacity-75",
+                )}
+              >
+                <span aria-hidden="true" className={cn("inline-block w-3", SERIES.history.swatch)} />
+                History
+              </button>
+            )}
             <LegendSwatch seriesKey="baseline" />
             <LegendSwatch seriesKey="active" />
             {hasExpectedRange && <LegendSwatch seriesKey="expectedRange" />}
@@ -106,6 +107,25 @@ export function TrendChart({ data, className }: TrendChartProps) {
         </div>
       </div>
 
+      <div className="group/chart relative">
+        {hasHistory && (
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            className={cn(
+              "absolute left-1.5 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border border-border/60 bg-card shadow-sm transition-opacity duration-500 ease-in-out",
+              showHistory
+                ? "opacity-100"
+                : "opacity-0 group-hover/chart:opacity-70 hover:!opacity-100",
+            )}
+            aria-label={showHistory ? "Hide history" : "Show history"}
+          >
+            {showHistory
+              ? <ChevronRight className="size-3.5 text-muted-foreground" />
+              : <ChevronLeft className="size-3.5 text-muted-foreground" />
+            }
+          </button>
+        )}
       <ChartContainer config={chartConfig} className="h-32 w-full">
         <AreaChart data={deduped} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
           <defs>
@@ -142,7 +162,9 @@ export function TrendChart({ data, className }: TrendChartProps) {
 
               return (
                 <div className="rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                  <div className="font-medium text-foreground">Day {day}</div>
+                  <div className="font-medium text-foreground">
+                    {day < 1 ? dayToDate(data.startDate, day) : `Day ${day}`}
+                  </div>
                   <div className="mt-1 grid gap-1">
                     {rows.map((row) => (
                       <div key={row.key} className="flex items-center justify-between gap-3">
@@ -161,6 +183,20 @@ export function TrendChart({ data, className }: TrendChartProps) {
               );
             }}
           />
+          {showHistory && (
+            <Area
+              dataKey="history"
+              type="monotone"
+              stroke="#B0A48C"
+              strokeWidth={1.5}
+              strokeDasharray="3 2"
+              strokeOpacity={1}
+              fill="none"
+              connectNulls
+              dot={false}
+              activeDot={false}
+            />
+          )}
           {hasExpectedRange && (
             <Area
               dataKey="expectedRange"
@@ -192,12 +228,13 @@ export function TrendChart({ data, className }: TrendChartProps) {
             stroke="#7A8C6E"
             strokeWidth={2.5}
             fill={`url(#fill-active-${chartId})`}
-            connectNulls={false}
+            connectNulls
             dot={false}
             activeDot={{ r: 4, fill: "#7A8C6E" }}
           />
         </AreaChart>
       </ChartContainer>
+      </div>
 
       <div className="flex justify-between text-[10px] text-muted-foreground">
         <span>
@@ -209,6 +246,46 @@ export function TrendChart({ data, className }: TrendChartProps) {
       </div>
     </div>
   );
+}
+
+export function buildTrendChartPoints(data: TrendData, showHistory: boolean): TrendChartPoint[] {
+  const lastBaselinePoint = data.baseline[data.baseline.length - 1];
+  const baselineEnd = lastBaselinePoint?.day ?? 0;
+  const lastBaselineValue = lastBaselinePoint?.value;
+  const firstBaselinePoint = data.baseline[0];
+  const firstBaselineDay = firstBaselinePoint?.day ?? 0;
+  const expectedRange = data.expectedRange ?? [];
+  const historyPoints = showHistory
+    ? [
+        ...data.history.filter((point) => point.day < firstBaselineDay),
+        ...(firstBaselinePoint ? [{ day: firstBaselinePoint.day, value: firstBaselinePoint.value }] : []),
+      ]
+    : [];
+  const activeWithBridge = lastBaselineValue !== undefined
+    ? [{ day: baselineEnd, value: lastBaselineValue }, ...data.active.filter((point) => point.day > baselineEnd)]
+    : data.active;
+  const allDays = new Set<number>([
+    ...historyPoints.map((point) => point.day),
+    ...data.baseline.map((point) => point.day),
+    ...activeWithBridge.map((point) => point.day),
+    ...expectedRange.map((point) => point.day),
+  ]);
+  const historyByDay = new Map(historyPoints.map((point) => [point.day, point.value]));
+  const baselineByDay = new Map(data.baseline.map((point) => [point.day, point.value]));
+  const activeByDay = new Map(activeWithBridge.map((point) => [point.day, point.value]));
+  const expectedByDay = new Map(
+    expectedRange.map((point) => [point.day, [point.low, point.high] as [number, number]]),
+  );
+
+  return [...allDays]
+    .sort((a, b) => a - b)
+    .map((day) => ({
+      day,
+      history: showHistory && day <= firstBaselineDay ? historyByDay.get(day) : undefined,
+      baseline: day <= baselineEnd ? baselineByDay.get(day) : undefined,
+      active: day >= baselineEnd ? activeByDay.get(day) : undefined,
+      expectedRange: expectedByDay.get(day),
+    }));
 }
 
 function LegendSwatch({ seriesKey }: { seriesKey: SeriesKey }) {
@@ -243,4 +320,14 @@ function formatTooltipRow(
 
   if (entry.value == null) return null;
   return { key: seriesKey, label, value: `${entry.value} ${unit}` };
+}
+
+function dayToDate(startDate: string, day: number): string {
+  const date = new Date(startDate);
+  date.setDate(date.getDate() + day - 1);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function roundChartValue(value: number): number {
+  return Math.round(value * 10) / 10;
 }
