@@ -407,6 +407,7 @@ function parseHostedWorkspaceInvocationReason(
 
   switch (reason) {
     case "alarm":
+    case "idle_shutdown_checkpoint":
     case "manual":
     case "nudge":
     case "retry":

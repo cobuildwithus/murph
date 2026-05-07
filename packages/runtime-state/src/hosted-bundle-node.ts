@@ -24,6 +24,7 @@ const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
 const HOSTED_CODEX_HOME_DIRECTORY_MODE = 0o700;
 const HOSTED_CODEX_HOME_FILE_MODE = 0o600;
+const HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT = "workspace-metadata";
 
 export interface HostedBundleArtifactSnapshotInput {
   absolutePath: string;
@@ -206,7 +207,10 @@ async function restoreHostedBundleArchiveFiles(input: {
   includeInlineFiles: boolean;
 }): Promise<void> {
   const archive = parseHostedBundleArchive(input.bytes);
-  const ignoredRoots = new Set(input.ignoredRoots ?? []);
+  const ignoredRoots = new Set([
+    HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
+    ...(input.ignoredRoots ?? []),
+  ]);
 
   if (archive.kind !== input.expectedKind) {
     throw new Error(

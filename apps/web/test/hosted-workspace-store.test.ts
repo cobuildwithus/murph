@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
 import { describe, expect, it, vi } from "vitest";
 
@@ -186,7 +187,7 @@ describe("hosted workspace store", () => {
     expect(updateData).not.toHaveProperty("redactedStatusJson");
   });
 
-  it("clears browser-vault replica refs when non-empty snapshot checkpoints omit continuity", async () => {
+  it("preserves browser-vault replica refs when checkpoint payloads omit continuity", async () => {
     const hostedWorkspace = createHostedWorkspaceDelegate({
       findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
         browserVaultReplicaRef: null,
@@ -209,9 +210,9 @@ describe("hosted workspace store", () => {
 
     const updateData = hostedWorkspace.updateMany.mock.calls[0]?.[0].data;
     expect(updateData).toEqual(expect.objectContaining({
-      browserVaultReplicaRef: Prisma.DbNull,
       snapshotRef: createBundleRef("snapshot_2"),
     }));
+    expect(updateData).not.toHaveProperty("browserVaultReplicaRef");
     expect(result).toMatchObject({
       status: "updated",
       workspace: {
@@ -222,11 +223,11 @@ describe("hosted workspace store", () => {
     });
   });
 
-  it("does not preserve a stale browser-vault replica ref when old runner payloads omit continuity", async () => {
+  it("does not overwrite a stale browser-vault replica ref when old runner payloads omit continuity", async () => {
     const staleBrowserVaultReplicaRef = createBrowserVaultReplicaRef("snapshot_1_hash");
     const hostedWorkspace = createHostedWorkspaceDelegate({
       findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
-        browserVaultReplicaRef: null,
+        browserVaultReplicaRef: staleBrowserVaultReplicaRef,
         snapshotRef: createBundleRef("snapshot_2"),
         version: 5n,
       })),
@@ -247,7 +248,6 @@ describe("hosted workspace store", () => {
     expect(staleBrowserVaultReplicaRef.sourceBundleHash).toBe("snapshot_1_hash");
     expect(hostedWorkspace.updateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        browserVaultReplicaRef: Prisma.DbNull,
         snapshotRef: createBundleRef("snapshot_2"),
       }),
       where: {
@@ -255,6 +255,8 @@ describe("hosted workspace store", () => {
         version: 4n,
       },
     });
+    const updateData = hostedWorkspace.updateMany.mock.calls[0]?.[0].data;
+    expect(updateData).not.toHaveProperty("browserVaultReplicaRef");
   });
 
   it("allows non-empty snapshot checkpoints with an explicit null browser-vault replica ref", async () => {
@@ -364,7 +366,7 @@ describe("hosted workspace store", () => {
     });
   });
 
-  it("clears browser-vault replica refs when latest-hot checkpoint refs omit continuity", async () => {
+  it("preserves browser-vault replica refs when latest-hot checkpoint refs omit continuity", async () => {
     const nextSnapshotRef = createLayeredSnapshotRef({
       base: createBundleRef("snapshot_2"),
       hot: createBundleRef("hot_2"),
@@ -390,9 +392,9 @@ describe("hosted workspace store", () => {
 
     const updateData = hostedWorkspace.updateMany.mock.calls[0]?.[0].data;
     expect(updateData).toEqual(expect.objectContaining({
-      browserVaultReplicaRef: Prisma.DbNull,
       snapshotRef: nextSnapshotRef,
     }));
+    expect(updateData).not.toHaveProperty("browserVaultReplicaRef");
     expect(result).toMatchObject({
       status: "updated",
       workspace: {
@@ -445,6 +447,75 @@ describe("hosted workspace store", () => {
       "Hosted workspace checkpoint cannot persist a browser-vault replica without a base snapshot.",
     );
     expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser-vault replica refs on working checkpoint refs when they do not match the delta", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_2_hash"),
+      expectedVersion: "4",
+      reason: "import",
+      snapshotRef: createWorkingSnapshotRef({
+        base: createBundleRef("snapshot_2"),
+        delta: createBundleRef("delta_2"),
+      }),
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(
+      "Hosted workspace checkpoint browser-vault replica sourceBundleHash must match snapshot delta hash.",
+    );
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("allows working checkpoint refs with a browser-vault replica matching the delta", async () => {
+    const browserVaultReplicaRef = createBrowserVaultReplicaRef("delta_2_hash");
+    const snapshotRef = createWorkingSnapshotRef({
+      base: createBundleRef("snapshot_2"),
+      delta: createBundleRef("delta_2"),
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
+        browserVaultReplicaRef,
+        snapshotRef,
+        version: 5n,
+      })),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    const result = await checkpointHostedWorkspaceTx({
+      browserVaultReplicaRef,
+      expectedVersion: "4",
+      reason: "canonical_runtime_commit",
+      snapshotRef,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        browserVaultReplicaRef,
+        snapshotRef,
+      }),
+      where: {
+        userId: "member_workspace_1",
+        version: 4n,
+      },
+    });
+    expect(result).toMatchObject({
+      status: "updated",
+      workspace: {
+        browserVaultReplicaRef,
+        snapshotRef,
+        version: "5",
+      },
+    });
   });
 });
 
@@ -811,6 +882,17 @@ function createLayeredSnapshotRef(input: {
     base: input.base,
     hot: input.hot,
     schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  };
+}
+
+function createWorkingSnapshotRef(input: {
+  base: ReturnType<typeof createBundleRef>;
+  delta: ReturnType<typeof createBundleRef>;
+}) {
+  return {
+    base: input.base,
+    delta: input.delta,
+    schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
   };
 }
 

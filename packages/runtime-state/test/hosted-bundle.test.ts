@@ -23,10 +23,14 @@ import {
   listHostedBundleArtifacts,
   clearHostedAssistantRuntimeHotState,
   materializeHostedExecutionArtifacts,
+  createHostedWorkspaceWorkingDeltaBundle,
+  readHostedPortableWorkspaceDeltaManifestFromBundle,
+  readHostedPortableWorkspaceManifestFromBundle,
   readHostedBundleTextFile,
   repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
+  restoreHostedWorkspaceWorkingDelta,
   resolveAssistantStatePaths,
   ASSISTANT_STATE_DIRECTORY_MODE,
   ASSISTANT_STATE_FILE_MODE,
@@ -731,6 +735,179 @@ test("hosted execution snapshots do not resurrect deleted materialized preserved
       [],
     );
     assert.equal(artifacts.size, 1);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted workspace working deltas preserve portable edits, deletes, runtime state, and raw artifact refs", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-working-delta-"));
+  const artifacts = new Map<string, Uint8Array>();
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const baseRawPath = path.join(vaultRoot, "raw", "captures", "base.pdf");
+    await mkdir(path.dirname(baseRawPath), { recursive: true });
+    await mkdir(path.join(vaultRoot, "bank"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "bank", "experiment.md"), "status: draft\n");
+    await writeFile(path.join(vaultRoot, "bank", "deleted.md"), "remove me\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"), "{\"v\":1}\n");
+    const baseRawBytes = Buffer.concat([
+      Buffer.from("%PDF-base\n", "utf8"),
+      Buffer.alloc(300 * 1024, "b"),
+    ]);
+    await writeFile(baseRawPath, baseRawBytes);
+
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      vaultRoot,
+    });
+    const baseManifest = readHostedPortableWorkspaceManifestFromBundle(baseSnapshot.bundle);
+    assert.ok(baseManifest);
+    const baseArtifactRefs = listHostedBundleArtifacts({
+      bytes: baseSnapshot.bundle,
+      expectedKind: "vault",
+    });
+    assert.equal(baseArtifactRefs.some((artifact) => artifact.path === "raw/captures/base.pdf"), true);
+    const artifactCountAfterBase = artifacts.size;
+    assert.equal(
+      baseManifest.files.some((file) => file.root === "vault" && file.path === "bank/experiment.md"),
+      true,
+    );
+
+    await writeFile(path.join(vaultRoot, "bank", "experiment.md"), "status: active\n");
+    await rm(path.join(vaultRoot, "bank", "deleted.md"));
+    await writeFile(path.join(vaultRoot, "bank", "added.md"), "new file\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"), "{\"v\":2}\n");
+    const addedRawBytes = Buffer.concat([
+      Buffer.from("%PDF-added\n", "utf8"),
+      Buffer.alloc(300 * 1024, "a"),
+    ]);
+    await writeFile(path.join(vaultRoot, "raw", "captures", "added.pdf"), addedRawBytes);
+    await rm(baseRawPath);
+
+    const currentSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      preservedArtifacts: baseArtifactRefs,
+      vaultRoot,
+    });
+    assert.equal(artifacts.size, artifactCountAfterBase + 1);
+    const delta = createHostedWorkspaceWorkingDeltaBundle({
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      currentBundle: currentSnapshot.bundle,
+      preservedArtifacts: baseArtifactRefs,
+    });
+    const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(delta.bundle);
+    assert.ok(deltaManifest);
+    assert.equal(deltaManifest.baseManifestHash, baseManifest.manifestHash);
+    assert.equal(
+      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "bank/experiment.md"),
+      true,
+    );
+    assert.equal(
+      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "bank/added.md"),
+      true,
+    );
+    assert.equal(
+      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "raw/captures/added.pdf" && file.artifact),
+      true,
+    );
+    assert.equal(
+      deltaManifest.tombstones.some((file) => file.root === "vault" && file.path === "bank/deleted.md"),
+      true,
+    );
+    assert.equal(
+      deltaManifest.tombstones.some((file) => file.root === "vault" && file.path === "raw/captures/base.pdf"),
+      false,
+    );
+
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const artifact = artifacts.get(ref.sha256);
+        assert.ok(artifact);
+        return artifact;
+      },
+      bundle: baseSnapshot.bundle,
+      shouldRestoreArtifact: () => true,
+      workspaceRoot: restoreRoot,
+    });
+    await restoreHostedWorkspaceWorkingDelta({
+      artifactResolver: async ({ ref }) => {
+        const artifact = artifacts.get(ref.sha256);
+        assert.ok(artifact);
+        return artifact;
+      },
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      bundle: delta.bundle,
+      roots: {
+        vault: restored.vaultRoot,
+      },
+      shouldRestoreArtifact: () => true,
+    });
+
+    assert.equal(await readFile(path.join(restored.vaultRoot, "bank", "experiment.md"), "utf8"), "status: active\n");
+    assert.equal(await readFile(path.join(restored.vaultRoot, "bank", "added.md"), "utf8"), "new file\n");
+    await assert.rejects(readFile(path.join(restored.vaultRoot, "bank", "deleted.md"), "utf8"));
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"), "utf8"),
+      "{\"v\":2}\n",
+    );
+    assert.equal(await readFile(path.join(restored.vaultRoot, "raw", "captures", "added.pdf"), "utf8"), addedRawBytes.toString("utf8"));
+    assert.equal(await readFile(path.join(restored.vaultRoot, "raw", "captures", "base.pdf"), "utf8"), baseRawBytes.toString("utf8"));
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted workspace working delta tombstones reject symlink traversal", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-working-delta-symlink-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    await mkdir(path.join(vaultRoot, "bank"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "bank", "deleted.md"), "remove me\n");
+
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      vaultRoot,
+    });
+    const baseManifest = readHostedPortableWorkspaceManifestFromBundle(baseSnapshot.bundle);
+    assert.ok(baseManifest);
+
+    await rm(path.join(vaultRoot, "bank", "deleted.md"));
+    const currentSnapshot = await snapshotHostedExecutionContext({
+      vaultRoot,
+    });
+    const delta = createHostedWorkspaceWorkingDeltaBundle({
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      currentBundle: currentSnapshot.bundle,
+    });
+
+    const restoreVaultRoot = path.join(workspaceRoot, "restore-vault");
+    const outsideRoot = path.join(workspaceRoot, "outside");
+    await mkdir(restoreVaultRoot, { recursive: true });
+    await mkdir(outsideRoot, { recursive: true });
+    await symlink(outsideRoot, path.join(restoreVaultRoot, "bank"));
+
+    await assert.rejects(
+      restoreHostedWorkspaceWorkingDelta({
+        baseManifest,
+        baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+        bundle: delta.bundle,
+        roots: {
+          vault: restoreVaultRoot,
+        },
+      }),
+      /tombstone path must not contain symlinks/u,
+    );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }

@@ -2698,6 +2698,14 @@ describe("hosted workspace runtime entrypoint", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
     });
 
+    const idleParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
+      request: {
+        ...createWorkspaceRunRequest(),
+        reason: "idle_shutdown_checkpoint",
+      },
+    });
+    assert.equal(idleParsed.request.reason, "idle_shutdown_checkpoint");
+
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
         request: {

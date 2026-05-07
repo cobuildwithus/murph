@@ -10,8 +10,9 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
-  buildHostedExecutionLayeredSnapshotRef,
+  buildHostedExecutionWorkingSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -29,12 +30,21 @@ import type {
   HostedWorkspaceInvocationRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  HostedAssistantRuntimeHotStateBudgetExceededError,
   HostedWorkspaceSnapshotContinuityIncompleteError,
+  HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+  HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
+  createHostedPortableWorkspaceManifestFromBundle,
+  createHostedWorkspaceWorkingDeltaBundle,
+  readHostedPortableWorkspaceDeltaManifestFromBundle,
+  readHostedPortableWorkspaceManifestFromBundle,
   sha256HostedBundleHex,
-  snapshotHostedAssistantRuntimeHotState,
   snapshotHostedExecutionContext,
+  type HostedBundleArtifactRef,
+  type HostedBundleArtifactRestoreInput,
+  type HostedBundleArtifactSnapshotInput,
   type HostedCodexHomeSnapshotDiagnostics,
+  type HostedPortableWorkspaceDeltaManifest,
+  type HostedPortableWorkspaceManifest,
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 
@@ -241,12 +251,18 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const mode = resolveHostedWorkspaceCheckpointSnapshotMode(input.request.reason);
-  if (mode === "hot") {
-    return await createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(input);
+  if (mode === "working") {
+    return await createHostedWorkspaceBridgeWorkingCheckpointSnapshotOrFullSeed(input);
   }
 
+  const preservedState = input.request.reason === "idle_shutdown"
+    ? await readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(input)
+    : await readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input);
   try {
-    return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
+    return await createHostedWorkspaceBridgeFullCheckpointSnapshot({
+      ...input,
+      preservedState,
+    });
   } catch (error) {
     if (
       input.request.reason === "idle_shutdown"
@@ -261,7 +277,7 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   }
 }
 
-async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(input: {
+async function createHostedWorkspaceBridgeWorkingCheckpointSnapshotOrFullSeed(input: {
   codexHomeSnapshotHashSecret: string | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -281,57 +297,44 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshotOrFullFallback(in
       error,
       platform: input.platform,
       request: input.request,
-      sidecar: "hot-checkpoint-base",
+      sidecar: "working-checkpoint-base",
     });
     return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
   }
 
-  if (
-    !currentRefs.baseSnapshotRef
-    || !currentRefs.browserVaultReplicaRef
-    || currentRefs.browserVaultReplicaRef.sourceBundleHash !== currentRefs.baseSnapshotRef.hash
-  ) {
-    await writeHostedCheckpointHotStateUnavailableFallbackLog({
-      fallbackReason: resolveHostedCheckpointHotStateUnavailableFallbackReason(currentRefs),
-      platform: input.platform,
-      request: input.request,
-    });
+  if (!currentRefs.baseSnapshotRef) {
     return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
   }
 
   try {
-    return await createHostedWorkspaceBridgeHotCheckpointSnapshot({
+    const preservedState = await readHostedWorkspaceEffectivePreservedState({
+      ...input,
+      snapshotRef: currentRefs.snapshotRef,
+    });
+    return await createHostedWorkspaceBridgeWorkingCheckpointSnapshot({
       ...input,
       baseSnapshotRef: currentRefs.baseSnapshotRef,
-      browserVaultReplicaRef: currentRefs.browserVaultReplicaRef,
+      preservedState,
     });
   } catch (error) {
-    if (error instanceof HostedAssistantRuntimeHotStateBudgetExceededError) {
-      await writeHostedCheckpointHotStateFallbackLog({
-        error,
-        platform: input.platform,
-        request: input.request,
-      });
-      try {
-        return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
-      } catch (fullError) {
-        if (fullError instanceof HostedWorkspaceSnapshotContinuityIncompleteError) {
-          await writeHostedCheckpointFullFallbackContinuityFailedLog({
-            error: fullError,
-            platform: input.platform,
-            request: input.request,
-          });
-        }
-        throw fullError;
-      }
+    if (error instanceof HostedWorkspaceWorkingCheckpointBaseUnavailableError) {
+      return await createHostedWorkspaceBridgeFullCheckpointSnapshot(input);
     }
     throw error;
+  }
+}
+
+class HostedWorkspaceWorkingCheckpointBaseUnavailableError extends Error {
+  constructor() {
+    super("Hosted workspace working checkpoint base bundle is missing.");
+    this.name = "HostedWorkspaceWorkingCheckpointBaseUnavailableError";
   }
 }
 
 async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
   codexHomeSnapshotHashSecret: string | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  preservedState?: HostedWorkspaceEffectivePreservedState | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
   userId: string;
@@ -356,6 +359,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
       let snapshot: Awaited<ReturnType<typeof snapshotHostedExecutionContext>>;
       try {
         snapshot = await snapshotHostedExecutionContext({
+          artifactRefProvider: input.preservedState?.artifactRefProvider,
           artifactSink: async (artifact) => {
             externalArtifactPutCount += 1;
             externalArtifactPutBytes += artifact.bytes.byteLength;
@@ -366,11 +370,13 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
           },
           codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
           operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+          preservedArtifacts: input.preservedState?.preservedArtifacts,
           vaultRoot: input.vaultRoot,
           workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
             workspaceSnapshotSizeDiagnostics = diagnostics;
             await writeHostedCheckpointSnapshotSizeDiagnosticLog({
               diagnostics,
+              mode: "full",
               platform: input.platform,
               request: input.request,
             });
@@ -417,9 +423,6 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     bundlePutCount: 1,
     externalArtifactPutBytes,
     externalArtifactPutCount,
-    hotStateBundleBytes: null,
-    hotStateFileCount: null,
-    hotStateInlineBytes: null,
     leaseCheckCount,
     mode: "full",
     platform: input.platform,
@@ -428,11 +431,30 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     workspaceSnapshotSizeDiagnostics,
   });
 
+  return {
+    ...await publishHostedWorkspaceBridgeBrowserVaultReplica({
+      platform: input.platform,
+      request: input.request,
+      sourceRef: snapshotRef,
+      vaultRoot: input.vaultRoot,
+    }),
+    snapshotRef,
+  };
+}
+
+async function publishHostedWorkspaceBridgeBrowserVaultReplica(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceCheckpointRequest;
+  sourceRef: HostedExecutionBundleRef;
+  vaultRoot: string;
+}): Promise<{
+  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+}> {
   let replica: Awaited<ReturnType<typeof createHostedBrowserVaultReplicaForSnapshot>>;
   try {
     replica = await createHostedBrowserVaultReplicaForSnapshot({
-      generatedAt: snapshotRef.updatedAt,
-      snapshotRef,
+      generatedAt: input.sourceRef.updatedAt,
+      snapshotRef: input.sourceRef,
       vaultRoot: input.vaultRoot,
     });
   } catch (error) {
@@ -443,17 +465,11 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
       request: input.request,
       sidecar: "browser-vault-replica",
     });
-    return {
-      browserVaultReplicaRef: null,
-      snapshotRef,
-    };
+    return {};
   }
 
   if (!replica) {
-    return {
-      browserVaultReplicaRef: null,
-      snapshotRef,
-    };
+    return {};
   }
 
   const browserVaultReplicaPort = input.platform.browserVaultReplicaPort;
@@ -464,10 +480,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
       request: input.request,
       sidecar: "browser-vault-replica",
     });
-    return {
-      browserVaultReplicaRef: null,
-      snapshotRef,
-    };
+    return {};
   }
 
   let browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
@@ -481,75 +494,105 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
       request: input.request,
       sidecar: "browser-vault-replica",
     });
-    return {
-      browserVaultReplicaRef: null,
-      snapshotRef,
-    };
+    return {};
   }
 
-  if (browserVaultReplicaRef.sourceBundleHash !== snapshotRef.hash) {
-    throw new TypeError(
-      "Hosted workspace runtime bridge published a browser-vault replica for a different snapshot.",
-    );
+  if (browserVaultReplicaRef.sourceBundleHash !== input.sourceRef.hash) {
+    await writeHostedCheckpointOptionalSidecarDegradedLog({
+      degradedBy: "replica-ref-mismatch",
+      platform: input.platform,
+      request: input.request,
+      sidecar: "browser-vault-replica",
+    });
+    return {};
   }
 
   return {
     browserVaultReplicaRef,
-    snapshotRef,
   };
 }
 
-async function createHostedWorkspaceBridgeHotCheckpointSnapshot(input: {
+async function createHostedWorkspaceBridgeWorkingCheckpointSnapshot(input: {
   baseSnapshotRef: HostedExecutionBundleRef;
-  browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   codexHomeSnapshotHashSecret: string | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  preservedState: HostedWorkspaceEffectivePreservedState;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
   userId: string;
   vaultRoot: string;
 }): Promise<{
-  browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const startedAt = Date.now();
+  let externalArtifactPutBytes = 0;
+  let externalArtifactPutCount = 0;
   let bundlePutBytes = 0;
-  let hotStateBundleBytes = 0;
-  let hotStateFileCount = 0;
-  let hotStateInlineBytes = 0;
   let leaseCheckCount = 0;
-  const hot = await snapshotHostedRuntimeBridgeWorkspaceBundle({
+  let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
+  const baseBundle = await input.platform.artifactStore.get(input.baseSnapshotRef.hash);
+  if (!baseBundle) {
+    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+  }
+  const baseManifest =
+    readHostedPortableWorkspaceManifestFromBundle(baseBundle)
+      ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+  const delta = await snapshotHostedRuntimeBridgeWorkspaceBundle({
     readCurrentLease: async () => {
       leaseCheckCount += 1;
       return await input.readCurrentLease();
     },
     request: input.request,
     snapshotWorkspace: async () => {
-      let snapshot: Awaited<ReturnType<typeof snapshotHostedAssistantRuntimeHotState>>;
+      let snapshot: Awaited<ReturnType<typeof snapshotHostedExecutionContext>>;
       try {
-        snapshot = await snapshotHostedAssistantRuntimeHotState({
+        snapshot = await snapshotHostedExecutionContext({
+          artifactRefProvider: input.preservedState.artifactRefProvider,
+          artifactSink: async (artifact) => {
+            externalArtifactPutCount += 1;
+            externalArtifactPutBytes += artifact.bytes.byteLength;
+            await input.platform.artifactStore.put({
+              bytes: artifact.bytes,
+              sha256: artifact.ref.sha256,
+            });
+          },
           codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
           operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+          preservedArtifacts: input.preservedState.preservedArtifacts,
           vaultRoot: input.vaultRoot,
+          workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
+            workspaceSnapshotSizeDiagnostics = diagnostics;
+            await writeHostedCheckpointSnapshotSizeDiagnosticLog({
+              diagnostics,
+              mode: "working",
+              platform: input.platform,
+              request: input.request,
+            });
+          },
         });
       } catch (error) {
         await writeHostedCodexHomeSnapshotFailureLog({
           error,
           platform: input.platform,
           request: input.request,
-          snapshotMode: "hot-state",
+          snapshotMode: "working",
         });
         throw error;
       }
-      hotStateBundleBytes = snapshot.bundleBytes;
-      hotStateFileCount = snapshot.fileCount;
-      hotStateInlineBytes = snapshot.inlineBytes;
       await writeHostedCodexHomeSnapshotDiagnosticLog({
         diagnostics: snapshot.codexHomeSnapshotDiagnostics,
         platform: input.platform,
         request: input.request,
       });
-      return snapshot.bundle;
+      workspaceSnapshotSizeDiagnostics = snapshot.workspaceSnapshotSizeDiagnostics;
+
+      return createHostedWorkspaceWorkingDeltaBundle({
+        baseManifest,
+        baseSnapshotHash: input.baseSnapshotRef.hash,
+        currentBundle: snapshot.bundle,
+        preservedArtifacts: input.preservedState.preservedArtifacts,
+      }).bundle;
     },
     userId: input.userId,
     writeBundle: async ({ bundle }) => {
@@ -562,7 +605,7 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshot(input: {
 
       return {
         hash,
-        key: `cloudflare-workspace-hot-state/${hash}.bundle`,
+        key: `cloudflare-workspace-deltas/${hash}.bundle`,
         size: bundle.byteLength,
         updatedAt: new Date().toISOString(),
       };
@@ -572,25 +615,207 @@ async function createHostedWorkspaceBridgeHotCheckpointSnapshot(input: {
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
     bundlePutCount: 1,
-    externalArtifactPutBytes: 0,
-    externalArtifactPutCount: 0,
-    hotStateBundleBytes,
-    hotStateFileCount,
-    hotStateInlineBytes,
+    externalArtifactPutBytes,
+    externalArtifactPutCount,
     leaseCheckCount,
-    mode: "hot",
+    mode: "working",
     platform: input.platform,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
-    workspaceSnapshotSizeDiagnostics: null,
+    workspaceSnapshotSizeDiagnostics,
+  });
+
+  const snapshotRef = buildHostedExecutionWorkingSnapshotRef({
+    base: input.baseSnapshotRef,
+    delta,
   });
 
   return {
-    browserVaultReplicaRef: input.browserVaultReplicaRef,
-    snapshotRef: buildHostedExecutionLayeredSnapshotRef({
-      base: input.baseSnapshotRef,
-      hot,
+    ...await publishHostedWorkspaceBridgeBrowserVaultReplica({
+      platform: input.platform,
+      request: input.request,
+      sourceRef: delta,
+      vaultRoot: input.vaultRoot,
     }),
+    snapshotRef,
+  };
+}
+
+function createBaseManifestArtifactRefProvider(
+  baseManifest: HostedPortableWorkspaceManifest,
+): (artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null {
+  const artifactFiles = new Map(
+    baseManifest.files
+      .filter((file) => file.artifact)
+      .map((file) => [`${file.root}:${file.path}`, file] as const),
+  );
+
+  return (artifact) => {
+    const baseFile = artifactFiles.get(`${artifact.root}:${artifact.path}`);
+    if (!baseFile?.artifact || baseFile.size !== artifact.bytes.byteLength) {
+      return null;
+    }
+
+    const liveHash = sha256HostedBundleHex(artifact.bytes);
+    if (baseFile.sha256 !== liveHash || baseFile.artifact.sha256 !== liveHash) {
+      return null;
+    }
+
+    return baseFile.artifact;
+  };
+}
+
+function createBaseManifestPreservedArtifacts(
+  baseManifest: HostedPortableWorkspaceManifest,
+): HostedBundleArtifactRestoreInput[] {
+  return baseManifest.files
+    .flatMap((file) => file.artifact
+      ? [{
+          path: file.path,
+          ref: file.artifact,
+          root: file.root,
+        }]
+      : []);
+}
+
+interface HostedWorkspaceEffectivePreservedState {
+  artifactRefProvider: (artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null;
+  manifest: HostedPortableWorkspaceManifest;
+  preservedArtifacts: HostedBundleArtifactRestoreInput[];
+}
+
+async function readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+}): Promise<HostedWorkspaceEffectivePreservedState | null> {
+  try {
+    const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
+    if (!currentRefs.snapshotRef) {
+      return null;
+    }
+    return await readHostedWorkspaceEffectivePreservedState({
+      ...input,
+      snapshotRef: currentRefs.snapshotRef,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+}): Promise<HostedWorkspaceEffectivePreservedState | null> {
+  if (!input.platform.workspacePort?.read) {
+    return null;
+  }
+  const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
+  if (!currentRefs.snapshotRef) {
+    return null;
+  }
+  if (readHostedExecutionSnapshotDeltaRef(currentRefs.snapshotRef)) {
+    return await readHostedWorkspaceEffectivePreservedState({
+      ...input,
+      snapshotRef: currentRefs.snapshotRef,
+    });
+  }
+  try {
+    return await readHostedWorkspaceEffectivePreservedState({
+      ...input,
+      snapshotRef: currentRefs.snapshotRef,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function readHostedWorkspaceEffectivePreservedState(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  snapshotRef: HostedExecutionSnapshotRef | null;
+}): Promise<HostedWorkspaceEffectivePreservedState> {
+  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
+  if (!baseSnapshotRef) {
+    return createHostedWorkspaceEffectivePreservedStateFromManifest(
+      createEmptyHostedPortableWorkspaceManifest(),
+    );
+  }
+
+  const baseBundle = await input.platform.artifactStore.get(baseSnapshotRef.hash);
+  if (!baseBundle) {
+    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+  }
+  const baseManifest =
+    readHostedPortableWorkspaceManifestFromBundle(baseBundle)
+      ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+  const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(input.snapshotRef);
+  if (!deltaSnapshotRef) {
+    return createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest);
+  }
+
+  const deltaBundle = await input.platform.artifactStore.get(deltaSnapshotRef.hash);
+  if (!deltaBundle) {
+    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+  }
+  const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(deltaBundle);
+  if (!deltaManifest) {
+    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+  }
+
+  return createHostedWorkspaceEffectivePreservedStateFromManifest(
+    createHostedWorkspaceEffectiveManifestFromDelta({
+      baseManifest,
+      deltaManifest,
+    }),
+  );
+}
+
+function createHostedWorkspaceEffectivePreservedStateFromManifest(
+  manifest: HostedPortableWorkspaceManifest,
+): HostedWorkspaceEffectivePreservedState {
+  return {
+    artifactRefProvider: createBaseManifestArtifactRefProvider(manifest),
+    manifest,
+    preservedArtifacts: createBaseManifestPreservedArtifacts(manifest),
+  };
+}
+
+function createEmptyHostedPortableWorkspaceManifest(): HostedPortableWorkspaceManifest {
+  const body = {
+    files: [],
+    policyVersion: HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+    schema: HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
+  } as const;
+  return {
+    files: [],
+    manifestHash: sha256HostedBundleHex(Buffer.from(JSON.stringify(body))),
+    policyVersion: HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+    schema: HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
+  };
+}
+
+function createHostedWorkspaceEffectiveManifestFromDelta(input: {
+  baseManifest: HostedPortableWorkspaceManifest;
+  deltaManifest: HostedPortableWorkspaceDeltaManifest;
+}): HostedPortableWorkspaceManifest {
+  if (input.deltaManifest.baseManifestHash !== input.baseManifest.manifestHash) {
+    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+  }
+  const files = new Map(input.baseManifest.files.map((file) => [
+    `${file.root}:${file.path}`,
+    file,
+  ]));
+  for (const tombstone of input.deltaManifest.tombstones) {
+    files.delete(`${tombstone.root}:${tombstone.path}`);
+  }
+  for (const upsert of input.deltaManifest.upserts) {
+    files.set(`${upsert.root}:${upsert.path}`, upsert);
+  }
+
+  return {
+    files: [...files.values()].sort((left, right) =>
+      `${left.root}:${left.path}`.localeCompare(`${right.root}:${right.path}`)
+    ),
+    manifestHash: input.deltaManifest.effectiveManifestHash,
+    policyVersion: input.baseManifest.policyVersion,
+    schema: input.baseManifest.schema,
   };
 }
 
@@ -603,7 +828,7 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
 }> {
   if (!input.platform.workspacePort?.read) {
     throw new TypeError(
-      "Hosted workspace runtime bridge requires workspace read support for hot checkpoints.",
+      "Hosted workspace runtime bridge requires workspace read support for working checkpoints.",
     );
   }
 
@@ -645,11 +870,16 @@ async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
 }
 
 async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
-  degradedBy: "current-ref-read" | "replica-create" | "replica-port-missing" | "replica-write";
+  degradedBy:
+    | "current-ref-read"
+    | "replica-create"
+    | "replica-port-missing"
+    | "replica-ref-mismatch"
+    | "replica-write";
   error?: unknown;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
-  sidecar: "browser-vault-replica" | "hot-checkpoint-base";
+  sidecar: "browser-vault-replica" | "working-checkpoint-base";
 }): Promise<void> {
   const errorName = params.error instanceof Error
     ? params.error.name
@@ -692,153 +922,6 @@ async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
   } catch (logError) {
     console.warn("Hosted checkpoint optional sidecar degradation log write failed.", {
       errorName: logError instanceof Error ? logError.name : typeof logError,
-    });
-  }
-}
-
-async function writeHostedCheckpointHotStateFallbackLog(params: {
-  error: HostedAssistantRuntimeHotStateBudgetExceededError;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
-}): Promise<void> {
-  console.warn("Hosted checkpoint hot-state fallback triggered.", {
-    errorName: params.error.name,
-  });
-  if (!params.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointReason: params.request.reason,
-    errorName: params.error.name,
-    fallbackReason: "budget_exceeded",
-    budgetActual: params.error.actual,
-    budgetClass: params.error.budget,
-    budgetLimit: params.error.limit,
-  };
-
-  try {
-    await params.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: params.request.attemptId,
-          component: "workspace",
-          eventCode: "checkpoint.hot_state_fallback",
-          leaseGeneration: params.request.leaseGeneration,
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: params.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (error) {
-    console.warn("Hosted checkpoint hot-state fallback log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
-  }
-}
-
-type HostedCheckpointHotStateUnavailableFallbackReason =
-  | "missing_base"
-  | "missing_replica"
-  | "stale_replica";
-
-function resolveHostedCheckpointHotStateUnavailableFallbackReason(
-  currentRefs: Awaited<ReturnType<typeof readHostedWorkspaceCurrentCheckpointRefs>>,
-): HostedCheckpointHotStateUnavailableFallbackReason {
-  if (!currentRefs.baseSnapshotRef) {
-    return "missing_base";
-  }
-  if (!currentRefs.browserVaultReplicaRef) {
-    return "missing_replica";
-  }
-  return "stale_replica";
-}
-
-async function writeHostedCheckpointHotStateUnavailableFallbackLog(params: {
-  fallbackReason: HostedCheckpointHotStateUnavailableFallbackReason;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
-}): Promise<void> {
-  console.warn("Hosted checkpoint hot-state unavailable fallback triggered.", {
-    fallbackReason: params.fallbackReason,
-  });
-  if (!params.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointReason: params.request.reason,
-    fallbackReason: params.fallbackReason,
-  };
-
-  try {
-    await params.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: params.request.attemptId,
-          component: "workspace",
-          eventCode: "checkpoint.hot_state_fallback",
-          leaseGeneration: params.request.leaseGeneration,
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: params.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (error) {
-    console.warn("Hosted checkpoint hot-state unavailable fallback log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
-  }
-}
-
-async function writeHostedCheckpointFullFallbackContinuityFailedLog(params: {
-  error: HostedWorkspaceSnapshotContinuityIncompleteError;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
-}): Promise<void> {
-  console.warn("Hosted checkpoint full fallback continuity failed.", {
-    continuityReason: params.error.reason,
-  });
-  if (!params.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointReason: params.request.reason,
-    continuityReason: params.error.reason,
-    errorMessage: redactHostedRuntimeDiagnosticText(params.error.message),
-    errorName: params.error.name,
-  };
-  appendHostedCodexHomeSnapshotDiagnostics(
-    redactedJson,
-    params.error.codexHomeSnapshotDiagnostics,
-  );
-
-  try {
-    await params.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: params.request.attemptId,
-          component: "workspace",
-          eventCode: "checkpoint.codex_continuity_missing_after_full_fallback",
-          leaseGeneration: params.request.leaseGeneration,
-          level: "error",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: params.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (error) {
-    console.warn("Hosted checkpoint full fallback continuity failure log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
     });
   }
 }
@@ -895,7 +978,7 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
   error: unknown;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
-  snapshotMode: "full" | "hot-state";
+  snapshotMode: "full" | "working";
 }): Promise<void> {
   if (!(input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError)) {
     return;
@@ -944,7 +1027,7 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
   }
 }
 
-type HostedWorkspaceCheckpointSnapshotMode = "full" | "hot";
+type HostedWorkspaceCheckpointSnapshotMode = "full" | "working";
 
 function resolveHostedWorkspaceCheckpointSnapshotMode(
   reason: HostedWorkspaceCheckpointRequest["reason"],
@@ -952,17 +1035,17 @@ function resolveHostedWorkspaceCheckpointSnapshotMode(
   switch (reason) {
     case "idle_shutdown":
     case "activation_bootstrap":
-    case "canonical_runtime_commit":
       return "full";
     case "active_turn_acceptance":
     case "active_turn_input":
     case "assistant_runtime_commit":
+    case "canonical_runtime_commit":
     case "import":
     case "outbox_receipt":
     case "outbox_sending":
     case "provider_cleanup":
     case "system_mailbox_receipt":
-      return "hot";
+      return "working";
   }
 
   const exhaustive: never = reason;
@@ -974,9 +1057,6 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   bundlePutCount: number;
   externalArtifactPutBytes: number;
   externalArtifactPutCount: number;
-  hotStateBundleBytes: number | null;
-  hotStateFileCount: number | null;
-  hotStateInlineBytes: number | null;
   leaseCheckCount: number;
   mode: HostedWorkspaceCheckpointSnapshotMode;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -995,12 +1075,9 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
     checkpointReason: input.request.reason,
     externalArtifactPutBytes: input.externalArtifactPutBytes,
     externalArtifactPutCount: input.externalArtifactPutCount,
-    hotStateBundleBytes: input.hotStateBundleBytes,
-    hotStateFileCount: input.hotStateFileCount,
-    hotStateInlineBytes: input.hotStateInlineBytes,
     leaseCheckCount: input.leaseCheckCount,
     snapshotElapsedMs: input.snapshotElapsedMs,
-    snapshotMode: input.mode === "hot" ? "hot-state" : "full",
+    snapshotMode: input.mode,
   };
   if (input.workspaceSnapshotSizeDiagnostics) {
     appendHostedWorkspaceSnapshotSizeDiagnostics(
@@ -1034,6 +1111,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
 
 async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
   diagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
+  mode: HostedWorkspaceCheckpointSnapshotMode;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
 }): Promise<void> {
@@ -1042,9 +1120,9 @@ async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
   }
 
   const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointPolicy: "full",
+    checkpointPolicy: input.mode,
     checkpointReason: input.request.reason,
-    snapshotMode: "full",
+    snapshotMode: input.mode,
   };
   appendHostedWorkspaceSnapshotSizeDiagnostics(redactedJson, input.diagnostics);
 

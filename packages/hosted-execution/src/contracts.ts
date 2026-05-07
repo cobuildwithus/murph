@@ -11,6 +11,7 @@ import type {
   HostedExecutionBundlePayload,
   HostedExecutionLayeredSnapshotRef as SharedHostedExecutionLayeredSnapshotRef,
   HostedExecutionSnapshotRefState,
+  HostedExecutionWorkingSnapshotRef as SharedHostedExecutionWorkingSnapshotRef,
 } from "./bundles.ts";
 import type {
   HostedExecutionLogLevel,
@@ -350,6 +351,7 @@ export type HostedExecutionSystemWake = Exclude<
 
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 export type HostedExecutionLayeredSnapshotRef = SharedHostedExecutionLayeredSnapshotRef;
+export type HostedExecutionWorkingSnapshotRef = SharedHostedExecutionWorkingSnapshotRef;
 export type HostedExecutionSnapshotRef = HostedExecutionSnapshotRefState;
 
 export interface HostedExecutionRedactedLogEntry {

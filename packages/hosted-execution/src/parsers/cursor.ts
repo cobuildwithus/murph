@@ -10,10 +10,12 @@ import {
 } from "../contracts.ts";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+  HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
   type HostedExecutionBundlePayload,
   type HostedExecutionBundleRefState,
   type HostedExecutionLayeredSnapshotRef,
   type HostedExecutionSnapshotRefState,
+  type HostedExecutionWorkingSnapshotRef,
 } from "../bundles.ts";
 import {
   requireObject,
@@ -56,6 +58,16 @@ export function parseHostedExecutionSnapshotRef(
     } satisfies HostedExecutionLayeredSnapshotRef;
   }
 
+  if (schema === HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA) {
+    requireHostedExecutionWorkingSnapshotField(record, "base", label);
+    requireHostedExecutionWorkingSnapshotField(record, "delta", label);
+    return {
+      base: parseRequiredHostedExecutionBundleRef(record.base, `${label}.base`),
+      delta: parseRequiredHostedExecutionBundleRef(record.delta, `${label}.delta`),
+      schema,
+    } satisfies HostedExecutionWorkingSnapshotRef;
+  }
+
   return parseHostedExecutionBundleRef(value, label);
 }
 
@@ -67,6 +79,14 @@ export function isHostedExecutionLayeredSnapshotRef(
     && value.schema === HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA;
 }
 
+export function isHostedExecutionWorkingSnapshotRef(
+  value: HostedExecutionSnapshotRefState,
+): value is HostedExecutionWorkingSnapshotRef {
+  return value !== null
+    && "schema" in value
+    && value.schema === HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA;
+}
+
 export function readHostedExecutionSnapshotBaseRef(
   value: HostedExecutionSnapshotRefState,
 ): HostedExecutionBundleRefState {
@@ -74,13 +94,23 @@ export function readHostedExecutionSnapshotBaseRef(
     return null;
   }
 
-  return isHostedExecutionLayeredSnapshotRef(value) ? value.base : value;
+  if (isHostedExecutionLayeredSnapshotRef(value) || isHostedExecutionWorkingSnapshotRef(value)) {
+    return value.base;
+  }
+
+  return value;
 }
 
 export function readHostedExecutionSnapshotHotRef(
   value: HostedExecutionSnapshotRefState,
 ): HostedExecutionBundleRefState {
   return isHostedExecutionLayeredSnapshotRef(value) ? value.hot : null;
+}
+
+export function readHostedExecutionSnapshotDeltaRef(
+  value: HostedExecutionSnapshotRefState,
+): HostedExecutionBundleRefState {
+  return isHostedExecutionWorkingSnapshotRef(value) ? value.delta : null;
 }
 
 export function buildHostedExecutionLayeredSnapshotRef(input: {
@@ -94,6 +124,17 @@ export function buildHostedExecutionLayeredSnapshotRef(input: {
   };
 }
 
+export function buildHostedExecutionWorkingSnapshotRef(input: {
+  base: NonNullable<HostedExecutionBundleRefState>;
+  delta: NonNullable<HostedExecutionBundleRefState>;
+}): HostedExecutionWorkingSnapshotRef {
+  return {
+    base: input.base,
+    delta: input.delta,
+    schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+  };
+}
+
 function requireHostedExecutionLayeredSnapshotField(
   record: Record<string, unknown>,
   field: "base" | "hot",
@@ -102,6 +143,27 @@ function requireHostedExecutionLayeredSnapshotField(
   if (!Object.prototype.hasOwnProperty.call(record, field)) {
     throw new TypeError(`${label}.${field} is required for layered snapshot refs.`);
   }
+}
+
+function requireHostedExecutionWorkingSnapshotField(
+  record: Record<string, unknown>,
+  field: "base" | "delta",
+  label: string,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(record, field)) {
+    throw new TypeError(`${label}.${field} is required for working snapshot refs.`);
+  }
+}
+
+function parseRequiredHostedExecutionBundleRef(
+  value: unknown,
+  label: string,
+): NonNullable<HostedExecutionBundleRefState> {
+  const parsed = parseRuntimeHostedExecutionBundleRef(value, label);
+  if (!parsed) {
+    throw new TypeError(`${label} must be a hosted execution bundle ref.`);
+  }
+  return parsed;
 }
 
 export function parseHostedBrowserVaultReplicaRef(

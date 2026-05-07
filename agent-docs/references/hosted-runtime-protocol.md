@@ -32,7 +32,7 @@ The live ownership split is:
 - `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
-  After a runner finishes idle with a layered hot checkpoint and no workspace
+  After a runner finishes idle with a working checkpoint and no workspace
   next wake, Cloudflare schedules one `idle_shutdown_checkpoint` alarm at the
   runner idle TTL minus the configured safety margin. Fresh nudges clear that
   pending idle checkpoint. When the idle alarm is still current, Cloudflare
@@ -231,37 +231,43 @@ drained through the hosted provider-cleanup retry state after the next workspace
 checkpoint.
 
 The hosted workspace checkpoint ref may be either a full/base workspace bundle
-or a layered `{base, hot}` ref. The full/base bundle preserves durable
-operational runtime continuity under `vault/.runtime/operations/**` by default,
-excluding explicit unsafe/process-local or repair-bin material such as secrets,
-device-sync runtime state, parser executable-selector config, quarantine
-payloads, locks, pid/socket files, global cache/tmp, and rebuildable
-projections. Hot checkpoints snapshot a much narrower explicit assistant
-runtime continuity subset under `vault/.runtime/operations/assistant/**` for
-user-visible checkpoint boundaries such as mailbox import, active-turn
-acceptance, and pre-delivery outbox sending state.
-`idle_shutdown` is the compaction boundary for warm-runner wind-down: it maps
-to a full/base snapshot and runs through the ordinary invocation lease shortly
-before container sleep, not in the Cloudflare container shutdown hook.
-Codex provider continuity is the exact active rollout JSONL referenced by live
-assistant session resume state, not the whole `.codex-hosted` tree. Restore
-applies the base bundle first, clears the vault hot-state include paths, then
-restores the latest hot bundle so files deleted by a hot checkpoint cannot
-resurrect from the base image. A hot bundle with Codex native resume state must
-carry the exact matching active rollout JSONL and manifest; otherwise snapshot
-creation fails closed instead of relying on unrelated base continuity. If no base snapshot exists, the runner may fall back to a full
-checkpoint so non-hot workspace content is not lost. Hot checkpoints also carry
-forward the browser-vault replica ref for the current base snapshot explicitly;
-if that continuity is missing or stale, the runner uses a full checkpoint
-instead. Checkpoint reasons are state-classed rather than workflow-labeled:
-`activation_bootstrap`, `canonical_runtime_commit`, and `idle_shutdown` write
-full/base snapshots, while `system_mailbox_receipt`,
-`assistant_runtime_commit`, `provider_cleanup`, pre-delivery outbox, and mailbox
-import/acceptance checkpoints write hot state. The legacy `maintenance` reason
-has been hard-cut from the current protocol; future broad background commits
-should add explicit state-class checkpoint reasons instead. Pre-delivery outbox
-sending must stay hot so user-visible delivery is not gated on compacting or
-validating large native Codex continuity artifacts.
+or a working `{base, delta}` ref. Full/base bundles carry a portable workspace
+manifest generated from the same hosted snapshot inclusion/exclusion policy used
+to write the bundle. Working commits scan the current portable workspace, compare
+it with the base manifest, and write one authoritative portable delta containing
+upserts, tombstones, required assistant-runtime continuity, required Codex
+continuity, and preserved artifact refs. Checkpoint reason strings are log
+labels only; they no longer decide storage scope. `activation_bootstrap` and
+`idle_shutdown` write full/base snapshots, missing-base cases seed a full/base
+snapshot, and correctness barriers such as mailbox import, active-turn
+acceptance, `canonical_runtime_commit`, assistant-runtime commits, provider
+cleanup, system-mailbox receipts, and pre-delivery outbox state write working
+commits. `idle_shutdown` is the compaction boundary for warm-runner wind-down:
+it maps to a full/base snapshot from the effective restored state and runs
+through the ordinary invocation lease shortly before container sleep, not in the
+Cloudflare container shutdown hook.
+
+The portable workspace policy excludes explicit unsafe/process-local or
+repair-bin material such as secrets, device-sync runtime state, parser
+executable-selector config, quarantine payloads, locks, pid/socket files, global
+cache/tmp, and rebuildable projections. Codex provider continuity is the exact
+active rollout JSONL referenced by live assistant session resume state, not the
+whole `.codex-hosted` tree. Restore applies the base bundle, applies delta
+tombstones, applies delta upserts, verifies the effective manifest, and treats
+any local restore cache as a performance cache only. A working delta with Codex
+native resume state must carry the exact matching active rollout JSONL and
+manifest; otherwise snapshot creation fails closed instead of relying on
+unrelated base continuity. If no usable base snapshot or base manifest exists,
+the runner may fall back to a full checkpoint seed so portable workspace content
+is not lost.
+
+Browser-vault replicas are derived dashboard sidecars, not canonical workspace
+state. A working commit publishes a fresh `browserVaultReplicaRef` keyed to the
+working delta hash when the replica was generated from the effective
+base-plus-delta state during that commit. If sidecar generation or publishing is
+unavailable, the runner omits the field instead of clearing an existing pointer.
+The runner must not carry a base browser-vault ref through a working commit that
+may contain canonical edits.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint
@@ -269,15 +275,17 @@ from an older or partially deployed runner when `browserVaultReplicaRef` is
 absent or explicitly null. Missing browser-vault replica continuity is
 recoverable dashboard state and must not stop mailbox import, assistant
 admission, outbox checkpointing, or the runner's ability to reach idle. When a
-replica ref is supplied, web still validates that it matches the checkpoint base
-snapshot hash; stale or mismatched replica metadata may be rejected because that
-indicates an internally inconsistent sidecar, not a recoverable omission. Future
+replica ref is supplied with a full/base snapshot, web still validates that it
+matches the snapshot hash; when a replica ref is supplied with a working
+snapshot, web validates that it matches the delta hash. Stale or mismatched
+replica metadata may be rejected because that indicates an internally
+inconsistent sidecar, not a recoverable omission. Future
 checkpoint fields that are not required to answer user messages must follow the
 same compatibility rule: old deployed runners may omit them without blocking
 assistant progress, and any stricter lockstep contract needs an explicit
 capability/version rollout plan before it can be required in production.
 The same runner-side liveness rule applies to auxiliary lanes: browser-vault
-publishing, hot-checkpoint current-ref reads, inbox projection and parser
+publishing, working-checkpoint current-ref reads, inbox projection and parser
 enrichment, provider cleanup and read acknowledgement, usage record, telemetry,
 log export, post-checkpoint system-mailbox acknowledgement, billing/customer
 decoration, and device-connect context enrichment may record degraded status,
@@ -325,8 +333,8 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - provider delivery and receipt/reconciliation policy
 - runtime timers and next wake projection
 - checkpoint timing
-- checkpoint snapshot policy and metrics (`full` vs `hot`, external artifact
-  PUT count, bundle PUT count, hot-state file/byte counts)
+- checkpoint snapshot policy and metrics (`full` vs `working`, external
+  artifact PUT count, bundle PUT count, delta file/byte counts)
 
 ### Cloudflare Owns
 

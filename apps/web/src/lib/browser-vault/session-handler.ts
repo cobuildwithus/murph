@@ -2,6 +2,7 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
 } from "@murphai/hosted-execution/parsers";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 
@@ -113,7 +114,11 @@ function emptyBrowserVaultSession() {
 }
 
 function readHostedWorkspaceSnapshotHash(value: unknown): string | null {
-  return readHostedExecutionSnapshotBaseRef(
-    parseHostedExecutionSnapshotRef(value, "Hosted browser vault session workspace snapshotRef"),
-  )?.hash ?? null;
+  const snapshotRef = parseHostedExecutionSnapshotRef(
+    value,
+    "Hosted browser vault session workspace snapshotRef",
+  );
+  return readHostedExecutionSnapshotDeltaRef(snapshotRef)?.hash
+    ?? readHostedExecutionSnapshotBaseRef(snapshotRef)?.hash
+    ?? null;
 }
