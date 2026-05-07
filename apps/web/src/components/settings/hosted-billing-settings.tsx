@@ -48,9 +48,6 @@ export function HostedBillingSettings(props: {
     currentPlanCode === "launch_monthly" &&
     currentBillingPhase === "trial" &&
     currentCheckoutOffer === HOSTED_PULSE_TRIAL_OFFER;
-  const currentPlanPrice = currentPlan
-    ? `${isPulseTrial ? "Then " : ""}$${Math.round(currentPlan.recurringAmountUsdCents / 100)} / month`
-    : "Syncing";
   const pendingPulseSwitchDate = hasPendingPulseSwitch
     ? formatHostedBillingDate(scheduledBillingEffectiveAt)
     : null;
@@ -59,36 +56,34 @@ export function HostedBillingSettings(props: {
     : null;
   const billingActionHelperText = hasPendingPulseSwitch
     ? "Want to keep Edge? Contact support and we'll help."
-    : isPulseTrial
-    ? "Start Pulse when trial credits are used up."
+    : null;
+
+  const planDisplayName = isPulseTrial
+    ? "Pulse trial"
+    : currentPlan?.displayName ?? "Plan syncing";
+
+  const statusChip = hasPendingPulseSwitch
+    ? { label: "Switching", sage: false }
     : null;
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-muted/40 p-5 sm:flex-row sm:items-start sm:justify-between">
+    <div className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Current plan
-        </p>
-        <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <p className="font-serif text-3xl font-normal tracking-tight text-foreground">
-            {isPulseTrial ? "Pulse trial" : currentPlan?.displayName ?? "Plan syncing"}
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+            {planDisplayName}
           </p>
-          <p className="text-sm text-muted-foreground">
-            {currentPlanPrice}
-          </p>
+          {statusChip ? (
+            <span className="inline-flex items-center gap-1.5 rounded-sm bg-[rgba(196,168,130,0.15)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.11em] text-[#736a58]">
+              {statusChip.label}
+            </span>
+          ) : null}
         </div>
         {hasPendingPulseSwitch && pendingPulseSwitchDate ? (
-          <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-            <p>
-              Pulse starts on {pendingPulseSwitchDate}. Edge remains active until then.
-            </p>
-            {scheduledPlanPrice ? <p>Then {scheduledPlanPrice}</p> : null}
-          </div>
-        ) : (
-          <p className="mt-2 text-sm text-muted-foreground">
-            Manage invoices, billing details, and payment methods.
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Pulse starts {pendingPulseSwitchDate}{scheduledPlanPrice ? ` at ${scheduledPlanPrice}` : ""}
           </p>
-        )}
+        ) : null}
       </div>
       <HostedBillingSettingsAction
         currentPeriodEnd={props.currentPeriodEnd?.toISOString() ?? null}
