@@ -1,4 +1,5 @@
 import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 
@@ -12,6 +13,7 @@ import { ensureDirectory, pathExists, walkVaultFiles } from "../fs.ts";
 import { VAULT_LAYOUT } from "../constants.ts";
 import {
   isJsonlRelativePath,
+  isRawRelativePath,
   isVaultFilesystemCaseInsensitive,
   normalizeRelativeVaultPath,
   normalizeRelativeVaultPathForComparison,
@@ -42,14 +44,84 @@ type WriteOperationStatus = "staged" | "committing" | "committed" | "rolled_back
 type WriteOperationActionState = "staged" | "applied" | "reused" | "rolled_back";
 const PROTECTED_CANONICAL_ROOT_FILES = new Set<string>([VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument]);
 const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV = "MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR";
+export const HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV = "MURPH_HOSTED_CANONICAL_WRITE_RECEIPT_DIR";
 const WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION = "murph.write-operation-guard-receipt.v1";
-const GUARD_RECEIPT_DIRECTORY_MODE = 0o700;
-const GUARD_RECEIPT_FILE_MODE = 0o600;
+export const HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION = "murph.hosted-canonical-write-receipt.v1";
+const HOSTED_CANONICAL_WRITE_PAYLOAD_DIRECTORY_NAME = "payloads";
+const PRIVATE_RECEIPT_DIRECTORY_MODE = 0o700;
+const PRIVATE_RECEIPT_FILE_MODE = 0o600;
 
 export interface CommittedPayloadReceipt {
   sha256: string;
   byteLength: number;
 }
+
+export interface HostedCanonicalWriteReceiptContentRef {
+  sha256: string;
+  byteSize: number;
+}
+
+export interface HostedCanonicalWritePayload {
+  bytes: Uint8Array;
+  byteLength: number;
+  sha256: string;
+}
+
+export type HostedCanonicalWriteReceiptAction =
+  | {
+      kind: "text_upsert";
+      targetRelativePath: string;
+      sha256: string;
+      byteLength: number;
+      effect: "create" | "update" | "reuse";
+      contentRef?: HostedCanonicalWriteReceiptContentRef;
+    }
+  | {
+      kind: "jsonl_append";
+      targetRelativePath: string;
+      appendSha256: string;
+      appendByteLength: number;
+      originalSize: number | null;
+      contentRef?: HostedCanonicalWriteReceiptContentRef;
+    }
+  | {
+      kind: "raw_upsert";
+      targetRelativePath: string;
+      sha256: string;
+      byteLength: number;
+      mediaType: string;
+      originalFileName: string;
+      effect: "copy" | "reuse";
+      contentRef: HostedCanonicalWriteReceiptContentRef;
+    }
+  | {
+      kind: "delete";
+      targetRelativePath: string;
+      existedBefore: boolean;
+    };
+
+export interface HostedCanonicalWriteReceipt {
+  schema: typeof HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION;
+  operationId: string;
+  operationType: string;
+  summary: string;
+  createdAt: string;
+  updatedAt: string;
+  occurredAt: string;
+  committedAt: string;
+  actions: HostedCanonicalWriteReceiptAction[];
+}
+
+export interface HostedCanonicalWritePersistenceInput {
+  payloads: HostedCanonicalWritePayload[];
+  receipt: HostedCanonicalWriteReceipt;
+}
+
+export interface HostedCanonicalWritePort {
+  persistCanonicalWrite(input: HostedCanonicalWritePersistenceInput): Promise<void>;
+}
+
+const hostedCanonicalWritePortStorage = new AsyncLocalStorage<HostedCanonicalWritePort | null>();
 
 interface WriteOperationGuardReceipt {
   schemaVersion: typeof WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION;
@@ -75,6 +147,8 @@ interface CreateWriteBatchInput {
   operationType: string;
   summary: string;
   occurredAt?: DateInput;
+  hostedCanonicalWritePort?: HostedCanonicalWritePort | null;
+  hostedCanonicalWriteReceiptDirectory?: string | null;
 }
 
 interface RunCanonicalWriteInput<TResult> extends CreateWriteBatchInput {
@@ -249,6 +323,15 @@ function createCommittedPayloadReceipt(content: string | Uint8Array): CommittedP
   };
 }
 
+function createHostedCanonicalWriteReceiptContentRef(
+  receipt: CommittedPayloadReceipt,
+): HostedCanonicalWriteReceiptContentRef {
+  return {
+    sha256: receipt.sha256,
+    byteSize: receipt.byteLength,
+  };
+}
+
 function normalizeStoredRelativePath(candidate: unknown): string | null {
   if (typeof candidate !== "string") {
     return null;
@@ -333,17 +416,277 @@ function resolveGuardReceiptDirectoryFromEnv(env: NodeJS.ProcessEnv = process.en
   return candidate ? path.resolve(candidate) : null;
 }
 
-async function ensurePrivateGuardReceiptDirectory(receiptRoot: string): Promise<void> {
-  await fs.mkdir(receiptRoot, { recursive: true, mode: GUARD_RECEIPT_DIRECTORY_MODE });
-  await fs.chmod(receiptRoot, GUARD_RECEIPT_DIRECTORY_MODE);
+function resolveHostedCanonicalWriteReceiptDirectoryFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const candidate = typeof env[HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV] === "string"
+    ? env[HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV]?.trim()
+    : "";
+  return candidate ? path.resolve(candidate) : null;
 }
 
-async function writePrivateGuardReceiptFile(absolutePath: string, content: string): Promise<void> {
+function resolveAmbientHostedCanonicalWritePort(): HostedCanonicalWritePort | null {
+  return hostedCanonicalWritePortStorage.getStore() ?? null;
+}
+
+export async function withHostedCanonicalWritePort<TResult>(
+  port: HostedCanonicalWritePort | null,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  return await hostedCanonicalWritePortStorage.run(port, run);
+}
+
+export async function applyHostedCanonicalWriteReceipt(input: {
+  readPayload(ref: HostedCanonicalWriteReceiptContentRef): Promise<Uint8Array | ArrayBuffer | null>;
+  receipt: HostedCanonicalWriteReceipt;
+  vaultRoot: string;
+}): Promise<void> {
+  if (input.receipt.schema !== HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_INVALID",
+      "Hosted canonical write receipt schema is invalid.",
+    );
+  }
+
+  const vaultRoot = normalizeVaultRoot(input.vaultRoot);
+  for (const action of input.receipt.actions) {
+    switch (action.kind) {
+      case "text_upsert": {
+        const bytes = await readHostedCanonicalWriteReceiptPayload({
+          expectedByteLength: action.byteLength,
+          expectedSha256: action.sha256,
+          readPayload: input.readPayload,
+          ref: action.contentRef,
+        });
+        await applyHostedCanonicalTextReceiptAction({
+          bytes,
+          targetRelativePath: action.targetRelativePath,
+          vaultRoot,
+        });
+        break;
+      }
+      case "jsonl_append": {
+        const bytes = await readHostedCanonicalWriteReceiptPayload({
+          expectedByteLength: action.appendByteLength,
+          expectedSha256: action.appendSha256,
+          readPayload: input.readPayload,
+          ref: action.contentRef,
+        });
+        await applyHostedCanonicalJsonlAppendReceiptAction({
+          bytes,
+          originalSize: action.originalSize,
+          targetRelativePath: action.targetRelativePath,
+          vaultRoot,
+        });
+        break;
+      }
+      case "raw_upsert": {
+        const bytes = await readHostedCanonicalWriteReceiptPayload({
+          expectedByteLength: action.byteLength,
+          expectedSha256: action.sha256,
+          readPayload: input.readPayload,
+          ref: action.contentRef,
+        });
+        await applyHostedCanonicalRawReceiptAction({
+          bytes,
+          targetRelativePath: action.targetRelativePath,
+          vaultRoot,
+        });
+        break;
+      }
+      case "delete":
+        await applyHostedCanonicalDeleteReceiptAction({
+          targetRelativePath: action.targetRelativePath,
+          vaultRoot,
+        });
+        break;
+    }
+  }
+}
+
+async function readHostedCanonicalWriteReceiptPayload(input: {
+  expectedByteLength: number;
+  expectedSha256: string;
+  readPayload(ref: HostedCanonicalWriteReceiptContentRef): Promise<Uint8Array | ArrayBuffer | null>;
+  ref?: HostedCanonicalWriteReceiptContentRef;
+}): Promise<Uint8Array> {
+  if (!input.ref) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_PAYLOAD_MISSING",
+      "Hosted canonical write receipt action is missing a payload ref.",
+    );
+  }
+  if (input.ref.sha256 !== input.expectedSha256 || input.ref.byteSize !== input.expectedByteLength) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_PAYLOAD_REF_INVALID",
+      "Hosted canonical write receipt payload ref does not match the action.",
+    );
+  }
+
+  const payload = await input.readPayload(input.ref);
+  if (!payload) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_PAYLOAD_UNAVAILABLE",
+      "Hosted canonical write payload is unavailable.",
+    );
+  }
+  const bytes = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+  const receipt = createCommittedPayloadReceipt(bytes);
+  if (receipt.sha256 !== input.expectedSha256 || receipt.byteLength !== input.expectedByteLength) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_PAYLOAD_INTEGRITY",
+      "Hosted canonical write payload failed integrity verification.",
+    );
+  }
+  return bytes;
+}
+
+async function applyHostedCanonicalTextReceiptAction(input: {
+  bytes: Uint8Array;
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const isRawTarget = isRawRelativePath(input.targetRelativePath, {
+    caseInsensitive: await isVaultFilesystemCaseInsensitive(input.vaultRoot),
+  });
+  const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
+    kind: "text",
+    allowRaw: isRawTarget,
+  });
+  if (await targetMatchesBytes(target.absolutePath, input.bytes)) {
+    return;
+  }
+  if (isRawTarget && (await pathExists(target.absolutePath))) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_RAW_CONFLICT",
+      "Hosted canonical raw replay found conflicting existing bytes.",
+    );
+  }
+  await writeTextFileAtomic(target.absolutePath, Buffer.from(input.bytes).toString("utf8"));
+}
+
+async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
+  bytes: Uint8Array;
+  originalSize: number | null;
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
+    kind: "jsonl_append",
+  });
+  const originalSize = input.originalSize ?? 0;
+  let existing = new Uint8Array();
+  try {
+    existing = await fs.readFile(target.absolutePath);
+  } catch (error) {
+    if (!isErrnoException(error) || error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  if (existing.byteLength < originalSize) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+      "Hosted canonical JSONL append base size is not present.",
+    );
+  }
+
+  const appendedEnd = originalSize + input.bytes.byteLength;
+  if (
+    existing.byteLength >= appendedEnd &&
+    Buffer.from(existing.subarray(originalSize, appendedEnd)).equals(Buffer.from(input.bytes))
+  ) {
+    return;
+  }
+
+  if (existing.byteLength !== originalSize) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+      "Hosted canonical JSONL append base content does not match the receipt.",
+    );
+  }
+
+  await fs.appendFile(target.absolutePath, input.bytes);
+}
+
+async function applyHostedCanonicalRawReceiptAction(input: {
+  bytes: Uint8Array;
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
+    kind: "raw",
+  });
+  if (await targetMatchesBytes(target.absolutePath, input.bytes)) {
+    return;
+  }
+  if (await pathExists(target.absolutePath)) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_RAW_CONFLICT",
+      "Hosted canonical raw replay found conflicting existing bytes.",
+    );
+  }
+  await fs.writeFile(target.absolutePath, input.bytes);
+}
+
+async function applyHostedCanonicalDeleteReceiptAction(input: {
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const target = await prepareVerifiedDeleteTarget(input.vaultRoot, input.targetRelativePath, {
+    allowAppendOnlyJsonl: true,
+    kind: "delete",
+  });
+  await fs.rm(target.absolutePath, { force: true });
+}
+
+async function targetMatchesBytes(absolutePath: string, bytes: Uint8Array): Promise<boolean> {
+  try {
+    const existing = await fs.readFile(absolutePath);
+    return Buffer.from(existing).equals(Buffer.from(bytes));
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function ensurePrivateReceiptDirectory(receiptRoot: string): Promise<void> {
+  await fs.mkdir(receiptRoot, { recursive: true, mode: PRIVATE_RECEIPT_DIRECTORY_MODE });
+  await fs.chmod(receiptRoot, PRIVATE_RECEIPT_DIRECTORY_MODE);
+}
+
+async function writePrivateReceiptFile(absolutePath: string, content: string): Promise<void> {
   await fs.writeFile(absolutePath, content, {
     encoding: "utf8",
-    mode: GUARD_RECEIPT_FILE_MODE,
+    mode: PRIVATE_RECEIPT_FILE_MODE,
   });
-  await fs.chmod(absolutePath, GUARD_RECEIPT_FILE_MODE);
+  await fs.chmod(absolutePath, PRIVATE_RECEIPT_FILE_MODE);
+}
+
+async function writePrivateReceiptPayloadFile(absolutePath: string, content: Uint8Array): Promise<void> {
+  await fs.writeFile(absolutePath, content, {
+    mode: PRIVATE_RECEIPT_FILE_MODE,
+  });
+  await fs.chmod(absolutePath, PRIVATE_RECEIPT_FILE_MODE);
+}
+
+function resolveHostedCanonicalWritePayloadDirectory(receiptRoot: string): string {
+  return path.join(receiptRoot, HOSTED_CANONICAL_WRITE_PAYLOAD_DIRECTORY_NAME);
+}
+
+export function resolveHostedCanonicalWritePayloadFilePath(input: {
+  receiptRoot: string;
+  sha256: string;
+}): string {
+  if (!/^[a-f0-9]{64}$/u.test(input.sha256)) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_PAYLOAD_REF_INVALID",
+      "Hosted canonical write receipt payload ref is invalid.",
+    );
+  }
+  return path.join(resolveHostedCanonicalWritePayloadDirectory(input.receiptRoot), `${input.sha256}.bin`);
 }
 
 function metadataRelativePath(operationId: string): string {
@@ -744,6 +1087,8 @@ export async function runCanonicalWrite<TResult>({
   operationType,
   summary,
   occurredAt = new Date(),
+  hostedCanonicalWritePort,
+  hostedCanonicalWriteReceiptDirectory,
   mutate,
 }: RunCanonicalWriteInput<TResult>): Promise<TResult> {
   const batch = await WriteBatch.create({
@@ -751,6 +1096,8 @@ export async function runCanonicalWrite<TResult>({
     operationType,
     summary,
     occurredAt,
+    hostedCanonicalWritePort,
+    hostedCanonicalWriteReceiptDirectory,
   });
 
   let result: TResult;
@@ -777,15 +1124,32 @@ export class WriteBatch {
 
   private readonly metadataAbsolutePath: string;
   private readonly stageRootAbsolutePath: string;
+  private readonly hostedCanonicalWritePort: HostedCanonicalWritePort | null;
+  private readonly hostedCanonicalWriteReceiptDirectory: string | null;
   private readonly record: StoredWriteOperation;
 
-  private constructor(vaultRoot: string, record: StoredWriteOperation) {
+  private constructor(input: {
+    hostedCanonicalWritePort?: HostedCanonicalWritePort | null;
+    hostedCanonicalWriteReceiptDirectory?: string | null;
+    record: StoredWriteOperation;
+    vaultRoot: string;
+  }) {
+    const { record, vaultRoot } = input;
     this.vaultRoot = vaultRoot;
     this.operationId = record.operationId;
     this.metadataRelativePath = metadataRelativePath(record.operationId);
     this.stageRootRelativePath = stageRootRelativePath(record.operationId);
     this.metadataAbsolutePath = resolveVaultPath(vaultRoot, this.metadataRelativePath).absolutePath;
     this.stageRootAbsolutePath = resolveVaultPath(vaultRoot, this.stageRootRelativePath).absolutePath;
+    this.hostedCanonicalWritePort = input.hostedCanonicalWritePort === undefined
+      ? resolveAmbientHostedCanonicalWritePort()
+      : input.hostedCanonicalWritePort ?? null;
+    this.hostedCanonicalWriteReceiptDirectory =
+      input.hostedCanonicalWriteReceiptDirectory === undefined
+        ? resolveHostedCanonicalWriteReceiptDirectoryFromEnv()
+        : input.hostedCanonicalWriteReceiptDirectory
+          ? path.resolve(input.hostedCanonicalWriteReceiptDirectory)
+          : null;
     this.record = record;
   }
 
@@ -794,6 +1158,8 @@ export class WriteBatch {
     operationType,
     summary,
     occurredAt = new Date(),
+    hostedCanonicalWritePort,
+    hostedCanonicalWriteReceiptDirectory,
   }: CreateWriteBatchInput): Promise<WriteBatch> {
     const absoluteRoot = normalizeVaultRoot(vaultRoot);
     const operationId = generateOperationId();
@@ -809,7 +1175,12 @@ export class WriteBatch {
       occurredAt: toIsoTimestamp(occurredAt, "occurredAt"),
       actions: [],
     };
-    const batch = new WriteBatch(absoluteRoot, record);
+    const batch = new WriteBatch({
+      hostedCanonicalWritePort,
+      hostedCanonicalWriteReceiptDirectory,
+      record,
+      vaultRoot: absoluteRoot,
+    });
     await ensureDirectory(path.dirname(batch.metadataAbsolutePath));
     await ensureDirectory(batch.stageRootAbsolutePath);
     await batch.persist();
@@ -1040,9 +1411,10 @@ export class WriteBatch {
     return normalizedTarget;
   }
 
-  async commit(): Promise<void> {
+  async commit(): Promise<HostedCanonicalWriteReceipt | null> {
     this.assertMutable();
     const lock = await acquireCanonicalWriteLock(this.vaultRoot);
+    let hostedCanonicalWriteReceipt: HostedCanonicalWriteReceipt | null = null;
 
     try {
       try {
@@ -1060,10 +1432,16 @@ export class WriteBatch {
         }
 
         await this.persistGuardReceiptIfConfigured();
+        const hostedCanonicalWritePersistenceInput =
+          await this.persistHostedCanonicalWriteReceiptIfConfigured();
+        hostedCanonicalWriteReceipt = hostedCanonicalWritePersistenceInput?.receipt ?? null;
         this.record.status = "committed";
         this.record.updatedAt = nowIso();
         this.record.error = undefined;
         await this.persist();
+        if (hostedCanonicalWritePersistenceInput) {
+          await this.persistHostedCanonicalWriteIfConfigured(hostedCanonicalWritePersistenceInput);
+        }
       } catch (error) {
         this.record.error = toStoredOperationError(error);
         this.record.updatedAt = nowIso();
@@ -1073,6 +1451,7 @@ export class WriteBatch {
         try {
           await this.rollbackAppliedActions();
           await this.cleanupGuardReceiptIfConfigured();
+          await this.cleanupHostedCanonicalWriteReceiptIfConfigured();
         } catch (rollbackError) {
           rollbackFailed = true;
           this.record.status = "failed";
@@ -1114,6 +1493,8 @@ export class WriteBatch {
     } finally {
       await lock?.release();
     }
+
+    return hostedCanonicalWriteReceipt;
   }
 
   async rollback(): Promise<void> {
@@ -1167,6 +1548,15 @@ export class WriteBatch {
     await fs.rm(path.join(receiptRoot, this.operationId), { recursive: true, force: true });
   }
 
+  private async cleanupHostedCanonicalWriteReceiptIfConfigured(): Promise<void> {
+    const receiptRoot = this.hostedCanonicalWriteReceiptDirectory;
+    if (!receiptRoot) {
+      return;
+    }
+
+    await fs.rm(path.join(receiptRoot, `${this.operationId}.json`), { force: true });
+  }
+
   private async persistGuardReceiptIfConfigured(): Promise<void> {
     const receiptRoot = resolveGuardReceiptDirectoryFromEnv();
     if (!receiptRoot) {
@@ -1174,7 +1564,7 @@ export class WriteBatch {
     }
 
     const actions: WriteOperationGuardReceiptAction[] = [];
-    await ensurePrivateGuardReceiptDirectory(receiptRoot);
+    await ensurePrivateReceiptDirectory(receiptRoot);
 
     for (const action of this.record.actions) {
       if (!(await isProtectedCanonicalPathForVault(this.vaultRoot, action.targetRelativePath))) {
@@ -1216,10 +1606,175 @@ export class WriteBatch {
       updatedAt: this.record.updatedAt,
       actions,
     };
-    await writePrivateGuardReceiptFile(
+    await writePrivateReceiptFile(
       path.join(receiptRoot, `${this.operationId}.json`),
       `${JSON.stringify(receipt, null, 2)}\n`,
     );
+  }
+
+  private async persistHostedCanonicalWriteReceiptIfConfigured(): Promise<HostedCanonicalWritePersistenceInput | null> {
+    if (!this.hostedCanonicalWritePort && !this.hostedCanonicalWriteReceiptDirectory) {
+      return null;
+    }
+
+    const receipt = await this.createHostedCanonicalWriteReceipt();
+    const payloads = (this.hostedCanonicalWritePort || this.hostedCanonicalWriteReceiptDirectory)
+      ? await this.createHostedCanonicalWritePayloads()
+      : [];
+    if (this.hostedCanonicalWriteReceiptDirectory) {
+      await ensurePrivateReceiptDirectory(this.hostedCanonicalWriteReceiptDirectory);
+      await this.persistHostedCanonicalWritePayloads(this.hostedCanonicalWriteReceiptDirectory, payloads);
+      await writePrivateReceiptFile(
+        path.join(this.hostedCanonicalWriteReceiptDirectory, `${this.operationId}.json`),
+        `${JSON.stringify(receipt, null, 2)}\n`,
+      );
+    }
+    return {
+      payloads,
+      receipt,
+    };
+  }
+
+  private async persistHostedCanonicalWritePayloads(
+    receiptRoot: string,
+    payloads: readonly HostedCanonicalWritePayload[],
+  ): Promise<void> {
+    if (payloads.length === 0) {
+      return;
+    }
+
+    const payloadRoot = resolveHostedCanonicalWritePayloadDirectory(receiptRoot);
+    await ensurePrivateReceiptDirectory(payloadRoot);
+    await Promise.all(payloads.map(async (payload) => {
+      await writePrivateReceiptPayloadFile(
+        resolveHostedCanonicalWritePayloadFilePath({
+          receiptRoot,
+          sha256: payload.sha256,
+        }),
+        payload.bytes,
+      );
+    }));
+  }
+
+  private async persistHostedCanonicalWriteIfConfigured(
+    input: HostedCanonicalWritePersistenceInput,
+  ): Promise<void> {
+    if (!this.hostedCanonicalWritePort) {
+      return;
+    }
+    await this.hostedCanonicalWritePort.persistCanonicalWrite(input);
+  }
+
+  private async createHostedCanonicalWriteReceipt(): Promise<HostedCanonicalWriteReceipt> {
+    const committedAt = nowIso();
+    const actions: HostedCanonicalWriteReceiptAction[] = [];
+    for (const action of this.record.actions) {
+      actions.push(await this.createHostedCanonicalWriteReceiptAction(action));
+    }
+
+    return {
+      schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+      operationId: this.operationId,
+      operationType: this.record.operationType,
+      summary: this.record.summary,
+      createdAt: this.record.createdAt,
+      updatedAt: this.record.updatedAt,
+      occurredAt: this.record.occurredAt,
+      committedAt,
+      actions,
+    };
+  }
+
+  private async createHostedCanonicalWritePayloads(): Promise<HostedCanonicalWritePayload[]> {
+    const payloadsBySha = new Map<string, HostedCanonicalWritePayload>();
+    for (const action of this.record.actions) {
+      if (
+        action.kind !== "text_write" &&
+        action.kind !== "jsonl_append" &&
+        action.kind !== "raw_copy"
+      ) {
+        continue;
+      }
+      const bytes = await fs.readFile(resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath);
+      const receipt = createCommittedPayloadReceipt(bytes);
+      const existing = payloadsBySha.get(receipt.sha256);
+      if (existing) {
+        if (existing.byteLength !== receipt.byteLength) {
+          throw new VaultError(
+            "CANONICAL_WRITE_PAYLOAD_CONFLICT",
+            "Hosted canonical write payload hash collision detected.",
+          );
+        }
+        continue;
+      }
+      payloadsBySha.set(receipt.sha256, {
+        bytes,
+        byteLength: receipt.byteLength,
+        sha256: receipt.sha256,
+      });
+    }
+    return [...payloadsBySha.values()];
+  }
+
+  private async createHostedCanonicalWriteReceiptAction(
+    action: StoredWriteAction,
+  ): Promise<HostedCanonicalWriteReceiptAction> {
+    switch (action.kind) {
+      case "text_write": {
+        const payloadReceipt = await this.requireActionPayloadReceipt(action);
+        return {
+          kind: "text_upsert",
+          targetRelativePath: action.targetRelativePath,
+          sha256: payloadReceipt.sha256,
+          byteLength: payloadReceipt.byteLength,
+          effect: action.effect ?? "update",
+          contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
+        };
+      }
+      case "jsonl_append": {
+        const payloadReceipt = await this.requireActionPayloadReceipt(action);
+        return {
+          kind: "jsonl_append",
+          targetRelativePath: action.targetRelativePath,
+          appendSha256: payloadReceipt.sha256,
+          appendByteLength: payloadReceipt.byteLength,
+          originalSize: action.originalSize ?? null,
+          contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
+        };
+      }
+      case "raw_copy": {
+        const payloadReceipt = await this.createActionPayloadReceiptFromStage(action);
+        return {
+          kind: "raw_upsert",
+          targetRelativePath: action.targetRelativePath,
+          sha256: payloadReceipt.sha256,
+          byteLength: payloadReceipt.byteLength,
+          mediaType: action.mediaType,
+          originalFileName: action.originalFileName,
+          effect: action.effect ?? "copy",
+          contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
+        };
+      }
+      case "delete":
+        return {
+          kind: "delete",
+          targetRelativePath: action.targetRelativePath,
+          existedBefore: action.existedBefore ?? false,
+        };
+    }
+  }
+
+  private async requireActionPayloadReceipt(
+    action: Extract<StoredWriteAction, { kind: "jsonl_append" | "text_write" }>,
+  ): Promise<CommittedPayloadReceipt> {
+    return action.committedPayloadReceipt ?? await this.createActionPayloadReceiptFromStage(action);
+  }
+
+  private async createActionPayloadReceiptFromStage(
+    action: Extract<StoredWriteAction, { kind: "jsonl_append" | "raw_copy" | "text_write" }>,
+  ): Promise<CommittedPayloadReceipt> {
+    const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
+    return createCommittedPayloadReceipt(await fs.readFile(stageAbsolutePath));
   }
 
   private async applyAction(index: number, action: StoredWriteAction): Promise<void> {

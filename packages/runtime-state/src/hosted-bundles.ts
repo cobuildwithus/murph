@@ -184,6 +184,7 @@ export type HostedWorkspaceArtifactResolver = (
 ) => Promise<Uint8Array | ArrayBuffer>;
 
 interface HostedExecutionContextSnapshotInput {
+  assertSnapshotLive?: () => Promise<void> | void;
   artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
   artifactRefProvider?: (
     input: HostedBundleArtifactSnapshotInput,
@@ -308,6 +309,7 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
     );
   }
   const vaultBundle = await snapshotHostedBundleRoots({
+    assertSnapshotLive: input.assertSnapshotLive,
     externalizeFile: async (artifact) => {
       const shouldExternalize = shouldExternalizeWorkspaceArtifact(artifact);
       const existingRef = shouldExternalize
@@ -328,7 +330,9 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
         return null;
       }
 
+      await input.assertSnapshotLive?.();
       const ref = createHostedWorkspaceArtifactRef(artifact.bytes);
+      await input.assertSnapshotLive?.();
       await artifactSink({
         ...artifact,
         ref,

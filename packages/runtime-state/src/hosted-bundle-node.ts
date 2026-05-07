@@ -52,6 +52,7 @@ export interface HostedBundleRestoreRootMap {
 }
 
 export async function snapshotHostedBundleRoots(input: {
+  assertSnapshotLive?: () => Promise<void> | void;
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   kind: HostedExecutionBundleKind;
   materializedPreservedArtifactPaths?: ReadonlySet<string>;
@@ -78,6 +79,7 @@ export async function snapshotHostedBundleRoots(input: {
   }
 
   for (const root of input.roots) {
+    await input.assertSnapshotLive?.();
     if (!(await directoryExists(root.root))) {
       if (root.optional) {
         continue;
@@ -97,6 +99,7 @@ export async function snapshotHostedBundleRoots(input: {
       files,
       includedPaths,
       await collectBundleFiles({
+        assertSnapshotLive: input.assertSnapshotLive,
         externalizeFile: input.externalizeFile,
         root: root.root,
         rootKey: root.rootKey,
@@ -107,6 +110,7 @@ export async function snapshotHostedBundleRoots(input: {
       files,
       includedPaths,
       await collectExplicitBundleFiles({
+        assertSnapshotLive: input.assertSnapshotLive,
         explicitFiles: root.explicitFiles ?? [],
         includedPaths,
         externalizeFile: input.externalizeFile,
@@ -122,6 +126,7 @@ export async function snapshotHostedBundleRoots(input: {
 
   const materializedPreservedArtifactPaths = input.materializedPreservedArtifactPaths ?? new Set<string>();
   for (const artifact of input.preservedArtifacts ?? []) {
+    await input.assertSnapshotLive?.();
     if (!configuredRootsByKey.has(artifact.root)) {
       throw new Error(`Hosted bundle preserved artifact root "${artifact.root}" is not configured for snapshot.`);
     }
@@ -160,6 +165,7 @@ export async function snapshotHostedBundleRoots(input: {
     includedPaths.add(preservedPathKey);
   }
 
+  await input.assertSnapshotLive?.();
   await input.onBeforeSerialize?.();
 
   return serializeHostedBundleArchive({
@@ -430,6 +436,7 @@ function isHostedCodexHomeRestorePath(input: {
 }
 
 async function collectBundleFiles(input: {
+  assertSnapshotLive?: () => Promise<void> | void;
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   root: string;
   rootKey: string;
@@ -438,10 +445,12 @@ async function collectBundleFiles(input: {
 }): Promise<HostedBundleArchiveFile[]> {
   const relativeDirectory = input.relativeDirectory ?? "";
   const directoryPath = relativeDirectory ? path.join(input.root, relativeDirectory) : input.root;
+  await input.assertSnapshotLive?.();
   const entries = await readdir(directoryPath, { withFileTypes: true });
   const files: HostedBundleArchiveFile[] = [];
 
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    await input.assertSnapshotLive?.();
     const relativePath = relativeDirectory
       ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
       : entry.name;
@@ -467,6 +476,7 @@ async function collectBundleFiles(input: {
     }
 
     const bytes = new Uint8Array(await readFile(absolutePath));
+    await input.assertSnapshotLive?.();
     const normalizedPath = normalizeBundlePath(relativePath);
     const artifact = input.externalizeFile
       ? await input.externalizeFile({
@@ -478,6 +488,7 @@ async function collectBundleFiles(input: {
       : null;
 
     if (artifact) {
+      await input.assertSnapshotLive?.();
       files.push({
         artifact,
         path: normalizedPath,
@@ -497,6 +508,7 @@ async function collectBundleFiles(input: {
 }
 
 async function collectExplicitBundleFiles(input: {
+  assertSnapshotLive?: () => Promise<void> | void;
   explicitFiles: readonly string[];
   includedPaths: ReadonlySet<string>;
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
@@ -509,6 +521,7 @@ async function collectExplicitBundleFiles(input: {
   const files: HostedBundleArchiveFile[] = [];
 
   for (const normalizedPath of normalizedPaths) {
+    await input.assertSnapshotLive?.();
     if (input.includedPaths.has(`${input.rootKey}:${normalizedPath}`)) {
       continue;
     }
@@ -522,6 +535,7 @@ async function collectExplicitBundleFiles(input: {
       ...normalizedPath.split(path.posix.sep),
     );
     const bytes = new Uint8Array(await readFile(absolutePath));
+    await input.assertSnapshotLive?.();
     const artifact = input.externalizeFile
       ? await input.externalizeFile({
           absolutePath,
@@ -532,6 +546,7 @@ async function collectExplicitBundleFiles(input: {
       : null;
 
     if (artifact) {
+      await input.assertSnapshotLive?.();
       files.push({
         artifact,
         path: normalizedPath,

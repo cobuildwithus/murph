@@ -1,3 +1,11 @@
+import path from "node:path";
+
+import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV,
+} from "@murphai/core";
+import {
+  resolveAssistantStatePaths,
+} from "@murphai/runtime-state/node";
 import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceInvocationResult,
@@ -529,6 +537,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runtimeEnv = {
       ...hostedCodexRuntime.runtimeEnv,
       ...(hostedCliBridge?.env ?? {}),
+      [HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV]: path.join(
+        resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
+        "receipts",
+        "canonical-writes",
+      ),
     };
 
     let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;

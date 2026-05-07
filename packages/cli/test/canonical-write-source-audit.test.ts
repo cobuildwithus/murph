@@ -11,14 +11,21 @@ const REPO_ROOT = path.resolve(
 
 const SOURCE_ROOTS = [
   'apps/cloudflare/src',
+  'apps/web/app',
   'apps/web/src',
+  'packages/assistant-engine/src',
+  'packages/assistantd/src',
+  'packages/assistant-runtime/src',
   'packages/cli/src',
   'packages/device-syncd/src',
+  'packages/inbox-services/src',
   'packages/importers/src',
   'packages/inboxd/src',
   'packages/parsers/src',
   'packages/query/src',
   'packages/runtime-state/src',
+  'packages/setup-cli/src',
+  'packages/vault-usecases/src',
 ] as const
 
 const ALLOWED_NON_CORE_CANONICAL_MUTATORS = [
@@ -28,6 +35,8 @@ const FS_MUTATION_PATTERNS = [
   /\bwriteFile\(/u,
   /\bappendFile\(/u,
   /\bcopyFile\(/u,
+  /\bcreateWriteStream\(/u,
+  /\bopen\([^)]*['"`][^'"`]*[wa][^'"`]*['"`]/u,
   /\brename\(/u,
   /\brm\(/u,
   /\bunlink\(/u,
@@ -97,6 +106,22 @@ test('canonical mutator matcher catches representative bypass shapes and ignores
       const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath)
       await writeFile(resolved.absolutePath, markdown, 'utf8')
       const root = WORKOUT_FORMATS_DIRECTORY
+    `),
+    true,
+  )
+
+  assert.equal(
+    isCanonicalMutatorSource(`
+      const absolutePath = path.join(vaultRoot, 'audit', 'events', '2026-05.jsonl')
+      createWriteStream(absolutePath, { flags: 'a' })
+    `),
+    true,
+  )
+
+  assert.equal(
+    isCanonicalMutatorSource(`
+      const absolutePath = path.join(input.vaultRoot, 'journal', '2026-05-07.md')
+      await open(absolutePath, 'w')
     `),
     true,
   )
@@ -177,8 +202,33 @@ function isCanonicalMutatorSource(source: string) {
     return true
   }
 
-  return (
-    matchesPattern(source, VAULT_RESOLUTION_PATTERNS) &&
-    matchesPattern(source, CANONICAL_TARGET_PATTERNS)
+  return sourceAnalysisChunks(source).some((chunk) =>
+    matchesPattern(chunk, FS_MUTATION_PATTERNS) &&
+    matchesPattern(chunk, VAULT_RESOLUTION_PATTERNS) &&
+    matchesPattern(chunk, CANONICAL_TARGET_PATTERNS)
   )
+}
+
+function sourceAnalysisChunks(source: string) {
+  const chunks: string[] = []
+  let current: string[] = []
+
+  for (const line of source.split(/\r?\n/u)) {
+    if (current.length > 0 && beginsTopLevelDeclaration(line)) {
+      chunks.push(current.join('\n'))
+      current = []
+    }
+    current.push(line)
+  }
+
+  if (current.length > 0) {
+    chunks.push(current.join('\n'))
+  }
+
+  return chunks
+}
+
+function beginsTopLevelDeclaration(line: string) {
+  return /^(?:export\s+)?(?:async\s+)?function\s/u.test(line) ||
+    /^(?:export\s+)?(?:const|let|class|interface|type)\s/u.test(line)
 }

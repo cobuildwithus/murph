@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -48,7 +49,13 @@ import {
 } from "../src/atomic-write.ts";
 import { pathExists } from "../src/fs.ts";
 import { parseRawImportManifest, stageRawImportManifest } from "../src/operations/raw-manifests.ts";
-import { WriteBatch, WRITE_OPERATION_SCHEMA_VERSION } from "../src/operations/write-batch.ts";
+import {
+  applyHostedCanonicalWriteReceipt,
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+  resolveHostedCanonicalWritePayloadFilePath,
+  WriteBatch,
+  WRITE_OPERATION_SCHEMA_VERSION,
+} from "../src/operations/write-batch.ts";
 import {
   applyImmutableWriteTarget,
   applyJsonlAppendTarget,
@@ -66,6 +73,20 @@ async function makeTempDirectory(name: string): Promise<string> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
   tempRoots.push(directory);
   return directory;
+}
+
+async function assertHostedPayloadFile(input: {
+  content: string;
+  receiptRoot: string;
+  sha256: string;
+}): Promise<void> {
+  assert.equal(
+    await fs.readFile(resolveHostedCanonicalWritePayloadFilePath({
+      receiptRoot: input.receiptRoot,
+      sha256: input.sha256,
+    }), "utf8"),
+    input.content,
+  );
 }
 
 afterEach(async () => {
@@ -482,6 +503,188 @@ test("raw manifest staging composes operator metadata and parses the current man
     importId: parsedManifest.importId,
     importedAt: parsedManifest.importedAt,
   }), manifestPath);
+});
+
+test("write batches emit exact hosted canonical write receipts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-receipts");
+  const sourceRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-receipts-source");
+  const receiptRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-receipts-out");
+  await initializeVault({ vaultRoot });
+
+  const deletePath = "bank/receipt/delete-me.md";
+  await fs.mkdir(path.dirname(resolveVaultPath(vaultRoot, deletePath).absolutePath), { recursive: true });
+  await fs.writeFile(resolveVaultPath(vaultRoot, deletePath).absolutePath, "remove\n", "utf8");
+  const rawSourcePath = path.join(sourceRoot, "scan.txt");
+  await fs.writeFile(rawSourcePath, "raw scan\n", "utf8");
+  const persistedHostedWrites: Awaited<ReturnType<WriteBatch["commit"]>>[] = [];
+  const persistedHostedPayloadCounts: number[] = [];
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "hosted_receipt",
+    summary: "emit hosted receipt",
+    hostedCanonicalWriteReceiptDirectory: receiptRoot,
+    hostedCanonicalWritePort: {
+      async persistCanonicalWrite(input) {
+        persistedHostedWrites.push(input.receipt);
+        persistedHostedPayloadCounts.push(input.payloads.length);
+      },
+    },
+  });
+  await batch.stageTextWrite("bank/receipt/note.md", "hello\n");
+  await batch.stageJsonlAppend("ledger/events/2026-05.jsonl", "{\"event\":1}\n");
+  await batch.stageRawCopy({
+    sourcePath: rawSourcePath,
+    targetRelativePath: "raw/documents/2026/05/scan.txt",
+    originalFileName: "scan.txt",
+    mediaType: "text/plain",
+  });
+  await batch.stageDelete(deletePath);
+
+  const receipt = await batch.commit();
+
+  assert.ok(receipt);
+  assert.equal(receipt.schema, HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION);
+  assert.equal(receipt.operationId, batch.operationId);
+  assert.deepEqual(persistedHostedWrites, [receipt]);
+  assert.deepEqual(persistedHostedPayloadCounts, [3]);
+  assert.deepEqual(receipt.actions.map((action) => action.kind), [
+    "text_upsert",
+    "jsonl_append",
+    "raw_upsert",
+    "delete",
+  ]);
+  assert.deepEqual(receipt.actions[0], {
+    kind: "text_upsert",
+    targetRelativePath: "bank/receipt/note.md",
+    sha256: createHash("sha256").update("hello\n").digest("hex"),
+    byteLength: "hello\n".length,
+    effect: "create",
+    contentRef: {
+      sha256: createHash("sha256").update("hello\n").digest("hex"),
+      byteSize: "hello\n".length,
+    },
+  });
+  assert.deepEqual(receipt.actions[1], {
+    kind: "jsonl_append",
+    targetRelativePath: "ledger/events/2026-05.jsonl",
+    appendSha256: createHash("sha256").update("{\"event\":1}\n").digest("hex"),
+    appendByteLength: "{\"event\":1}\n".length,
+    originalSize: 0,
+    contentRef: {
+      sha256: createHash("sha256").update("{\"event\":1}\n").digest("hex"),
+      byteSize: "{\"event\":1}\n".length,
+    },
+  });
+  assert.deepEqual(receipt.actions[2], {
+    kind: "raw_upsert",
+    targetRelativePath: "raw/documents/2026/05/scan.txt",
+    sha256: createHash("sha256").update("raw scan\n").digest("hex"),
+    byteLength: "raw scan\n".length,
+    mediaType: "text/plain",
+    originalFileName: "scan.txt",
+    effect: "copy",
+    contentRef: {
+      sha256: createHash("sha256").update("raw scan\n").digest("hex"),
+      byteSize: "raw scan\n".length,
+    },
+  });
+  assert.deepEqual(receipt.actions[3], {
+    kind: "delete",
+    targetRelativePath: deletePath,
+    existedBefore: true,
+  });
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(path.join(receiptRoot, `${batch.operationId}.json`), "utf8")),
+    receipt,
+  );
+  await assertHostedPayloadFile({
+    content: "hello\n",
+    receiptRoot,
+    sha256: createHash("sha256").update("hello\n").digest("hex"),
+  });
+  await assertHostedPayloadFile({
+    content: "{\"event\":1}\n",
+    receiptRoot,
+    sha256: createHash("sha256").update("{\"event\":1}\n").digest("hex"),
+  });
+  await assertHostedPayloadFile({
+    content: "raw scan\n",
+    receiptRoot,
+    sha256: createHash("sha256").update("raw scan\n").digest("hex"),
+  });
+});
+
+test("hosted canonical receipt replay allows raw manifest text writes idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-raw-manifest-replay");
+  await initializeVault({ vaultRoot });
+
+  const content = Buffer.from("{\"schemaVersion\":\"example.raw-manifest.v1\"}\n", "utf8");
+  const sha256 = createHash("sha256").update(content).digest("hex");
+  await applyHostedCanonicalWriteReceipt({
+    readPayload: async () => content,
+    receipt: {
+      schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+      operationId: "op_raw_manifest_replay",
+      operationType: "raw_manifest",
+      summary: "Replay raw manifest text write.",
+      createdAt: FIXED_TIME,
+      updatedAt: FIXED_TIME,
+      occurredAt: FIXED_TIME,
+      committedAt: FIXED_TIME,
+      actions: [
+        {
+          kind: "text_upsert",
+          targetRelativePath: "raw/inbox/cap_1/manifest.json",
+          sha256,
+          byteLength: content.byteLength,
+          effect: "create",
+          contentRef: {
+            sha256,
+            byteSize: content.byteLength,
+          },
+        },
+      ],
+    },
+    vaultRoot,
+  });
+
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, "raw", "inbox", "cap_1", "manifest.json"), "utf8"),
+    content.toString("utf8"),
+  );
+});
+
+test("write batches fail closed and roll back when hosted receipt persistence fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-receipts-fail");
+  const receiptRoot = await makeTempDirectory("murph-core-operations-thresholds-hosted-receipts-fail-out");
+  await initializeVault({ vaultRoot });
+
+  const targetPath = "bank/receipt/should-rollback.md";
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "hosted_receipt_failure",
+    summary: "fail hosted receipt",
+    hostedCanonicalWriteReceiptDirectory: receiptRoot,
+    hostedCanonicalWritePort: {
+      async persistCanonicalWrite() {
+        throw new Error("receipt sink unavailable");
+      },
+    },
+  });
+  await batch.stageTextWrite(targetPath, "must roll back\n");
+
+  await assert.rejects(
+    () => batch.commit(),
+    /receipt sink unavailable/u,
+  );
+
+  await assert.rejects(fs.readFile(resolveVaultPath(vaultRoot, targetPath).absolutePath, "utf8"));
+  await assert.rejects(fs.readFile(path.join(receiptRoot, `${batch.operationId}.json`), "utf8"));
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "rolled_back");
+  assert.equal(operation.actions[0]?.state, "rolled_back");
 });
 
 test("validateVault ignores unrelated raw inbox files and non-attachment manifest placeholders", async () => {

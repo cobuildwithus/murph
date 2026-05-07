@@ -141,13 +141,19 @@ export {
   acquireCanonicalWriteLock,
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
+  HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV,
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   inspectCanonicalWriteLock,
   withCanonicalWriteLockScope,
+  applyHostedCanonicalWriteReceipt,
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
+  resolveHostedCanonicalWritePayloadFilePath,
+  runCanonicalWrite,
+  withHostedCanonicalWritePort,
 } from "./operations/index.ts";
 export type {
   CanonicalMutationResource,
@@ -156,6 +162,12 @@ export type {
   CanonicalWriteLockHandle,
   CanonicalWriteLockInspection,
   CanonicalWriteLockMetadata,
+  HostedCanonicalWritePayload,
+  HostedCanonicalWritePort,
+  HostedCanonicalWritePersistenceInput,
+  HostedCanonicalWriteReceipt,
+  HostedCanonicalWriteReceiptAction,
+  HostedCanonicalWriteReceiptContentRef,
   RecoverableStoredWriteOperation,
 } from "./operations/index.ts";
 export {
