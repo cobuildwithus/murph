@@ -327,14 +327,14 @@ function resolveCompletionDetail(input: {
   }
 
   if (input.connected && !input.hasContactAction) {
-    return `${input.providerLabel} is connected and ready in Murph. No extra step is needed.`;
+    return `${input.providerLabel} is ready. Murph will start learning from your data.`;
   }
 
   if (input.connected && input.source) {
-    return `${input.providerLabel} is now available in your connected sources.`;
+    return `${input.providerLabel} is ready. Say hi to start exploring your data.`;
   }
 
-  return "Your connected sources are ready in Murph.";
+  return "Your wearable is ready. Murph will start learning from your data.";
 }
 
 function readSearchParamString(

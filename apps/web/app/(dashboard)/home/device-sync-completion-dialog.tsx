@@ -58,16 +58,16 @@ export function DeviceSyncCompletionDialog({
             aria-hidden="true"
             data-device-sync-icon={model.failed ? "alert" : "watch"}
             className={cn(
-              "flex size-14 items-center justify-center rounded-2xl border",
+              "flex size-16 items-center justify-center rounded-2xl",
               model.failed
-                ? "border-destructive/20 bg-destructive/10 text-destructive"
-                : "border-primary/20 bg-primary/10 text-primary",
+                ? "bg-destructive/10 text-destructive"
+                : "bg-primary/10 text-primary",
             )}
           >
             {model.failed ? (
-              <AlertCircleIcon className="size-7" />
+              <AlertCircleIcon className="size-8" />
             ) : (
-              <WatchCheckIcon className="size-9" />
+              <WatchCheckIcon className="size-10" />
             )}
           </span>
           <div className="flex flex-col gap-2">
