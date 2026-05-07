@@ -31,7 +31,7 @@ export function ConnectedAccountCard(props: {
             className={cn(
               "font-serif leading-tight tracking-tight [overflow-wrap:anywhere]",
               isEmpty ? "text-muted-foreground" : "text-foreground",
-              isEmpty ? "text-lg" : "text-xl",
+              "text-lg",
             )}
           >
             {value}

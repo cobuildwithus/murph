@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
-import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
+import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
@@ -105,10 +105,15 @@ export default async function SettingsPage() {
       </section>
 
       <section className="flex flex-col gap-4">
-        <HostedDeviceSyncSettings
-          authenticated={authenticated}
-          member={authenticatedMember}
-        />
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Wearables
+        </div>
+        <Link
+          href="/connect"
+          className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          Manage wearables
+        </Link>
       </section>
 
       <section className="flex flex-col gap-4">

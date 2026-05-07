@@ -180,12 +180,12 @@ test("SettingsPage reads the app session and persisted account settings into the
 
   assert.match(markup, /Hosted billing settings/);
   assert.match(markup, /Hosted account settings \+15550100001/);
-  assert.match(markup, /Hosted device sync settings true/);
+  assert.match(markup, /Manage wearables/);
+  assert.match(markup, /href="\/connect"/);
   assert.match(markup, /Hosted data privacy settings/);
   assert.match(markup, /Your account/);
   assert.match(markup, /Subscription, connected accounts, and data privacy\./);
   assert.doesNotMatch(markup, /Data sources/);
-  assert.doesNotMatch(markup, /href="\/connect"[^>]*>Connect devices/);
   for (const removedCopy of [
     ["vault", "sync"].join(" "),
     ["Sync", "local", "vault"].join(" "),
@@ -219,13 +219,5 @@ test("SettingsPage reads the app session and persisted account settings into the
   }), undefined);
   expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
-  }), undefined);
-  expect(mocks.HostedDeviceSyncSettings).toHaveBeenCalledWith(expect.objectContaining({
-    authenticated: true,
-    member: {
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    },
   }), undefined);
 });
