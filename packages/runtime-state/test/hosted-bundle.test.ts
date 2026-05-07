@@ -43,6 +43,109 @@ import {
   writeHostedBundleTextFile,
 } from "../src/node/index.ts";
 
+const HOSTED_CHECKPOINT_DEBUG_PATHS_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS";
+const HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE";
+const HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA = "murph.hosted-checkpoint-debug-paths.v1";
+
+async function withHostedCheckpointDebugEnv(
+  input: {
+    enabled?: string;
+    outputFile?: string;
+  },
+  run: () => Promise<void>,
+): Promise<void> {
+  const previousEnabled = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_ENV];
+  const previousOutputFile = process.env[HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV];
+
+  try {
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_ENV, input.enabled);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV, input.outputFile);
+    await run();
+  } finally {
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_ENV, previousEnabled);
+    setOptionalProcessEnv(HOSTED_CHECKPOINT_DEBUG_PATHS_FILE_ENV, previousOutputFile);
+  }
+}
+
+function setOptionalProcessEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+}
+
+function assertRecord(value: unknown): asserts value is Record<string, unknown> {
+  assert.ok(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseHostedCheckpointDebugArtifact(text: string): Record<string, unknown> {
+  const value: unknown = JSON.parse(text);
+  assertRecord(value);
+  return value;
+}
+
+function readHostedCheckpointDebugRecord(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  const value = record[key];
+  assertRecord(value);
+  return value;
+}
+
+function readHostedCheckpointDebugEntries(
+  artifact: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const value = artifact.entries;
+  assert.ok(Array.isArray(value));
+  const entries: Record<string, unknown>[] = [];
+
+  for (const entry of value) {
+    assertRecord(entry);
+    entries.push(entry);
+  }
+
+  return entries;
+}
+
+function assertHostedCheckpointDebugEntry(
+  entries: readonly Record<string, unknown>[],
+  expected: {
+    bytes?: number;
+    decision?: string;
+    depth?: number;
+    path: string;
+    reason?: string;
+    root?: string;
+    source?: string;
+    type?: string;
+  },
+): void {
+  const entry = entries.find((candidate) =>
+    candidate.path === expected.path
+    && (expected.source === undefined || candidate.source === expected.source)
+    && (expected.reason === undefined || candidate.reason === expected.reason)
+  );
+  assert.ok(entry, `missing hosted checkpoint debug entry for ${expected.path}`);
+
+  for (const [key, value] of Object.entries(expected)) {
+    if (value !== undefined) {
+      assert.equal(entry[key], value);
+    }
+  }
+}
+
+function isMissingTestPathError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ENOENT",
+  );
+}
+
 test("hosted bundle helpers round-trip multi-root archives and base64 helpers", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-"));
 
@@ -211,6 +314,303 @@ test("hosted bundle explicit files snapshot direct files and reject symlink path
       }),
       /explicit file is not a regular file/u,
     );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted bundle explicit file snapshots check liveness before externalizing", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-explicit-live-"));
+
+  try {
+    const root = path.join(workspaceRoot, "root");
+    await mkdir(path.join(root, "nested"), { recursive: true });
+    await writeFile(path.join(root, "nested", "keep.txt"), "keep\n", "utf8");
+
+    let liveChecks = 0;
+    let externalizeCalls = 0;
+    await assert.rejects(
+      snapshotHostedBundleRoots({
+        assertSnapshotLive() {
+          liveChecks += 1;
+          if (liveChecks >= 5) {
+            throw new Error("snapshot stale");
+          }
+        },
+        externalizeFile: async () => {
+          externalizeCalls += 1;
+          return null;
+        },
+        kind: "vault",
+        roots: [
+          {
+            explicitFiles: ["nested/keep.txt"],
+            root,
+            rootKey: "vault",
+            shouldIncludeRelativePath: () => false,
+          },
+        ],
+      }),
+      /snapshot stale/u,
+    );
+    assert.equal(externalizeCalls, 0);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted checkpoint debug paths are disabled by default", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-checkpoint-debug-disabled-"));
+
+  try {
+    const root = path.join(workspaceRoot, "root");
+    const debugOutputPath = path.join(workspaceRoot, "debug.json");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "keep.txt"), "keep\n", "utf8");
+
+    await withHostedCheckpointDebugEnv({ outputFile: debugOutputPath }, async () => {
+      const bundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root, rootKey: "vault" }],
+      });
+      assert.ok(bundle);
+    });
+
+    await assert.rejects(readFile(debugOutputPath, "utf8"), isMissingTestPathError);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted checkpoint debug paths record walker decisions", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-checkpoint-debug-"));
+
+  try {
+    const root = path.join(workspaceRoot, "root");
+    const debugOutputPath = path.join(workspaceRoot, "checkpoint-debug.json");
+    await mkdir(path.join(root, "excluded-dir"), { recursive: true });
+    await mkdir(path.join(root, "nested"), { recursive: true });
+    await writeFile(path.join(root, "excluded-dir", "hidden.txt"), "hidden\n", "utf8");
+    await writeFile(path.join(root, "explicit-only.txt"), "explicit\n", "utf8");
+    await writeFile(path.join(root, "external.bin"), "external\n", "utf8");
+    await writeFile(path.join(root, "keep.txt"), "keep\n", "utf8");
+    await writeFile(path.join(root, "nested", "deep.txt"), "deep\n", "utf8");
+    await writeFile(path.join(root, "skip.txt"), "skip\n", "utf8");
+    await symlink(path.join(root, "keep.txt"), path.join(root, "keep-link.txt"));
+
+    await withHostedCheckpointDebugEnv({ enabled: "1", outputFile: debugOutputPath }, async () => {
+      const bundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (entry) => entry.path === "external.bin"
+          ? {
+              byteSize: entry.bytes.byteLength,
+              sha256: sha256HostedBundleHex(entry.bytes),
+            }
+          : null,
+        kind: "vault",
+        materializedPreservedArtifactPaths: new Set(["vault:preserved/stale.bin"]),
+        preservedArtifacts: [
+          {
+            path: "preserved/drop.bin",
+            ref: {
+              byteSize: 4,
+              sha256: sha256HostedBundleHex(Buffer.from("drop")),
+            },
+            root: "vault",
+          },
+          {
+            path: "preserved/old.bin",
+            ref: {
+              byteSize: 3,
+              sha256: sha256HostedBundleHex(Buffer.from("old")),
+            },
+            root: "vault",
+          },
+          {
+            path: "preserved/stale.bin",
+            ref: {
+              byteSize: 5,
+              sha256: sha256HostedBundleHex(Buffer.from("stale")),
+            },
+            root: "vault",
+          },
+        ],
+        roots: [
+          {
+            explicitFiles: ["explicit-only.txt", "keep.txt"],
+            root,
+            rootKey: "vault",
+            shouldIncludeRelativePath(relativePath) {
+              return relativePath !== "excluded-dir"
+                && relativePath !== "explicit-only.txt"
+                && relativePath !== "skip.txt"
+                && !relativePath.startsWith("excluded-dir/");
+            },
+          },
+        ],
+        shouldIncludePreservedArtifact(artifact) {
+          return artifact.path !== "preserved/drop.bin";
+        },
+      });
+      assert.ok(bundle);
+    });
+
+    const debugText = await readFile(debugOutputPath, "utf8");
+    assert.equal(debugText.includes(workspaceRoot), false);
+    assert.equal(debugText.includes(root), false);
+
+    const artifact = parseHostedCheckpointDebugArtifact(debugText);
+    assert.equal(artifact.schema, HOSTED_CHECKPOINT_DEBUG_TRACE_SCHEMA);
+    assert.equal(artifact.kind, "vault");
+    assert.equal(artifact.status, "completed");
+
+    const summary = readHostedCheckpointDebugRecord(artifact, "summary");
+    const entries = readHostedCheckpointDebugEntries(artifact);
+    assert.equal(summary.archiveFileCount, 5);
+    assert.equal(summary.entryCount, entries.length);
+
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "exclude",
+      depth: 1,
+      path: "excluded-dir",
+      reason: "policy_excluded",
+      source: "walk",
+      type: "directory",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "include",
+      path: "external.bin",
+      reason: "externalized",
+      source: "walk",
+      type: "file",
+      bytes: Buffer.byteLength("external\n"),
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "exclude",
+      path: "keep-link.txt",
+      reason: "unsupported_type",
+      source: "walk",
+      type: "symlink",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      bytes: Buffer.byteLength("keep\n"),
+      decision: "include",
+      depth: 1,
+      path: "keep.txt",
+      reason: "inline",
+      source: "walk",
+      type: "file",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "descend",
+      depth: 1,
+      path: "nested",
+      reason: "policy_included",
+      source: "walk",
+      type: "directory",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "include",
+      depth: 2,
+      path: "nested/deep.txt",
+      reason: "inline",
+      source: "walk",
+      type: "file",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "exclude",
+      path: "skip.txt",
+      reason: "policy_excluded",
+      source: "walk",
+      type: "file",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "include",
+      depth: 1,
+      path: "explicit-only.txt",
+      reason: "inline",
+      source: "explicit",
+      type: "file",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "exclude",
+      path: "keep.txt",
+      reason: "already_included",
+      source: "explicit",
+      type: "file",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "exclude",
+      path: "preserved/drop.bin",
+      reason: "policy_excluded",
+      source: "preserved",
+      type: "artifact",
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "include",
+      depth: 2,
+      path: "preserved/old.bin",
+      reason: "preserved_artifact",
+      source: "preserved",
+      type: "artifact",
+      bytes: 3,
+    });
+    assertHostedCheckpointDebugEntry(entries, {
+      decision: "exclude",
+      path: "preserved/stale.bin",
+      reason: "not_live",
+      source: "preserved",
+      type: "artifact",
+    });
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted checkpoint debug paths protect the output file", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-checkpoint-debug-output-"));
+
+  try {
+    const root = path.join(workspaceRoot, "root");
+    const debugOutputPath = path.join(workspaceRoot, "checkpoint-debug.json");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "keep.txt"), "keep\n", "utf8");
+    await writeFile(debugOutputPath, "old\n", "utf8");
+    await chmod(debugOutputPath, 0o666);
+
+    await withHostedCheckpointDebugEnv({ enabled: "1", outputFile: debugOutputPath }, async () => {
+      const bundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root, rootKey: "vault" }],
+      });
+      assert.ok(bundle);
+    });
+
+    const outputMode = (await lstat(debugOutputPath)).mode & 0o777;
+    assert.equal(outputMode, 0o600);
+
+    const symlinkOutputPath = path.join(workspaceRoot, "checkpoint-debug-link.json");
+    await symlink(debugOutputPath, symlinkOutputPath);
+    await withHostedCheckpointDebugEnv({ enabled: "1", outputFile: symlinkOutputPath }, async () => {
+      await assert.rejects(
+        snapshotHostedBundleRoots({
+          kind: "vault",
+          roots: [{ root, rootKey: "vault" }],
+        }),
+        /debug output path must not be a symbolic link/u,
+      );
+    });
+
+    const directoryOutputPath = path.join(workspaceRoot, "checkpoint-debug-dir");
+    await mkdir(directoryOutputPath);
+    await withHostedCheckpointDebugEnv({ enabled: "1", outputFile: directoryOutputPath }, async () => {
+      await assert.rejects(
+        snapshotHostedBundleRoots({
+          kind: "vault",
+          roots: [{ root, rootKey: "vault" }],
+        }),
+        /debug output path must be a regular file/u,
+      );
+    });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
