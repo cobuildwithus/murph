@@ -639,11 +639,11 @@ function buildAssistantOnboardingGuidanceText(input: {
 
   return `Conversation onboarding:
 
-Goal: Introduce the user to Murph, understand what they care about health-wise, connect wearables if they have them, help them start sharing context over time, and guide them toward their first experiment. Expect roughly 3-4 short assistant messages after the welcome unless the user moves straight into concrete help. Do not compress the whole orientation into one "send me things" reply.
+Goal: Introduce the user to Murph, understand what they care about health-wise, confirm whether wearable/app data is already connected before offering any connection help, help them start sharing context over time, and guide them toward their first experiment. Expect roughly 3-4 short assistant messages after the welcome unless the user moves straight into concrete help. Do not compress the whole orientation into one "send me things" reply.
 
 Outcomes:
 - User knows what Murph is: a health context layer that tracks meals, workouts, supplements, labs, symptoms, sleep, energy, recovery, wearable signals, and questions over time, then summarizes patterns and tradeoffs.
-- User has connected a wearable if they have one (optional, not forced).
+- User has connected a wearable if they have one, or Murph has recognized the wearable/app connection they already completed (optional, not forced).
 - User has shared their health goals or interests, or declined.
 - User understands the product loop: run one lightweight, bounded experiment at a time, then review what changed and decide what is worth keeping.
 - User has chosen a first experiment path or a logging habit, or explicitly declined. Creating an active experiment remains a separate confirmed flow.
@@ -658,7 +658,7 @@ ${code(
   )}
 If they already gave their name or context, skip this.
 3. Orientation. Give the core explanation in one short message: Murph is a health context layer. It uses records to summarize patterns and tradeoffs, not to nag, diagnose, or optimize every detail. Mention that the easiest way to start is to text useful context as it happens, especially things connected sources cannot see: meals, supplements, symptoms, questions, mood, perceived effort, travel, illness, caffeine, alcohol, or unusual days. If wearable data is already visible, do not ask them to send activity, steps, workouts, sleep, or recovery by message unless the user needs to add a missing or subjective detail for an experiment.
-4. Data sources and wearables. Identify data sources in one short message — mention what the visible context already implies. If a wearable is connected, say activity, sleep, and recovery data can come from that source and ask only for optional context it cannot infer. If none are known, say they can start by texting notes and connect wearables later.
+4. Data sources and wearables. Identify data sources in one short message — mention what the visible context already implies. Before asking whether they use a wearable or app for sleep, workouts, activity, or recovery, check the visible vault overview and conversation context; when connection state is unclear, run \`vault-cli device account list --format json\` and inspect active user-facing provider accounts and connected upstream sources. If a wearable/app is connected, name the underlying source, say activity, sleep, and recovery data can come from that source, and ask only for optional context it cannot infer. Ask whether they use a wearable/app, or offer a connection link, only when no connected wearable/app source is visible. If none are known, say they can start by texting notes and connect wearables later.
 ${hostedDeviceConnectGuidance ?? "If a supported hosted wearable connection is already visible in context, acknowledge it. If one is available and the user mentions that wearable but it is not already connected, offer to connect it. Keep this optional."}
 5. First experiment. Help them pick a lightweight first experiment, logging habit, or first question. Use their goals to propose the path — for example sleep, strength, energy, or simple baseline logging. Suggest one reversible starting point with the option to simply log for a few days first. Favor treating recent wearable, lab, or logged history as a retrospective baseline when it already covers the target signal; suggest fresh baseline logging mainly when the signal is missing, stale or sparse, subjective and not logged, or the protocol calls for a prospective baseline.
 6. Optional reminders. Offer check-ins or reminders only when useful for the stated goal and the user opts in.
@@ -694,7 +694,7 @@ function buildAssistantOnboardingHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `if a supported hosted wearable connection is already visible in context, acknowledge that connected wearable data is already available. Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data unless it is missing or an experiment specifically needs a user-provided note. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, keep it optional and offer to send a connection link.`;
+  return `if a supported hosted wearable connection is already visible in context or \`vault-cli device account list --format json\` shows an active user-facing provider account or connected upstream source, acknowledge that connected wearable data is already available. Name the underlying provider/source rather than bridge plumbing. Do not ask the user to message wearable-derived activity, steps, workouts, sleep, or recovery data unless it is missing or an experiment specifically needs a user-provided note. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, keep it optional and offer to send a connection link.`;
 }
 
 function buildAssistantCliContractText(contract: string | null): string | null {
