@@ -76,6 +76,8 @@ export interface TimelineEvent {
 export interface TrendData {
   label: string;
   unit: string;
+  startDate: string;
+  history: { day: number; value: number }[];
   baseline: { day: number; value: number }[];
   active: { day: number; value: number }[];
   expectedRange?: { day: number; low: number; high: number }[];
@@ -109,6 +111,7 @@ export interface ExperimentSignal {
   unit?: string;
   delta: string;
   direction: "up" | "down" | "neutral";
+  sentiment?: "positive" | "negative" | "neutral";
   displayValue?: string;
   estimatedChange?: ExperimentSignalEstimatedChange;
   expected: string;
@@ -289,12 +292,12 @@ export type ScheduleCellKind =
   | "completed"
   | "partial"
   | "missed"
-  | "skipped"
-  | "scheduled"
-  | "rest"
-  | "upcoming";
+  | "failed"
+  | "unknown"
+  | "scheduled";
 
 export interface ScheduleCell {
+  columnStart?: number;
   dayLabel: string;
   date?: string;
   kind: ScheduleCellKind;
@@ -312,6 +315,7 @@ export interface ScheduleWeek {
 export interface ExperimentSchedule {
   cadence: string;
   dose?: string;
+  loggedSessions?: number;
   weeks: ScheduleWeek[];
 }
 

@@ -1271,6 +1271,176 @@ export const experimentRunBaselineSchema = z
   })
   .strict();
 
+const experimentAdherenceLocalTimeSchema = z
+  .string()
+  .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u, "Expected a 24-hour HH:MM time.");
+
+export const experimentAdherenceCalendarSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("daily"),
+      timeZone: timeZoneString(),
+      localTime: experimentAdherenceLocalTimeSchema.optional(),
+      targetCountPerDay: integerSchema(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("weekdays"),
+      timeZone: timeZoneString(),
+      weekdays: uniqueArray(integerSchema(0, 6), {
+        minItems: 1,
+        maxItems: 7,
+        uniqueItems: true,
+      }),
+      localTime: experimentAdherenceLocalTimeSchema.optional(),
+      targetCountPerDay: integerSchema(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("explicitDates"),
+      timeZone: timeZoneString(),
+      dates: z.array(
+        z
+          .object({
+            localDate: isoDateString(),
+            label: boundedString(1, 160).optional(),
+            localTime: experimentAdherenceLocalTimeSchema.optional(),
+            targetCount: integerSchema(1).optional(),
+          })
+          .strict(),
+      )
+        .min(1)
+        .max(100)
+        .superRefine((dates, ctx) => {
+          const seen = new Set<string>();
+          dates.forEach((date, index) => {
+            if (seen.has(date.localDate)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Duplicate explicit adherence date.",
+                path: [index, "localDate"],
+              });
+              return;
+            }
+            seen.add(date.localDate);
+          });
+        }),
+    })
+    .strict(),
+]);
+
+export const experimentAdherenceGraceSchema = z.union([
+  z.object({ hours: numberSchema(0) }).strict(),
+  z.object({ days: numberSchema(0) }).strict(),
+]);
+
+export const experimentAdherenceEvidenceRuleSchema = z
+  .discriminatedUnion("kind", [
+    z
+      .object({
+        kind: z.literal("linkedEventCount"),
+        eventKind: z.enum([
+          "intervention_session",
+          "supplement_intake",
+          "medication_intake",
+          "activity_session",
+          "measurement",
+        ]),
+        missing: z.enum(["missed_after_grace", "unknown"]),
+        partialCredit: numberSchema(0, 1).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("metricThreshold"),
+        metricKey: boundedString(1, 160),
+        op: z.enum([">=", "<=", "==", "between"]),
+        value: numberSchema().optional(),
+        min: numberSchema().optional(),
+        max: numberSchema().optional(),
+        missing: z.enum(["unknown", "failed_after_grace"]),
+      })
+      .strict()
+      .superRefine((rule, context) => {
+        if (rule.op === "between") {
+          if (rule.min === undefined || rule.max === undefined) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "metricThreshold between requires min and max.",
+              path: ["min"],
+            });
+          }
+          if (rule.min !== undefined && rule.max !== undefined && rule.min > rule.max) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "metricThreshold min must be less than or equal to max.",
+              path: ["max"],
+            });
+          }
+          return;
+        }
+
+        if (rule.value === undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "metricThreshold requires value unless op is between.",
+            path: ["value"],
+          });
+        }
+        if (rule.min !== undefined || rule.max !== undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "metricThreshold min/max are only valid with op between.",
+            path: ["min"],
+          });
+        }
+      }),
+    z
+      .object({
+        kind: z.literal("metricPresence"),
+        metricKey: boundedString(1, 160),
+        missing: z.enum(["missed_after_grace", "unknown"]),
+      })
+      .strict(),
+  ]);
+
+export const experimentAdherenceTargetSchema = z
+  .object({
+    targetId: patternedString(SLUG_PATTERN),
+    label: boundedString(1, 160),
+    phase: z.enum(["baseline", "intervention", "run"]),
+    calendar: experimentAdherenceCalendarSchema,
+    evidence: experimentAdherenceEvidenceRuleSchema,
+    grace: experimentAdherenceGraceSchema.optional(),
+    rollup: z
+      .object({
+        targetCompletions: integerSchema(0).optional(),
+        minimumUsefulCompletions: integerSchema(0).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const experimentAdherenceTargetsSchema = uniqueArray(experimentAdherenceTargetSchema, {
+  maxItems: 8,
+  uniqueItems: true,
+}).superRefine((targets, context) => {
+  const seen = new Set<string>();
+  for (const [index, target] of targets.entries()) {
+    if (seen.has(target.targetId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Experiment adherence target ids must be unique.",
+        path: [index, "targetId"],
+      });
+    }
+    seen.add(target.targetId);
+  }
+});
+
 export const experimentRunPlanSchema = z
   .object({
     baseline: experimentRunBaselineSchema.optional(),
@@ -1278,6 +1448,7 @@ export const experimentRunPlanSchema = z
     baselineEnd: isoDateString().optional(),
     interventionStart: isoDateString().optional(),
     interventionEnd: isoDateString().optional(),
+    adherenceTargets: experimentAdherenceTargetsSchema.optional(),
     modality: boundedString(1, 160).optional(),
     schedule: experimentRunScheduleIntentSchema.optional(),
     dose: boundedString(1, 160).optional(),
@@ -2048,6 +2219,10 @@ export type ProtocolEffectiveSpec = z.infer<typeof protocolEffectiveSpecSchema>;
 export type ProtocolLineage = z.infer<typeof protocolLineageSchema>;
 export type ProtocolDiffEntry = z.infer<typeof protocolDiffEntrySchema>;
 export type ProtocolPersonalization = z.infer<typeof protocolPersonalizationSchema>;
+export type ExperimentAdherenceCalendar = z.infer<typeof experimentAdherenceCalendarSchema>;
+export type ExperimentAdherenceGrace = z.infer<typeof experimentAdherenceGraceSchema>;
+export type ExperimentAdherenceEvidenceRule = z.infer<typeof experimentAdherenceEvidenceRuleSchema>;
+export type ExperimentAdherenceTarget = z.infer<typeof experimentAdherenceTargetSchema>;
 export type ExperimentRunLogging = z.infer<typeof experimentRunLoggingSchema>;
 export type ExperimentRunPlan = z.infer<typeof experimentRunPlanSchema>;
 export type ExperimentAnalysisPlan = z.infer<typeof experimentAnalysisPlanSchema>;

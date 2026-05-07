@@ -26,6 +26,7 @@ import {
   type JsonValue,
 } from '@murphai/contracts'
 import { stringifyFrontmatterDocument } from '@murphai/core'
+import { synthesizeLegacySessionAdherenceTargets } from '@murphai/query'
 import { z } from 'zod'
 import {
   loadQueryRuntime,
@@ -670,6 +671,24 @@ function toCurrentProtocolRef(
     : undefined
 }
 
+function hydrateRunPlanAdherenceTargets(
+  runPlan: ExperimentRunPlanValue | undefined,
+): ExperimentRunPlanValue | undefined {
+  if (!runPlan || runPlan.adherenceTargets?.length) {
+    return runPlan
+  }
+
+  const [adherenceTarget] = synthesizeLegacySessionAdherenceTargets({ runPlan })
+  if (!adherenceTarget) {
+    return runPlan
+  }
+
+  return experimentRunPlanSchema.parse({
+    ...runPlan,
+    adherenceTargets: [adherenceTarget],
+  })
+}
+
 export async function planExperimentRecord(input: PlanExperimentRecordInput) {
   const payload = await resolveExperimentPlanPayload(input)
 
@@ -682,6 +701,7 @@ export async function planExperimentRecord(input: PlanExperimentRecordInput) {
 export async function startExperimentFromPlanRecord(input: StartExperimentFromPlanInput) {
   const payload = await resolveExperimentPlanPayload(input)
   const core = await loadExperimentJournalVaultCoreRuntime()
+  const runPlan = hydrateRunPlanAdherenceTargets(payload.runPlan)
   let protocol: {
     protocolId: string
     slug: string
@@ -749,7 +769,7 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
     commonsProtocolRef: payload.commonsProtocolRef,
     protocolRef,
     effectiveProtocolSnapshot,
-    runPlan: payload.runPlan,
+    runPlan,
     analysisPlan: payload.analysisPlan,
     onboarding: payload.onboarding,
     assistantSupport: payload.assistantSupport,
@@ -778,7 +798,7 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
     commonsProtocolRef: payload.commonsProtocolRef,
     protocolRef,
     effectiveProtocolSnapshot,
-    runPlan: payload.runPlan,
+    runPlan,
     analysisPlan: payload.analysisPlan,
     onboarding: payload.onboarding,
     assistantSupport: payload.assistantSupport,

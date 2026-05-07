@@ -1043,6 +1043,34 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     assert.equal(runPlan.sessionsPerWeek, 3)
     assert.equal(runPlan.targetSessions, 6)
     assert.equal(runPlan.minimumUsefulSessions, 4)
+    assert.ok(Array.isArray(runPlan.adherenceTargets))
+    assert.equal(runPlan.adherenceTargets.length, 1)
+    const adherenceTarget = requireRecord(
+      runPlan.adherenceTargets[0],
+      'runPlan.adherenceTargets[0]',
+    )
+    assert.match(String(adherenceTarget.targetId), /^traditional-dry-sauna/u)
+    assert.match(String(adherenceTarget.label), /dry sauna/iu)
+    assert.equal(adherenceTarget.phase, 'intervention')
+    assert.deepEqual(requireRecord(adherenceTarget.calendar, 'adherenceTarget.calendar'), {
+      kind: 'weekdays',
+      timeZone: 'America/Los_Angeles',
+      localTime: '18:00',
+      weekdays: [2, 4, 6],
+      targetCountPerDay: 1,
+    })
+    assert.deepEqual(requireRecord(adherenceTarget.evidence, 'adherenceTarget.evidence'), {
+      kind: 'linkedEventCount',
+      eventKind: 'intervention_session',
+      missing: 'missed_after_grace',
+    })
+    assert.deepEqual(requireRecord(adherenceTarget.grace, 'adherenceTarget.grace'), {
+      hours: 24,
+    })
+    assert.deepEqual(requireRecord(adherenceTarget.rollup, 'adherenceTarget.rollup'), {
+      targetCompletions: 6,
+      minimumUsefulCompletions: 4,
+    })
     assert.equal(analysisPlan.primaryBiomarkerKey, 'biomarker:resting-heart-rate')
     assert.deepEqual(analysisPlan.secondaryBiomarkerKeys, [
       'biomarker:morning-blood-pressure',

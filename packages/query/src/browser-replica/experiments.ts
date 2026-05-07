@@ -1,14 +1,17 @@
 import {
+  experimentAdherenceTargetsSchema,
   experimentRunScheduleIntentSchema,
+  type ExperimentAdherenceTarget,
   type ExperimentRunScheduleIntent,
 } from "@murphai/contracts";
 
 import {
-  expandBrowserVaultRunSchedule,
-  type BrowserVaultRunScheduleCell,
-  type BrowserVaultRunScheduleExpansionEvent,
-  type BrowserVaultRunScheduleEventStatus,
-} from "./run-schedule.ts";
+  buildExperimentAdherenceCalendar,
+  synthesizeLegacySessionAdherenceTargets,
+  type ExperimentAdherenceCalendarResult,
+  type ExperimentAdherenceCellStatus,
+  type ExperimentAdherenceObservation,
+} from "../experiment-adherence.ts";
 import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
@@ -102,6 +105,7 @@ export interface BrowserVaultExperimentResultRun {
   phase: BrowserVaultExperimentProgressPhase;
   protocolRef: JsonRecord | null;
   runPlan: {
+    adherenceTargets: BrowserVaultExperimentAdherenceTarget[];
     minimumUsefulSessions: number | null;
     schedule: ExperimentRunScheduleIntent | null;
     sessionsPerWeek: number | null;
@@ -112,6 +116,14 @@ export interface BrowserVaultExperimentResultRun {
   status: string | null;
   title: string;
   windows: BrowserVaultExperimentRunWindows;
+}
+
+export interface BrowserVaultExperimentAdherenceTarget {
+  calendar: ExperimentAdherenceTarget["calendar"];
+  label: string;
+  phase: ExperimentAdherenceTarget["phase"];
+  rollup?: ExperimentAdherenceTarget["rollup"];
+  targetId: string;
 }
 
 export interface BrowserVaultExperimentMetricSource {
@@ -174,12 +186,42 @@ export interface BrowserVaultExperimentBiomarkerResult {
 }
 
 export interface BrowserVaultExperimentScheduleResult {
-  cells: BrowserVaultRunScheduleCell[];
+  cells: BrowserVaultExperimentScheduleCell[];
   completedSessions: number;
+  failedSessions: number;
   missedSessions: number;
+  unknownSessions: number;
   partialSessions: number;
   plannedSessions: number;
   skippedSessions: number;
+  timeZone: string;
+}
+
+export type BrowserVaultExperimentScheduleCellKind =
+  | "completed"
+  | "partial"
+  | "missed"
+  | "failed"
+  | "unknown"
+  | "scheduled";
+
+export interface BrowserVaultExperimentScheduleCell {
+  evidenceIds: string[];
+  kind: BrowserVaultExperimentScheduleCellKind;
+  label: string;
+  localDate: string;
+  localTime: string | null;
+  planned: boolean;
+  reason: string;
+  source: "event" | "planned";
+  targetId: string;
+  timeZone: string;
+}
+
+export interface BrowserVaultExperimentAdherenceResult {
+  cells: ExperimentAdherenceCalendarResult["cells"];
+  summary: ExperimentAdherenceCalendarResult["summary"];
+  targets: BrowserVaultExperimentAdherenceTarget[];
   timeZone: string;
 }
 
@@ -225,6 +267,7 @@ export interface BrowserVaultExperimentOutcomeResult {
 }
 
 export interface BrowserVaultExperimentResultsView {
+  adherence: BrowserVaultExperimentAdherenceResult | null;
   asOf: string;
   biomarkers: BrowserVaultExperimentBiomarkerResult[];
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
@@ -240,6 +283,7 @@ interface BrowserVaultExperimentRunContext {
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
   entity: BrowserVaultEntity;
   events: BrowserVaultEntity[];
+  adherenceTargets: ExperimentAdherenceTarget[];
   expectedEffects: BrowserVaultExperimentExpectedEffectInput[];
   run: BrowserVaultExperimentResultRun;
 }
@@ -283,11 +327,13 @@ export function selectBrowserVaultExperimentResults(
   const context = buildRunContext(client, entity, asOf);
   const metricWindow = buildMetricWindowContext(context.run.windows, context.asOfDate);
   const biomarkers = buildBiomarkerResults(client, context, metricWindow);
-  const schedule = buildScheduleResult(context);
+  const adherence = buildAdherenceResult(context, client.replica.metricRows);
+  const schedule = buildScheduleResult(adherence);
   const progress = buildProgressResult(context, biomarkers, schedule);
   const outcome = buildOutcomeResult(context, biomarkers, progress);
 
   return {
+    adherence,
     asOf,
     biomarkers,
     diagnostics: context.diagnostics,
@@ -370,7 +416,20 @@ function buildRunContext(
   const attributes = entity.attributes;
   const windows = readRunWindows(attributes);
   const schedule = readRunSchedule(attributes, diagnostics);
-  const asOfDate = schedule ? toZonedIsoDate(asOf, schedule.timeZone) : toIsoDate(asOf);
+  const runPlanRecord = readRecord(attributes.runPlan);
+  const parsedAdherenceTargets = readAdherenceTargets(attributes, diagnostics);
+  const adherenceTargets: ExperimentAdherenceTarget[] = parsedAdherenceTargets === null
+    ? synthesizeLegacySessionAdherenceTargets({
+        runPlan: {
+          minimumUsefulSessions: readNumber(runPlanRecord, "minimumUsefulSessions") ?? undefined,
+          modality: readString(runPlanRecord?.modality) ?? undefined,
+          schedule: schedule ?? undefined,
+          targetSessions: readNumber(runPlanRecord, "targetSessions") ?? undefined,
+        },
+      })
+    : parsedAdherenceTargets;
+  const runTimeZone = adherenceTargets[0]?.calendar.timeZone ?? schedule?.timeZone ?? null;
+  const asOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
   const startedOn = readString(attributes.startedOn) ?? entity.date ?? extractDate(entity.occurredAt);
   const completedAt = readString(attributes.completedAt) ?? readString(attributes.endedOn);
   const hasCompleteWindows =
@@ -390,6 +449,7 @@ function buildRunContext(
     protocolRef: cloneRecordOrNull(attributes.protocolRef),
     runPlan: {
       ...windows,
+      adherenceTargets: adherenceTargets.map(projectBrowserAdherenceTarget),
       minimumUsefulSessions: readNumber(attributes.runPlan, "minimumUsefulSessions"),
       schedule,
       sessionsPerWeek: readNumber(attributes.runPlan, "sessionsPerWeek"),
@@ -401,7 +461,7 @@ function buildRunContext(
     title: entity.title ?? readString(attributes.title) ?? entity.id,
     windows,
   } satisfies BrowserVaultExperimentResultRun;
-  const events = selectExperimentEvents(client, entity, run, asOfDate, schedule?.timeZone ?? null);
+  const events = selectExperimentEvents(client, entity, run, asOfDate, runTimeZone);
   const expectedEffects = readExpectedEffectInputs(attributes);
 
   return {
@@ -410,8 +470,21 @@ function buildRunContext(
     diagnostics,
     entity,
     events,
+    adherenceTargets,
     expectedEffects,
     run,
+  };
+}
+
+function projectBrowserAdherenceTarget(
+  target: ExperimentAdherenceTarget,
+): BrowserVaultExperimentAdherenceTarget {
+  return {
+    calendar: target.calendar,
+    label: target.label,
+    phase: target.phase,
+    rollup: target.rollup,
+    targetId: target.targetId,
   };
 }
 
@@ -447,6 +520,47 @@ function readRunSchedule(
   }
 
   return result.data;
+}
+
+function readAdherenceTargets(
+  attributes: JsonRecord,
+  diagnostics: BrowserVaultExperimentResultDiagnostic[],
+): ExperimentAdherenceTarget[] | null {
+  const runPlan = readRecord(attributes.runPlan);
+
+  if (!runPlan || runPlan.adherenceTargets === undefined || runPlan.adherenceTargets === null) {
+    return null;
+  }
+
+  const result = experimentAdherenceTargetsSchema.safeParse(runPlan.adherenceTargets);
+  if (!result.success) {
+    diagnostics.push({
+      code: "invalid_schedule",
+      message: "The experiment has adherence targets, but they are not supported by browser Results.",
+      severity: "warning",
+    });
+    return [];
+  }
+
+  const supported = result.data.filter(isBrowserSupportedAdherenceTarget);
+  if (supported.length < result.data.length) {
+    diagnostics.push({
+      code: "invalid_schedule",
+      message: "Some adherence targets are not supported by browser Results and were left out.",
+      severity: "warning",
+    });
+  }
+
+  return supported;
+}
+
+function isBrowserSupportedAdherenceTarget(
+  target: ExperimentAdherenceTarget,
+): boolean {
+  return (
+    target.evidence.kind === "linkedEventCount" &&
+    target.evidence.eventKind === "intervention_session"
+  );
 }
 
 function selectExperimentEvents(
@@ -796,56 +910,114 @@ function emptyMetricWindowSummary(
   };
 }
 
-function buildScheduleResult(
+function buildAdherenceResult(
   context: BrowserVaultExperimentRunContext,
-): BrowserVaultExperimentScheduleResult | null {
-  const schedule = context.run.runPlan.schedule;
+  metricRows: readonly BrowserVaultMetricRow[],
+): BrowserVaultExperimentAdherenceResult | null {
+  const adherenceTargets = context.adherenceTargets;
   const interventionStart = context.run.windows.interventionStart;
   const interventionEnd = context.run.windows.interventionEnd;
 
-  if (!schedule || !interventionStart || !interventionEnd) {
+  if (adherenceTargets.length === 0 || !interventionStart || !interventionEnd) {
     context.diagnostics.push({
       code: "no_schedule",
-      message: "No structured run schedule is available for this experiment.",
+      message: "No structured adherence target is available for this experiment.",
       severity: "info",
     });
     return null;
   }
 
   try {
-    const cells = expandBrowserVaultRunSchedule({
+    const adherence = buildExperimentAdherenceCalendar({
       asOf: context.asOf,
-      events: buildScheduleExpansionEvents(context.events),
-      schedule,
-      window: {
-        endLocalDate: interventionEnd,
-        startLocalDate: interventionStart,
-      },
+      observations: buildAdherenceObservations(context, metricRows, adherenceTargets),
+      targets: adherenceTargets,
+      windows: context.run.windows,
     });
-    return summarizeScheduleCells(schedule.timeZone, cells);
+    return {
+      cells: adherence.cells,
+      summary: adherence.summary,
+      targets: adherenceTargets.map(projectBrowserAdherenceTarget),
+      timeZone: adherence.timeZone,
+    };
   } catch {
     context.diagnostics.push({
       code: "invalid_schedule",
-      message: "The experiment schedule could not be expanded safely for browser Results.",
+      message: "The experiment adherence target could not be expanded safely for browser Results.",
       severity: "warning",
     });
     return null;
   }
 }
 
-function buildScheduleExpansionEvents(
-  events: readonly BrowserVaultEntity[],
-): BrowserVaultRunScheduleExpansionEvent[] {
-  return events
-    .filter((event) => event.kind === "intervention_session")
-    .map((event) => ({
-      localDate: readSessionEventLocalDate(event) ?? (event.occurredAt ? null : event.date),
-      occurredAt: event.occurredAt,
-      status: readSessionScheduleStatus(event),
-    }));
+function buildScheduleResult(
+  adherence: BrowserVaultExperimentAdherenceResult | null,
+): BrowserVaultExperimentScheduleResult | null {
+  if (!adherence) {
+    return null;
+  }
+
+  return summarizeScheduleCells(adherence.timeZone, adherence.cells.map((cell) => ({
+    evidenceIds: cell.evidenceIds,
+    kind: mapAdherenceCellStatus(cell.status),
+    label: cell.label,
+    localDate: cell.localDate,
+    localTime: cell.localTime,
+    planned: cell.planned,
+    reason: cell.reason,
+    source: cell.evidenceIds.length > 0 ? "event" : "planned",
+    targetId: cell.targetId,
+    timeZone: adherence.timeZone,
+  })));
 }
 
-function readSessionScheduleStatus(event: BrowserVaultEntity): BrowserVaultRunScheduleEventStatus {
+function buildAdherenceObservations(
+  context: BrowserVaultExperimentRunContext,
+  metricRows: readonly BrowserVaultMetricRow[],
+  targets: readonly ExperimentAdherenceTarget[],
+): ExperimentAdherenceObservation[] {
+  const observations: ExperimentAdherenceObservation[] = [];
+
+  for (const target of targets) {
+    switch (target.evidence.kind) {
+      case "linkedEventCount":
+        const linkedEvidence = target.evidence;
+        observations.push(...context.events
+          .filter((event) => event.kind === linkedEvidence.eventKind)
+          .map((event) => ({
+            evidenceId: event.id,
+            eventKind: event.kind,
+            localDate:
+              readSessionEventLocalDate(event) ??
+              readEventLocalDate(event, target.calendar.timeZone) ??
+              event.date ??
+              context.asOfDate,
+            status: readSessionScheduleStatus(event),
+            targetId: target.targetId,
+          })));
+        break;
+      case "metricPresence":
+      case "metricThreshold":
+        const metricEvidence = target.evidence;
+        observations.push(...metricRows
+          .filter((row) => row.metricKey === metricEvidence.metricKey)
+          .map((row) => ({
+            evidenceId: row.id,
+            localDate: row.date,
+            metricKey: row.metricKey,
+            targetId: target.targetId,
+            value: row.value,
+          })));
+        break;
+    }
+  }
+
+  return observations;
+}
+
+function readSessionScheduleStatus(
+  event: BrowserVaultEntity,
+): ExperimentAdherenceObservation["status"] {
   const status = readString(event.attributes.sessionStatus);
 
   switch (status) {
@@ -860,17 +1032,30 @@ function readSessionScheduleStatus(event: BrowserVaultEntity): BrowserVaultRunSc
   }
 }
 
+function mapAdherenceCellStatus(
+  status: ExperimentAdherenceCellStatus,
+): BrowserVaultExperimentScheduleCellKind {
+  switch (status) {
+    case "satisfied":
+      return "completed";
+    default:
+      return status;
+  }
+}
+
 function summarizeScheduleCells(
   timeZone: string,
-  cells: readonly BrowserVaultRunScheduleCell[],
+  cells: readonly BrowserVaultExperimentScheduleCell[],
 ): BrowserVaultExperimentScheduleResult {
   return {
     cells: cells.slice(),
     completedSessions: countCells(cells, "completed"),
+    failedSessions: countCells(cells, "failed"),
     missedSessions: countCells(cells, "missed"),
+    unknownSessions: countCells(cells, "unknown"),
     partialSessions: countCells(cells, "partial"),
     plannedSessions: cells.filter((cell) => cell.planned).length,
-    skippedSessions: countCells(cells, "skipped"),
+    skippedSessions: 0,
     timeZone,
   };
 }
@@ -880,12 +1065,16 @@ function buildProgressResult(
   biomarkers: readonly BrowserVaultExperimentBiomarkerResult[],
   schedule: BrowserVaultExperimentScheduleResult | null,
 ): BrowserVaultExperimentProgressResult {
-  const targetSessions = context.run.runPlan.targetSessions;
-  const minimumUsefulSessions = context.run.runPlan.minimumUsefulSessions;
+  const targetSessions =
+    context.adherenceTargets[0]?.rollup?.targetCompletions ??
+    context.run.runPlan.targetSessions;
+  const minimumUsefulSessions =
+    context.adherenceTargets[0]?.rollup?.minimumUsefulCompletions ??
+    context.run.runPlan.minimumUsefulSessions;
   const completedSessions = schedule?.completedSessions ?? countSessionEvents(context.events, "completed");
   const partialSessions = schedule?.partialSessions ?? countSessionEvents(context.events, "partial");
   const missedSessions = schedule?.missedSessions ?? countSessionEvents(context.events, "missed");
-  const skippedSessions = schedule?.skippedSessions ?? countSessionEvents(context.events, "skipped");
+  const skippedSessions = schedule?.skippedSessions ?? 0;
   const loggedSessions = completedSessions + partialSessions;
   const expectedSessionsByNow = computeExpectedSessionsByNow(
     context.run,
@@ -1415,7 +1604,7 @@ function computeExpectedSessionsByNow(
 
 function countSessionEvents(
   events: readonly BrowserVaultEntity[],
-  status: BrowserVaultRunScheduleEventStatus,
+  status: NonNullable<ExperimentAdherenceObservation["status"]>,
 ): number {
   return events
     .filter((event) => event.kind === "intervention_session")
@@ -1424,8 +1613,8 @@ function countSessionEvents(
 }
 
 function countCells(
-  cells: readonly BrowserVaultRunScheduleCell[],
-  kind: BrowserVaultRunScheduleCell["kind"],
+  cells: readonly BrowserVaultExperimentScheduleCell[],
+  kind: BrowserVaultExperimentScheduleCell["kind"],
 ): number {
   return cells.filter((cell) => cell.kind === kind).length;
 }

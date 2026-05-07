@@ -198,7 +198,7 @@ test("reports missing browser setup without pretending wearable data is missing"
   });
 });
 
-test("builds active intervention progress and preserves schedule session statuses", () => {
+test("builds active intervention progress and treats skipped sessions as missed in adherence v1", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
       generatedAt: "2026-04-12T12:00:00.000Z",
@@ -240,7 +240,8 @@ test("builds active intervention progress and preserves schedule session statuse
   assert.equal(result.experiment.phase, "intervention");
   assert.equal(result.progress?.adherence.completedSessions, 1);
   assert.equal(result.progress?.adherence.partialSessions, 1);
-  assert.equal(result.progress?.adherence.skippedSessions, 1);
+  assert.equal(result.progress?.adherence.skippedSessions, 0);
+  assert.equal(result.progress?.adherence.missedSessions, 2);
   assert.equal(result.progress?.adherence.loggedSessions, 2);
   assert.deepEqual(
     result.schedule?.cells
@@ -249,7 +250,7 @@ test("builds active intervention progress and preserves schedule session statuse
     [
       ["2026-04-08", "completed"],
       ["2026-04-09", "partial"],
-      ["2026-04-10", "skipped"],
+      ["2026-04-10", "missed"],
     ],
   );
   assert.equal(result.biomarkers[0]?.intervention.daysWithData, 2);
@@ -946,6 +947,95 @@ test("returns null schedule when the run has no structured schedule", () => {
   assert.ok(result);
   assert.equal(result.schedule, null);
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
+});
+
+test("does not synthesize a legacy schedule when explicit browser targets are unsupported", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-14",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+            adherenceTargets: [{
+              targetId: "step-floor",
+              label: "Step floor",
+              phase: "intervention",
+              calendar: {
+                kind: "daily",
+                timeZone: "America/New_York",
+              },
+              evidence: {
+                kind: "metricThreshold",
+                metricKey: "steps",
+                op: ">=",
+                value: 8000,
+                missing: "unknown",
+              },
+            }],
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.schedule, null);
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
+});
+
+test("uses adherence target rollups for browser progress targets", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-11T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-10",
+            adherenceTargets: [{
+              targetId: "sauna",
+              label: "Sauna",
+              phase: "intervention",
+              calendar: {
+                kind: "daily",
+                timeZone: "America/New_York",
+              },
+              evidence: {
+                kind: "linkedEventCount",
+                eventKind: "intervention_session",
+                missing: "missed_after_grace",
+              },
+              rollup: {
+                targetCompletions: 2,
+                minimumUsefulCompletions: 1,
+              },
+            }],
+          },
+        }),
+        sessionEvent("2026-04-08", "completed"),
+        sessionEvent("2026-04-09", "completed"),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.targetSessions, 2);
+  assert.equal(result.progress?.adherence.minimumUsefulSessions, 1);
+  assert.equal(result.progress?.adherence.status, "met_target");
 });
 
 function createReplica(input: {

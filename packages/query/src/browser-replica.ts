@@ -67,6 +67,7 @@ export { selectBrowserVaultExperimentResults } from "./browser-replica/experimen
 export type {
   BrowserVaultExperimentBiomarkerResult,
   BrowserVaultExperimentBiomarkerStatus,
+  BrowserVaultExperimentAdherenceResult,
   BrowserVaultExperimentCoverageStatus,
   BrowserVaultExperimentExpectedDirection,
   BrowserVaultExperimentExpectedEffect,
@@ -85,6 +86,8 @@ export type {
   BrowserVaultExperimentResultsOptions,
   BrowserVaultExperimentResultsView,
   BrowserVaultExperimentRunWindows,
+  BrowserVaultExperimentScheduleCell,
+  BrowserVaultExperimentScheduleCellKind,
   BrowserVaultExperimentScheduleResult,
 } from "./browser-replica/experiments.ts";
 export {

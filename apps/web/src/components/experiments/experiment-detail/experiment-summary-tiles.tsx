@@ -20,7 +20,7 @@ interface ExperimentSummaryTilesExperiment {
 }
 
 interface SummaryDatum {
-  key: "baseline" | "experiment" | "next" | "sessions";
+  key: "baseline" | "experiment" | "next" | "adherence";
   label: string;
   value: ReactNode;
   detail?: ReactNode;
@@ -54,13 +54,17 @@ function getSummaryData(experiment: ExperimentSummaryTilesExperiment): SummaryDa
   const inBaseline = baselineDays > 0 && day != null && day <= baselineDays;
   const tallies = tallySchedule(schedule);
 
+  const baselineCompleted = day != null && day > baselineDays;
+
   return [
-    {
-      key: "baseline",
-      label: "Baseline",
-      value: renderBaselineValue({ baselineDays, day }),
-      detail: `${baselineDays} days`,
-    },
+    ...(!baselineCompleted
+      ? [{
+          key: "baseline" as const,
+          label: "Baseline",
+          value: renderBaselineValue({ baselineDays, day }),
+          detail: `${baselineDays} days`,
+        }]
+      : []),
     {
       key: "experiment",
       label: inBaseline ? "Protocol" : "Experiment",
@@ -69,17 +73,17 @@ function getSummaryData(experiment: ExperimentSummaryTilesExperiment): SummaryDa
     },
     {
       key: "next",
-      label: "Next session",
+      label: "Next target",
       value: nextStep?.when ?? "—",
-      detail: nextStep ? nextStep.title : "No upcoming session",
+      detail: nextStep ? nextStep.title : "No upcoming target",
     },
     {
-      key: "sessions",
-      label: "Sessions",
+      key: "adherence",
+      label: "Adherence",
       value: tallies && tallies.total > 0
         ? `${tallies.completed} of ${tallies.total} done`
         : "—",
-      detail: renderSessionsDetail(tallies),
+      detail: renderAdherenceDetail(tallies),
     },
   ];
 }
@@ -124,12 +128,13 @@ function renderExperimentValue({
   return `Day ${day} of ${durationDays}`;
 }
 
-function renderSessionsDetail(tallies: ScheduleTallies | null): ReactNode {
+function renderAdherenceDetail(tallies: ScheduleTallies | null): ReactNode {
   if (!tallies) return "No schedule";
   if (
     tallies.partial === 0
     && tallies.missed === 0
-    && tallies.skipped === 0
+    && tallies.failed === 0
+    && tallies.unknown === 0
     && tallies.scheduled === 0
   ) {
     return "On track";
@@ -146,13 +151,19 @@ function renderSessionsDetail(tallies: ScheduleTallies | null): ReactNode {
       {tallies.missed > 0 && (
         <span className="flex items-center gap-1.5">
           <span className="inline-block size-1.5 rounded-full bg-destructive" />
-          {tallies.missed} missed
+          {tallies.missed} not logged
         </span>
       )}
-      {tallies.skipped > 0 && (
+      {tallies.failed > 0 && (
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block size-1.5 rounded-full bg-destructive/70" />
+          {tallies.failed} not met
+        </span>
+      )}
+      {tallies.unknown > 0 && (
         <span className="flex items-center gap-1.5">
           <span className="inline-block size-1.5 rounded-full bg-muted-foreground" />
-          {tallies.skipped} skipped
+          {tallies.unknown} unknown
         </span>
       )}
       {tallies.scheduled > 0 && (
@@ -169,7 +180,8 @@ interface ScheduleTallies {
   completed: number;
   partial: number;
   missed: number;
-  skipped: number;
+  failed: number;
+  unknown: number;
   scheduled: number;
   total: number;
 }
@@ -184,15 +196,16 @@ function tallySchedule(schedule: ExperimentSchedule | undefined): ScheduleTallie
         if (cell.kind === "completed") acc.completed += 1;
         if (cell.kind === "partial") acc.partial += 1;
         if (cell.kind === "missed") acc.missed += 1;
-        if (cell.kind === "skipped") acc.skipped += 1;
+        if (cell.kind === "failed") acc.failed += 1;
+        if (cell.kind === "unknown") acc.unknown += 1;
         if (cell.kind === "scheduled") acc.scheduled += 1;
         return acc;
       },
-      { completed: 0, partial: 0, missed: 0, skipped: 0, scheduled: 0 },
+      { completed: 0, partial: 0, missed: 0, failed: 0, unknown: 0, scheduled: 0 },
     );
 
   return {
     ...counts,
-    total: counts.completed + counts.partial + counts.missed + counts.skipped + counts.scheduled,
+    total: counts.completed + counts.partial + counts.missed + counts.failed + counts.unknown + counts.scheduled,
   };
 }

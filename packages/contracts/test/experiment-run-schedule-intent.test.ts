@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  experimentAdherenceTargetsSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
 } from "../src/index.ts";
@@ -99,5 +100,91 @@ describe("experiment run schedule intents", () => {
     expect(expressionSchema.pattern).toBe(
       "^(?:[0-5]?\\d)\\s+(?:[01]?\\d|2[0-3])\\s+\\*\\s+\\*\\s+[0-7](?:,[0-7])*$",
     );
+  });
+});
+
+describe("experiment adherence targets", () => {
+  it("accepts day-level linked event and metric targets on run plans", () => {
+    const saunaTarget = {
+      targetId: "sauna",
+      label: "Sauna",
+      phase: "intervention",
+      calendar: {
+        kind: "daily",
+        timeZone: "America/New_York",
+        targetCountPerDay: 1,
+      },
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "intervention_session",
+        missing: "missed_after_grace",
+      },
+      grace: { hours: 24 },
+      rollup: {
+        targetCompletions: 14,
+        minimumUsefulCompletions: 7,
+      },
+    } as const;
+    const stepTarget = {
+      targetId: "step-floor",
+      label: "Step floor",
+      phase: "intervention",
+      calendar: {
+        kind: "daily",
+        timeZone: "America/New_York",
+      },
+      evidence: {
+        kind: "metricThreshold",
+        metricKey: "steps",
+        op: ">=",
+        value: 8000,
+        missing: "unknown",
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetsSchema.parse([saunaTarget, stepTarget])).toEqual([
+      saunaTarget,
+      stepTarget,
+    ]);
+    expect(experimentRunPlanSchema.parse({ adherenceTargets: [saunaTarget] }).adherenceTargets).toEqual([
+      saunaTarget,
+    ]);
+    expect(
+      experimentAdherenceTargetsSchema.safeParse([
+        {
+          ...saunaTarget,
+          calendar: {
+            kind: "explicitDates",
+            timeZone: "America/New_York",
+            dates: [
+              { localDate: "2026-05-01", label: "First" },
+              { localDate: "2026-05-01", label: "Duplicate" },
+            ],
+          },
+        },
+      ]).success,
+    ).toBe(false);
+  });
+
+  it("rejects ambiguous target ids and invalid threshold rules", () => {
+    const target = {
+      targetId: "sauna",
+      label: "Sauna",
+      phase: "intervention",
+      calendar: {
+        kind: "daily",
+        timeZone: "America/New_York",
+      },
+      evidence: {
+        kind: "metricThreshold",
+        metricKey: "steps",
+        op: "between",
+        value: 8000,
+        missing: "unknown",
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetsSchema.safeParse([target, target]).success).toBe(false);
+    expect(experimentAdherenceTargetsSchema.safeParse([target]).success).toBe(false);
   });
 });
