@@ -963,11 +963,11 @@ function resolveHostedWorkspaceCheckpointSnapshotMode(
   reason: HostedWorkspaceCheckpointRequest["reason"],
 ): HostedWorkspaceCheckpointSnapshotMode {
   switch (reason) {
+    case "activation_bootstrap":
     case "idle_shutdown":
       return "full";
     case "active_turn_acceptance":
     case "active_turn_input":
-    case "activation_bootstrap":
     case "assistant_runtime_commit":
     case "canonical_runtime_commit":
     case "import":

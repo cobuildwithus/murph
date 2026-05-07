@@ -8,6 +8,7 @@ import {
 } from "@murphai/runtime-state/node";
 import type {
   HostedWorkspaceCheckpointRequest,
+  HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -39,6 +40,7 @@ import type {
 } from "./hosted-runtime/mailbox-import.ts";
 import {
   createEmptyHostedMailboxImportState,
+  readHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "./hosted-runtime/mailbox-state.ts";
 import type {
@@ -377,7 +379,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
     }
 
-    const workspaceRead = await raceHostedRuntimeLiveness(
+    let workspaceRead = await raceHostedRuntimeLiveness(
       workspacePort.read(),
       livenessAbortController.signal,
     );
@@ -405,16 +407,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       leaseGeneration: input.request.leaseGeneration,
       workspaceVersion: input.request.workspaceVersion,
     };
-    const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-      createSnapshot: createLivenessGuardedCheckpointSnapshot,
-      metadata: {
-        attemptId: input.request.attemptId,
-        expectedWorkspaceVersion: input.request.workspaceVersion,
-        leaseGeneration: input.request.leaseGeneration,
-        nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
-        nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
-      },
-    });
+    const createCheckpointRequestBuilderForWorkspace = (
+      workspace: HostedWorkspaceState | null,
+    ): HostedWorkspaceCheckpointRequestBuilder =>
+      createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+        createSnapshot: createLivenessGuardedCheckpointSnapshot,
+        metadata: {
+          attemptId: input.request.attemptId,
+          expectedWorkspaceVersion: workspace?.version ?? input.request.workspaceVersion,
+          leaseGeneration: input.request.leaseGeneration,
+          nextWakeAt: workspace?.nextWakeAt ?? null,
+          nextWakeReason: workspace?.nextWakeReason ?? null,
+        },
+      });
+    let checkpointRequestBuilder = createCheckpointRequestBuilderForWorkspace(workspaceRead.workspace);
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
       mailboxBudget.importItem(
         item,
@@ -475,6 +481,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         redactedStatus: workspaceRead.workspace?.redactedStatus ?? null,
         workspacePort: idleShutdownCheckpointWorkspacePort,
       });
+    }
+
+    if (restored.restoredLegacyWorkingSnapshot) {
+      const bootstrapCheckpoint = await checkpointRestoredLegacyWorkingSnapshot({
+        assertRuntimeLiveness,
+        checkpointRequestBuilder,
+        expectedUserId: input.request.userId,
+        livenessAbortSignal: livenessAbortController.signal,
+        redactedStatus: workspaceRead.workspace?.redactedStatus ?? null,
+        vaultRoot: restored.vaultRoot,
+        workspacePort: cacheRecordingWorkspacePort,
+      });
+      workspaceRead = {
+        ...workspaceRead,
+        workspace: bootstrapCheckpoint.workspace,
+      };
+      checkpointRequestBuilder =
+        createCheckpointRequestBuilderForWorkspace(bootstrapCheckpoint.workspace);
     }
 
     const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;
@@ -682,6 +706,60 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
       : {}),
     status: "idle",
   };
+}
+
+async function checkpointRestoredLegacyWorkingSnapshot(input: {
+  assertRuntimeLiveness: () => void;
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  expectedUserId: string;
+  livenessAbortSignal: AbortSignal;
+  redactedStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
+  vaultRoot: string;
+  workspacePort: HostedRuntimePlatform["workspacePort"];
+}): Promise<HostedWorkspaceCheckpointResponse> {
+  if (!input.workspacePort) {
+    throw new TypeError("Hosted legacy working snapshot bootstrap requires workspace port support.");
+  }
+
+  input.assertRuntimeLiveness();
+  const state = await raceHostedRuntimeLiveness(
+    readHostedMailboxImportState({ vaultRoot: input.vaultRoot }),
+    input.livenessAbortSignal,
+  );
+  input.assertRuntimeLiveness();
+  const checkpointRequest = await raceHostedRuntimeLiveness(
+    Promise.resolve(input.checkpointRequestBuilder.createRequest({
+      importResult: {
+        blocked: [],
+        fetchedCount: 0,
+        importedCount: 0,
+        state,
+      },
+      previousState: state,
+      reason: "activation_bootstrap",
+      redactedStatus: input.redactedStatus ?? null,
+      state,
+    })),
+    input.livenessAbortSignal,
+  );
+  input.assertRuntimeLiveness();
+  const checkpoint = await raceHostedRuntimeLiveness(
+    input.workspacePort.checkpoint(checkpointRequest),
+    input.livenessAbortSignal,
+  );
+  input.assertRuntimeLiveness();
+
+  if (checkpoint.workspace.userId !== input.expectedUserId) {
+    throw new HostedMailboxImportCheckpointUserMismatchError({
+      actualUserId: checkpoint.workspace.userId,
+      expectedUserId: input.expectedUserId,
+    });
+  }
+  if (!checkpoint.checkpointed) {
+    throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+  }
+
+  return checkpoint;
 }
 
 function shouldDeferInitialMailboxImportCheckpoint(
