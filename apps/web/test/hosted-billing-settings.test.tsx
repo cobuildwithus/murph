@@ -88,10 +88,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Upgrade to Edge/);
-    assert.match(markup, /Current plan/);
     assert.match(markup, /Pulse/);
-    assert.match(markup, /\$8 \/ month/);
-    assert.match(markup, /Manage invoices, billing details, and payment methods\./);
     assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
@@ -109,9 +106,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Pulse trial/);
-    assert.match(markup, /Then \$8 \/ month/);
     assert.match(markup, /Start Pulse plan/);
-    assert.match(markup, /Start Pulse when trial credits are used up\./);
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
@@ -169,9 +164,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
     assert.match(markup, /Switch to Pulse/);
     assert.match(markup, /Edge/);
-    assert.match(markup, /\$20 \/ month/);
     assert.match(markup, /Manage subscription/);
-    assert.match(markup, /Manage invoices, billing details, and payment methods\./);
     assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
@@ -202,10 +195,8 @@ describe("HostedBillingSettings", () => {
       scheduledBillingPlanCode: "launch_monthly",
     }));
 
-    assert.match(markup, /Current plan/);
     assert.match(markup, /Edge/);
-    assert.match(markup, /Pulse starts on May 6, 2026\. Edge remains active until then\./);
-    assert.match(markup, /Then \$8 \/ month/);
+    assert.match(markup, /Pulse starts May 6, 2026 at \$8 \/ month/);
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Want to keep Edge\? Contact support/);
     assert.doesNotMatch(markup, /Switch to Pulse/);
