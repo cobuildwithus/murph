@@ -1,6 +1,12 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
+
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
+import {
+  formatHostedDeviceSyncProviderLabel,
+  resolveHostedDeviceSyncBrowserProviderLabel,
+} from "../device-sync/provider-label";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   readHostedMemberSnapshot,
@@ -249,7 +255,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Oura, WHOOP, and Strava provider revocation",
     deletion: "best-effort-delete",
     export: "metadata-and-counts",
-    note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Garmin routed through Junction is deleted locally without provider-side revocation until Junction revocation is implemented.",
+    note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Wearable sources without a provider-side revocation hook are deleted locally unless source-side revocation is implemented.",
   },
   {
     slug: "providers.linq_telegram_email_messages",
@@ -297,7 +303,7 @@ export type HostedAccountProviderRevocationStatus =
 export interface HostedAccountProviderRevocationResult {
   connectionId: string;
   errorCode: string | null;
-  provider: string;
+  providerLabel: string;
   status: HostedAccountProviderRevocationStatus;
   warningCode: string | null;
 }
@@ -330,6 +336,10 @@ type DeviceConnectionIdentity = {
   id: string;
   provider: string;
   providerAccountBlindIndex: string;
+  sources: readonly {
+    sourceProviderSlug: string;
+    status: string;
+  }[];
 };
 
 const HOSTED_DATA_EXPORT_REDACTIONS = [
@@ -356,7 +366,7 @@ const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Live Prisma, hosted mailbox, device, runtime, and workspace rows are deleted immediately by this workflow.",
   "Cloudflare Durable Object/R2 cleanup is best effort and reported in the deletion result when hosted execution control is configured.",
-  "Provider-side data deletion is limited to revocation hooks and external provider retention controls; Garmin routed through Junction is local-reference deletion unless Junction revocation is implemented.",
+  "Provider-side data deletion is limited to revocation hooks and external provider retention controls; wearable sources without a provider-side revocation hook use local-reference deletion unless source-side revocation is implemented.",
   "Stripe, Privy, carrier/email/Telegram/Linq provider records, and infrastructure backups follow their documented retention/legal processes.",
 ] as const;
 
@@ -465,6 +475,7 @@ export async function buildHostedDataExport(input: {
         connectedAt: true,
         createdAt: true,
         displayName: true,
+        id: true,
         keyVersion: true,
         lastErrorCode: true,
         lastErrorMessage: true,
@@ -477,6 +488,16 @@ export async function buildHostedDataExport(input: {
         provider: true,
         providerAccountBlindIndex: true,
         scopesJson: true,
+        sources: {
+          orderBy: [
+            { status: "asc" },
+            { sourceProviderSlug: "asc" },
+          ],
+          select: {
+            sourceProviderSlug: true,
+            status: true,
+          },
+        },
         status: true,
         tokenVersion: true,
         updatedAt: true,
@@ -506,6 +527,7 @@ export async function buildHostedDataExport(input: {
       select: {
         action: true,
         channel: true,
+        connectionId: true,
         createdAt: true,
         expectedTokenVersion: true,
         forceRefresh: true,
@@ -729,6 +751,12 @@ export async function buildHostedDataExport(input: {
   const limitedAiUsage = limitRowsForExport(aiUsage);
   const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
   const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
+  const wearableProviderLabelByConnectionId = new Map(
+    limitedDeviceConnections.rows.map((connection) => [
+      connection.id,
+      resolveDeviceConnectionProviderLabel(connection),
+    ] as const),
+  );
 
   return toExportRecord({
     schema: HOSTED_DATA_EXPORT_SCHEMA,
@@ -832,29 +860,36 @@ export async function buildHostedDataExport(input: {
         updatedAt: session.updatedAt,
         userId: session.userId,
       })),
-      deviceConnections: limitedDeviceConnections.rows.map((connection) => ({
-        accessTokenExpiresAt: connection.accessTokenExpiresAt,
-        connectedAt: connection.connectedAt,
-        createdAt: connection.createdAt,
-        displayName: connection.displayName,
-        idPresent: true,
-        lastErrorCode: connection.lastErrorCode,
-        lastErrorMessagePresent: Boolean(connection.lastErrorMessage),
-        lastSyncCompletedAt: connection.lastSyncCompletedAt,
-        lastSyncErrorAt: connection.lastSyncErrorAt,
-        lastSyncStartedAt: connection.lastSyncStartedAt,
-        lastWebhookAt: connection.lastWebhookAt,
-        metadataPresent: connection.metadataJson !== null,
-        nextReconcileAt: connection.nextReconcileAt,
-        provider: connection.provider,
-        providerAccountLinked: connection.providerAccountBlindIndex.length > 0,
-        scopesPresent: connection.scopesJson !== null,
-        status: connection.status,
-        keyVersionPresent: Boolean(connection.keyVersion),
-        tokenVersionPresent: connection.tokenVersion !== null,
-        updatedAt: connection.updatedAt,
-        userId: connection.userId,
-      })),
+      deviceConnections: limitedDeviceConnections.rows.map((connection) => {
+        const providerLabel = resolveDeviceConnectionProviderLabel(connection);
+
+        return {
+          accessTokenExpiresAt: connection.accessTokenExpiresAt,
+          connectedAt: connection.connectedAt,
+          createdAt: connection.createdAt,
+          displayName: normalizeDeviceConnectionDisplayNameForExport(connection.displayName, {
+            provider: connection.provider,
+            providerLabel,
+          }),
+          idPresent: true,
+          lastErrorCode: connection.lastErrorCode,
+          lastErrorMessagePresent: Boolean(connection.lastErrorMessage),
+          lastSyncCompletedAt: connection.lastSyncCompletedAt,
+          lastSyncErrorAt: connection.lastSyncErrorAt,
+          lastSyncStartedAt: connection.lastSyncStartedAt,
+          lastWebhookAt: connection.lastWebhookAt,
+          metadataPresent: connection.metadataJson !== null,
+          nextReconcileAt: connection.nextReconcileAt,
+          providerAccountLinked: connection.providerAccountBlindIndex.length > 0,
+          providerLabel,
+          scopesPresent: connection.scopesJson !== null,
+          status: connection.status,
+          keyVersionPresent: Boolean(connection.keyVersion),
+          tokenVersionPresent: connection.tokenVersion !== null,
+          updatedAt: connection.updatedAt,
+          userId: connection.userId,
+        };
+      }),
       deviceSyncSignals: limitedDeviceSyncSignals.rows.map((signal) => ({
         connectionIdPresent: Boolean(signal.connectionId),
         createdAt: signal.createdAt,
@@ -863,7 +898,11 @@ export async function buildHostedDataExport(input: {
         kind: signal.kind,
         nextReconcileAt: signal.nextReconcileAt,
         occurredAt: signal.occurredAt,
-        provider: signal.provider,
+        providerLabel: resolveDeviceRowProviderLabel({
+          connectionId: signal.connectionId,
+          provider: signal.provider,
+          providerLabelByConnectionId: wearableProviderLabelByConnectionId,
+        }),
         reason: signal.reason,
         resourceCategory: signal.resourceCategory,
         revokeWarningCode: signal.revokeWarningCode,
@@ -880,7 +919,11 @@ export async function buildHostedDataExport(input: {
         forceRefresh: audit.forceRefresh,
         idPresent: true,
         keyVersionPresent: Boolean(audit.keyVersion),
-        provider: audit.provider,
+        providerLabel: resolveDeviceRowProviderLabel({
+          connectionId: audit.connectionId,
+          provider: audit.provider,
+          providerLabelByConnectionId: wearableProviderLabelByConnectionId,
+        }),
         refreshOutcome: audit.refreshOutcome,
         sessionIdPresent: Boolean(audit.sessionId),
         tokenVersionChanged: audit.tokenVersionChanged,
@@ -969,6 +1012,54 @@ function projectHostedWorkspaceForExport(workspace: {
     userId: workspace.userId,
     version: workspace.version,
   });
+}
+
+function resolveDeviceConnectionProviderLabel(connection: {
+  metadataJson?: Prisma.JsonValue | null;
+  provider: string;
+  sources?: readonly {
+    sourceProviderSlug: string;
+    status: string;
+  }[];
+}): string {
+  return resolveHostedDeviceSyncBrowserProviderLabel({
+    metadata: connection.metadataJson,
+    provider: connection.provider,
+    upstreamSources: connection.sources ?? [],
+  });
+}
+
+function resolveDeviceRowProviderLabel(input: {
+  connectionId: string | null;
+  provider: string;
+  providerLabelByConnectionId: ReadonlyMap<string, string>;
+}): string {
+  const connectionLabel = input.connectionId
+    ? input.providerLabelByConnectionId.get(input.connectionId)
+    : null;
+
+  return connectionLabel ?? formatHostedDeviceSyncProviderLabel(input.provider);
+}
+
+function normalizeDeviceConnectionDisplayNameForExport(
+  value: string | null,
+  input: {
+    provider: string;
+    providerLabel: string;
+  },
+): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+
+  const hiddenLabels = new Set([
+    input.providerLabel.toLowerCase(),
+    formatHostedDeviceSyncProviderLabel(input.provider).toLowerCase(),
+    formatDeviceSyncProviderLabel(input.provider).toLowerCase(),
+  ]);
+
+  return hiddenLabels.has(normalized.toLowerCase()) ? null : normalized;
 }
 
 function projectAccountSnapshotForExport(
@@ -1383,6 +1474,16 @@ async function listDeviceConnectionIdentities(input: {
       id: true,
       provider: true,
       providerAccountBlindIndex: true,
+      sources: {
+        orderBy: [
+          { status: "asc" },
+          { sourceProviderSlug: "asc" },
+        ],
+        select: {
+          sourceProviderSlug: true,
+          status: true,
+        },
+      },
     },
     where: { userId: input.memberId },
   });
@@ -1404,7 +1505,7 @@ async function revokeDeviceProvidersBestEffort(input: {
     return input.connections.map((connection) => ({
       connectionId: connection.id,
       errorCode: safeErrorCode(error),
-      provider: connection.provider,
+      providerLabel: resolveDeviceConnectionProviderLabel(connection),
       status: "skipped_not_configured",
       warningCode: null,
     }));
@@ -1420,7 +1521,7 @@ async function revokeDeviceProvidersBestEffort(input: {
       results.push({
         connectionId: connection.id,
         errorCode: null,
-        provider: connection.provider,
+        providerLabel: resolveDeviceConnectionProviderLabel(connection),
         status: "not_needed",
         warningCode: null,
       });
@@ -1437,7 +1538,7 @@ async function revokeDeviceProvidersBestEffort(input: {
         results.push({
           connectionId: connection.id,
           errorCode: null,
-          provider: connection.provider,
+          providerLabel: resolveDeviceConnectionProviderLabel(connection),
           status: "warning",
           warningCode: "CONNECTION_SECRET_MISSING",
         });
@@ -1450,7 +1551,7 @@ async function revokeDeviceProvidersBestEffort(input: {
         results.push({
           connectionId: connection.id,
           errorCode: null,
-          provider: connection.provider,
+          providerLabel: resolveDeviceConnectionProviderLabel(connection),
           status: "warning",
           warningCode: "CONNECTION_SECRET_MISSING",
         });
@@ -1464,7 +1565,7 @@ async function revokeDeviceProvidersBestEffort(input: {
       results.push({
         connectionId: connection.id,
         errorCode: null,
-        provider: connection.provider,
+        providerLabel: resolveDeviceConnectionProviderLabel(connection),
         status: "revoked",
         warningCode: null,
       });
@@ -1472,7 +1573,7 @@ async function revokeDeviceProvidersBestEffort(input: {
       results.push({
         connectionId: connection.id,
         errorCode: safeErrorCode(error),
-        provider: connection.provider,
+        providerLabel: resolveDeviceConnectionProviderLabel(connection),
         status: "failed",
         warningCode: null,
       });

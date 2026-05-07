@@ -1,9 +1,15 @@
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
 
+import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
+
 import type { HostedBrowserDeviceSyncConnection } from "./public-connection";
 import type { HostedBrowserDeviceSyncConnectionSource } from "./public-ingress-service";
 
-import { formatHostedDeviceSyncProviderLabel } from "./provider-label";
+import {
+  formatHostedDeviceSyncProviderLabel,
+  formatHostedDeviceSyncSourceLabel,
+  resolveHostedDeviceSyncBrowserProviderLabel,
+} from "./provider-label";
 
 export { formatHostedDeviceSyncProviderLabel };
 
@@ -153,8 +159,14 @@ function buildConnectedSource(input: {
   upstreamSources: HostedDeviceSyncSettingsUpstreamSource[];
 }): HostedDeviceSyncSettingsSource {
   const { connection, now } = input;
-  const providerLabel = formatHostedDeviceSyncProviderLabel(connection.provider);
+  const backendProviderLabel = formatDeviceSyncProviderLabel(connection.provider);
+  const providerLabel = resolveHostedDeviceSyncBrowserProviderLabel({
+    metadata: connection.metadata,
+    provider: connection.provider,
+    upstreamSources: input.upstreamSources,
+  });
   const displayName = resolveDisplayName({
+    backendProviderLabel,
     connection,
     connectionIndex: input.connectionIndex,
     duplicateCount: input.duplicateCount,
@@ -398,8 +410,14 @@ function buildUnavailableSource(
     upstreamSources: HostedDeviceSyncSettingsUpstreamSource[];
   },
 ): HostedDeviceSyncSettingsSource {
-  const providerLabel = formatHostedDeviceSyncProviderLabel(connection.provider);
+  const backendProviderLabel = formatDeviceSyncProviderLabel(connection.provider);
+  const providerLabel = resolveHostedDeviceSyncBrowserProviderLabel({
+    metadata: connection.metadata,
+    provider: connection.provider,
+    upstreamSources: input.upstreamSources,
+  });
   const displayName = resolveDisplayName({
+    backendProviderLabel,
     connection,
     connectionIndex: input.connectionIndex,
     duplicateCount: input.duplicateCount,
@@ -443,10 +461,18 @@ function buildUnavailableSource(
   } satisfies HostedDeviceSyncSettingsSource;
 }
 
-function normalizeDisplayName(value: string | null, providerLabel: string): string | null {
+function normalizeDisplayName(
+  value: string | null,
+  providerLabel: string,
+  backendProviderLabel: string,
+): string | null {
   const normalized = value?.trim() ?? "";
 
-  if (!normalized || normalized.toLowerCase() === providerLabel.toLowerCase()) {
+  if (
+    !normalized
+    || normalized.toLowerCase() === providerLabel.toLowerCase()
+    || normalized.toLowerCase() === backendProviderLabel.toLowerCase()
+  ) {
     return null;
   }
 
@@ -454,12 +480,17 @@ function normalizeDisplayName(value: string | null, providerLabel: string): stri
 }
 
 function resolveDisplayName(input: {
+  backendProviderLabel: string;
   connection: HostedBrowserDeviceSyncConnection;
   connectionIndex: number;
   duplicateCount: number;
   providerLabel: string;
 }): string | null {
-  const normalized = normalizeDisplayName(input.connection.displayName, input.providerLabel);
+  const normalized = normalizeDisplayName(
+    input.connection.displayName,
+    input.providerLabel,
+    input.backendProviderLabel,
+  );
 
   if (normalized) {
     return normalized;
@@ -511,7 +542,7 @@ function toSettingsUpstreamSource(
   source: HostedBrowserDeviceSyncConnectionSource,
 ): HostedDeviceSyncSettingsUpstreamSource {
   return {
-    providerLabel: formatPublicUpstreamSourceLabel(source.sourceProviderSlug),
+    providerLabel: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
     resourceCount: source.resourceCount,
     sourceProviderSlug: source.sourceProviderSlug,
     status: source.status,
@@ -531,31 +562,6 @@ function compareUpstreamSources(
   }
 
   return left.resourceCount - right.resourceCount;
-}
-
-function formatPublicUpstreamSourceLabel(sourceProviderSlug: string): string {
-  const normalized = sourceProviderSlug.trim().toLowerCase().replace(/_/gu, "-");
-
-  switch (normalized) {
-    case "dexcom-v3":
-      return "Dexcom";
-    case "fitbit":
-      return "Fitbit";
-    case "freestyle-libre":
-      return "Freestyle Libre";
-    case "garmin":
-      return "Garmin";
-    case "oura":
-      return "Oura";
-    case "strava":
-      return "Strava";
-    case "whoop":
-      return "WHOOP";
-    case "withings":
-      return "Withings";
-  }
-
-  return "Connected source";
 }
 
 function sourceStatusRank(status: HostedDeviceSyncSettingsUpstreamSource["status"]): number {

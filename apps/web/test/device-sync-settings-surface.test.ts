@@ -32,6 +32,18 @@ const OURA_PROVIDER: PublicProviderDescriptor = {
   webhookUrl: "https://example.com/webhooks/oura",
 };
 
+const JUNCTION_PROVIDER: PublicProviderDescriptor = {
+  callbackPath: "/connect/junction/callback",
+  callbackUrl: "https://example.com/connect/junction/callback",
+  connectionKind: "external_link",
+  credentialPolicy: "provider_config",
+  defaultScopes: [],
+  provider: "junction",
+  supportsWebhooks: true,
+  webhookPath: "/webhooks/junction",
+  webhookUrl: "https://example.com/webhooks/junction",
+};
+
 function buildConnection(overrides: Partial<HostedBrowserDeviceSyncConnection> = {}): HostedBrowserDeviceSyncConnection {
   return {
     accessTokenExpiresAt: null,
@@ -94,7 +106,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
-  it("summarizes upstream Junction sources without exposing raw source names or instance keys", () => {
+  it("uses upstream source labels for Junction-backed settings rows", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connectionSources: [
         {
@@ -107,19 +119,15 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         },
       ],
       connections: [buildConnection({
+        displayName: "Junction",
         provider: "junction",
       })],
-      providers: [{
-        ...OURA_PROVIDER,
-        callbackPath: "/connect/junction/callback",
-        callbackUrl: "https://example.com/connect/junction/callback",
-        connectionKind: "external_link",
-        credentialPolicy: "provider_config",
-        defaultScopes: [],
-        provider: "junction",
-      }],
+      providers: [JUNCTION_PROVIDER],
     });
 
+    expect(source?.provider).toBe("junction");
+    expect(source?.providerLabel).toBe("Dexcom");
+    expect(source?.displayName).toBeNull();
     expect(source?.upstreamSources).toEqual([
       {
         providerLabel: "Dexcom",
@@ -128,6 +136,68 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         status: "connected",
       },
     ]);
+  });
+
+  it("uses safe aggregate labels for multi-source intermediary connections", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [
+        {
+          connectionId: "dspc_example",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-04-03T08:00:00.000Z",
+          resourceCount: 3,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+        {
+          connectionId: "dspc_example",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-04-03T08:00:00.000Z",
+          resourceCount: 2,
+          sourceProviderSlug: "oura",
+          status: "connected",
+        },
+      ],
+      connections: [buildConnection({
+        displayName: "Junction",
+        provider: "junction",
+      })],
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source?.provider).toBe("junction");
+    expect(source?.providerLabel).toBe("2 wearables");
+    expect(source?.displayName).toBeNull();
+  });
+
+  it("can fall back to source metadata before an upstream source row exists", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        displayName: "Junction",
+        metadata: { sourceProviderSlug: "oura" },
+        provider: "junction",
+        setupPhase: "pending_link",
+      })],
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source?.provider).toBe("junction");
+    expect(source?.providerLabel).toBe("Oura");
+    expect(source?.displayName).toBeNull();
+  });
+
+  it("uses a wearable fallback when an intermediary source cannot be resolved yet", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        displayName: "Junction",
+        provider: "junction",
+      })],
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source?.provider).toBe("junction");
+    expect(source?.providerLabel).toBe("Wearable source");
+    expect(source?.displayName).toBeNull();
   });
 
   it("hides generic provider labels from the rendered display name", () => {
