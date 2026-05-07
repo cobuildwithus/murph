@@ -12,7 +12,11 @@ import type {
   ExperimentResultsPublicProjection,
   ExperimentShellProjection,
 } from "@/src/lib/health-commons/experiment-projections";
-import type { ExperimentProtocol } from "@/src/types/experiments";
+import type { BrowserVaultContextValue } from "@/src/lib/browser-vault/context";
+import type {
+  ExperimentProtocol,
+  ExperimentRunProjection,
+} from "@/src/types/experiments";
 
 const mocks = vi.hoisted(() => ({
   experimentHeader: vi.fn(() => createElement("div", null, "header")),
@@ -26,12 +30,14 @@ const mocks = vi.hoisted(() => ({
   readHostedAccountSettingsSnapshot: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   refresh: vi.fn(),
-  resolveBrowserVaultExperimentRun: vi.fn(() => null),
+  resolveBrowserVaultExperimentRun: vi.fn<() => ExperimentRunProjection | null>(() => null),
   resultsTab: vi.fn(() => createElement("div", null, "results tab")),
-  useBrowserVault: vi.fn(() => ({
+  useBrowserVault: vi.fn<() => BrowserVaultContextValue>(() => ({
     client: null,
+    dataVersion: null,
     error: null,
-    refresh: vi.fn(),
+    ref: null,
+    refresh: vi.fn(async () => {}),
     status: "ready",
   })),
 }));
@@ -127,8 +133,10 @@ beforeEach(() => {
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   mocks.useBrowserVault.mockReturnValue({
     client: null,
+    dataVersion: null,
     error: null,
-    refresh: vi.fn(),
+    ref: null,
+    refresh: vi.fn(async () => {}),
     status: "ready",
   });
 });
@@ -284,6 +292,58 @@ test("experiment start fallback is not a live contact route", async () => {
   expect(markup).toContain('aria-busy="true"');
   expect(markup).not.toContain("href=");
   expect(markup).not.toContain("https://t.me");
+});
+
+test("experiment start action becomes a results link for a running browser-vault run", async () => {
+  const protocol = createResultsPublicProjection();
+  const activeRun: ExperimentRunProjection = {
+    id: "run_1",
+    source: "browser-vault",
+    snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
+    slug: null,
+    status: "active",
+    statusLabel: "Active",
+    startedOn: "2026-04-01",
+    tags: [],
+    title: "Finnish Dry Sauna",
+    signals: [],
+    trends: [],
+    timeline: [],
+  };
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refresh: vi.fn(async () => {}),
+    status: "ready",
+  });
+  mocks.resolveBrowserVaultExperimentRun.mockReturnValue(activeRun);
+
+  const { ExperimentStartOrResultsButton } = await import(
+    "../app/(dashboard)/experiments/[experimentId]/experiment-start-or-results-button"
+  );
+  const view = await renderClient(
+    createElement(ExperimentStartOrResultsButton, {
+      activeRunProtocol: protocol,
+      protocolDays: 14,
+      protocolTitle: "Finnish Dry Sauna",
+      resultsHref: "/experiments/finnish-sauna#results",
+      startAction: createElement("button", { type: "button" }, "Start Experiment"),
+    }),
+  );
+
+  expect(mocks.resolveBrowserVaultExperimentRun).toHaveBeenCalledWith({
+    client: null,
+    protocol,
+  });
+  expect(view.container.textContent).toContain("View Results");
+  expect(view.container.textContent).not.toContain("Start Experiment");
+  expect(view.container.querySelector("a")?.getAttribute("href")).toBe(
+    "/experiments/finnish-sauna#results",
+  );
+
+  await view.cleanup();
 });
 
 test("server layout keeps routing reads inside the deferred start action slot", async () => {
