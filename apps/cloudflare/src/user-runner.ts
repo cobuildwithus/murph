@@ -1630,7 +1630,7 @@ export class HostedUserRunner {
 
         try {
           await this.scheduleHostedWakeRetryAlarm({
-            respectMaxAttempts: true,
+            respectMaxAttempts: input.reason !== "nudge",
             retryDelayMs,
             userId: input.userId,
           });
