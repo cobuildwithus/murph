@@ -113,7 +113,7 @@ export async function writeHostedLocalHarnessState(
 ): Promise<void> {
   const statePath = resolveHostedLocalRepoPath(state.statePath);
   await mkdir(path.dirname(statePath), { recursive: true });
-  const tempPath = `${statePath}.${process.pid}.tmp`;
+  const tempPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
