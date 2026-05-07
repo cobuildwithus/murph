@@ -98,6 +98,8 @@ export interface RunAssistantAutomationInput {
 
 export interface RunAssistantAutomationPassInput
   extends Omit<RunAssistantAutomationInput, 'once' | 'onInboxEvent' | 'startDaemon'> {
+  // Lets fresh hosted input reach the normal scanner before stale receipt retry scans.
+  deferReceiptRecovery?: boolean
   scanNumber?: number
 }
 
@@ -855,27 +857,30 @@ export async function runAssistantAutomationPass(
     : null
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
+  const runReceiptRecovery = () => recoverAssistantAutoReplies({
+    allowSelfAuthored: input.allowSelfAuthored ?? false,
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    autoReply: state.autoReply,
+    executionContext,
+    inboxServices,
+    maxPerScan: input.maxPerScan,
+    onEvent: input.onEvent,
+    onTraceEvent: input.onTraceEvent,
+    requestId: input.requestId,
+    signal: input.signal,
+    sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+    inputSource,
+    vault: input.vault,
+  })
 
-  const recovery = applyCanonicalWrites
-    ? await recoverAssistantAutoReplies({
-        allowSelfAuthored: input.allowSelfAuthored ?? false,
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        autoReply: state.autoReply,
-        executionContext,
-        inboxServices,
-        maxPerScan: input.maxPerScan,
-        onEvent: input.onEvent,
-        onTraceEvent: input.onTraceEvent,
-        requestId: input.requestId,
-        signal: input.signal,
-        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-        inputSource,
-        vault: input.vault,
-      })
-    : {
+  const deferReceiptRecovery =
+    applyCanonicalWrites && input.deferReceiptRecovery === true
+  let recovery = !applyCanonicalWrites || deferReceiptRecovery
+    ? {
         ...createEmptyAutoReplyScanResult(),
         progressed: false,
       }
+    : await runReceiptRecovery()
 
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
@@ -901,6 +906,19 @@ export async function runAssistantAutomationPass(
       })
     },
   })
+  if (deferReceiptRecovery) {
+    if (scanResult.replies.replied > 0) {
+      recovery = {
+        ...recovery,
+        nextWakeAt: earliestAssistantAutomationWakeAt(
+          recovery.nextWakeAt,
+          new Date().toISOString(),
+        ),
+      }
+    } else if (!input.signal?.aborted) {
+      recovery = await runReceiptRecovery()
+    }
+  }
   const shouldDrainOutboxAfterScan =
     applyCanonicalWrites
     && (input.drainOutbox ?? true)

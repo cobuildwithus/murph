@@ -357,6 +357,43 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("passes deferred receipt recovery to hosted assistant automation passes", async () => {
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: "2026-05-07T00:00:00.000Z",
+      progressed: true,
+    });
+
+    await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_defer_recovery",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_defer_recovery",
+        kind: "runtime.timer",
+        occurredAt: "2026-05-07T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      createHostedAutomationRuntime(),
+      [],
+      false,
+      true,
+    );
+
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deferReceiptRecovery: true,
+        deliveryDispatchMode: "queue-only",
+      }),
+    );
+  });
+
   it("runs hosted automation even when inbox init would fail", async () => {
     mocks.initInboxRuntime.mockRejectedValueOnce(new Error("inbox init failed"));
 

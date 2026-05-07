@@ -522,6 +522,7 @@ export async function runHostedWorkspaceAssistantPhase(
 
     const skipDeviceSync = shouldSkipDeviceSyncForAssistantPhase(input);
     const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
+      deferReceiptRecovery: shouldDeferReceiptRecoveryForAssistantPhase(input),
       executionContext,
       preferredInputIds: input.initialMailboxImport.importResult.assistantInputIds ?? [],
       requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
@@ -938,6 +939,15 @@ function buildHostedProviderCleanupRedactedStatus(input: {
 }
 
 function shouldSkipDeviceSyncForAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  return (
+    input.request.reason === "nudge"
+    || input.initialMailboxImport.importResult.importedCount > 0
+  );
+}
+
+function shouldDeferReceiptRecoveryForAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
   return (

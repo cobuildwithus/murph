@@ -129,6 +129,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   preferredInputIds?: readonly string[] | null;
+  deferReceiptRecovery?: boolean;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   skipDeviceSync?: boolean;
@@ -180,6 +181,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.runtime,
         input.preferredInputIds ?? [],
         input.skipInitialMailboxRefresh === true,
+        input.deferReceiptRecovery === true,
         input.signal,
       )
     : {
@@ -227,6 +229,7 @@ export async function runHostedAssistantAutomation(
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
   preferredInputIds: readonly string[] = [],
   skipInitialMailboxRefresh = false,
+  deferReceiptRecovery = false,
   signal?: AbortSignal,
 ): Promise<{
   nextWakeAt: string | null;
@@ -273,6 +276,7 @@ export async function runHostedAssistantAutomation(
     const passStartedAt = Date.now();
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
+      ...(deferReceiptRecovery ? { deferReceiptRecovery: true } : {}),
       drainOutbox: false,
       executionContext,
       inboxServices,
