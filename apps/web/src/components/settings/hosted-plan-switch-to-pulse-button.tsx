@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { MinusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
@@ -91,6 +91,12 @@ export function SwitchToPulseButton(props: {
   );
 }
 
+const EDGE_ONLY_FEATURES = [
+  "More usage on latest AI models",
+  "Longer experiment context",
+  "Deeper research and analysis",
+];
+
 function PulseSwitchConfirmationDialog(props: {
   currentPeriodEnd?: string | null;
   errorMessage: string | null;
@@ -113,20 +119,32 @@ function PulseSwitchConfirmationDialog(props: {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="border-y border-[#c4a882]/25 py-2">
-          <PlanPriceRow label="Current" name="Edge" price={edgePriceLabel} />
-          <div className="mx-1 flex items-center gap-3 py-1 text-[#736a58]">
-            <div className="h-px min-w-0 flex-1 bg-[#c4a882]/25" />
-            <ArrowRight className="size-4" aria-hidden="true" />
-            <div className="h-px min-w-0 flex-1 bg-[#c4a882]/25" />
+        <div className="rounded-lg border border-[#c4a882]/25 px-5 py-4">
+          <div className="flex items-baseline gap-1">
+            <span className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436]">
+              {pulsePriceLabel}
+            </span>
+            <span className="text-sm text-[#736a58]">/ month</span>
           </div>
-          <PlanPriceRow label="At renewal" name="Pulse" price={pulsePriceLabel} />
+          <p className="mt-1 text-xs text-[#736a58]">
+            Down from {edgePriceLabel}/mo
+          </p>
+          <ul className="mt-4 flex flex-col gap-2.5">
+            {EDGE_ONLY_FEATURES.map((feature) => (
+              <li key={feature} className="flex items-start gap-2.5 text-sm text-[#736a58]">
+                <span aria-hidden className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+                  <MinusIcon className="size-3 text-destructive/70" strokeWidth={2.5} />
+                </span>
+                {feature}
+              </li>
+            ))}
+          </ul>
         </div>
 
         {props.errorMessage ? (
           <p
             role="alert"
-            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
+            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
           >
             {props.errorMessage}
           </p>
@@ -155,29 +173,6 @@ function PulseSwitchConfirmationDialog(props: {
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function PlanPriceRow(props: {
-  label: string;
-  name: string;
-  price: string;
-}) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
-      <div className="min-w-0">
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-          {props.label}
-        </p>
-        <p className="mt-1 text-sm font-medium text-[#2d3436]">
-          {props.name}
-        </p>
-      </div>
-      <p className="shrink-0 font-serif text-3xl/8 font-semibold tracking-normal text-[#2d3436]">
-        {props.price}
-        <span className="ml-1 font-sans text-sm font-normal text-[#736a58]">/mo</span>
-      </p>
-    </div>
   );
 }
 
