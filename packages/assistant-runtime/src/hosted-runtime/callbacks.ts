@@ -51,7 +51,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   const now = new Date();
   const intents = await listAssistantOutboxIntents(vaultRoot);
 
-  const effects: HostedAssistantDeliveryEffect[] = [];
+  const candidates: AssistantOutboxIntent[] = [];
   for (const intent of intents) {
     if (intent.status === "sending") {
       const mirrorState = await readAssistantOutboxIntentMirrorState({
@@ -80,14 +80,59 @@ export async function collectHostedAssistantDeliverySideEffects(
       continue;
     }
 
-    effects.push(buildHostedAssistantDeliveryEffect({
+    candidates.push(intent);
+  }
+
+  const effects = candidates
+    .sort(compareHostedAssistantDeliveryCandidateIntents)
+    .map((intent) => buildHostedAssistantDeliveryEffect({
       dedupeKey: intent.dedupeKey,
       effectId: intent.intentId,
       payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
     }));
-  }
 
   return effects.slice(0, HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS);
+}
+
+function compareHostedAssistantDeliveryCandidateIntents(
+  left: AssistantOutboxIntent,
+  right: AssistantOutboxIntent,
+): number {
+  const priorityDelta =
+    readHostedAssistantDeliveryCandidatePriority(left)
+    - readHostedAssistantDeliveryCandidatePriority(right);
+  if (priorityDelta !== 0) {
+    return priorityDelta;
+  }
+
+  const createdAtDelta =
+    readHostedAssistantDeliveryCandidateCreatedAt(left)
+      .localeCompare(readHostedAssistantDeliveryCandidateCreatedAt(right));
+  if (createdAtDelta !== 0) {
+    return createdAtDelta;
+  }
+  return left.intentId.localeCompare(right.intentId);
+}
+
+function readHostedAssistantDeliveryCandidatePriority(
+  intent: AssistantOutboxIntent,
+): number {
+  switch (intent.status) {
+    case "pending":
+      return 0;
+    case "retryable":
+      return 1;
+    case "sending":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function readHostedAssistantDeliveryCandidateCreatedAt(
+  intent: AssistantOutboxIntent,
+): string {
+  return typeof intent.createdAt === "string" ? intent.createdAt : "";
 }
 
 export async function resolveHostedAssistantOutboxNextWakeAt(input: {

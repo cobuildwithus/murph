@@ -127,6 +127,73 @@ describe("hosted provider effects", () => {
     );
   });
 
+  it("materializes redacted Linq direct targets with the proved same-wake sender", async () => {
+    const fetchMock = vi.fn(async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          chat: {
+            id: "materialized-chat",
+            message: {
+              id: "materialized-message",
+            },
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify({
+        unexpected: {
+          bodyPresent: init?.body !== undefined,
+          url,
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 500,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+linq-recipient",
+      fromPhoneNumber: "+linq-sender",
+      idempotencyKey: "assistant-outbox:intent_1",
+      message: "hello",
+      replyToMessageId: "linq-message-1",
+      target: "h1_111111111111111111111111",
+      targetKind: "explicit",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+    })).resolves.toEqual({
+      providerMessageId: "materialized-message",
+      providerThreadId: "materialized-chat",
+      target: "materialized-chat",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    assert.equal(
+      String(fetchMock.mock.calls[0]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/chats",
+    );
+    assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    assert.equal(body.from, "+linq-sender");
+    assert.deepEqual(body.to, ["+linq-recipient"]);
+    assert.deepEqual(body.message.parts, [{ type: "text", value: "hello" }]);
+    assert.equal(body.message.idempotency_key, "assistant-outbox:intent_1");
+  });
+
   it("starts and stops Linq typing inside the provider effect", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>

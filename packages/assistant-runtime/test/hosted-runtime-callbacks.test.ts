@@ -216,6 +216,64 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("prefers fresh pending deliveries over stale retryable deliveries at the hosted effect cap", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_stale",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_stale",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "h1_111111111111111111111111",
+        identityId: "identity_1",
+        intentId: "intent_stale",
+        lastError: {
+          code: "LINQ_API_REQUEST_FAILED",
+          message: "Chat not found",
+        },
+        message: "stale reply",
+        nextAttemptAt: "2026-04-08T00:00:01.000Z",
+        replyToMessageId: "old-message",
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_stale",
+      },
+      {
+        actorId: "actor_fresh",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_fresh",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "h1_222222222222222222222222",
+        identityId: "identity_1",
+        intentId: "intent_fresh",
+        lastError: null,
+        message: "fresh reply",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "fresh-message",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_fresh",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.effectId).toBe("intent_fresh");
+    expect(sideEffects[0]?.payload.message).toBe("fresh reply");
+  });
+
   it("rejects hosted email participant routes before collecting committed delivery effects", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
