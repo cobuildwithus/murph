@@ -616,6 +616,69 @@ test("Junction normalizer flattens grouped timeseries payloads for activity and 
   assert.equal(distanceEvent?.dataOrigin?.sourceProviderSlug, "oura");
 });
 
+test("Junction normalizer maps respiratory rate unit aliases to the canonical sample unit", async () => {
+  const respiratoryRateUnits = [
+    undefined,
+    "bpm",
+    "rpm",
+    "breaths/min",
+    "breaths/minute",
+    "breaths per minute",
+    "breaths_per_minute",
+  ] as const;
+
+  for (const unit of respiratoryRateUnits) {
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      connectionId: "conn-junction-garmin",
+      sourceKind: "poll",
+      deliveryMode: "scheduled_reconcile",
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        importedAt: "2026-04-22T12:00:00.000Z",
+        timeseries: {
+          respiratory_rate: {
+            groups: {
+              garmin: [{
+                data: [{
+                  timestamp: "2026-04-22T07:15:00Z",
+                  ...(unit === undefined ? {} : { unit }),
+                  value: 14.8,
+                }],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          },
+        },
+      },
+    });
+
+    const respiratoryRateSample = payload.samples?.find((sample) =>
+      sample.stream === "respiratory_rate"
+    );
+    const canonicalRecord = payload.canonicalWearableRecords?.find((record) =>
+      record.kind === "sample" && record.metric === "respiratoryRate"
+    );
+    const rawRespiratoryRateArtifact = payload.rawArtifacts?.find((artifact) =>
+      artifact.role === "junction-timeseries-respiratory-rate"
+    );
+    const rawRespiratoryRateArtifactText = JSON.stringify(rawRespiratoryRateArtifact?.content);
+
+    assert.deepEqual(payload.provenance?.timeseriesResources, ["respiratory_rate"]);
+    assert.equal(respiratoryRateSample?.unit, "breaths_per_minute");
+    assert.equal(respiratoryRateSample?.sample.value, 14.8);
+    assert.equal(respiratoryRateSample?.dataOrigin?.sourceProviderSlug, "garmin");
+    assert.ok(canonicalRecord && canonicalRecord.kind === "sample");
+    assert.equal(canonicalRecord.unit, "breaths_per_minute");
+
+    if (unit === undefined) {
+      assert.doesNotMatch(rawRespiratoryRateArtifactText, /"unit":/u);
+    } else {
+      assert.match(rawRespiratoryRateArtifactText, new RegExp(`"unit":"${unit}"`, "u"));
+    }
+  }
+});
+
 test("Junction snapshot import minimizes grouped source identifiers in raw envelopes", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
