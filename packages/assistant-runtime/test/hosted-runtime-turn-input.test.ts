@@ -317,6 +317,40 @@ describe("createHostedAssistantInputSource", () => {
     });
   });
 
+  it("skips active-turn mailbox refreshes during a fresh foreground input pass", async () => {
+    const vaultRoot = await createTempVault();
+    const refreshMailboxForActiveTurnInput =
+      vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      }));
+    const source = createHostedAssistantInputSource({
+      requestId: "req_turn_input",
+      runtime: createRuntime({
+        checkpointActiveTurnInput: vi.fn(async () => undefined),
+        refreshMailboxForActiveTurnInput,
+      }),
+      skipActiveTurnMailboxRefresh: true,
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    await expect(source?.refresh({ phase: "input_available" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    await expect(source?.refresh({ phase: "request_boundary" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    await expect(source?.refresh({ phase: "commit_barrier" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+
+    expect(refreshMailboxForActiveTurnInput).not.toHaveBeenCalled();
+  });
+
   it("does not let newer preferred input skip older unprocessed input", async () => {
     const vaultRoot = await createTempVault();
     const older = await upsertAssistantInputEvent({

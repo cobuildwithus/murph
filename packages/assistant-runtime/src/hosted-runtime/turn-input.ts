@@ -29,6 +29,7 @@ export function createHostedAssistantInputSource(input: {
   preferredInputIds?: readonly string[] | null;
   requestId: string;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  skipActiveTurnMailboxRefresh?: boolean;
   skipInitialMailboxRefresh?: boolean;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
@@ -82,7 +83,11 @@ export function createHostedAssistantInputSource(input: {
         skippedInitialMailboxRefresh =
           skippedInitialMailboxRefresh || shouldSkipInitialMailboxRefresh;
 
-        if (shouldRefreshMailbox && !shouldSkipInitialMailboxRefresh) {
+        if (
+          shouldRefreshMailbox
+          && input.skipActiveTurnMailboxRefresh !== true
+          && !shouldSkipInitialMailboxRefresh
+        ) {
           try {
             mailboxRefresh = await refreshMailboxForActiveTurnInput({
               requestId: input.requestId,

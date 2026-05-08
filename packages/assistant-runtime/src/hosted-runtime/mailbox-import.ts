@@ -64,6 +64,7 @@ export interface HostedMailboxResolvedImportItem {
 export interface HostedMailboxImportLoopResult {
   assistantInputIds?: string[];
   blocked: HostedMailboxImportLoopBlockedItem[];
+  conversationImportedCount?: number;
   fetchedCount: number;
   importedCount: number;
   nextRetryAt?: string | null;
@@ -163,6 +164,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
   let nextState = input.state;
   const assistantInputIds: string[] = [];
+  let conversationImportedCount = 0;
   let importedCount = 0;
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let nextRetryAt: string | null = null;
@@ -320,6 +322,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (outcome.status === "imported") {
       importedCount += 1;
+      if (route.action === "import-conversation-message") {
+        conversationImportedCount += 1;
+      }
       if (outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
       }
@@ -330,6 +335,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   return {
     assistantInputIds,
     blocked,
+    conversationImportedCount,
     fetchedCount: fetched.items.length,
     importedCount,
     ...(nextRetryAt ? { nextRetryAt } : {}),

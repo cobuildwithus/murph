@@ -72,6 +72,7 @@ describe("hosted mailbox import loop", () => {
       "mailbox_item_conversation_002",
     ]);
     assert.equal(result.importedCount, 2);
+    assert.equal(result.conversationImportedCount, 2);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.state.watermarks.conversation, "2");
     assert.equal(result.state.watermarks.system, "0");
@@ -515,6 +516,7 @@ describe("hosted mailbox import loop", () => {
       },
     ]);
     assert.equal(result.importedCount, 1);
+    assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.state.watermarks.conversation, "2");
   });
 

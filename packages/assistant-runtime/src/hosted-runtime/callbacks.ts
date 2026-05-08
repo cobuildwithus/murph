@@ -46,25 +46,19 @@ const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
 export interface CollectHostedAssistantDeliverySideEffectsInput {
-  includeBackgroundDueIntents?: boolean;
+  includeBackgroundDueIntents: boolean;
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
 }
 
 export async function collectHostedAssistantDeliverySideEffects(
-  input: string | CollectHostedAssistantDeliverySideEffectsInput,
+  input: CollectHostedAssistantDeliverySideEffectsInput,
 ): Promise<HostedAssistantDeliveryEffect[]> {
-  const request = typeof input === "string"
-    ? {
-        includeBackgroundDueIntents: true,
-        preferredIntentIds: [],
-        vaultRoot: input,
-      }
-    : {
-        includeBackgroundDueIntents: input.includeBackgroundDueIntents ?? true,
-        preferredIntentIds: input.preferredIntentIds ?? [],
-        vaultRoot: input.vaultRoot,
-      };
+  const request = {
+    includeBackgroundDueIntents: input.includeBackgroundDueIntents,
+    preferredIntentIds: input.preferredIntentIds ?? [],
+    vaultRoot: input.vaultRoot,
+  };
   const now = new Date();
   const intents = await listAssistantOutboxIntents(request.vaultRoot);
   const preferredIntentOrder = new Map(
@@ -115,9 +109,16 @@ export async function collectHostedAssistantDeliverySideEffects(
         .filter((intent) => !preferredIntentOrder.has(intent.intentId))
         .sort(compareHostedAssistantDeliveryCandidateIntents)
     : [];
+  const cappedBackgroundCandidates = backgroundCandidates.slice(
+    0,
+    Math.max(
+      0,
+      HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS - foregroundCandidates.length,
+    ),
+  );
   const effects = [
     ...foregroundCandidates,
-    ...backgroundCandidates,
+    ...cappedBackgroundCandidates,
   ]
     .map((intent) => buildHostedAssistantDeliveryEffect({
       dedupeKey: intent.dedupeKey,
@@ -125,7 +126,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
     }));
 
-  return effects.slice(0, HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS);
+  return effects;
 }
 
 function readPreferredHostedAssistantDeliveryIntentOrder(

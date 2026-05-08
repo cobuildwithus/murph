@@ -132,6 +132,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   deferReceiptRecovery?: boolean;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
+  skipActiveTurnMailboxRefresh?: boolean;
   skipDeviceSync?: boolean;
   skipInitialMailboxRefresh?: boolean;
   vaultRoot: string;
@@ -181,6 +182,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.runtime,
         input.preferredInputIds ?? [],
         input.skipInitialMailboxRefresh === true,
+        input.skipActiveTurnMailboxRefresh === true,
         input.deferReceiptRecovery === true,
         input.signal,
       )
@@ -241,6 +243,7 @@ export async function runHostedAssistantAutomation(
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
   preferredInputIds: readonly string[] = [],
   skipInitialMailboxRefresh = false,
+  skipActiveTurnMailboxRefresh = false,
   deferReceiptRecovery = false,
   signal?: AbortSignal,
 ): Promise<{
@@ -274,6 +277,7 @@ export async function runHostedAssistantAutomation(
     preferredInputIds,
     requestId,
     runtime,
+    skipActiveTurnMailboxRefresh,
     skipInitialMailboxRefresh,
     vaultRoot,
     wake,

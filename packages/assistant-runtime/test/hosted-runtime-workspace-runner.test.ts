@@ -3058,7 +3058,11 @@ async function runFastDispatchCrashWindowAttempt(input: {
     }),
     requestId: "request_synthetic_fast_dispatch_crash_window",
     async runAssistantPhase(phaseInput) {
-      const effects = await collectHostedAssistantDeliverySideEffects(input.vaultRoot);
+      const effects = await collectHostedAssistantDeliverySideEffects({
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: input.vaultRoot,
+      });
       assert.equal(effects.length, 1);
       const effect = effects[0];
       assert.equal(effect?.payload.channel, "linq");
