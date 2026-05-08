@@ -5665,6 +5665,350 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
+  it('uses deterministic hosted delivery idempotency keys for replayed hosted auto-replies', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_replay',
+      inputId: 'ain_11111111111111111111111111111111',
+      occurredAt: '2026-04-08T00:07:00.000Z',
+      receivedAt: '2026-04-08T00:07:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_replay',
+        threadId: 'real_thread_replay',
+      },
+      source: 'linq',
+      text: 'captureless replay text',
+    })
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_replay',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+    const firstKey = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+      ?.deliveryIdempotencyKey
+
+    replyMocks.sendAssistantMessage.mockClear()
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_replay',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+    const replayKey = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+      ?.deliveryIdempotencyKey
+
+    expect(firstKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    expect(replayKey).toBe(firstKey)
+  })
+
+  it('changes hosted delivery idempotency keys when route dimensions change', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const readDeliveryKey = async (
+      candidate: AssistantInputCandidate,
+      enabledChannels: readonly string[],
+    ): Promise<string> => {
+      replyMocks.sendAssistantMessage.mockClear()
+      const context = reply.createAssistantAutoReplyGroupContext([
+        createCapturelessReplyGroupItem(candidate),
+      ])
+      if (!context) {
+        throw new Error('expected reply context')
+      }
+      await reply.processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context,
+        enabledChannels,
+        executionContext: {
+          hosted: {
+            memberId: 'member_variation',
+            userEnvKeys: [],
+          },
+        },
+        inboxServices: createInboxServices({
+          show: vi.fn(),
+        }),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault: '/tmp/assistant-automation-vault',
+      })
+      const key = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+        ?.deliveryIdempotencyKey
+      if (typeof key !== 'string') {
+        throw new Error('expected hosted delivery idempotency key')
+      }
+      return key
+    }
+
+    const base = await readDeliveryKey(
+      createCapturelessAssistantInputCandidate({
+        conversationThreadId: 'safe_thread_base',
+        inputId: 'ain_22222222222222222222222222222222',
+        occurredAt: '2026-04-08T00:08:00.000Z',
+        receivedAt: '2026-04-08T00:08:01.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_base',
+          threadId: 'real_thread_base',
+        },
+        source: 'linq',
+        text: 'base text',
+      }),
+      ['linq'],
+    )
+
+    const changedRecipient = await readDeliveryKey(
+      createCapturelessAssistantInputCandidate({
+        conversationThreadId: 'safe_thread_base',
+        inputId: 'ain_22222222222222222222222222222222',
+        occurredAt: '2026-04-08T00:08:00.000Z',
+        receivedAt: '2026-04-08T00:08:01.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_base',
+          threadId: 'real_thread_other',
+        },
+        source: 'linq',
+        text: 'base text',
+      }),
+      ['linq'],
+    )
+    const changedChannel = await readDeliveryKey(
+      createCapturelessAssistantInputCandidate({
+        conversationThreadId: 'safe_thread_base',
+        inputId: 'ain_22222222222222222222222222222222',
+        occurredAt: '2026-04-08T00:08:00.000Z',
+        receivedAt: '2026-04-08T00:08:01.000Z',
+        replyTarget: {
+          channel: 'telegram',
+          messageId: 'real_msg_base',
+          threadId: 'real_thread_base',
+        },
+        source: 'telegram',
+        text: 'base text',
+      }),
+      ['telegram'],
+    )
+    const changedConversation = await readDeliveryKey(
+      createCapturelessAssistantInputCandidate({
+        conversationThreadId: 'safe_thread_other',
+        inputId: 'ain_22222222222222222222222222222222',
+        occurredAt: '2026-04-08T00:08:00.000Z',
+        receivedAt: '2026-04-08T00:08:01.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_base',
+          threadId: 'real_thread_base',
+        },
+        source: 'linq',
+        text: 'base text',
+      }),
+      ['linq'],
+    )
+    const changedInbound = await readDeliveryKey(
+      createCapturelessAssistantInputCandidate({
+        conversationThreadId: 'safe_thread_base',
+        inputId: 'ain_33333333333333333333333333333333',
+        occurredAt: '2026-04-08T00:08:00.000Z',
+        receivedAt: '2026-04-08T00:08:01.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_base',
+          threadId: 'real_thread_base',
+        },
+        source: 'linq',
+        text: 'base text',
+      }),
+      ['linq'],
+    )
+
+    expect(new Set([
+      base,
+      changedRecipient,
+      changedChannel,
+      changedConversation,
+      changedInbound,
+    ]).size).toBe(5)
+  })
+
+  it('recomputes hosted delivery idempotency keys after active-turn hosted input admission', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const initialInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_active',
+      inputId: 'ain_44444444444444444444444444444444',
+      occurredAt: '2026-04-08T00:09:00.000Z',
+      receivedAt: '2026-04-08T00:09:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_active_initial',
+        threadId: 'real_thread_active',
+      },
+      source: 'linq',
+      text: 'initial hosted text',
+    })
+    const lateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_active',
+      inputId: 'ain_55555555555555555555555555555555',
+      occurredAt: '2026-04-08T00:09:10.000Z',
+      receivedAt: '2026-04-08T00:09:11.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_active_late',
+        threadId: 'real_thread_active',
+      },
+      source: 'linq',
+      text: 'late hosted text',
+    })
+    const executionContext = {
+      hosted: {
+        memberId: 'member_active_replay',
+        userEnvKeys: [],
+      },
+    }
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const replayContext = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+      createCapturelessReplyGroupItem(lateInput),
+    ])
+    if (!replayContext) {
+      throw new Error('expected replay context')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: replayContext,
+      enabledChannels: ['linq'],
+      executionContext,
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+    const replayKey = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+      ?.deliveryIdempotencyKey
+    if (typeof replayKey !== 'string') {
+      throw new Error('expected replay delivery idempotency key')
+    }
+
+    replyMocks.sendAssistantMessage.mockClear()
+    replyMocks.sendAssistantMessage.mockImplementation(
+      async (input: {
+        activeTurnInput?: (
+          value: {
+            phase: 'input_available' | 'request_boundary' | 'commit_barrier'
+            sessionId: string
+            turnId: string
+            vault: string
+          }
+        ) => Promise<
+          | { kind: 'no-new-input' }
+          | {
+              deliveryIdempotencyKey?: string | null
+              kind: 'accepted'
+            }
+        >
+        deliveryIdempotencyKey?: string | null
+      }) => {
+        expect(input.deliveryIdempotencyKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+        expect(input.deliveryIdempotencyKey).not.toBe(replayKey)
+        const admitted = await input.activeTurnInput?.({
+          phase: 'request_boundary',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          vault: '/tmp/assistant-automation-vault',
+        })
+        if (admitted?.kind !== 'accepted') {
+          throw new Error('expected active input admission')
+        }
+        expect(admitted.deliveryIdempotencyKey).toBe(replayKey)
+        return {
+          delivery: {
+            channel: 'linq',
+            target: 'target-1',
+            sentAt: '2026-04-08T00:10:00.000Z',
+          },
+          deliveryDeferred: false,
+          deliveryError: null,
+          deliveryIntentId: 'intent-1',
+          response: 'response with late input',
+          session: {
+            sessionId: 'session-1',
+          },
+        }
+      },
+    )
+    const initialContext = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+    ])
+    if (!initialContext) {
+      throw new Error('expected initial context')
+    }
+    const inputSource = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationInputs() {
+        return {
+          inputs: [lateInput],
+          nextCursor: lateInput.event.cursor,
+        }
+      },
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: initialContext,
+      enabledChannels: ['linq'],
+      executionContext,
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+  })
+
   it.each([
     [
       'assistant input id',

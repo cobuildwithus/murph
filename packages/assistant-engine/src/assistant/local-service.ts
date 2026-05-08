@@ -1042,6 +1042,10 @@ function buildActiveTurnContinuationInput(input: {
       input.acceptedInput.deliveryReplyToMessageId === undefined
         ? input.input.deliveryReplyToMessageId
         : input.acceptedInput.deliveryReplyToMessageId,
+    deliveryIdempotencyKey:
+      input.acceptedInput.deliveryIdempotencyKey === undefined
+        ? input.input.deliveryIdempotencyKey
+        : input.acceptedInput.deliveryIdempotencyKey,
     prompt: input.acceptedInput.prompt,
     receiptMetadata:
       input.acceptedInput.receiptMetadata === undefined
