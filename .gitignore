@@ -6,6 +6,7 @@ coverage/
 .DS_Store
 .turbo/
 .tmp/
+.runtime/
 .next/
 .next-dev/
 .next-smoke/
