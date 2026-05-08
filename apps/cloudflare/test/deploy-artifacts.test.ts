@@ -23,9 +23,18 @@ import {
 
 const healthCommonsPackageName = "@murphai/health-commons";
 const finnishDrySaunaProtocol = {
+  attribution: {
+    ownerType: "murph",
+  },
   body: "Finnish Dry Sauna fixture body.",
   entityType: "protocol_variant",
   key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  lineage: {
+    relationship: "root",
+  },
+  protocol: {
+    doseSignature: "3 sessions weekly",
+  },
   relativePath: "protocols/dry-sauna/murph-finnish-standard-3x-week.md",
   revision: {
     pageRevisionId: "sha256:test-page",
@@ -33,7 +42,19 @@ const finnishDrySaunaProtocol = {
     runSpecRevisionId: "sha256:test-run-spec",
   },
   schemaVersion: "murph.commons.page.v1",
+  safety: {
+    cautionLevel: "moderate",
+  },
   slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
+  testPlans: [
+    {
+      baselineDays: 7,
+      durationDays: 28,
+      interventionDays: 21,
+      planId: "dry-sauna-fixture",
+      primaryBiomarkerKey: "biomarker:resting_pulse",
+    },
+  ],
   title: "Finnish Dry Sauna",
 } as const;
 const requiredHostedCryptoWorkerVars = {
@@ -130,6 +151,39 @@ describe("deploy artifact validation", () => {
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Runner Health Commons generated catalog is stale or missing Finnish Dry Sauna",
+    );
+  });
+
+  it("rejects a runner bundle with a schema-invalid Health Commons catalog", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const schemaInvalidProtocol: Record<string, unknown> = {
+      ...finnishDrySaunaProtocol,
+    };
+    delete schemaInvalidProtocol.protocol;
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "catalog.json",
+      ),
+      `${JSON.stringify({
+        artifactManifests: [],
+        catalogHash: "sha256:invalid",
+        changes: [],
+        entities: [schemaInvalidProtocol],
+        redirects: [],
+        schemaVersion: "murph.commons.catalog.v1",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons generated catalog is invalid",
     );
   });
 
@@ -265,6 +319,37 @@ export function loadGeneratedHealthCommonsCatalog() {
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Prepared runner bundle changed after assembly",
     );
+    await expect(access(markerPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("validates the Health Commons catalog without executing bundled runtime code", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const markerPath = path.join(fixture.runnerBundleDir, "runtime-import-marker");
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "dist",
+        "runtime.js",
+      ),
+      `import { writeFileSync } from "node:fs";
+
+writeFileSync(${JSON.stringify(markerPath)}, "executed");
+
+export function loadGeneratedHealthCommonsCatalog() {
+  return {};
+}
+`,
+      "utf8",
+    );
+    await rewriteRunnerBundleManifest(fixture);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
     await expect(access(markerPath)).rejects.toMatchObject({
       code: "ENOENT",
     });

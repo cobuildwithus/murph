@@ -580,7 +580,7 @@ describe("HostedBundleGarbageCollector", () => {
       }),
     ).rejects.toMatchObject({
       operation: "cleanup-authoritative-next",
-      refKey: nextBundleRef.key,
+      refKeyPresent: true,
     });
 
     expect(bucket.deleted).toEqual([]);

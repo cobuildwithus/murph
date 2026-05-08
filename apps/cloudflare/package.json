@@ -69,6 +69,7 @@
     "@cloudflare/containers": "^0.2.0",
     "@murphai/assistant-runtime": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",
+    "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/health-commons": "workspace:*",

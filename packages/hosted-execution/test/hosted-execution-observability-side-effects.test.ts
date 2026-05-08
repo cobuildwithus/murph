@@ -251,13 +251,21 @@ describe("hosted execution observability", () => {
   });
 
   it("automatically includes safe custom error properties in structured diagnostics", () => {
+    const rawBundleRefKey = [
+      "users",
+      "bundles",
+      "user-segment",
+      "vault",
+      "hash",
+    ].join("/");
     const error = Object.assign(
       new Error("Hosted bundle archive is invalid."),
       {
         code: "bundle_archive_validation_error",
         details: {
           bundleArchiveOperation: "runner-input",
-          bundleRefKey: "users/bundles/user-segment/vault/hash",
+          bundleRefKey: rawBundleRefKey,
+          bundleRefKeyPresent: true,
           bundleRefPresent: true,
         },
         name: "HostedBundleArchiveValidationError",
@@ -265,7 +273,8 @@ describe("hosted execution observability", () => {
         path: "/tmp/raw-bundle",
         payload: "raw payload fragment",
         refHash: "a".repeat(64),
-        refKey: "users/bundles/user-segment/vault/hash",
+        refKey: rawBundleRefKey,
+        refKeyPresent: true,
         refSize: 123,
         token: "secret-token",
       },
@@ -287,16 +296,19 @@ describe("hosted execution observability", () => {
     });
     expect(record.details).toMatchObject({
       bundleArchiveOperation: "runner-input",
-      bundleRefKey: "users/bundles/user-segment/vault/hash",
+      bundleRefKeyPresent: true,
       bundleRefPresent: true,
       errorDetail: "Hosted bundle archive is invalid.",
       errorProperties: {
         operation: "runner-input",
         refHash: "a".repeat(64),
-        refKey: "users/bundles/user-segment/vault/hash",
+        refKeyPresent: true,
         refSize: 123,
       },
     });
+    expect(JSON.stringify(record.details)).not.toContain(
+      rawBundleRefKey,
+    );
     expect(record.details?.errorProperties).not.toHaveProperty("path");
     expect(record.details?.errorProperties).not.toHaveProperty("payload");
     expect(record.details?.errorProperties).not.toHaveProperty("token");

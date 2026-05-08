@@ -3,7 +3,15 @@ import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runPnpmCommand } from "./process.js";
+import {
+  createPackageManagerProcessEnv,
+  runPnpmCommand,
+} from "./process.js";
+
+interface WorkspacePnpmInstallPolicy {
+  npmrcLines: string[];
+  overrides: Record<string, string>;
+}
 
 export async function installPackedRunnerDependencies(
   bundleDir: string,
@@ -24,6 +32,9 @@ export async function installPackedRunnerDependencies(
       overrides?: Record<string, string>;
     };
   };
+  const workspaceInstallPolicy = await readWorkspacePnpmInstallPolicy(
+    input.repoRoot,
+  );
   const workspaceTarballOverrides = buildWorkspaceTarballOverrides(
     bundleDir,
     tarballPaths,
@@ -49,6 +60,7 @@ export async function installPackedRunnerDependencies(
   packageJson.pnpm = {
     ...packageJson.pnpm,
     overrides: {
+      ...workspaceInstallPolicy.overrides,
       ...(packageJson.pnpm?.overrides ?? {}),
       ...workspaceTarballOverrides,
     },
@@ -60,7 +72,7 @@ export async function installPackedRunnerDependencies(
     "utf8",
   );
   await installPinnedProductionDependencies(bundleDir, {
-    repoRoot: input.repoRoot,
+    policy: workspaceInstallPolicy,
   });
 }
 
@@ -136,7 +148,7 @@ export function pinInstalledDependencyVersions(
 
     if (!options.allowMissing) {
       throw new Error(
-        `Could not resolve an installed version for direct dependency ${packageName} from ${runtimePackageRoot}.`,
+        `Could not resolve an installed version for direct dependency ${packageName} from the runner runtime package.`,
       );
     }
 
@@ -179,14 +191,14 @@ function resolveInstalledPackageManifestPath(
 async function installPinnedProductionDependencies(
   installRoot: string,
   input: {
-    repoRoot: string;
+    policy: WorkspacePnpmInstallPolicy;
   },
 ): Promise<void> {
   const installEnv = {
     COREPACK_ENABLE_AUTO_PIN: "0",
   };
 
-  await writeRunnerBundlePnpmInstallConfig(installRoot, input.repoRoot);
+  await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, input.policy);
   await runPnpmCommand(["install", "--prod", "--lockfile-only"], {
     cwd: installRoot,
     env: installEnv,
@@ -201,50 +213,157 @@ export async function writeRunnerBundlePnpmInstallConfig(
   installRoot: string,
   repoRoot: string,
 ): Promise<void> {
-  const policy = await readWorkspaceMinimumReleaseAgePolicy(repoRoot);
+  const policy = await readWorkspacePnpmInstallPolicy(repoRoot);
 
-  if (policy === null) {
+  await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, policy);
+}
+
+async function writeRunnerBundlePnpmInstallConfigFromPolicy(
+  installRoot: string,
+  policy: WorkspacePnpmInstallPolicy,
+): Promise<void> {
+  if (policy.npmrcLines.length === 0) {
     return;
   }
 
-  const lines = [`minimum-release-age=${policy.minimumReleaseAge}`];
-  for (const excludedPackage of policy.minimumReleaseAgeExclude) {
-    lines.push(`minimum-release-age-exclude[]=${excludedPackage}`);
-  }
-
-  await writeFile(path.join(installRoot, ".npmrc"), `${lines.join("\n")}\n`, "utf8");
+  await writeFile(
+    path.join(installRoot, ".npmrc"),
+    `${policy.npmrcLines.join("\n")}\n`,
+    "utf8",
+  );
 }
 
-async function readWorkspaceMinimumReleaseAgePolicy(repoRoot: string): Promise<{
-  minimumReleaseAge: number;
-  minimumReleaseAgeExclude: string[];
-} | null> {
+async function readWorkspacePnpmInstallPolicy(
+  repoRoot: string,
+): Promise<WorkspacePnpmInstallPolicy> {
   let workspaceConfig: string;
   try {
-    workspaceConfig = await readFile(path.join(repoRoot, "pnpm-workspace.yaml"), "utf8");
+    workspaceConfig = await readFile(
+      path.join(repoRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
   } catch {
-    return null;
+    return {
+      npmrcLines: [],
+      overrides: {},
+    };
   }
 
-  const minimumReleaseAgeMatch = /^minimumReleaseAge:\s*(\d+)\s*$/mu.exec(
+  const lines: string[] = [];
+  appendBooleanPnpmConfigLine(
+    lines,
     workspaceConfig,
+    "blockExoticSubdeps",
+    "block-exotic-subdeps",
   );
-  if (!minimumReleaseAgeMatch) {
-    return null;
-  }
-
-  const minimumReleaseAge = Number.parseInt(minimumReleaseAgeMatch[1] ?? "", 10);
-  if (!Number.isInteger(minimumReleaseAge) || minimumReleaseAge < 0) {
-    return null;
-  }
-
-  return {
-    minimumReleaseAge,
-    minimumReleaseAgeExclude: parseYamlStringList(
+  appendBooleanPnpmConfigLine(
+    lines,
+    workspaceConfig,
+    "engineStrict",
+    "engine-strict",
+  );
+  appendBooleanPnpmConfigLine(
+    lines,
+    workspaceConfig,
+    "managePackageManagerVersions",
+    "manage-package-manager-versions",
+  );
+  appendNumberPnpmConfigLine(
+    lines,
+    workspaceConfig,
+    "minimumReleaseAge",
+    "minimum-release-age",
+  );
+  for (
+    const excludedPackage of parseYamlStringList(
       workspaceConfig,
       "minimumReleaseAgeExclude",
-    ),
+    )
+  ) {
+    lines.push(`minimum-release-age-exclude[]=${excludedPackage}`);
+  }
+  appendStringPnpmConfigLine(
+    lines,
+    workspaceConfig,
+    "nodeVersion",
+    "node-version",
+  );
+  for (
+    const allowedBuild of parseYamlTrueMapKeys(
+      workspaceConfig,
+      "allowBuilds",
+    )
+  ) {
+    lines.push(`only-built-dependencies[]=${allowedBuild}`);
+  }
+  appendBooleanPnpmConfigLine(
+    lines,
+    workspaceConfig,
+    "packageManagerStrictVersion",
+    "package-manager-strict-version",
+  );
+  appendStringPnpmConfigLine(lines, workspaceConfig, "savePrefix", "save-prefix");
+  appendStringPnpmConfigLine(lines, workspaceConfig, "trustPolicy", "trust-policy");
+  appendNumberPnpmConfigLine(
+    lines,
+    workspaceConfig,
+    "trustPolicyIgnoreAfter",
+    "trust-policy-ignore-after",
+  );
+  return {
+    npmrcLines: lines,
+    overrides: parseYamlStringMap(workspaceConfig, "overrides"),
   };
+}
+
+function appendBooleanPnpmConfigLine(
+  lines: string[],
+  source: string,
+  yamlKey: string,
+  pnpmKey: string,
+): void {
+  const value = parseYamlScalar(source, yamlKey);
+  if (value === "true" || value === "false") {
+    lines.push(`${pnpmKey}=${value}`);
+  }
+}
+
+function appendNumberPnpmConfigLine(
+  lines: string[],
+  source: string,
+  yamlKey: string,
+  pnpmKey: string,
+): void {
+  const value = parseYamlScalar(source, yamlKey);
+  if (!value || !/^\d+$/u.test(value)) {
+    return;
+  }
+
+  lines.push(`${pnpmKey}=${value}`);
+}
+
+function appendStringPnpmConfigLine(
+  lines: string[],
+  source: string,
+  yamlKey: string,
+  pnpmKey: string,
+): void {
+  const value = parseYamlScalar(source, yamlKey);
+  if (value === null) {
+    return;
+  }
+
+  lines.push(`${pnpmKey}=${value}`);
+}
+
+function parseYamlScalar(source: string, key: string): string | null {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = new RegExp(`^${escapedKey}:\\s*(.*?)\\s*$`, "mu").exec(source);
+  if (!match) {
+    return null;
+  }
+
+  return stripYamlStringQuotes(match[1] ?? "");
 }
 
 function parseYamlStringList(source: string, key: string): string[] {
@@ -271,6 +390,42 @@ function parseYamlStringList(source: string, key: string): string[] {
   return values;
 }
 
+function parseYamlTrueMapKeys(source: string, key: string): string[] {
+  return Object.entries(parseYamlStringMap(source, key))
+    .flatMap(([entryKey, entryValue]) =>
+      entryValue === "true" ? [entryKey] : [],
+    );
+}
+
+function parseYamlStringMap(source: string, key: string): Record<string, string> {
+  const lines = source.split(/\r?\n/u);
+  const mapStartIndex = lines.findIndex((line) => line.trim() === `${key}:`);
+  if (mapStartIndex === -1) {
+    return {};
+  }
+
+  const values: Record<string, string> = {};
+  for (const line of lines.slice(mapStartIndex + 1)) {
+    if (line.length > 0 && !/^\s/u.test(line)) {
+      break;
+    }
+
+    const match = /^\s*(.+?)\s*:\s*(.+?)\s*$/u.exec(line);
+    if (!match) {
+      continue;
+    }
+
+    const entryKey = stripYamlStringQuotes(match[1] ?? "");
+    if (!entryKey) {
+      continue;
+    }
+
+    values[entryKey] = stripYamlStringQuotes(match[2] ?? "");
+  }
+
+  return values;
+}
+
 function stripYamlStringQuotes(value: string): string {
   const trimmed = value.trim();
   if (
@@ -288,6 +443,7 @@ async function runNodeImportProbe(
   specifier: string,
 ): Promise<void> {
   const probeSource = `await import(${JSON.stringify(specifier)});`;
+  const processEnv = await createPackageManagerProcessEnv(undefined);
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [
@@ -296,6 +452,7 @@ async function runNodeImportProbe(
       probeSource,
     ], {
       cwd,
+      env: processEnv.env,
       stdio: ["ignore", "ignore", "ignore"],
     });
 
@@ -312,7 +469,7 @@ async function runNodeImportProbe(
         ),
       );
     });
-  });
+  }).finally(processEnv.cleanup);
 }
 
 function toPosixPath(value: string): string {

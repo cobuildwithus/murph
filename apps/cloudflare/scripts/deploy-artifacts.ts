@@ -1,7 +1,20 @@
 import { createHash } from "node:crypto";
-import { readlink, readdir, readFile, realpath, stat, lstat, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+
+import {
+  healthCommonsCatalogSchema,
+  type HealthCommonsCatalog,
+} from "@murphai/contracts";
 
 import {
   buildHostedWorkerSecretsPayload,
@@ -113,7 +126,10 @@ export async function assertPreparedDeployArtifacts(input: {
   const manifest = await readRunnerBundleManifest(input.runnerBundleDir);
   const manifestGeneratedAtMs = parseManifestGeneratedAt(manifest.generatedAt);
 
-  const generatedConfig = await readJsonObjectFile(input.configPath, "generated Wrangler config");
+  const generatedConfig = await readJsonObjectFile(
+    input.configPath,
+    "generated Wrangler config",
+  );
   assertGeneratedWranglerConfig(generatedConfig);
   assertGeneratedWranglerConfigMatchesCurrentEnvironment(generatedConfig, source);
   await assertArtifactNotNewerThanManifest({
@@ -123,14 +139,22 @@ export async function assertPreparedDeployArtifacts(input: {
   });
 
   if (input.includeSecrets) {
-    const workerSecretsPayload = await readJsonObjectFile(input.secretsFilePath, "worker secrets payload");
-    assertWorkerSecretsPayloadMatchesCurrentEnvironment(workerSecretsPayload, source);
+    const workerSecretsPayload = await readJsonObjectFile(
+      input.secretsFilePath,
+      "worker secrets payload",
+    );
+    assertWorkerSecretsPayloadMatchesCurrentEnvironment(
+      workerSecretsPayload,
+      source,
+    );
   }
 
   await assertRunnerBundleShape(input.runnerBundleDir, manifest);
 
   if (manifest.buildSkipped) {
-    throw new Error("Prepared runner bundle was assembled without rebuilding workspace artifacts; rebuild deploy artifacts before deploying.");
+    throw new Error(
+      "Prepared runner bundle was assembled without rebuilding workspace artifacts; rebuild deploy artifacts before deploying.",
+    );
   }
 
   if (!manifest.includeBundleOnlyDependencies) {
@@ -140,18 +164,31 @@ export async function assertPreparedDeployArtifacts(input: {
   }
 
   const expectedWorkspacePackageNames = [
-    ...resolveHostedRunnerWorkspacePackageNames({ includeBundleOnlyDependencies: true }),
+    ...resolveHostedRunnerWorkspacePackageNames({
+      includeBundleOnlyDependencies: true,
+    }),
   ];
   const expectedBuildPackageNames = [
-    ...resolveHostedRunnerBuildPackageNames({ includeBundleOnlyDependencies: true }),
+    ...resolveHostedRunnerBuildPackageNames({
+      includeBundleOnlyDependencies: true,
+    }),
   ];
 
-  if (!stringArraysEqual(manifest.workspacePackageNames, expectedWorkspacePackageNames)) {
-    throw new Error("Prepared runner bundle package closure is stale; rebuild deploy artifacts before deploying.");
+  if (
+    !stringArraysEqual(
+      manifest.workspacePackageNames,
+      expectedWorkspacePackageNames,
+    )
+  ) {
+    throw new Error(
+      "Prepared runner bundle package closure is stale; rebuild deploy artifacts before deploying.",
+    );
   }
 
   if (!stringArraysEqual(manifest.buildPackageNames, expectedBuildPackageNames)) {
-    throw new Error("Prepared runner bundle build closure is stale; rebuild deploy artifacts before deploying.");
+    throw new Error(
+      "Prepared runner bundle build closure is stale; rebuild deploy artifacts before deploying.",
+    );
   }
 
   const expectedSourceFingerprint = await fingerprintHostedRunnerSources({
@@ -161,10 +198,14 @@ export async function assertPreparedDeployArtifacts(input: {
   });
 
   if (manifest.sourceFingerprint !== expectedSourceFingerprint) {
-    throw new Error("Prepared runner bundle source fingerprint is stale; rebuild deploy artifacts before deploying.");
+    throw new Error(
+      "Prepared runner bundle source fingerprint is stale; rebuild deploy artifacts before deploying.",
+    );
   }
 
-  const expectedBundleFingerprint = await fingerprintRunnerBundle(input.runnerBundleDir);
+  const expectedBundleFingerprint = await fingerprintRunnerBundle(
+    input.runnerBundleDir,
+  );
 
   if (manifest.bundleFingerprint !== expectedBundleFingerprint) {
     throw new Error("Prepared runner bundle changed after assembly; rebuild deploy artifacts before deploying.");
@@ -219,9 +260,18 @@ async function assertRunnerBundleShape(
 
   assertNoWorkspaceDependencySpecs(packageJson.dependencies, "dependencies");
   assertNoWorkspaceDependencySpecs(packageJson.optionalDependencies, "optionalDependencies");
-  await assertReadableFile(path.join(bundleDir, "dist", "container-entrypoint.js"), "runner container entrypoint");
-  await assertReadableFile(path.join(bundleDir, "dist", "index.js"), "runner worker entrypoint");
-  await assertReadableDirectory(path.join(bundleDir, "node_modules"), "runner bundle dependencies");
+  await assertReadableFile(
+    path.join(bundleDir, "dist", "container-entrypoint.js"),
+    "runner container entrypoint",
+  );
+  await assertReadableFile(
+    path.join(bundleDir, "dist", "index.js"),
+    "runner worker entrypoint",
+  );
+  await assertReadableDirectory(
+    path.join(bundleDir, "node_modules"),
+    "runner bundle dependencies",
+  );
 
   for (const packageName of manifest.workspacePackageNames) {
     if (packageName === hostedRunnerRuntimePackageName) {
@@ -232,8 +282,14 @@ async function assertRunnerBundleShape(
   }
 
   if (manifest.includeBundleOnlyDependencies) {
-    await assertReadableFile(path.join(bundleDir, "node_modules", ".bin", "murph"), "runner murph binary");
-    await assertReadableFile(path.join(bundleDir, "node_modules", ".bin", "vault-cli"), "runner vault-cli binary");
+    await assertReadableFile(
+      path.join(bundleDir, "node_modules", ".bin", "murph"),
+      "runner murph binary",
+    );
+    await assertReadableFile(
+      path.join(bundleDir, "node_modules", ".bin", "vault-cli"),
+      "runner vault-cli binary",
+    );
   }
 
   await assertRunnerBundleHealthCommonsPackageFiles(bundleDir);
@@ -308,7 +364,9 @@ async function assertArtifactNotNewerThanManifest(input: {
   const artifactStat = await stat(input.artifactPath);
 
   if (artifactStat.mtimeMs > input.manifestGeneratedAtMs + deployArtifactTimestampGraceMs) {
-    throw new Error(`${input.label} is newer than the runner bundle; rebuild deploy artifacts before deploying.`);
+    throw new Error(
+      `${input.label} is newer than the runner bundle; rebuild deploy artifacts before deploying.`,
+    );
   }
 }
 
@@ -331,7 +389,9 @@ function assertNoWorkspaceDependencySpecs(
   }
 
   if (!isStringRecord(dependencyGroup)) {
-    throw new Error(`Runner bundle package manifest ${groupName} must be a string map.`);
+    throw new Error(
+      `Runner bundle package manifest ${groupName} must be a string map.`,
+    );
   }
 
   const workspaceDependencyName = Object.entries(dependencyGroup).find(
@@ -339,7 +399,9 @@ function assertNoWorkspaceDependencySpecs(
   )?.[0];
 
   if (workspaceDependencyName) {
-    throw new Error(`Runner bundle still contains a workspace dependency for ${workspaceDependencyName}.`);
+    throw new Error(
+      `Runner bundle still contains a workspace dependency for ${workspaceDependencyName}.`,
+    );
   }
 }
 
@@ -464,7 +526,7 @@ async function assertRunnerBundleHealthCommonsCatalog(bundleDir: string): Promis
   }
 
   for (const packageDir of packageDirs) {
-    const runtimePath = await resolveContainedRunnerDependencyFile({
+    await resolveContainedRunnerDependencyFile({
       filePath: path.join(packageDir, "dist", "runtime.js"),
       label: "Health Commons runtime entrypoint",
       packageName: healthCommonsPackageName,
@@ -476,62 +538,14 @@ async function assertRunnerBundleHealthCommonsCatalog(bundleDir: string): Promis
       packageName: healthCommonsPackageName,
       rootDir: bundleDir,
     });
-    const catalog = await loadHealthCommonsCatalogThroughBundledRuntime({
+    const catalog = await readJsonObjectFile(
       catalogPath,
-      runtimePath,
-    });
-    assertHealthCommonsCatalogIncludesFinnishDrySauna(catalog);
-  }
-}
-
-async function loadHealthCommonsCatalogThroughBundledRuntime(input: {
-  catalogPath: string;
-  runtimePath: string;
-}): Promise<Record<string, unknown>> {
-  let runtimeModule: unknown;
-
-  try {
-    runtimeModule = await import(pathToFileURL(input.runtimePath).href);
-  } catch (error) {
-    throw new Error(
-      "Health Commons runtime entrypoint could not be loaded; rebuild deploy artifacts before deploying.",
-      { cause: error },
+      "Runner Health Commons generated catalog",
+    );
+    assertHealthCommonsCatalogIncludesFinnishDrySauna(
+      parseRunnerHealthCommonsCatalog(catalog),
     );
   }
-
-  if (
-    !isRecordObject(runtimeModule) ||
-    typeof runtimeModule.loadGeneratedHealthCommonsCatalog !== "function"
-  ) {
-    throw new Error(
-      "Health Commons runtime entrypoint does not expose catalog validation; rebuild deploy artifacts before deploying.",
-    );
-  }
-
-  let catalog: unknown;
-
-  try {
-    catalog = runtimeModule.loadGeneratedHealthCommonsCatalog({
-      catalogPath: input.catalogPath,
-    });
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      throw new Error("Missing Health Commons generated catalog.");
-    }
-
-    throw new Error(
-      "Runner Health Commons generated catalog is invalid; rebuild deploy artifacts before deploying.",
-      { cause: error },
-    );
-  }
-
-  if (!isRecordObject(catalog)) {
-    throw new Error(
-      "Runner Health Commons generated catalog is invalid; rebuild deploy artifacts before deploying.",
-    );
-  }
-
-  return catalog;
 }
 
 async function resolveContainedRunnerDependencyFile(input: {
@@ -713,24 +727,28 @@ function isPackageDirectory(
     && tail.every((part, index) => part === packageParts[index]);
 }
 
-function assertHealthCommonsCatalogIncludesFinnishDrySauna(
+function parseRunnerHealthCommonsCatalog(
   catalog: Record<string, unknown>,
-): void {
-  const entities = catalog.entities;
-
-  if (!Array.isArray(entities)) {
+): HealthCommonsCatalog {
+  const result = healthCommonsCatalogSchema.safeParse(catalog);
+  if (!result.success) {
     throw new Error(
       "Runner Health Commons generated catalog is invalid; rebuild deploy artifacts before deploying.",
     );
   }
 
-  const protocol = entities.find((entity) =>
-    isRecordObject(entity) &&
-      entity.key === healthCommonsFinnishDrySaunaProtocol.key
+  return result.data;
+}
+
+function assertHealthCommonsCatalogIncludesFinnishDrySauna(
+  catalog: HealthCommonsCatalog,
+): void {
+  const protocol = catalog.entities.find((entity) =>
+    entity.key === healthCommonsFinnishDrySaunaProtocol.key
   );
 
   if (
-    !isRecordObject(protocol) ||
+    !protocol ||
     protocol.entityType !== "protocol_variant" ||
     protocol.slug !== healthCommonsFinnishDrySaunaProtocol.slug ||
     protocol.title !== healthCommonsFinnishDrySaunaProtocol.title
