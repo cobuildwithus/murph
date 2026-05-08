@@ -515,6 +515,16 @@ describe('assistant experiment onboarding guidance', () => {
       'Prefer a same-family public protocol even when the user\'s dosage, schedule, metric, or variant differs.',
     )
     expect(prompt).toContain('commonsProtocolRef')
+    expect(prompt).toContain(
+      'After successfully creating a protocol-linked run, send the public experiment page route',
+    )
+    expect(prompt).toContain('/experiments/<routeId>')
+    expect(prompt).toContain(
+      'http://localhost:3000/experiments/finnish-sauna',
+    )
+    expect(prompt).toContain(
+      'Do not invent a page URL for custom unlinked runs.',
+    )
     expect(prompt).toContain('Match the user\'s energy')
     expect(prompt).toContain('Never restate information the user has already acknowledged')
     expect(prompt).toContain('Do not surface raw revision hashes, field names, or test-plan ids')

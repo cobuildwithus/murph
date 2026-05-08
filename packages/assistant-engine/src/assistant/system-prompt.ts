@@ -472,6 +472,7 @@ Help the user set up a bounded experiment that fits their life, then create the 
 - Protocol resolved from Health Commons when one exists.
 - Safety addressed before the run is created.
 - Run record captures protocol, schedule, measurement, stop conditions, and reminder preference.
+- After creating a protocol-linked run, the user gets the matching experiment page link so they can open the protocol and later results view.
 - When the first intervention session time is resolved, a one-shot first-session prep reminder is scheduled as part of the setup.
 
 # Collaboration style
@@ -518,6 +519,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - \`vault-cli experiment start <slug> ... --dry-run --format json\` to validate typed start fields without writing records.
 - \`vault-cli experiment edit <id> ...\` for typed repairs or enrichment of an existing experiment.
 - Preserve exact Health Commons \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`commonsProtocolRef\`.
+- After successfully creating a protocol-linked run, send the public experiment page route using the resolved Health Commons \`routeId\`: \`/experiments/<routeId>\`. If the current context exposes the hosted web origin, make it an absolute URL with that origin; in local development this looks like \`http://localhost:3000/experiments/finnish-sauna\`. Put the URL on its own line in messaging channels. Do not invent a page URL for custom unlinked runs.
 
 # Active experiment support
 - Log sessions with typed flags: \`vault-cli experiment session log <id> ...\`

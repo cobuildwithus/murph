@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-04-27
+Last verified: 2026-05-08
 
 ## Current State
 
@@ -16,6 +16,7 @@ Experiment onboarding is planning by default.
 - Health Commons protocol pages may carry an `experimentOnboarding` block that defines the start intent, context review hints, safety screen, setup slots, plan defaults, logging fields, and assistant-support policy for that protocol.
 - The onboarding block is public protocol metadata. It does not itself create a private run, reminder, or user state.
 - Private run creation still happens only in the user vault after setup is resolved and the user has been agreeing. A separate "confirm" step is only needed when there is ambiguity or the user contradicted something.
+- After a protocol-linked run is created, the assistant should send the matching experiment page link so the user can reopen the protocol and later results view.
 - The richer downstream loop is: onboarding plan -> private run -> outcome card -> optional sharing or contribution. Onboarding owns only the planning step.
 - Safety-screen positives or uncertainty are guardrails for unsupervised setup, not diagnoses.
 - Assistant follow-ups should never be created before the experiment is set up. After setup, follow-ups included in the agreed plan may default on with a clear opt-out, and should use neutral language that records what happened rather than implying failure.
@@ -81,6 +82,7 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 - Ask the safety screen even when the vault is silent for high-caution protocols.
 - Keep setup lightweight and gradual: ask only the slots that materially affect safety, logistics, measurement fidelity, or assistant support; ask at most two questions per response; and continue across turns until goal, safety, logistics, measurement, logging, stop-condition, and reminder coverage is complete.
 - When all setup slots are resolved and the user has been agreeing throughout, create the run directly — no separate confirmation step required. Only pause for explicit confirmation when the user contradicted something, when there is ambiguity about dates/dose/schedule, or when a safety-screen positive changed the plan.
+- After successfully creating a protocol-linked run, send the route for the resolved Health Commons protocol page, normally `/experiments/<routeId>` and absolute when the active app origin is available. For local development this may look like `http://localhost:3000/experiments/finnish-sauna`. Do not fabricate a protocol page link for custom unlinked runs.
 - When you do summarize before creating, keep it to new information only — never repeat stop conditions, safety info, or details already discussed. The summary should be crisp enough that a later outcome card or share artifact can clearly point back to what was actually run.
 - Keep any pre-creation summary human-readable. Raw revision hashes, internal field names, and selected test-plan identifiers are lineage data for the saved run record, not default onboarding copy; mention them only when the user asks for technical provenance.
 
@@ -92,4 +94,5 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 4. When setup is unambiguous and the user has been agreeing, Murph creates the experiment without requiring a formal confirmation step; any assistant follow-ups included in that plan must remain easy to opt out of.
 5. High-caution protocols can steer users toward clinician guidance, lower-intensity alternatives, or postponement without pretending that Murph diagnosed them.
 6. Protocol-specific read hints stay on the public protocol page so assistants do not need a second protocol-by-protocol prompt fork to know which CLI reads matter.
-7. Completed runs remain traceable to exact protocol revisions so outcome cards, comparisons, and later cohort summaries mean the same thing.
+7. Protocol-linked run handoff includes the matching experiment page link so the user can return to the protocol and results surface.
+8. Completed runs remain traceable to exact protocol revisions so outcome cards, comparisons, and later cohort summaries mean the same thing.
