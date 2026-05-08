@@ -128,12 +128,15 @@ describe("browser vault session route", () => {
       prisma: mocks.prismaClient,
     });
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
     await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
+      refreshPending: true,
       state: "empty",
     });
   });
@@ -373,9 +376,15 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("returns empty when the workspace has a replica ref but no snapshot ref", async () => {
+  it("serves the latest replica ref even when the workspace has no snapshot ref", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -397,23 +406,34 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef: createReplicaRef(),
+      userId: "member_123",
+    });
     await expect(response.json()).resolves.toMatchObject({
-      encryptedReplica: null,
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: null,
-      state: "empty",
+      encryptedReplica: createReplicaEnvelope(),
+      freshness: "fresh",
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      refreshPending: false,
+      state: "ready",
     });
   });
 
-  it("returns empty when the workspace snapshot ref no longer matches the replica source bundle hash", async () => {
+  it("serves the latest replica ref without comparing it to the workspace snapshot hash", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
     const scheduleBrowserVaultRefresh = vi.fn().mockResolvedValue({
       accepted: true,
       immediateRefreshStarted: false,
-      sourceStateHash: "b".repeat(64),
       userId: "member_123",
     });
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -440,31 +460,30 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
-      sourceStateHash: "b".repeat(64),
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef: createReplicaRef(),
       userId: "member_123",
     });
-    await expect(response.json()).resolves.toEqual({
-      encryptedReplica: null,
-      freshness: "stale",
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: null,
-      refreshPending: true,
-      state: "empty",
+    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      freshness: "fresh",
+      refreshPending: false,
+      state: "ready",
       workspaceVersion: "1",
     });
   });
 
-  it("does not wait for stale-replica refresh scheduling before returning the session response", async () => {
+  it("does not schedule refresh for an existing latest replica even if snapshot hashes differ", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    let releaseSchedule: () => void = () => {};
-    const createBrowserVaultSession = vi.fn();
-    const scheduleBrowserVaultRefresh = vi.fn(() =>
-      new Promise<void>((resolve) => {
-        releaseSchedule = resolve;
-      }));
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
+    const scheduleBrowserVaultRefresh = vi.fn();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -482,33 +501,23 @@ describe("browser vault session route", () => {
       scheduleBrowserVaultRefresh,
     });
 
-    const responsePromise = browserVaultSessionRoute.POST(
+    const response = await browserVaultSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
       }),
     );
 
-    await vi.waitFor(() => {
-      expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
-        sourceStateHash: "b".repeat(64),
-        userId: "member_123",
-      });
-    });
-    expect(mocks.afterResponse).toHaveBeenCalledWith(expect.any(Function));
-    const responseOrBlocked = await Promise.race([
-      responsePromise,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
-    ]);
-    releaseSchedule();
-
-    expect(responseOrBlocked).toBeInstanceOf(Response);
-    const response = responseOrBlocked as Response;
     expect(response.status).toBe(200);
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef: createReplicaRef(),
+      userId: "member_123",
+    });
+    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
-      freshness: "stale",
-      refreshPending: true,
-      state: "empty",
+      freshness: "fresh",
+      refreshPending: false,
+      state: "ready",
       workspaceVersion: "1",
     });
   });
@@ -549,7 +558,6 @@ describe("browser vault session route", () => {
 
     await vi.waitFor(() => {
       expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
-        sourceStateHash: "b".repeat(64),
         userId: "member_123",
       });
     });
@@ -604,7 +612,6 @@ describe("browser vault session route", () => {
 
     await vi.waitFor(() => {
       expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
-        sourceStateHash: "b".repeat(64),
         userId: "member_123",
       });
     });
@@ -627,14 +634,13 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("returns stale not_modified only to clients that opt in to stale replicas", async () => {
+  it("returns fresh not_modified for the latest replica without stale opt-in", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     const createBrowserVaultSession = vi.fn();
     const scheduleBrowserVaultRefresh = vi.fn().mockResolvedValue({
       accepted: true,
       immediateRefreshStarted: false,
-      sourceStateHash: "b".repeat(64),
       userId: "member_123",
     });
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -664,25 +670,28 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
-      sourceStateHash: "b".repeat(64),
-      userId: "member_123",
-    });
+    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       encryptedReplica: null,
-      freshness: "stale",
+      freshness: "fresh",
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef,
-      refreshPending: true,
+      refreshPending: false,
       state: "not_modified",
       workspaceVersion: "3",
     });
   });
 
-  it("returns empty when a layered snapshot base no longer matches the replica source bundle hash", async () => {
+  it("serves the latest replica when a layered snapshot base has a different hash", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -707,19 +716,27 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef: createReplicaRef(),
+      userId: "member_123",
+    });
     await expect(response.json()).resolves.toMatchObject({
-      encryptedReplica: null,
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: null,
-      state: "empty",
+      freshness: "fresh",
+      refreshPending: false,
+      state: "ready",
     });
   });
 
-  it("returns empty when a layered snapshot has no base for the current replica", async () => {
+  it("serves the latest replica when a layered snapshot has no base", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
+    });
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -744,17 +761,19 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef: createReplicaRef(),
+      userId: "member_123",
+    });
     await expect(response.json()).resolves.toMatchObject({
-      encryptedReplica: null,
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: null,
-      state: "empty",
+      freshness: "fresh",
+      refreshPending: false,
+      state: "ready",
     });
   });
 
-  it("prefers the workspace snapshot mismatch guard over not_modified reuse", async () => {
+  it("returns not_modified for the latest ref without a workspace snapshot mismatch guard", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     const createBrowserVaultSession = vi.fn();
@@ -785,8 +804,8 @@ describe("browser vault session route", () => {
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
-      replicaRef: null,
-      state: "empty",
+      replicaRef,
+      state: "not_modified",
     });
   });
 

@@ -47,8 +47,9 @@ import {
   LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
 } from "./web-control-plane.ts";
 import {
-  refreshDashboardReplicaFromCommittedWorkspace,
-  type DashboardReplicaRefreshResult,
+  createLiveBrowserVaultProjectionHash,
+  refreshBrowserVaultReplicaFromLiveWorkspace,
+  type BrowserVaultReplicaRefreshResult,
 } from "./dashboard-replica/refresher.ts";
 
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
@@ -86,11 +87,10 @@ export interface HostedWorkspaceInvocationRunner {
 
 export interface HostedBrowserVaultReplicaRefreshInput {
   runtime?: HostedAssistantRuntimeConfig | null;
-  sourceStateHash: string;
   userId: string;
 }
 
-export type HostedBrowserVaultReplicaRefreshResult = DashboardReplicaRefreshResult;
+export type HostedBrowserVaultReplicaRefreshResult = BrowserVaultReplicaRefreshResult;
 
 export function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
@@ -241,18 +241,25 @@ export async function refreshHostedBrowserVaultReplica(
   const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
   const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
   const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
+  const generatedAt = new Date().toISOString();
+  const projectionHash = createLiveBrowserVaultProjectionHash({
+    generatedAt,
+    userId: input.userId,
+  });
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId: input.userId,
+    browserVaultRefreshAuthority: true,
     commitTimeoutMs: runtime.commitTimeoutMs,
     internalWorkerProxyToken,
     localInternalProxyBaseUrl,
-    dashboardReplicaSourceStateHash: input.sourceStateHash,
+    dashboardReplicaSourceStateHash: null,
     workspaceCheckpointBridge: null,
   });
-  return await refreshDashboardReplicaFromCommittedWorkspace({
+  return await refreshBrowserVaultReplicaFromLiveWorkspace({
+    generatedAt,
     platform,
+    projectionHash,
     signal: options?.signal,
-    sourceStateHash: input.sourceStateHash,
     userId: input.userId,
   });
 }

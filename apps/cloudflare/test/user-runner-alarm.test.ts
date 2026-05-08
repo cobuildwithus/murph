@@ -2671,10 +2671,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async (input) => ({
-      sourceStateHash: input.sourceStateHash,
+    >(async () => ({
       status: "already_fresh",
-      userId: input.userId,
     }));
     const waitUntil = vi.fn();
     const { readPendingDashboardReplicaRefreshStorage, runner, sql } = createRunnerCryptoContextHarness(
@@ -2691,14 +2689,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "pending-nudge-refresh-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: false,
     });
 
     expect(readPendingDashboardReplicaRefreshStorage()).toMatchObject({
-      sourceStateHash: "pending-nudge-refresh-base_hash",
+      updatedAt: expect.any(String),
     });
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
     expect(waitUntil).not.toHaveBeenCalled();
@@ -2739,7 +2736,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "refresh-preempted-by-nudge-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: true,
@@ -2800,7 +2796,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "refresh-preempted-by-manual-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: true,
@@ -2826,12 +2821,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async (input) => ({
+    >(async () => ({
       byteLength: 256,
-      replicaRef: createBrowserVaultReplicaRef(input.sourceStateHash),
-      sourceStateHash: input.sourceStateHash,
+      replicaRef: createBrowserVaultReplicaRef("live-projection-published"),
       status: "published",
-      userId: input.userId,
     }));
     const { readPendingDashboardReplicaRefreshStorage, runner } = createRunnerCryptoContextHarness(workspace, {
       refreshBrowserVaultReplica,
@@ -2839,7 +2832,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "refresh-published-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: true,
@@ -2851,6 +2843,39 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(([input]) =>
       input.path === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
     )).toBe(false);
+  });
+
+  it("does not schedule a continuation alarm when a dashboard replica refresh starts immediately", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("refresh-immediate-no-alarm"),
+      version: "4",
+    });
+    const activeRefresh = createDeferred<Awaited<ReturnType<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >>>();
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => await activeRefresh.promise);
+    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
+      refreshBrowserVaultReplica,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleDashboardReplicaRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      immediateRefreshStarted: true,
+    });
+
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+    expect(alarms).toEqual([]);
+
+    activeRefresh.resolve({
+      status: "already_fresh",
+    });
+    await flushDetachedRunnerDrive();
+
+    expect(alarms).toEqual([]);
   });
 
   it("keeps dashboard replica refresh pending and schedules a retry after publish conflict", async () => {
@@ -2874,7 +2899,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "refresh-conflict-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: true,
@@ -2882,188 +2906,122 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(expect.objectContaining({
-      sourceStateHash: "refresh-conflict-base_hash",
       userId: "member_123",
     }));
 
     await flushDetachedRunnerDrive();
 
     expect(readPendingDashboardReplicaRefreshStorage()).toMatchObject({
-      sourceStateHash: "refresh-conflict-base_hash",
+      updatedAt: expect.any(String),
     });
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(alarms).toContain("2026-04-27T00:00:30.050Z");
   });
 
-  it("does not enter dashboard replica refresh container work when a nudge arrives during refresh setup", async () => {
+  it("drains a pending dashboard replica refresh after an active invocation completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-setup-preempted-by-nudge"),
+      snapshotRef: createLayeredSnapshotRef("refresh-after-invocation"),
       version: "4",
     });
-    const refreshSetupRead = createDeferred<void>();
-    let setupReadStarted = false;
+    const activeInvocation = createDeferred<Awaited<ReturnType<HostedExecutionContainerStubLike["invoke"]>>>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
+      async () => await activeInvocation.promise,
+    );
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async (input) => ({
-      sourceStateHash: input.sourceStateHash,
+    >(async () => ({
       status: "already_fresh",
-      userId: input.userId,
-    }));
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      nextWakeAt: null,
-      status: "idle",
     }));
     const { runner } = createRunnerCryptoContextHarness(workspace, {
-      destroyInstance,
       invoke,
-      onWorkspaceRead: async ({ readCount }) => {
-        if (readCount !== 1) {
-          return;
-        }
-        setupReadStarted = true;
-        await refreshSetupRead.promise;
-      },
+      refreshBrowserVaultReplica,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    vi.setSystemTime(new Date(FIXED_NOW));
+
+    await expect(runner.scheduleDashboardReplicaRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      immediateRefreshStarted: false,
+    });
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    activeInvocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "member_123",
+      }),
+    ));
+  });
+
+  it("drains a refreshed pending dashboard replica slot after an active refresh completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("refresh-a"),
+      version: "4",
+    });
+    const activeRefresh = createDeferred<Awaited<ReturnType<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >>>();
+    let firstRefresh = true;
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => {
+      if (firstRefresh) {
+        firstRefresh = false;
+        return await activeRefresh.promise;
+      }
+
+      return {
+        status: "already_fresh",
+      };
+    });
+    const { runner } = createRunnerCryptoContextHarness(workspace, {
       refreshBrowserVaultReplica,
     });
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "refresh-setup-preempted-by-nudge-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: true,
     });
-    await vi.waitFor(() => expect(setupReadStarted).toBe(true));
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "member_123",
+      }),
+    ));
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(1);
 
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: true,
+    workspace.snapshotRef = createLayeredSnapshotRef("refresh-b");
+    workspace.version = "5";
+    await expect(runner.scheduleDashboardReplicaRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      immediateRefreshStarted: false,
     });
-    setupReadStarted = false;
-    refreshSetupRead.resolve();
 
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    await flushDetachedRunnerDrive();
+    activeRefresh.resolve({
+      status: "already_fresh",
+    });
 
-    expect(destroyInstance).toHaveBeenCalledOnce();
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(2));
+    expect(refreshBrowserVaultReplica).toHaveBeenLastCalledWith(expect.objectContaining({
+      userId: "member_123",
+    }));
   });
-
-	  it("drains a pending dashboard replica refresh after an active invocation completes", async () => {
-	    vi.useFakeTimers();
-	    vi.setSystemTime(new Date(FIXED_NOW));
-	    const workspace = createWorkspaceState({
-	      snapshotRef: createLayeredSnapshotRef("refresh-after-invocation"),
-	      version: "4",
-	    });
-	    const activeInvocation = createDeferred<Awaited<ReturnType<HostedExecutionContainerStubLike["invoke"]>>>();
-	    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
-	      async () => await activeInvocation.promise,
-	    );
-	    const refreshBrowserVaultReplica = vi.fn<
-	      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-	    >(async (input) => ({
-	      sourceStateHash: input.sourceStateHash,
-	      status: "already_fresh",
-	      userId: input.userId,
-	    }));
-	    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
-	      invoke,
-	      refreshBrowserVaultReplica,
-	    });
-	    await runner.bindUser("member_123");
-
-	    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
-	    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-	    vi.setSystemTime(new Date(FIXED_NOW));
-
-	    await expect(runner.scheduleDashboardReplicaRefreshForUser({
-	      sourceStateHash: "refresh-after-invocation-base_hash",
-	      userId: "member_123",
-	    })).resolves.toMatchObject({
-	      immediateRefreshStarted: false,
-	    });
-	    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
-	    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-
-	    activeInvocation.resolve({
-	      nextWakeAt: null,
-	      status: "idle",
-	    });
-	    await expect(activeRun).resolves.toMatchObject({
-	      status: "idle",
-	    });
-
-	    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
-	      expect.objectContaining({
-	        sourceStateHash: "refresh-after-invocation-base_hash",
-	        userId: "member_123",
-	      }),
-	    ));
-	  });
-
-	  it("drains the latest pending dashboard replica refresh after an active refresh completes", async () => {
-	    vi.useFakeTimers();
-	    vi.setSystemTime(new Date(FIXED_NOW));
-	    const workspace = createWorkspaceState({
-	      snapshotRef: createLayeredSnapshotRef("refresh-a"),
-	      version: "4",
-	    });
-	    const activeRefresh = createDeferred<Awaited<ReturnType<
-	      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-	    >>>();
-	    const refreshBrowserVaultReplica = vi.fn<
-	      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-	    >(async (input) => {
-	      if (input.sourceStateHash === "refresh-a-base_hash") {
-	        return await activeRefresh.promise;
-	      }
-
-	      return {
-	        sourceStateHash: input.sourceStateHash,
-	        status: "already_fresh",
-	        userId: input.userId,
-	      };
-	    });
-		    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
-		      refreshBrowserVaultReplica,
-		    });
-	    await runner.bindUser("member_123");
-
-	    await expect(runner.scheduleDashboardReplicaRefreshForUser({
-	      sourceStateHash: "refresh-a-base_hash",
-	      userId: "member_123",
-	    })).resolves.toMatchObject({
-	      immediateRefreshStarted: true,
-	    });
-		    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
-		      expect.objectContaining({
-		        sourceStateHash: "refresh-a-base_hash",
-		        userId: "member_123",
-		      }),
-		    ));
-		    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
-
-	    workspace.snapshotRef = createLayeredSnapshotRef("refresh-b");
-	    workspace.version = "5";
-	    await expect(runner.scheduleDashboardReplicaRefreshForUser({
-	      sourceStateHash: "refresh-b-base_hash",
-	      userId: "member_123",
-	    })).resolves.toMatchObject({
-	      immediateRefreshStarted: false,
-	    });
-
-	    activeRefresh.resolve({
-	      status: "already_fresh",
-	    });
-
-	    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
-	      expect.objectContaining({
-	        sourceStateHash: "refresh-b-base_hash",
-	        userId: "member_123",
-	      }),
-	    ));
-	  });
 
   it("does not schedule dashboard replica refresh when only workspace metadata changes", async () => {
     const workspace = createWorkspaceState({
@@ -3079,10 +3037,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async (input) => ({
-      sourceStateHash: input.sourceStateHash,
+    >(async () => ({
       status: "already_fresh",
-      userId: input.userId,
     }));
     const { readPendingDashboardReplicaRefreshStorage, runner } = createRunnerCryptoContextHarness(
       workspace,
@@ -3098,8 +3054,34 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+    await flushDetachedRunnerDrive();
     expect(readPendingDashboardReplicaRefreshStorage()).toBeUndefined();
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+  });
+
+  it("preserves a completed invocation when dashboard replica refresh scheduling fails", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("refresh-schedule-fails"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle",
+    }));
+    const { runner } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      onStoragePut: ({ key }) => {
+        if (key === "runner:pending-browser-vault-refresh:v1") {
+          throw new Error("dashboard refresh storage unavailable");
+        }
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(invoke).toHaveBeenCalledOnce();
   });
 
   it("does not schedule dashboard replica refresh when the current source already has a replica", async () => {
@@ -3120,10 +3102,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async (input) => ({
-      sourceStateHash: input.sourceStateHash,
+    >(async () => ({
       status: "already_fresh",
-      userId: input.userId,
     }));
     const { readPendingDashboardReplicaRefreshStorage, runner } = createRunnerCryptoContextHarness(
       workspace,
@@ -3139,8 +3119,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+    await flushDetachedRunnerDrive();
     expect(readPendingDashboardReplicaRefreshStorage()).toBeUndefined();
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
   });
 
   it("clears pending dashboard replica refresh when the generated replica is too large", async () => {
@@ -3153,12 +3134,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     const browserVaultPublish = vi.fn();
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async (input) => ({
+    >(async () => ({
       byteLength: 51 * 1024 * 1024,
       maxBytes: 50 * 1024 * 1024,
-      sourceStateHash: input.sourceStateHash,
       status: "refresh_failed_too_large",
-      userId: input.userId,
     }));
     const { alarms, readPendingDashboardReplicaRefreshStorage, runner } = createRunnerCryptoContextHarness(
       workspace,
@@ -3170,7 +3149,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "refresh-too-large-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: true,
@@ -3181,137 +3159,137 @@ describe("HostedUserRunner runtime crypto context", () => {
     await flushDetachedRunnerDrive();
     expect(browserVaultPublish).not.toHaveBeenCalled();
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(alarms).not.toContain("2026-04-27T00:00:01.000Z");
   });
 
-	  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
-	    vi.useFakeTimers();
-	    vi.setSystemTime(new Date(FIXED_NOW));
-	    const workspace = createWorkspaceState({
-	      snapshotRef: createLayeredSnapshotRef("idle-schedule-read-fail"),
-	      version: "4",
-	    });
-	    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-	      onWorkspaceRead: ({ readCount }) => {
-	        if (readCount === 2) {
-	          throw new Error("workspace read unavailable after completion");
-	        }
-	      },
-	    });
-	    await runner.bindUser("member_123");
+  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-schedule-read-fail"),
+      version: "4",
+    });
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      onWorkspaceRead: ({ readCount }) => {
+        if (readCount === 2) {
+          throw new Error("workspace read unavailable after completion");
+        }
+      },
+    });
+    await runner.bindUser("member_123");
 
-	    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-	      status: "idle",
-	    });
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
 
-	    expect(invoke).toHaveBeenCalledOnce();
-	    expect(alarms).toContain("deleted");
-	    expect(
-	      sql.exec(
-	        `SELECT in_flight,
-	                last_error_code,
-	                retry_failure_count
-	         FROM runner_meta WHERE user_id = ?`,
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{
-	      in_flight: 0,
-	      last_error_code: null,
-	      retry_failure_count: 0,
-	    }]);
-	  });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toContain("deleted");
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                last_error_code,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      last_error_code: null,
+      retry_failure_count: 0,
+    }]);
+  });
 
-	  it("reschedules failed idle-shutdown checkpoints as idle retries", async () => {
-	    vi.useFakeTimers();
-	    vi.setSystemTime(new Date(FIXED_NOW));
-	    const workspace = createWorkspaceState({
-	      snapshotRef: createLayeredSnapshotRef("idle-retry"),
-	      version: "4",
-	    });
-	    const destroyInstance = vi.fn(async () => {});
-	    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-	      throw new Error("checkpoint failed");
-	    });
-	    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-	      destroyInstance,
-	      invoke,
-	    });
-	    await runner.bindUser("member_123");
-	    sql.exec(
-	      `UPDATE runner_meta
-	       SET idle_shutdown_checkpoint_due_at = ?,
-	           idle_shutdown_checkpoint_workspace_version = ?
-	       WHERE user_id = ?`,
-	      FIXED_NOW,
-	      "4",
-	      "member_123",
-	    );
+  it("reschedules failed idle-shutdown checkpoints as idle retries", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-retry"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("checkpoint failed");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
 
-	    await expect(runner.alarm()).resolves.toBeUndefined();
+    await expect(runner.alarm()).resolves.toBeUndefined();
 
-	    expect(destroyInstance).not.toHaveBeenCalled();
-	    expect(alarms.at(-1)).toBe("2026-04-27T00:00:30.000Z");
-	    expect(
-	      sql.exec(
-	        `SELECT idle_shutdown_checkpoint_due_at,
-	                idle_shutdown_checkpoint_workspace_version,
-	                next_wake_at,
-	                retry_failure_count
-	         FROM runner_meta WHERE user_id = ?`,
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:30.000Z",
-	      idle_shutdown_checkpoint_workspace_version: "4",
-	      next_wake_at: null,
-	      retry_failure_count: 1,
-	    }]);
-	  });
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:30.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:30.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: null,
+      retry_failure_count: 1,
+    }]);
+  });
 
-	  it("does not retry idle-shutdown checkpoints after the max attempt cap", async () => {
-	    vi.useFakeTimers();
-	    vi.setSystemTime(new Date(FIXED_NOW));
-	    const workspace = createWorkspaceState({
-	      snapshotRef: createLayeredSnapshotRef("idle-retry-cap"),
-	      version: "4",
-	    });
-	    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-	      throw new Error("checkpoint failed");
-	    });
-	    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-	      invoke,
-	      maxEventAttempts: 1,
-	    });
-	    await runner.bindUser("member_123");
-	    sql.exec(
-	      `UPDATE runner_meta
-	       SET idle_shutdown_checkpoint_due_at = ?,
-	           idle_shutdown_checkpoint_workspace_version = ?
-	       WHERE user_id = ?`,
-	      FIXED_NOW,
-	      "4",
-	      "member_123",
-	    );
+  it("does not retry idle-shutdown checkpoints after the max attempt cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-retry-cap"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("checkpoint failed");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      maxEventAttempts: 1,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
 
-	    await expect(runner.alarm()).resolves.toBeUndefined();
+    await expect(runner.alarm()).resolves.toBeUndefined();
 
-	    expect(alarms.at(-1)).toBe("deleted");
-	    expect(
-	      sql.exec(
-	        `SELECT idle_shutdown_checkpoint_due_at,
-	                idle_shutdown_checkpoint_workspace_version,
-	                retry_failure_count
-	         FROM runner_meta WHERE user_id = ?`,
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: null,
-	      idle_shutdown_checkpoint_workspace_version: null,
-	      retry_failure_count: 1,
-	    }]);
-	  });
+    expect(alarms.at(-1)).toBe("deleted");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      retry_failure_count: 1,
+    }]);
+  });
 
-	  it("skips stale idle-shutdown checkpoint alarms when the workspace version changed", async () => {
+  it("skips stale idle-shutdown checkpoint alarms when the workspace version changed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -3433,17 +3411,18 @@ function createRunnerCryptoContextHarness(
     browserVaultPublish?(): Promise<void> | void;
     cryptoContextCacheMaxAgeMs?: number;
     cryptoContextStatus?: number;
-	    destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
-	    invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
-	    maxEventAttempts?: number;
-	    onDeleteAlarm?(input: { alarmCount: number }): Promise<void> | void;
-	    onSetAlarm?(input: { alarmCount: number; scheduledTimeIso: string }): Promise<void> | void;
-	    onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
-	    refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
-	    runnerTimeoutMs?: number;
-	    usageGateResponse?: Record<string, unknown>;
-	    usageGateStatus?: number;
-	    waitUntil?(promise: Promise<unknown>): void;
+    destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
+    invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
+    maxEventAttempts?: number;
+    onDeleteAlarm?(input: { alarmCount: number }): Promise<void> | void;
+    onSetAlarm?(input: { alarmCount: number; scheduledTimeIso: string }): Promise<void> | void;
+    onStoragePut?(input: { key: string; value: unknown }): void | Promise<void>;
+    onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
+    refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
+    runnerTimeoutMs?: number;
+    usageGateResponse?: Record<string, unknown>;
+    usageGateStatus?: number;
+    waitUntil?(promise: Promise<unknown>): void;
   } = {},
 ) {
   const sql = createTestSqlStorage();
@@ -3464,6 +3443,7 @@ function createRunnerCryptoContextHarness(
       return null;
     },
     async put<T>(key: string, value: T) {
+      await options.onStoragePut?.({ key, value });
       values.set(key, value);
     },
     async setAlarm(scheduledTime: number | Date) {
@@ -3482,11 +3462,15 @@ function createRunnerCryptoContextHarness(
     nextWakeAt: null,
     status: "idle" as const,
   }));
+  const refreshBrowserVaultReplica = options.refreshBrowserVaultReplica
+    ?? vi.fn<NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>>(
+      async () => ({ status: "already_fresh" as const }),
+    );
   const destroyInstance = options.destroyInstance ?? vi.fn(async () => {});
-	  let cryptoContextStatus = options.cryptoContextStatus ?? 200;
-	  let workspaceReadCount = 0;
+  let cryptoContextStatus = options.cryptoContextStatus ?? 200;
+  let workspaceReadCount = 0;
 
-	  mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
+  mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
     boundUserId?: string;
     path: string;
   }) => {
@@ -3518,14 +3502,14 @@ function createRunnerCryptoContextHarness(
       });
     }
 
-	    if (input.path !== HOSTED_RUNTIME_WORKSPACE_PATH) {
-	      throw new Error(`Unexpected web control path in runtime crypto context test: ${input.path}`);
-	    }
+    if (input.path !== HOSTED_RUNTIME_WORKSPACE_PATH) {
+      throw new Error(`Unexpected web control path in runtime crypto context test: ${input.path}`);
+    }
 
-	    workspaceReadCount += 1;
-	    await options.onWorkspaceRead?.({ readCount: workspaceReadCount });
-	    return createWorkspaceReadResponseBody(workspace);
-	  });
+    workspaceReadCount += 1;
+    await options.onWorkspaceRead?.({ readCount: workspaceReadCount });
+    return createWorkspaceReadResponseBody(workspace);
+  });
 
   const runner = new HostedUserRunner(
     {
@@ -3555,7 +3539,7 @@ function createRunnerCryptoContextHarness(
           async ownsInternalWorkerProxyToken() {
             return true;
           },
-          refreshBrowserVaultReplica: options.refreshBrowserVaultReplica,
+          refreshBrowserVaultReplica,
           async smokeHealth() {
             return {
               ok: true,

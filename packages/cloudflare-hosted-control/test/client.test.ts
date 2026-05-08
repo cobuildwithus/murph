@@ -87,7 +87,6 @@ describe("createCloudflareHostedControlClient", () => {
     );
     expect(() =>
       client.scheduleBrowserVaultRefresh({
-        sourceStateHash: "a".repeat(64),
         userId: "",
       })
     ).toThrow("Cloudflare hosted control userId must not be blank.");
@@ -547,12 +546,11 @@ describe("createCloudflareHostedControlClient", () => {
     expectNoRunContractFields(result);
   });
 
-  it("schedules browser vault refreshes with only the source-state hash", async () => {
+  it("schedules browser vault refreshes without a workspace source hash", async () => {
     let observedRequest: ObservedRequest | null = null;
     const result = {
       accepted: true,
       immediateRefreshStarted: false,
-      sourceStateHash: "a".repeat(64),
       userId: "user_123",
     };
     const client = createCloudflareHostedControlClient({
@@ -566,16 +564,13 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     await expect(client.scheduleBrowserVaultRefresh({
-      sourceStateHash: "a".repeat(64),
       userId: "user_123",
     })).resolves.toEqual(result);
 
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/browser-vault/refresh");
     expect(request.init?.method).toBe("POST");
-    expect(request.init?.body).toBe(JSON.stringify({
-      sourceStateHash: "a".repeat(64),
-    }));
+    expect(request.init?.body).toBe("{}");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
   });

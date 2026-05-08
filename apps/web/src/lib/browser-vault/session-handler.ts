@@ -1,11 +1,6 @@
 import {
-  parseHostedExecutionSnapshotRef,
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
-import {
-  getDashboardReplicaFreshness,
-  readDashboardReplicaSourceStateHash,
-} from "@murphai/hosted-execution/dashboard-replica";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
@@ -45,51 +40,22 @@ export function createBrowserVaultSessionRoute(input: {
       body.knownReplicaRef ?? null,
       "Browser vault session request knownReplicaRef",
     );
-    const acceptStaleReplica = body.acceptStaleReplica === true;
     const workspace = await readHostedWorkspace({ userId: auth.member.id });
     const replicaRef = parseHostedBrowserVaultReplicaRef(
       workspace?.browserVaultReplicaRef ?? null,
       "Hosted browser vault session workspace replica ref",
     );
-    const snapshotRef = parseHostedExecutionSnapshotRef(
-      workspace?.snapshotRef ?? null,
-      "Hosted browser vault session workspace snapshot ref",
-    );
-    const sourceStateHash = readDashboardReplicaSourceStateHash(
-      snapshotRef,
-    );
     const workspaceVersion = workspace?.version ?? null;
-    const freshness = getDashboardReplicaFreshness({
-      replicaRef,
-      snapshotRef,
-    });
+    const freshness = replicaRef ? "fresh" as const : "stale" as const;
 
     if (!replicaRef) {
       scheduleAfterResponseOrFireAndForget(() =>
-        scheduleDashboardReplicaRefreshBestEffort({
-          sourceStateHash,
-          userId: auth.member.id,
-        }),
+        scheduleDashboardReplicaRefreshBestEffort({ userId: auth.member.id }),
       );
       return emptyBrowserVaultSession({
-        refreshPending: sourceStateHash !== null,
+        refreshPending: true,
         workspaceVersion,
       });
-    }
-
-    if (freshness === "stale") {
-      scheduleAfterResponseOrFireAndForget(() =>
-        scheduleDashboardReplicaRefreshBestEffort({
-          sourceStateHash,
-          userId: auth.member.id,
-        }),
-      );
-      if (!acceptStaleReplica) {
-        return emptyBrowserVaultSession({
-          refreshPending: sourceStateHash !== null,
-          workspaceVersion,
-        });
-      }
     }
 
     if (browserVaultReplicaRefsMatch(knownReplicaRef, replicaRef)) {
@@ -124,14 +90,14 @@ export function createBrowserVaultSessionRoute(input: {
             userId: auth.member.id,
           })),
           freshness,
-          refreshPending: freshness === "stale",
+          refreshPending: false,
           workspaceVersion,
         },
       );
     } catch (error) {
       if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
         return emptyBrowserVaultSession({
-          refreshPending: sourceStateHash !== null,
+          refreshPending: true,
           workspaceVersion,
         });
       }
@@ -174,21 +140,15 @@ function emptyBrowserVaultSession(input: {
 }
 
 async function scheduleDashboardReplicaRefreshBestEffort(input: {
-  sourceStateHash: string | null;
   userId: string;
 }): Promise<void> {
   try {
-    if (!input.sourceStateHash) {
-      return;
-    }
-
     const client = readHostedExecutionControlClientIfConfigured();
     if (!client) {
       return;
     }
 
     await client.scheduleBrowserVaultRefresh({
-      sourceStateHash: input.sourceStateHash,
       userId: input.userId,
     });
   } catch {

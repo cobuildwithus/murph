@@ -257,7 +257,6 @@ export async function startHostedContainerEntrypoint(input: {
           const result = await runHostedBrowserVaultRefreshWithProcessIsolation(
             {
               runtime: parsed.runtime,
-              sourceStateHash: parsed.sourceStateHash,
               userId: parsed.userId,
             },
             runtime,
@@ -455,7 +454,6 @@ function parseHostedBrowserVaultRefreshContainerRequest(value: unknown): {
   internalWorkerProxyToken: string | null;
   localBridge: HostedExecutionLocalBridgeConfig;
   runtime: HostedAssistantRuntimeConfig | null;
-  sourceStateHash: string;
   userId: string;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -477,10 +475,6 @@ function parseHostedBrowserVaultRefreshContainerRequest(value: unknown): {
     runtime: readOptionalRuntimeConfig(
       record.runtime,
       "Hosted browser-vault refresh request.runtime",
-    ),
-    sourceStateHash: requireContainerRequestString(
-      record.sourceStateHash,
-      "Hosted browser-vault refresh request.sourceStateHash",
     ),
     userId: requireContainerRequestString(
       record.userId,

@@ -143,11 +143,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     });
   }
 
-  if (shouldDeferHostedMailboxImportCheckpoint({
-    deferCheckpoint: input.deferCheckpoint === true,
-    importResult,
-    stateChanged,
-  })) {
+  if (input.deferCheckpoint === true) {
     return {
       afterCheckpointEffects,
       checkpoint: null,
@@ -207,20 +203,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     state: importResult.state,
     stateChanged,
   };
-}
-
-function shouldDeferHostedMailboxImportCheckpoint(input: {
-  deferCheckpoint: boolean;
-  importResult: HostedMailboxImportLoopResult;
-  stateChanged: boolean;
-}): boolean {
-  return (
-    input.deferCheckpoint
-    && input.stateChanged
-    && input.importResult.importedCount > 0
-    && input.importResult.blocked.length === 0
-    && !input.importResult.nextRetryAt
-  );
 }
 
 export function buildHostedMailboxImportRedactedStatus(

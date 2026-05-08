@@ -1,21 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { createHash } from "node:crypto";
 
 import {
   createHostedBrowserVaultReplicaForSourceState,
-  readHostedBrowserVaultWarmSourceStateHash,
-  restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "@murphai/assistant-runtime";
-import {
-  readDashboardReplicaSourceStateHash,
-} from "@murphai/hosted-execution/dashboard-replica";
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
-import type {
-  HostedBrowserVaultReplicaPublishResponse,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
@@ -30,7 +20,7 @@ import type {
 
 type HostedRuntimePlatform = ReturnType<typeof buildHostedExecutionRuntimePlatform>;
 
-export type DashboardReplicaRefreshResult =
+export type BrowserVaultReplicaRefreshResult =
   | {
       byteLength: number;
       replicaRef: HostedBrowserVaultReplicaRef;
@@ -42,117 +32,34 @@ export type DashboardReplicaRefreshResult =
       status: "refresh_failed_too_large";
     }
   | {
-      status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing";
+      status: "publish_conflict";
     };
 
-export async function refreshDashboardReplicaFromCommittedWorkspace(input: {
+export type DashboardReplicaRefreshResult = BrowserVaultReplicaRefreshResult;
+
+export async function refreshBrowserVaultReplicaFromLiveWorkspace(input: {
+  generatedAt: string;
   platform: HostedRuntimePlatform;
+  projectionHash: string;
   signal?: AbortSignal;
-  sourceStateHash: string;
   userId: string;
-}): Promise<DashboardReplicaRefreshResult> {
-  const workspacePort = input.platform.workspacePort;
-  if (!workspacePort?.read) {
-    throw new TypeError("Dashboard replica refresh requires a workspace read port.");
-  }
+}): Promise<BrowserVaultReplicaRefreshResult> {
   if (!input.platform.browserVaultReplicaPort?.write) {
-    throw new TypeError("Dashboard replica refresh requires a browser-vault replica write port.");
+    throw new TypeError("Browser-vault refresh requires a browser-vault replica write port.");
   }
   if (!input.platform.browserVaultReplicaPort.publishRef) {
-    throw new TypeError("Dashboard replica refresh requires a browser-vault replica publish port.");
+    throw new TypeError("Browser-vault refresh requires a browser-vault replica publish port.");
   }
 
-  const workspaceRead = await workspacePort.read();
-  const workspace = workspaceRead.workspace;
-  if (!workspace) {
-    return {
-      status: "workspace_missing",
-    };
-  }
-
-  const currentSourceStateHash = readDashboardReplicaSourceStateHash(workspace.snapshotRef);
-  if (currentSourceStateHash !== input.sourceStateHash) {
-    return {
-      status: "stale_source",
-    };
-  }
-
-  if (workspace.browserVaultReplicaRef?.sourceBundleHash === input.sourceStateHash) {
-    return {
-      status: "already_fresh",
-    };
-  }
-
-  const warmResult = await tryRefreshDashboardReplicaFromWarmRoot({
-    platform: input.platform,
-    signal: input.signal,
-    sourceStateHash: input.sourceStateHash,
-    userId: input.userId,
-  });
-  if (warmResult) {
-    return warmResult;
-  }
-
-  const refreshRoot = await mkdtemp(path.join(os.tmpdir(), "murph-dashboard-replica-refresh-"));
-  try {
-    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-      platform: input.platform,
-      vaultRoot: refreshRoot,
-      workspace,
-    });
-    return await createWriteAndPublishDashboardReplica({
-      platform: input.platform,
-      signal: input.signal,
-      sourceStateHash: input.sourceStateHash,
-      vaultRoot: restored.vaultRoot,
-    });
-  } finally {
-    await rm(refreshRoot, {
-      force: true,
-      recursive: true,
-    });
-  }
-}
-
-async function tryRefreshDashboardReplicaFromWarmRoot(input: {
-  platform: HostedRuntimePlatform;
-  signal?: AbortSignal;
-  sourceStateHash: string;
-  userId: string;
-}): Promise<DashboardReplicaRefreshResult | null> {
-  const warmVaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(input.userId);
-  const warmSourceStateHash = await readHostedBrowserVaultWarmSourceStateHash({
-    vaultRoot: warmVaultRoot,
-  });
-  if (warmSourceStateHash !== input.sourceStateHash) {
-    return null;
-  }
-
-  try {
-    return await createWriteAndPublishDashboardReplica({
-      platform: input.platform,
-      signal: input.signal,
-      sourceStateHash: input.sourceStateHash,
-      vaultRoot: warmVaultRoot,
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function createWriteAndPublishDashboardReplica(input: {
-  platform: HostedRuntimePlatform;
-  signal?: AbortSignal;
-  sourceStateHash: string;
-  vaultRoot: string;
-}): Promise<DashboardReplicaRefreshResult> {
-  throwIfDashboardReplicaRefreshAborted(input.signal);
+  const vaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(input.userId);
+  throwIfBrowserVaultRefreshAborted(input.signal);
   const replica = await createHostedBrowserVaultReplicaForSourceState({
-    generatedAt: new Date().toISOString(),
-    sourceStateHash: input.sourceStateHash,
-    vaultRoot: input.vaultRoot,
+    generatedAt: input.generatedAt,
+    sourceStateHash: input.projectionHash,
+    vaultRoot,
   });
-  throwIfDashboardReplicaRefreshAborted(input.signal);
+  throwIfBrowserVaultRefreshAborted(input.signal);
+
   const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
   if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
     return {
@@ -162,23 +69,21 @@ async function createWriteAndPublishDashboardReplica(input: {
     };
   }
 
-  const replicaRef = await input.platform.browserVaultReplicaPort!.write({ replica });
-  assertDashboardReplicaWriteResult({
+  const replicaRef = await input.platform.browserVaultReplicaPort.write({ replica });
+  assertBrowserVaultReplicaWriteResult({
     byteLength,
-    expectedSourceStateHash: input.sourceStateHash,
+    projectionHash: input.projectionHash,
     replicaRef,
   });
-  throwIfDashboardReplicaRefreshAborted(input.signal);
+  throwIfBrowserVaultRefreshAborted(input.signal);
 
-  const publish = await input.platform.browserVaultReplicaPort!.publishRef!({
-    expectedSourceStateHash: input.sourceStateHash,
+  const publish = await input.platform.browserVaultReplicaPort.publishRef({
     replicaRef,
   });
   if (!publish.published) {
-    return classifyDashboardReplicaPublishMiss({
-      sourceStateHash: input.sourceStateHash,
-      workspace: publish.workspace,
-    });
+    return {
+      status: "publish_conflict",
+    };
   }
 
   return {
@@ -188,59 +93,42 @@ async function createWriteAndPublishDashboardReplica(input: {
   };
 }
 
-function classifyDashboardReplicaPublishMiss(input: {
-  sourceStateHash: string;
-  workspace: HostedBrowserVaultReplicaPublishResponse["workspace"];
-}): Extract<
-  DashboardReplicaRefreshResult,
-  { status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing" }
-> {
-  if (!input.workspace) {
-    return {
-      status: "workspace_missing",
-    };
-  }
-
-  if (readDashboardReplicaSourceStateHash(input.workspace.snapshotRef) !== input.sourceStateHash) {
-    return {
-      status: "stale_source",
-    };
-  }
-
-  if (input.workspace.browserVaultReplicaRef?.sourceBundleHash === input.sourceStateHash) {
-    return {
-      status: "already_fresh",
-    };
-  }
-
-  return {
-    status: "publish_conflict",
-  };
+export function createLiveBrowserVaultProjectionHash(input: {
+  generatedAt: string;
+  userId: string;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      generatedAt: input.generatedAt,
+      schema: "murph.browser-vault-live-projection.v1",
+      userId: input.userId,
+    }))
+    .digest("hex");
 }
 
-function assertDashboardReplicaWriteResult(input: {
+function assertBrowserVaultReplicaWriteResult(input: {
   byteLength: number;
-  expectedSourceStateHash: string;
+  projectionHash: string;
   replicaRef: HostedBrowserVaultReplicaRef;
 }): void {
-  if (input.replicaRef.sourceBundleHash !== input.expectedSourceStateHash) {
-    throw new Error("Dashboard replica refresh wrote a stale replica ref.");
+  if (input.replicaRef.sourceBundleHash !== input.projectionHash) {
+    throw new Error("Browser-vault refresh wrote a mismatched live projection ref.");
   }
 
   if (
     input.byteLength !== input.replicaRef.byteLength
     || input.byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES
   ) {
-    throw new Error("Dashboard replica refresh wrote invalid replica size metadata.");
+    throw new Error("Browser-vault refresh wrote invalid replica size metadata.");
   }
 }
 
-function throwIfDashboardReplicaRefreshAborted(signal: AbortSignal | undefined): void {
+function throwIfBrowserVaultRefreshAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) {
     return;
   }
 
   throw signal.reason instanceof Error
     ? signal.reason
-    : new Error("Dashboard replica refresh aborted before publish.");
+    : new Error("Browser-vault refresh aborted before publish.");
 }

@@ -12,6 +12,7 @@ import {
   summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
@@ -250,6 +251,8 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
         proxyContext: input.proxyContext,
         sourceStateHash: refreshSourceStateHash,
       })
+    : isRunnerBrowserVaultRefreshProxyContext(input.proxyContext)
+      ? true
     : await writeRequestOwnsActiveInvocationLease({
         env: input.env,
         request: input.request,
@@ -315,8 +318,13 @@ function isAllowedBrowserVaultRefreshOutboundRequest(input: {
 }): boolean {
   return (
     input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
-    && input.method === "GET"
-    && input.url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH
+    && (
+      (input.method === "GET" && input.url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH)
+      || (
+        input.method === "POST"
+        && input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
+      )
+    )
   ) || (
     input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore
     && input.method === "POST"

@@ -211,7 +211,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const result = await platform.browserVaultReplicaPort!.publishRef!({
-      expectedSourceStateHash: sourceBundleHash,
       replicaRef,
     });
 
@@ -254,7 +253,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const result = await platform.browserVaultReplicaPort!.publishRef!({
-      expectedSourceStateHash: sourceBundleHash,
       replicaRef,
     });
 
@@ -267,6 +265,41 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect.objectContaining({
         message: "Hosted runtime control-plane response returned non-OK.",
       }),
+    );
+  });
+
+  it("builds a live browser-vault refresh publish port without a workspace lease", async () => {
+    const sourceBundleHash = "c".repeat(64);
+    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      published: false,
+      workspace: null,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 409,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      browserVaultRefreshAuthority: true,
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    expect(platform.browserVaultReplicaPort?.publishRef).toBeDefined();
+    const result = await platform.browserVaultReplicaPort!.publishRef!({
+      replicaRef,
+    });
+
+    expect(result).toEqual({
+      published: false,
+      workspace: null,
+    });
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault publish fetch");
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe(
+      "http://web-control.worker/api/internal/hosted-workspace/browser-vault-replica",
     );
   });
 

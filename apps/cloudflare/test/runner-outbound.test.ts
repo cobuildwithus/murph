@@ -20,6 +20,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -2346,13 +2347,12 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       createBrowserVaultReplicaRefreshWriteRequest({
         replica: createBrowserVaultReplica(sourceBundleHash),
-        sourceStateHash: sourceBundleHash,
       }),
       env,
       "member_123",
       RUNNER_PROXY_TOKEN,
       {
-        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId(sourceBundleHash),
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId("live"),
         proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
       },
     );
@@ -2386,14 +2386,13 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       createBrowserVaultReplicaRefreshWriteRequest({
         replica: createBrowserVaultReplica(sourceBundleHash),
-        sourceStateHash: sourceBundleHash,
       }),
       env,
       "member_123",
       RUNNER_PROXY_TOKEN,
       {
-        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId("f".repeat(64)),
-        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId("live"),
+        proxyLeaseGeneration: "9",
       },
     );
 
@@ -2430,6 +2429,42 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows detached browser-vault refresh authority to publish the latest replica ref", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        published: false,
+        workspace: null,
+      }, {
+        status: 409,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH}`, {
+        body: JSON.stringify({
+          replicaRef: createBrowserVaultReplicaRef("live-refresh"),
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId("live"),
+        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("rejects browser-vault replica writes when the live invocation lease is stale", async () => {
@@ -3139,7 +3174,7 @@ function createBrowserVaultReplicaWriteRequest(input: {
 
 function createBrowserVaultReplicaRefreshWriteRequest(input: {
   replica: unknown;
-  sourceStateHash: string;
+  sourceStateHash?: string;
 }): Request {
   return new Request("http://browser-vault.worker/replicas", {
     body: JSON.stringify({
@@ -3147,7 +3182,11 @@ function createBrowserVaultReplicaRefreshWriteRequest(input: {
     }),
     headers: createRunnerProxyHeaders({
       "content-type": "application/json; charset=utf-8",
-      [RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER]: input.sourceStateHash,
+      ...(input.sourceStateHash
+        ? {
+            [RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER]: input.sourceStateHash,
+          }
+        : {}),
     }),
     method: "POST",
   });
@@ -3162,6 +3201,20 @@ function createBrowserVaultReplica(sourceBundleHash: string) {
       sourceBundleHash,
     },
   };
+}
+
+function createBrowserVaultReplicaRef(sourceBundleHash: string) {
+  return {
+    byteLength: 256,
+    dataVersion: "runner-outbound-test",
+    generatedAt: "2026-04-26T00:00:00.000Z",
+    keyId: "browser-key-runner-outbound",
+    objectKey: "browser-vault/member-test/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:runner-outbound",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
+  } as const;
 }
 
 function createWorkspaceVersionAwareUserRunner(input: {

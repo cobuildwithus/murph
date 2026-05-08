@@ -4,10 +4,7 @@ const mocks = vi.hoisted(() => ({
   createReplica: vi.fn(),
   measureReplicaBytes: vi.fn((replica: unknown) => JSON.stringify(replica).length),
   publishReplica: vi.fn(),
-  readWarmSourceStateHash: vi.fn(),
-  restoreWorkspace: vi.fn(),
   warmVaultRoot: vi.fn(),
-  workspaceRead: vi.fn(),
   writeReplica: vi.fn(),
 }));
 
@@ -19,8 +16,6 @@ vi.mock("@murphai/assistant-runtime", async () => {
   return {
     ...actual,
     createHostedBrowserVaultReplicaForSourceState: mocks.createReplica,
-    readHostedBrowserVaultWarmSourceStateHash: mocks.readWarmSourceStateHash,
-    restoreHostedWorkspaceRuntimeJobWorkspace: mocks.restoreWorkspace,
   };
 });
 
@@ -59,41 +54,38 @@ vi.mock("../src/runtime-platform.ts", async () => {
         publishRef: mocks.publishReplica,
         write: mocks.writeReplica,
       },
-      workspacePort: {
-        read: mocks.workspaceRead,
-      },
     })),
   };
 });
 
+const FIXED_NOW = "2026-05-08T00:00:00.000Z";
+
 describe("refreshHostedBrowserVaultReplica", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    mocks.createReplica.mockImplementation(async (input: {
+      sourceStateHash: string;
+    }) => createReplica(input.sourceStateHash));
     mocks.measureReplicaBytes.mockImplementation(() => 256);
+    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
+    mocks.writeReplica.mockImplementation(async (input: {
+      replica: ReturnType<typeof createReplica>;
+    }) => createReplicaRef(input.replica.source.sourceBundleHash));
     mocks.publishReplica.mockImplementation(async (input: {
       replicaRef: ReturnType<typeof createReplicaRef>;
     }) => ({
       published: true,
-      workspace: {
-        ...createWorkspace(input.replicaRef.sourceBundleHash),
-        browserVaultReplicaRef: input.replicaRef,
-      },
+      workspace: null,
     }));
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
-  it("generates from the warm vault when its source-state marker matches", async () => {
-    const sourceStateHash = "a".repeat(64);
-    mocks.workspaceRead.mockResolvedValue({
-      workspace: createWorkspace(sourceStateHash),
-    });
-    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
-    mocks.readWarmSourceStateHash.mockResolvedValue(sourceStateHash);
-    mocks.createReplica.mockResolvedValue(createReplica(sourceStateHash));
-    mocks.writeReplica.mockResolvedValue(createReplicaRef(sourceStateHash));
-
+  it("generates from the live warm vault and publishes the latest replica ref", async () => {
     const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
     const result = await refreshHostedBrowserVaultReplica({
       runtime: {
@@ -101,110 +93,28 @@ describe("refreshHostedBrowserVaultReplica", () => {
         platformEnv: {},
         userEnv: {},
       },
-      sourceStateHash,
       userId: "member_123",
     });
 
+    const sourceStateHash = result.status === "published"
+      ? result.replicaRef.sourceBundleHash
+      : "";
     expect(result).toMatchObject({
       replicaRef: createReplicaRef(sourceStateHash),
       status: "published",
     });
+    expect(mocks.createReplica).toHaveBeenCalledWith(expect.objectContaining({
+      generatedAt: FIXED_NOW,
+      sourceStateHash,
+      vaultRoot: "/warm/vault",
+    }));
+    expect(sourceStateHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(mocks.publishReplica).toHaveBeenCalledWith({
-      expectedSourceStateHash: sourceStateHash,
       replicaRef: createReplicaRef(sourceStateHash),
     });
-    expect(mocks.createReplica).toHaveBeenCalledWith(expect.objectContaining({
-      sourceStateHash,
-      vaultRoot: "/warm/vault",
-    }));
-    expect(mocks.restoreWorkspace).not.toHaveBeenCalled();
-  });
-
-  it("falls back to cold restore when the warm marker does not match", async () => {
-    const sourceStateHash = "b".repeat(64);
-    mocks.workspaceRead.mockResolvedValue({
-      workspace: createWorkspace(sourceStateHash),
-    });
-    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
-    mocks.readWarmSourceStateHash.mockResolvedValue("c".repeat(64));
-    mocks.restoreWorkspace.mockResolvedValue({
-      vaultRoot: "/restored/vault",
-    });
-    mocks.createReplica.mockResolvedValue(createReplica(sourceStateHash));
-    mocks.writeReplica.mockResolvedValue(createReplicaRef(sourceStateHash));
-
-    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
-    const result = await refreshHostedBrowserVaultReplica({
-      runtime: {
-        forwardedEnv: {},
-        platformEnv: {},
-        userEnv: {},
-      },
-      sourceStateHash,
-      userId: "member_123",
-    });
-
-    expect(result).toMatchObject({
-      replicaRef: createReplicaRef(sourceStateHash),
-      status: "published",
-    });
-    expect(mocks.restoreWorkspace).toHaveBeenCalledTimes(1);
-    expect(mocks.createReplica).toHaveBeenCalledWith(expect.objectContaining({
-      sourceStateHash,
-      vaultRoot: "/restored/vault",
-    }));
-  });
-
-  it("falls back to cold restore when warm replica generation fails", async () => {
-    const sourceStateHash = "d".repeat(64);
-    mocks.workspaceRead.mockResolvedValue({
-      workspace: createWorkspace(sourceStateHash),
-    });
-    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
-    mocks.readWarmSourceStateHash.mockResolvedValue(sourceStateHash);
-    mocks.restoreWorkspace.mockResolvedValue({
-      vaultRoot: "/restored/vault",
-    });
-    mocks.createReplica
-      .mockRejectedValueOnce(new Error("warm vault unavailable"))
-      .mockResolvedValueOnce(createReplica(sourceStateHash));
-    mocks.writeReplica.mockResolvedValue(createReplicaRef(sourceStateHash));
-
-    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
-    const result = await refreshHostedBrowserVaultReplica({
-      runtime: {
-        forwardedEnv: {},
-        platformEnv: {},
-        userEnv: {},
-      },
-      sourceStateHash,
-      userId: "member_123",
-    });
-
-    expect(result).toMatchObject({
-      replicaRef: createReplicaRef(sourceStateHash),
-      status: "published",
-    });
-    expect(mocks.restoreWorkspace).toHaveBeenCalledTimes(1);
-    expect(mocks.createReplica).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      vaultRoot: "/warm/vault",
-    }));
-    expect(mocks.createReplica).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      vaultRoot: "/restored/vault",
-    }));
   });
 
   it("returns a terminal degraded status without writing when the replica exceeds the byte cap", async () => {
-    const sourceStateHash = "d".repeat(64);
-    mocks.workspaceRead.mockResolvedValue({
-      workspace: createWorkspace(sourceStateHash),
-    });
-    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
-    mocks.readWarmSourceStateHash.mockResolvedValue(null);
-    mocks.restoreWorkspace.mockResolvedValue({
-      vaultRoot: "/restored/vault",
-    });
-    mocks.createReplica.mockResolvedValue(createReplica(sourceStateHash));
     mocks.measureReplicaBytes.mockReturnValueOnce(257);
 
     const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
@@ -214,7 +124,6 @@ describe("refreshHostedBrowserVaultReplica", () => {
         platformEnv: {},
         userEnv: {},
       },
-      sourceStateHash,
       userId: "member_123",
     });
 
@@ -227,21 +136,10 @@ describe("refreshHostedBrowserVaultReplica", () => {
     expect(mocks.publishReplica).not.toHaveBeenCalled();
   });
 
-  it("keeps same-source publish conflicts retryable after writing", async () => {
-    const sourceStateHash = "e".repeat(64);
-    mocks.workspaceRead.mockResolvedValue({
-      workspace: createWorkspace(sourceStateHash),
-    });
-    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
-    mocks.readWarmSourceStateHash.mockResolvedValue(null);
-    mocks.restoreWorkspace.mockResolvedValue({
-      vaultRoot: "/restored/vault",
-    });
-    mocks.createReplica.mockResolvedValue(createReplica(sourceStateHash));
-    mocks.writeReplica.mockResolvedValue(createReplicaRef(sourceStateHash));
+  it("keeps latest-ref publish conflicts retryable after writing", async () => {
     mocks.publishReplica.mockResolvedValue({
       published: false,
-      workspace: createWorkspace(sourceStateHash),
+      workspace: null,
     });
 
     const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
@@ -251,7 +149,6 @@ describe("refreshHostedBrowserVaultReplica", () => {
         platformEnv: {},
         userEnv: {},
       },
-      sourceStateHash,
       userId: "member_123",
     });
 
@@ -259,26 +156,17 @@ describe("refreshHostedBrowserVaultReplica", () => {
       status: "publish_conflict",
     });
     expect(mocks.writeReplica).toHaveBeenCalledOnce();
-    expect(mocks.publishReplica).toHaveBeenCalledWith({
-      expectedSourceStateHash: sourceStateHash,
-      replicaRef: createReplicaRef(sourceStateHash),
-    });
+    expect(mocks.publishReplica).toHaveBeenCalledWith(expect.objectContaining({
+      replicaRef: expect.objectContaining({
+        sourceBundleHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      }),
+    }));
   });
 
   it("does not write or publish when refresh is aborted before publish", async () => {
-    const sourceStateHash = "f".repeat(64);
     const replicaReady = createDeferred<ReturnType<typeof createReplica>>();
     const abortController = new AbortController();
-    mocks.workspaceRead.mockResolvedValue({
-      workspace: createWorkspace(sourceStateHash),
-    });
-    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
-    mocks.readWarmSourceStateHash.mockResolvedValue(null);
-    mocks.restoreWorkspace.mockResolvedValue({
-      vaultRoot: "/restored/vault",
-    });
     mocks.createReplica.mockImplementation(async () => await replicaReady.promise);
-    mocks.writeReplica.mockResolvedValue(createReplicaRef(sourceStateHash));
 
     const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
     const refresh = refreshHostedBrowserVaultReplica({
@@ -287,7 +175,6 @@ describe("refreshHostedBrowserVaultReplica", () => {
         platformEnv: {},
         userEnv: {},
       },
-      sourceStateHash,
       userId: "member_123",
     }, {
       signal: abortController.signal,
@@ -295,33 +182,13 @@ describe("refreshHostedBrowserVaultReplica", () => {
     await vi.waitFor(() => expect(mocks.createReplica).toHaveBeenCalledOnce());
 
     abortController.abort(new Error("foreground_invocation"));
-    replicaReady.resolve(createReplica(sourceStateHash));
+    replicaReady.resolve(createReplica("f".repeat(64)));
 
     await expect(refresh).rejects.toThrow("foreground_invocation");
     expect(mocks.writeReplica).not.toHaveBeenCalled();
     expect(mocks.publishReplica).not.toHaveBeenCalled();
   });
 });
-
-function createWorkspace(sourceStateHash: string) {
-  return {
-    browserVaultReplicaRef: null,
-    checkpointedAt: "2026-05-08T00:00:00.000Z",
-    createdAt: "2026-05-08T00:00:00.000Z",
-    nextWakeAt: null,
-    nextWakeReason: null,
-    redactedStatus: null,
-    snapshotRef: {
-      hash: sourceStateHash,
-      key: `cloudflare-workspace-bundles/${sourceStateHash}.bundle`,
-      schema: "murph.hosted-execution-bundle-ref.v1",
-      size: 123,
-    },
-    updatedAt: "2026-05-08T00:00:00.000Z",
-    userId: "member_123",
-    version: "1",
-  };
-}
 
 function createReplica(sourceStateHash: string) {
   return {
