@@ -1,6 +1,7 @@
 import {
   sendLinqMessage,
   sendTelegramMessage,
+  sendWhatsAppMessage,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
 import {
@@ -29,6 +30,8 @@ import type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
+  HostedRuntimeWhatsAppSendRequest,
+  HostedRuntimeWhatsAppSendResponse,
 } from "./hosted-runtime/platform.ts";
 
 export interface HostedProviderEffectDependencies {
@@ -111,6 +114,16 @@ export async function sendHostedProviderLinqMessage(
     }
     throw error;
   }
+}
+
+export async function sendHostedProviderWhatsAppMessage(
+  request: HostedRuntimeWhatsAppSendRequest,
+  dependencies: HostedProviderEffectDependencies,
+): Promise<HostedRuntimeWhatsAppSendResponse> {
+  return await sendWhatsAppMessage(request, {
+    env: dependencies.env,
+    signal: dependencies.signal,
+  });
 }
 
 export async function sendHostedProviderLinqChatAction(

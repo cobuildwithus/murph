@@ -16,6 +16,7 @@ describe("hosted runtime parser coverage", () => {
           channelCapabilities: {
             emailSendReady: true,
             telegramBotConfigured: false,
+            whatsappCloudApiConfigured: false,
           },
           deviceSync: {
             providerConfigs: {
@@ -42,6 +43,7 @@ describe("hosted runtime parser coverage", () => {
         channelCapabilities: {
           emailSendReady: true,
           telegramBotConfigured: false,
+          whatsappCloudApiConfigured: false,
         },
         deviceSync: {
           providerConfigs: {
@@ -70,6 +72,10 @@ describe("hosted runtime parser coverage", () => {
             channel: "telegram",
             memberChannel: "telegram",
           },
+          {
+            capabilityReady: false,
+            channel: "whatsapp",
+          },
         ],
       },
       userEnv: {
@@ -88,6 +94,7 @@ describe("hosted runtime parser coverage", () => {
         channelCapabilities: {
           emailSendReady: "yes",
           telegramBotConfigured: false,
+          whatsappCloudApiConfigured: false,
         },
       },
     })).toThrow(/emailSendReady must be a boolean/u);
@@ -113,6 +120,7 @@ describe("hosted runtime parser coverage", () => {
         channelCapabilities: {
           emailSendReady: false,
           telegramBotConfigured: false,
+          whatsappCloudApiConfigured: false,
         },
         deviceSync: {
           providerConfigs: {
@@ -133,6 +141,7 @@ describe("hosted runtime parser coverage", () => {
         channelCapabilities: {
           emailSendReady: false,
           telegramBotConfigured: false,
+          whatsappCloudApiConfigured: false,
         },
         deviceSync: {
           providerConfigs: {
@@ -156,6 +165,7 @@ describe("hosted runtime parser coverage", () => {
           channelCapabilities: {
             emailSendReady: true,
             telegramBotConfigured: true,
+            whatsappCloudApiConfigured: false,
           },
           deviceSync: null,
           managedAutoReplyChannels: [
@@ -181,6 +191,7 @@ describe("hosted runtime parser coverage", () => {
         channelCapabilities: {
           emailSendReady: true,
           telegramBotConfigured: true,
+          whatsappCloudApiConfigured: false,
         },
         deviceSync: null,
         managedAutoReplyChannels: [
@@ -210,6 +221,7 @@ describe("hosted runtime parser coverage", () => {
         channelCapabilities: {
           emailSendReady: true,
           telegramBotConfigured: true,
+          whatsappCloudApiConfigured: false,
         },
         managedAutoReplyChannels: {
           email: true,
@@ -222,6 +234,7 @@ describe("hosted runtime parser coverage", () => {
         channelCapabilities: {
           emailSendReady: true,
           telegramBotConfigured: true,
+          whatsappCloudApiConfigured: false,
         },
         managedAutoReplyChannels: [
           {

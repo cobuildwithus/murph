@@ -84,7 +84,7 @@ Core execution tuning:
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
-- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
 - `HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS` defaults to `0`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls the Durable Object-owned idle checkpoint/shutdown window. The runner container treats its own idle TTL as fallback-only and adds grace beyond this window before Cloudflare activity expiry.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
@@ -127,6 +127,8 @@ Opt-in runtime integrations:
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_FILE_BASE_URL`
+- `WHATSAPP_API_BASE_URL`
+- `WHATSAPP_GRAPH_VERSION`
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
@@ -202,6 +204,8 @@ Opt-in execution integrations:
 - `STRAVA_CLIENT_ID`
 - `STRAVA_CLIENT_SECRET`
 - `TELEGRAM_BOT_TOKEN`
+- `WHATSAPP_ACCESS_TOKEN`
+- `WHATSAPP_PHONE_NUMBER_ID`
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.

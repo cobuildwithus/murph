@@ -12,6 +12,7 @@ import {
   sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  sendWhatsAppMessage,
   type AssistantChannelDependencies,
 } from './assistant/channel-adapters.js'
 import {
@@ -43,6 +44,7 @@ export {
   sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  sendWhatsAppMessage,
 }
 
 export interface DeliverAssistantMessageInput {

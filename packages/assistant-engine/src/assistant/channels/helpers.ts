@@ -241,17 +241,18 @@ export function readDeliveredTarget(
 }
 
 export function readDeliveredTargetKind(
-  delivered:
-    | {
-        targetKind?: string | null
-      }
-    | void,
+  delivered: unknown,
 ): AssistantDeliveryCandidate['kind'] | null {
   if (!delivered || typeof delivered !== 'object') {
     return null
   }
 
-  const value = normalizeOptionalText(delivered.targetKind)
+  const targetKind = 'targetKind' in delivered
+    ? (delivered as { targetKind?: unknown }).targetKind
+    : null
+  const value = typeof targetKind === 'string'
+    ? normalizeOptionalText(targetKind)
+    : null
   if (value === 'explicit' || value === 'participant' || value === 'thread') {
     return value
   }
@@ -272,13 +273,14 @@ export function readDeliveredProviderMessageId(
 }
 
 export function readDeliveredProviderMessageIds(
-  delivered:
-    | {
-        providerMessageIds?: readonly string[] | null
-      }
-    | void,
+  delivered: unknown,
 ): string[] | null {
-  if (!delivered || typeof delivered !== 'object' || !Array.isArray(delivered.providerMessageIds)) {
+  if (
+    !delivered ||
+    typeof delivered !== 'object' ||
+    !('providerMessageIds' in delivered) ||
+    !Array.isArray(delivered.providerMessageIds)
+  ) {
     return null
   }
 

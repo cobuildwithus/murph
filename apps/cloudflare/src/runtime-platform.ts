@@ -48,11 +48,13 @@ import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
   parseHostedRunnerLinqSendResponse,
   parseHostedRunnerProviderEffectErrorResponse,
   parseHostedRunnerTelegramDownloadFileResponse,
   parseHostedRunnerTelegramGetFileResponse,
   parseHostedRunnerTelegramSendResponse,
+  parseHostedRunnerWhatsAppSendResponse,
 } from "./runner-effects-contract.ts";
 import {
   HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
@@ -526,6 +528,14 @@ function createCloudflareRunnerProviderEffectsPort(input: {
         description: "Hosted Telegram chat action",
         path: HOSTED_EXECUTION_RUNNER_TELEGRAM_CHAT_ACTION_PATH,
       });
+    },
+    async sendWhatsApp(request) {
+      const payload = await post({
+        body: request,
+        description: "Hosted WhatsApp send",
+        path: HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
+      });
+      return parseHostedRunnerWhatsAppSendResponse(payload);
     },
   };
 }

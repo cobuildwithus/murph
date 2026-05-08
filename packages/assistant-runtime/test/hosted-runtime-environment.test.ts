@@ -188,6 +188,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       channelCapabilities: {
         emailSendReady: true,
         telegramBotConfigured: true,
+        whatsappCloudApiConfigured: false,
       },
       deviceSync: null,
       managedAutoReplyChannels: [
@@ -205,6 +206,10 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
           capabilityReady: true,
           channel: "telegram",
           memberChannel: "telegram",
+        },
+        {
+          capabilityReady: false,
+          channel: "whatsapp",
         },
       ],
     },
@@ -488,6 +493,9 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      WHATSAPP_ACCESS_TOKEN: "whatsapp-token",
+      WHATSAPP_GRAPH_VERSION: "v25.0",
+      WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
     }),
     {
       HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -499,6 +507,9 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      WHATSAPP_ACCESS_TOKEN: "whatsapp-token",
+      WHATSAPP_GRAPH_VERSION: "v25.0",
+      WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
     },
   );
   assert.equal(readHostedRuntimeCommitTimeoutConfigValue("45000"), 45_000);
@@ -516,11 +527,14 @@ test("hosted runtime resolved config derives typed channel and device-sync state
     HOSTED_EMAIL_LOCAL_PART: "assistant",
     HOSTED_EMAIL_SEND_READY: "true",
     TELEGRAM_BOT_TOKEN: "telegram-token",
+    WHATSAPP_ACCESS_TOKEN: "whatsapp-token",
+    WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
   });
 
   assert.deepEqual(resolved.channelCapabilities, {
     emailSendReady: true,
     telegramBotConfigured: true,
+    whatsappCloudApiConfigured: true,
   });
   assert.deepEqual(resolved.deviceSync, {
     providerConfigs: {

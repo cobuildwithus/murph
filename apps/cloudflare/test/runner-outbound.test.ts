@@ -57,6 +57,7 @@ import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
 } from "../src/runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import type {
@@ -1535,6 +1536,55 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const telegramRequest = fetchMock.mock.calls[0]?.[0];
     expect(String(telegramRequest)).toBe("https://api.telegram.org/bottelegram-token/sendMessage");
+  });
+
+  it("sends WhatsApp through Worker-owned provider env without returning token material", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(JSON.stringify({
+      contacts: [{ wa_id: "15550100001" }],
+      messages: [{ id: "wamid.MESSAGE_1" }],
+      messaging_product: "whatsapp",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH}`, {
+        body: JSON.stringify({
+          message: "hello",
+          replyToMessageId: "wamid.REPLY_1",
+          target: "15550100001",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token",
+        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toEqual({
+      providerMessageId: "wamid.MESSAGE_1",
+      providerThreadId: "15550100001",
+      target: "15550100001",
+    });
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("test-whatsapp-token");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const whatsAppRequest = fetchMock.mock.calls[0]?.[0];
+    expect(String(whatsAppRequest)).toBe(
+      "https://graph.facebook.com/v25.0/phone-number-id-1/messages",
+    );
   });
 
   it("looks up Telegram files through Worker-owned provider env", async () => {

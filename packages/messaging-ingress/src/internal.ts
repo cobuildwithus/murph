@@ -20,6 +20,10 @@ const LOCAL_UNIX_PATH_SUBSTRING_PATTERN = new RegExp(
 );
 const LOCAL_WINDOWS_PATH_SUBSTRING_PATTERN =
   /(^|[^A-Za-z0-9+.-])([A-Za-z]:\\(?:[^\r\n"'<>|]*))/gu;
+const PLACEHOLDER_HOME_UNIX_PATH_SUBSTRING_PATTERN =
+  /(^|[^A-Za-z0-9+.-])(<HOME_DIR>\/(?:[^\r\n"'<>|]*))/gu;
+const PLACEHOLDER_HOME_WINDOWS_PATH_SUBSTRING_PATTERN =
+  /(^|[^A-Za-z0-9+.-])(<HOME_DIR>\\(?:[^\r\n"'<>|]*))/gu;
 const LOCAL_PATH_TRAILING_PUNCTUATION_PATTERN = /[.,;:!?)}\]]+$/u;
 const NON_PATH_TAIL_LEAD_WORDS = new Set([
   "after",
@@ -177,7 +181,7 @@ function sanitizeRawMetadataValue(value: unknown): unknown {
       return REDACTED_SECRET;
     }
 
-    return redactLocalPathSubstrings(value);
+    return sanitizeLocalPathSubstrings(value);
   }
 
   if (value === undefined) {
@@ -230,9 +234,21 @@ function looksSensitiveStringValue(value: string): boolean {
   return SENSITIVE_STRING_PATTERNS.some((pattern) => pattern.test(value.trim()));
 }
 
-function redactLocalPathSubstrings(value: string): string {
+function sanitizeLocalPathSubstrings(value: string): string {
   return redactMatchedLocalPaths(
-    redactMatchedLocalPaths(value, LOCAL_UNIX_PATH_SUBSTRING_PATTERN, "/"),
+    redactMatchedLocalPaths(
+      redactMatchedLocalPaths(
+        redactMatchedLocalPaths(
+          value,
+          PLACEHOLDER_HOME_UNIX_PATH_SUBSTRING_PATTERN,
+          "/",
+        ),
+        LOCAL_UNIX_PATH_SUBSTRING_PATTERN,
+        "/",
+      ),
+      PLACEHOLDER_HOME_WINDOWS_PATH_SUBSTRING_PATTERN,
+      "\\",
+    ),
     LOCAL_WINDOWS_PATH_SUBSTRING_PATTERN,
     "\\",
   );

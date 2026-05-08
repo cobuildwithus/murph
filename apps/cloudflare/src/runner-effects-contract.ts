@@ -13,6 +13,8 @@ import type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
+  HostedRuntimeWhatsAppSendRequest,
+  HostedRuntimeWhatsAppSendResponse,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 
 export const HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH =
@@ -31,6 +33,8 @@ export const HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH =
   "/linq/chats/mark-read";
 export const HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH =
   "/linq/messages/delete";
+export const HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH =
+  "/whatsapp/send";
 
 const PROVIDER_EFFECT_PATHS = new Set([
   HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
@@ -41,6 +45,7 @@ const PROVIDER_EFFECT_PATHS = new Set([
   HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
   HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
   HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
+  HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
 ]);
 
 export interface HostedRunnerProviderEffectErrorResponse {
@@ -227,6 +232,33 @@ export function parseHostedRunnerProviderEffectErrorResponse(
     ...(typeof record.target === "string" && record.target.trim().length > 0
       ? { target: record.target.trim() }
       : {}),
+  };
+}
+
+export function parseHostedRunnerWhatsAppSendRequest(
+  value: unknown,
+): HostedRuntimeWhatsAppSendRequest {
+  const record = requireRecord(value, "Hosted WhatsApp send request");
+  return {
+    message: readRequiredString(record.message, "message"),
+    replyToMessageId: readOptionalString(record.replyToMessageId, "replyToMessageId"),
+    target: readRequiredString(record.target, "target"),
+  };
+}
+
+export function parseHostedRunnerWhatsAppSendResponse(
+  value: unknown,
+): HostedRuntimeWhatsAppSendResponse | void {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const record = requireRecord(value, "Hosted WhatsApp send response");
+  return {
+    providerMessageId: readOptionalString(record.providerMessageId, "providerMessageId"),
+    providerMessageIds: readOptionalStringArray(record.providerMessageIds, "providerMessageIds"),
+    providerThreadId: readOptionalString(record.providerThreadId, "providerThreadId"),
+    target: readOptionalString(record.target, "target"),
+    targetKind: parseOptionalTargetKind(record.targetKind, "targetKind"),
   };
 }
 

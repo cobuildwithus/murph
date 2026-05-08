@@ -22,5 +22,9 @@ export function createDefaultHostedManagedAutoReplyChannels(
       channel: "telegram",
       memberChannel: "telegram",
     },
+    {
+      capabilityReady: channelCapabilities.whatsappCloudApiConfigured === true,
+      channel: "whatsapp",
+    },
   ];
 }

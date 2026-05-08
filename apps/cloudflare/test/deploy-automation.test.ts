@@ -496,7 +496,7 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: ${{ vars.HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
-      "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
+      "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram,whatsapp' }}",
       "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
@@ -755,7 +755,7 @@ describe("hosted deploy automation helpers", () => {
 
     expect(environment.workerVars).toEqual({
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
     });
   });
 
@@ -780,7 +780,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "hosted-email,linq,mapbox,telegram",
+      "hosted-email,linq,mapbox,telegram,whatsapp",
     );
   });
 
@@ -837,6 +837,8 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
+      WHATSAPP_ACCESS_TOKEN: "whatsapp-token",
+      WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
       OPENAI_API_KEY: "openai-key",
     })).toEqual({
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -849,6 +851,8 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
+      WHATSAPP_ACCESS_TOKEN: "whatsapp-token",
+      WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
       OPENAI_API_KEY: "openai-key",
     });
   });

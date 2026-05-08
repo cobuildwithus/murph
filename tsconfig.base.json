@@ -256,6 +256,9 @@
       "@murphai/operator-config/linq-runtime": [
         "packages/operator-config/src/linq-runtime.ts"
       ],
+      "@murphai/operator-config/whatsapp-runtime": [
+        "packages/operator-config/src/whatsapp-runtime.ts"
+      ],
       "@murphai/operator-config/*": [
         "packages/operator-config/src/*"
       ],

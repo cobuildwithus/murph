@@ -2018,6 +2018,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (request.url.endsWith("/whatsapp/send")) {
+        return new Response(JSON.stringify({
+          providerMessageId: "whatsapp_message_123",
+          providerThreadId: "15550100001",
+          target: "15550100001",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
 
       return new Response(JSON.stringify({ ok: true }), {
         headers: {
@@ -2071,16 +2083,29 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       target: "linq_chat_123",
       targetKind: null,
     });
+    await expect(platform.effectsPort.sendWhatsApp!({
+      message: "hello",
+      replyToMessageId: "wamid.REPLY_1",
+      target: "15550100001",
+    })).resolves.toEqual({
+      providerMessageId: "whatsapp_message_123",
+      providerMessageIds: null,
+      providerThreadId: "15550100001",
+      target: "15550100001",
+      targetKind: null,
+    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     const telegramRequest = requireFetchRequest(fetchMock.mock.calls[0], "telegram send");
     const linqStartRequest = requireFetchRequest(fetchMock.mock.calls[1], "linq action start");
     const linqStopRequest = requireFetchRequest(fetchMock.mock.calls[2], "linq action stop");
     const linqSendRequest = requireFetchRequest(fetchMock.mock.calls[3], "linq send");
+    const whatsAppSendRequest = requireFetchRequest(fetchMock.mock.calls[4], "whatsapp send");
     expect(telegramRequest.url).toBe("http://results.worker/telegram/send");
     expect(linqStartRequest.url).toBe("http://results.worker/linq/chat-action");
     expect(linqStopRequest.url).toBe("http://results.worker/linq/chat-action");
     expect(linqSendRequest.url).toBe("http://results.worker/linq/send");
+    expect(whatsAppSendRequest.url).toBe("http://results.worker/whatsapp/send");
     expect(telegramRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
@@ -2104,6 +2129,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       message: "hello",
       target: "stale-chat",
       targetKind: "thread",
+    });
+    await expect(whatsAppSendRequest.json()).resolves.toEqual({
+      message: "hello",
+      replyToMessageId: "wamid.REPLY_1",
+      target: "15550100001",
     });
   });
 

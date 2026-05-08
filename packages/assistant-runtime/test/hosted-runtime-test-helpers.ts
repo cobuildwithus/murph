@@ -28,6 +28,7 @@ export const HOSTED_RUNTIME_RESOLVED_CONFIG: HostedAssistantRuntimeResolvedConfi
   channelCapabilities: {
     emailSendReady: true,
     telegramBotConfigured: true,
+    whatsappCloudApiConfigured: false,
   },
   deviceSync: null,
   managedAutoReplyChannels: [
@@ -45,6 +46,11 @@ export const HOSTED_RUNTIME_RESOLVED_CONFIG: HostedAssistantRuntimeResolvedConfi
       capabilityReady: true,
       channel: "telegram",
       memberChannel: "telegram",
+    },
+    {
+      capabilityReady: false,
+      channel: "whatsapp",
+      memberChannel: null,
     },
   ],
 };

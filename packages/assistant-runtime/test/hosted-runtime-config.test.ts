@@ -87,6 +87,7 @@ describe("parseHostedAssistantRuntimeConfig", () => {
         channelCapabilities: {
           emailSendReady: false,
           telegramBotConfigured: false,
+          whatsappCloudApiConfigured: false,
         },
         deviceSync: {
           providerConfigs: {
@@ -120,6 +121,7 @@ describe("parseHostedAssistantRuntimeConfig", () => {
           channelCapabilities: {
             emailSendReady: false,
             telegramBotConfigured: false,
+            whatsappCloudApiConfigured: false,
           },
           deviceSync: {
             providerConfigs: {

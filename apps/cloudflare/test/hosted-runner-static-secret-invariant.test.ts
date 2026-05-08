@@ -228,7 +228,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
       '{"keys":[{"keyId":"cloudflare-automation:v1","privateJwk":{"kty":"EC","d":"fixture-automation"}}]}',
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       "http://host.docker.internal:8787",
-    HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
+    HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
     HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
     HOSTED_WEB_BASE_URL: "https://web.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
@@ -246,6 +246,8 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     OURA_CLIENT_SECRET: "fixture-oura-client-secret",
     TELEGRAM_API_BASE_URL: "https://telegram.example.test",
     TELEGRAM_BOT_TOKEN: "fixture-telegram-token",
+    WHATSAPP_ACCESS_TOKEN: "fixture-whatsapp-token",
+    WHATSAPP_PHONE_NUMBER_ID: "fixture-whatsapp-phone-number-id",
     TELEGRAM_FILE_BASE_URL: "https://telegram-files.example.test",
     OPENAI_API_KEY: "fixture-vercel-openai-key",
     WHOOP_CLIENT_ID: "fixture-whoop-client-id",

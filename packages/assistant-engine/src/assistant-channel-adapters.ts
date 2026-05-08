@@ -14,6 +14,7 @@ export {
   sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  sendWhatsAppMessage,
   startAssistantChannelActivitySession,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,

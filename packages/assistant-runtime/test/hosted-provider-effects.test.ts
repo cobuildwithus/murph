@@ -6,6 +6,7 @@ import {
   sendHostedProviderLinqChatAction,
   sendHostedProviderLinqMessage,
   sendHostedProviderTelegramChatAction,
+  sendHostedProviderWhatsAppMessage,
 } from "../src/hosted-provider-effects.ts";
 
 describe("hosted provider effects", () => {
@@ -227,5 +228,55 @@ describe("hosted provider effects", () => {
     );
     assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
     assert.equal(fetchMock.mock.calls[1]?.[1]?.method, "DELETE");
+  });
+
+  it("sends WhatsApp messages through Worker-owned provider env", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(JSON.stringify({
+      contacts: [{ wa_id: "15550100001" }],
+      messages: [{ id: "wamid.MESSAGE_1" }],
+      messaging_product: "whatsapp",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedProviderWhatsAppMessage({
+      message: "hello",
+      replyToMessageId: "wamid.REPLY_1",
+      target: "15550100001",
+    }, {
+      env: {
+        WHATSAPP_ACCESS_TOKEN: "test-access-token",
+        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
+      },
+    })).resolves.toEqual({
+      providerMessageId: "wamid.MESSAGE_1",
+      providerThreadId: "15550100001",
+      target: "15550100001",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    assert.equal(
+      String(fetchMock.mock.calls[0]?.[0]),
+      "https://graph.facebook.com/v25.0/phone-number-id-1/messages",
+    );
+    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "15550100001",
+      type: "text",
+      context: {
+        message_id: "wamid.REPLY_1",
+      },
+      text: {
+        body: "hello",
+        preview_url: false,
+      },
+    });
   });
 });
