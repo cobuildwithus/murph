@@ -314,6 +314,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("does not checkpoint no-op alarms only because automation returned a future wake", async () => {
     const nextWakeAt = "2026-04-27T00:01:00.000Z";
+    const existingWakeAt = "2026-04-27T00:05:00.000Z";
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       assistantAutomationProgressed: false,
@@ -333,7 +334,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       workspace: {
         checkpointedAt: "2026-04-27T00:00:00.000Z",
         createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeAt: existingWakeAt,
         nextWakeReason: "assistant",
         redactedStatus: null,
         snapshotRef: null,
@@ -358,6 +359,46 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         assistantAutomationProgressed: false,
         nextWakeAtPresent: true,
         progressed: false,
+      }),
+    }));
+  });
+
+  it("checkpoints a consumed alarm wake when automation advances it", async () => {
+    const nextWakeAt = "2026-04-27T00:01:00.000Z";
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: nextWakeAt,
+        hostedAssistantProgressed: true,
       }),
     }));
   });
@@ -922,6 +963,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit)
       .toHaveBeenCalledTimes(1);
+  });
+
+  it("omits only the deferred receipt-recovery wake after clean fast dispatch", async () => {
+    const deferredReceiptRecoveryWakeAt = "2026-05-08T00:00:00.000Z";
+    const nextWakeAtWithoutDeferredReceiptRecovery = "2026-05-08T16:00:00.000Z";
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationDeferredReceiptRecoveryWakeAt: deferredReceiptRecoveryWakeAt,
+      assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery:
+        nextWakeAtWithoutDeferredReceiptRecovery,
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: deferredReceiptRecoveryWakeAt,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_synthetic",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: nextWakeAtWithoutDeferredReceiptRecovery,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedOutboxDeliverySent: 1,
+        nextWakeAt: nextWakeAtWithoutDeferredReceiptRecovery,
+      }),
+    }));
   });
 
   it("fast-dispatches idempotent nudge delivery when input is admitted during the active turn", async () => {

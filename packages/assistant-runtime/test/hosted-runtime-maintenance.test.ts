@@ -359,11 +359,13 @@ describe("runHostedAssistantAutomation", () => {
 
   it("passes deferred receipt recovery to hosted assistant automation passes", async () => {
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      deferredReceiptRecoveryWakeAt: "2026-05-07T00:00:00.000Z",
       nextWakeAt: "2026-05-07T00:00:00.000Z",
+      nextWakeAtWithoutDeferredReceiptRecovery: "2026-05-07T16:00:00.000Z",
       progressed: true,
     });
 
-    await runHostedAssistantAutomation(
+    const result = await runHostedAssistantAutomation(
       "/tmp/vault-root",
       "req_defer_recovery",
       {
@@ -386,6 +388,11 @@ describe("runHostedAssistantAutomation", () => {
       true,
     );
 
+    expect(result).toEqual(expect.objectContaining({
+      deferredReceiptRecoveryWakeAt: "2026-05-07T00:00:00.000Z",
+      nextWakeAt: "2026-05-07T00:00:00.000Z",
+      nextWakeAtWithoutDeferredReceiptRecovery: "2026-05-07T16:00:00.000Z",
+    }));
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({
         deferReceiptRecovery: true,
@@ -691,8 +698,10 @@ describe("runHostedAssistantAutomation", () => {
         },
         createHostedAutomationRuntime(),
       ),
-    ).resolves.toEqual({
+    ).resolves.toEqual(expect.objectContaining({
+      deferredReceiptRecoveryWakeAt: null,
       nextWakeAt: expect.any(String),
+      nextWakeAtWithoutDeferredReceiptRecovery: expect.any(String),
       progressed: true,
       redactedLogEntries: [
         expect.objectContaining({
@@ -702,7 +711,7 @@ describe("runHostedAssistantAutomation", () => {
           message: "Hosted assistant automation could not run because the inbox runtime is not initialized yet; scheduling a retry.",
         }),
       ],
-    });
+    }));
   });
 
   it("rethrows unexpected automation failures", async () => {

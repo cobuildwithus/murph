@@ -2885,7 +2885,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
   test("returns next wake from the checkpointed workspace after import commits", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const staleWakeAt = "2026-04-27T00:05:00.000Z";
+    const previousWakeAt = "2099-04-27T00:05:00.000Z";
     const events: string[] = [];
 
     try {
@@ -2925,12 +2925,15 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             events,
             workspace: createWorkspaceState({
-              nextWakeAt: staleWakeAt,
+              nextWakeAt: previousWakeAt,
               nextWakeReason: "alarm",
               version: "0",
             }),
           }),
         }),
+        async runAssistantPhase() {
+          return { progressed: false };
+        },
         vaultRoot,
       });
 
@@ -2944,7 +2947,7 @@ describe("hosted workspace runtime entrypoint", () => {
   test("returns scheduled when no mailbox import runs and the workspace has a future wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
-    const nextWakeAt = "2026-04-27T00:05:00.000Z";
+    const nextWakeAt = "2099-04-27T00:05:00.000Z";
 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {

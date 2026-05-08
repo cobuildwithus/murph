@@ -70,7 +70,9 @@ export interface AssistantAutomationScanResult {
 
 export interface AssistantAutomationPassResult {
   cronProcessed: number
+  deferredReceiptRecoveryWakeAt?: string | null
   nextWakeAt: string | null
+  nextWakeAtWithoutDeferredReceiptRecovery?: string | null
   outboxAttempted: number
   progressed: boolean
   replies: AssistantAutoReplyScanResult

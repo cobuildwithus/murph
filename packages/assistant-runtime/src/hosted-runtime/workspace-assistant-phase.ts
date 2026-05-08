@@ -582,13 +582,11 @@ export async function runHostedWorkspaceAssistantPhase(
     ) {
       const postDelivery = await drainHostedPostCheckpointDeliveryCleanup({
         assistantDeliveryEffects: deliveryEffects,
-        baseNextWakeAt: resolveEarliestHostedWorkspaceWakeAt(
-          resolveEarliestHostedWorkspaceWakeAt(
-            assistantMetrics.nextWakeAt,
-            skippedDeviceSyncWakeAt,
-          ),
+        baseNextWakeAt: resolveHostedFastDispatchBaseNextWakeAt({
+          assistantMetrics,
+          skippedDeviceSyncWakeAt,
           systemMailboxWakeAt,
-        ),
+        }),
         checkpointReason: "outbox_receipt",
         input,
         providerCleanupCheckpoint,
@@ -1384,7 +1382,11 @@ function hostedAssistantWakeStateProgressed(input: {
     );
   }
 
-  return consumedScheduledWorkspaceWake(input.input) && input.nextWakeAt === null;
+  if (!consumedScheduledWorkspaceWake(input.input)) {
+    return false;
+  }
+
+  return input.nextWakeAt !== (input.input.workspace?.nextWakeAt ?? null);
 }
 
 function resolveHostedWorkspaceDeviceConnectProviders(
@@ -1620,6 +1622,24 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
     && input.deliveryEffects.length > 0
     && input.deliveryEffects.every((effect) => effect.payload.transportIdempotent === true)
     && (input.assistantMetrics.postCheckpointRecord ?? null) === null
+  );
+}
+
+function resolveHostedFastDispatchBaseNextWakeAt(input: {
+  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+  skippedDeviceSyncWakeAt: string | null;
+  systemMailboxWakeAt: string | null;
+}): string | null {
+  const assistantWakeAt =
+    input.assistantMetrics.assistantAutomationDeferredReceiptRecoveryWakeAt
+      ? input.assistantMetrics.assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery ?? null
+      : input.assistantMetrics.nextWakeAt;
+  return resolveEarliestHostedWorkspaceWakeAt(
+    resolveEarliestHostedWorkspaceWakeAt(
+      assistantWakeAt,
+      input.skippedDeviceSyncWakeAt,
+    ),
+    input.systemMailboxWakeAt,
   );
 }
 
