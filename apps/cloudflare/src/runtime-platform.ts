@@ -565,7 +565,10 @@ async function createHostedBrowserVaultReplicaWriteHeaders(input: {
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): Promise<Headers> {
   if (input.workspaceCheckpointBridge) {
-    return await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge);
+    return await requireHostedRuntimeActiveLeaseHeaders(
+      input.workspaceCheckpointBridge,
+      "Browser-vault replica write",
+    );
   }
 
   if (input.dashboardReplicaSourceStateHash) {
@@ -580,7 +583,7 @@ async function createHostedBrowserVaultReplicaWriteHeaders(input: {
     return new Headers();
   }
 
-  return new Headers();
+  throw new Error("Browser-vault replica write requires active lease or refresh authority.");
 }
 
 function createCloudflareRuntimeLivenessPort(input: {

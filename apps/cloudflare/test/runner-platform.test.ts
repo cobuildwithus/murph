@@ -1395,6 +1395,73 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(request.json()).resolves.toEqual({ replica });
   });
 
+  it("writes explicit browser-vault refresh replicas without lease or source headers", async () => {
+    const sourceBundleHash = "d".repeat(64);
+    const replica = {
+      generatedAt: "2026-04-26T00:00:00.000Z",
+      schema: "murph.browser-vault-replica",
+      source: {
+        dataVersion: "runner-platform-live-refresh-test",
+        sourceBundleHash,
+      },
+    };
+    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      browserVaultRefreshAuthority: true,
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: null,
+    });
+
+    const result = await platform.browserVaultReplicaPort!.write({ replica });
+
+    expect(result).toEqual(replicaRef);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault replica write");
+    expect(request.url).toBe("http://browser-vault.worker/replicas");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect(request.headers.get(RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER)).toBeNull();
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBeNull();
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBeNull();
+    await expect(request.json()).resolves.toEqual({ replica });
+  });
+
+  it("rejects browser-vault replica writes when the workspace bridge has no active lease", async () => {
+    const sourceBundleHash = "e".repeat(64);
+    const replica = {
+      generatedAt: "2026-04-26T00:00:00.000Z",
+      schema: "murph.browser-vault-replica",
+      source: {
+        dataVersion: "runner-platform-no-lease-test",
+        sourceBundleHash,
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(null, { status: 500 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => null,
+      },
+    });
+
+    await expect(
+      platform.browserVaultReplicaPort!.write({ replica }),
+    ).rejects.toThrow(
+      "Browser-vault replica write requires an active hosted runtime invocation lease.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("deduplicates successful artifact uploads by SHA within one platform instance", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
