@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  clearHostedBrowserVaultWarmSourceStateHash,
   type HostedAssistantWorkspaceRuntimeJobResult,
 } from "@murphai/assistant-runtime";
 import {
@@ -59,6 +60,9 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
   const warmRoot = await resolveHostedRunnerWarmLauncherRoot(input.job);
+  await clearHostedBrowserVaultWarmSourceStateHash({
+    vaultRoot: resolveHostedRunnerWarmWorkspaceVaultRoot(input.job.request.userId),
+  });
 
   if (options?.signal?.aborted) {
     throw options.signal.reason ?? new Error("Hosted runner job aborted before child launch.");
@@ -175,21 +179,29 @@ function resolveNodeRunnerChildEntry(): string {
 async function resolveHostedRunnerWarmLauncherRoot(
   job: HostedExecutionWorkspaceInvocationJobInput,
 ): Promise<string> {
-  const workspaceId = createHostedRunnerWarmWorkspaceId(job.request.userId);
+  const root = resolveHostedRunnerWarmLauncherRootPath(job.request.userId);
+  const workspaceId = path.basename(root);
   const cached = hostedRunnerWarmLauncherRoots.get(workspaceId);
   if (cached) {
     await mkdir(cached, { mode: 0o700, recursive: true });
     return cached;
   }
 
-  const root = path.join(
-    tmpdir(),
-    HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY,
-    workspaceId,
-  );
   await mkdir(root, { mode: 0o700, recursive: true });
   hostedRunnerWarmLauncherRoots.set(workspaceId, root);
   return root;
+}
+
+export function resolveHostedRunnerWarmWorkspaceVaultRoot(userId: string): string {
+  return path.join(resolveHostedRunnerWarmLauncherRootPath(userId), "vault");
+}
+
+function resolveHostedRunnerWarmLauncherRootPath(userId: string): string {
+  return path.join(
+    tmpdir(),
+    HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY,
+    createHostedRunnerWarmWorkspaceId(userId),
+  );
 }
 
 function createHostedRunnerWarmWorkspaceId(userId: string): string {
