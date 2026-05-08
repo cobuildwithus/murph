@@ -29,7 +29,7 @@ import type {
 } from './service-contracts.js'
 import {
   finalizeAssistantTurnFromDeliveryOutcome,
-  resolveHostedAssistantDeliveryTransportIdempotentOverride,
+  resolveAssistantHostedDeliveryIdempotency,
 } from './delivery-service.js'
 import {
   hasAssistantSeenFirstContact,
@@ -101,6 +101,7 @@ export interface AssistantNotificationInput
       | 'deliverySubject'
       | 'deliveryTarget'
       | 'executionContext'
+      | 'hostedDeliveryIdempotency'
       | 'onProviderEvent'
       | 'onTraceEvent'
       | 'operatorAuthority'
@@ -517,6 +518,7 @@ function buildAssistantNotificationMessageInput(
     deliverySubject: input.deliverySubject ?? null,
     deliveryTarget: input.deliveryTarget ?? null,
     executionContext: input.executionContext,
+    hostedDeliveryIdempotency: input.hostedDeliveryIdempotency ?? null,
     identityId: input.identityId,
     includeEarlySessionOnboarding: false,
     maxSessionAgeMs: input.maxSessionAgeMs,
@@ -565,19 +567,20 @@ async function deliverAssistantNotificationMessage(input: {
     inputDeliverySubject: input.input.deliverySubject ?? null,
   })
   const deliveryChannel = audience.channel ?? input.session.binding.channel
-  const deliveryIdempotencyKey = input.input.deliveryIdempotencyKey ?? null
+  const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+    audience,
+    channel: deliveryChannel,
+    input: input.input,
+    session: input.session,
+  })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
     message: input.message,
     dedupeToken: input.dedupeToken,
-    deliveryIdempotencyKey,
+    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliverySource: input.input.deliverySource ?? null,
-    deliveryTransportIdempotent: resolveHostedAssistantDeliveryTransportIdempotentOverride({
-      channel: deliveryChannel,
-      deliveryIdempotencyKey,
-      executionContext: input.input.executionContext,
-    }),
+    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     channel: deliveryChannel,
     identityId: audience.identityId ?? input.session.binding.identityId,
     actorId: audience.actorId ?? input.session.binding.actorId,

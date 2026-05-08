@@ -332,6 +332,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     forceQueueOnlyAssistantNotification: true,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
+    sourceMailboxItemId: input.pendingItem.itemId,
     vaultRoot: input.vaultRoot,
     wake: input.pendingItem.wake,
   });

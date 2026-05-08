@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionRedactedLogEntry,
@@ -242,6 +244,7 @@ export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification?: boolean;
+  sourceMailboxItemId?: string | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -270,6 +273,7 @@ export async function executeHostedMailboxEvent(input: {
     executionContext: bootstrappedExecutionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     runtime: input.runtime,
+    sourceMailboxItemId: input.sourceMailboxItemId ?? null,
     vaultRoot: input.vaultRoot,
   });
 
@@ -291,6 +295,7 @@ async function handleHostedMailboxEvent(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
+  sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
@@ -302,6 +307,7 @@ async function handleHostedMailboxEvent(input: {
     executionContext: input.executionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     runtime: input.runtime,
+    sourceMailboxItemId: input.sourceMailboxItemId,
     vaultRoot: input.vaultRoot,
   });
 }
@@ -314,6 +320,7 @@ async function executeHostedSystemWake(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
   >;
+  sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.kind) {
@@ -332,6 +339,7 @@ async function executeHostedSystemWake(input: {
         wake: input.wake,
         executionContext: input.executionContext,
         forceQueueOnly: input.forceQueueOnlyAssistantNotification,
+        sourceMailboxItemId: input.sourceMailboxItemId,
         vaultRoot: input.vaultRoot,
       });
     case "device-sync.wake":
@@ -361,6 +369,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnly?: boolean;
+  sourceMailboxItemId?: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
@@ -378,6 +387,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         input.executionContext,
         input.forceQueueOnly === true,
         input.vaultRoot,
+        input.sourceMailboxItemId ?? null,
         (entry) => {
           redactedLogEntries.push(entry);
         },
@@ -1267,6 +1277,7 @@ function buildAssistantNotificationInput(
   executionContext: AssistantExecutionContext,
   forceQueueOnly: boolean,
   vault: string,
+  sourceMailboxItemId: string | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
 ): Parameters<typeof sendAssistantNotification>[0] {
   const route = wake.notification.route;
@@ -1282,6 +1293,27 @@ function buildAssistantNotificationInput(
       ? "queue-only"
       : wake.notification.deliveryDispatchMode ?? undefined,
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: "assistant-notification:1",
+      conversationId: hashHostedAssistantNotificationDeliveryKeyParts([
+        route.channel,
+        route.identityId,
+        route.actorId,
+        route.threadId,
+        route.threadIsDirect,
+      ]),
+      inboundMailboxItemIds: [
+        sourceMailboxItemId ?? wake.eventId,
+      ],
+      recipientKey: hashHostedAssistantNotificationDeliveryKeyParts([
+        route.channel,
+        delivery.kind,
+        delivery.target,
+        route.identityId,
+        route.actorId,
+        route.threadId,
+      ]),
+    },
     deliveryKind: delivery.kind === "explicit" ? null : delivery.kind,
     deliverySource: delivery.source ?? null,
     deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
@@ -1317,4 +1349,14 @@ function buildAssistantNotificationInput(
     turnTrigger: "automation-cron",
     vault,
   };
+}
+
+function hashHostedAssistantNotificationDeliveryKeyParts(
+  parts: readonly (boolean | null | string | undefined)[],
+): string {
+  return `sha256:${createHash("sha256")
+    .update("murph.hosted-notification-delivery-key.v1")
+    .update("\0")
+    .update(JSON.stringify(parts.map((part) => part ?? null)))
+    .digest("hex")}`;
 }

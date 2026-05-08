@@ -347,7 +347,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   expect(JSON.stringify(rawEvent)).not.toContain(initialSession.sessionId)
 })
 
-test('sendAssistantNotificationLocal marks hosted Linq delivery with deterministic keys idempotent', async () => {
+test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {
   const linqSession = createAssistantSession({
     binding: {
       actorId: 'actor-linq',
@@ -480,12 +480,17 @@ test('sendAssistantNotificationLocal marks hosted Linq delivery with determinist
   )
 
   await sendAssistantNotificationLocal({
-    deliveryIdempotencyKey: 'sha256:hosted-linq-notification',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
         userEnvKeys: [],
       },
+    },
+    hostedDeliveryIdempotency: {
+      assistantTurnOrdinal: 'assistant-notification:1',
+      conversationId: 'notification-conversation',
+      inboundMailboxItemIds: ['mailbox_item_notification'],
+      recipientKey: 'notification-recipient',
     },
     instructions: 'Deliver this hosted notification.',
     vault: '/vaults/test',
@@ -494,7 +499,7 @@ test('sendAssistantNotificationLocal marks hosted Linq delivery with determinist
   expect(deliverMessage).toHaveBeenCalledWith(
     expect.objectContaining({
       channel: 'linq',
-      deliveryIdempotencyKey: 'sha256:hosted-linq-notification',
+      deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       deliveryTransportIdempotent: true,
     }),
   )

@@ -897,12 +897,15 @@ describe("assistant delivery orchestration seam", () => {
     await deliverAssistantReply({
       input: {
         deliverResponse: true,
-        deliveryIdempotencyKey: "sha256:hosted-email",
         executionContext: {
           hosted: {
             memberId: "member-hosted",
             userEnvKeys: [],
           },
+        },
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-reply:1",
+          inboundMailboxItemIds: ["mailbox_item_email"],
         },
         prompt: "hello",
         vault: "/vault",
@@ -916,7 +919,7 @@ describe("assistant delivery orchestration seam", () => {
     expect(runtimeState.outbox.deliverMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({
         channel: "email",
-        deliveryIdempotencyKey: "sha256:hosted-email",
+        deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
         deliveryTransportIdempotent: false,
       }),
     );
@@ -975,16 +978,16 @@ describe("assistant delivery orchestration seam", () => {
     runtimeState.outbox.deliverMessage.mockResolvedValue({
       delivery: {
         channel: "linq",
-        idempotencyKey: null,
+        idempotencyKey: "sha256:derived-hosted-linq",
         messageLength: 10,
-        providerMessageId: "provider-linq-no-key",
+        providerMessageId: "provider-linq-derived-key",
         providerThreadId: null,
         sentAt: "2026-04-08T11:02:00.000Z",
         target: "linq-thread",
         targetKind: "thread",
       },
       intent: {
-        intentId: "intent-linq-no-key",
+        intentId: "intent-linq-derived-key",
       },
       kind: "sent",
       session: null,
@@ -998,6 +1001,10 @@ describe("assistant delivery orchestration seam", () => {
             memberId: "member-hosted",
             userEnvKeys: [],
           },
+        },
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-reply:1",
+          inboundMailboxItemIds: ["mailbox_item_123"],
         },
         prompt: "hello",
         vault: "/vault",
@@ -1017,10 +1024,108 @@ describe("assistant delivery orchestration seam", () => {
     expect(runtimeState.outbox.deliverMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({
         channel: "linq",
-        deliveryIdempotencyKey: null,
-        deliveryTransportIdempotent: false,
+        deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        deliveryTransportIdempotent: true,
       }),
     );
+    const firstDerivedLinqKey = runtimeState.outbox.deliverMessage.mock.lastCall?.[0]
+      .deliveryIdempotencyKey;
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        executionContext: {
+          hosted: {
+            memberId: "member-hosted",
+            userEnvKeys: [],
+          },
+        },
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-reply:1",
+          inboundMailboxItemIds: ["mailbox_item_123"],
+        },
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "reply body",
+      session: {
+        ...session,
+        binding: {
+          ...session.binding,
+          channel: "linq",
+        },
+      },
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-hosted-linq-no-key-retry",
+    });
+
+    expect(runtimeState.outbox.deliverMessage.mock.lastCall?.[0])
+      .toEqual(expect.objectContaining({
+        deliveryIdempotencyKey: firstDerivedLinqKey,
+      }));
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          executionContext: {
+            hosted: {
+              memberId: "member-hosted",
+              userEnvKeys: [],
+            },
+          },
+          prompt: "hello",
+          vault: "/vault",
+        },
+        response: "reply body",
+        session: {
+          ...session,
+          binding: {
+            ...session.binding,
+            channel: "linq",
+          },
+        },
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-hosted-linq-missing-key",
+      })
+    ).rejects.toThrow("Hosted outbound delivery requires a deterministic idempotency key.");
+  });
+
+  it("fails closed for hosted email deliveries without a deterministic key", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "email",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+
+    await expect(
+      deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          executionContext: {
+            hosted: {
+              memberId: "member-hosted",
+              userEnvKeys: [],
+            },
+          },
+          prompt: "hello",
+          vault: "/vault",
+        },
+        response: "reply body",
+        session,
+        sharedPlan: createSharedPlan(),
+        turnId: "turn-hosted-email-missing-key",
+      })
+    ).rejects.toThrow("Hosted outbound delivery requires a deterministic idempotency key.");
   });
 
   it("passes outbound delivery text through unchanged for user-facing channels", async () => {

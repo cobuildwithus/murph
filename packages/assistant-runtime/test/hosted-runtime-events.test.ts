@@ -614,6 +614,12 @@ describe("executeHostedMailboxEvent", () => {
       firstContactPolicy: {
         markSeenOnDeliveryAccepted: true,
       },
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: "assistant-notification:1",
+        conversationId: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        inboundMailboxItemIds: ["evt_notification"],
+        recipientKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      },
       identityId: "hid_linq_identity_123",
       instructions: "Send exactly the signup welcome.",
       onTraceEvent: expect.any(Function),
@@ -849,6 +855,12 @@ describe("executeHostedMailboxEvent", () => {
       deliveryTarget: null,
       executionContext: hydratedExecutionContext,
       firstContactPolicy: null,
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: "assistant-notification:1",
+        conversationId: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        inboundMailboxItemIds: ["evt_notification_rehydrate"],
+        recipientKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      },
       identityId: "hid_linq_identity_123",
       instructions: "Send exactly the signup welcome.",
       onTraceEvent: expect.any(Function),
@@ -1079,6 +1091,12 @@ describe("executeHostedMailboxEvent", () => {
       deliveryTarget: null,
       executionContext,
       firstContactPolicy: null,
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: "assistant-notification:1",
+        conversationId: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        inboundMailboxItemIds: ["evt_notification_materialize_linq_home"],
+        recipientKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      },
       identityId: "hid_linq_identity_participant",
       instructions: "Send exactly the signup welcome.",
       onTraceEvent: expect.any(Function),

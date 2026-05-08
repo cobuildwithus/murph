@@ -67,6 +67,13 @@ export interface AssistantSessionResolutionFields {
   vault: string
 }
 
+export interface AssistantHostedDeliveryIdempotencyContext {
+  assistantTurnOrdinal: number | string
+  conversationId?: string | null
+  inboundMailboxItemIds?: readonly string[] | null
+  recipientKey?: string | null
+}
+
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
   acceptedTurnInput?: {
@@ -84,6 +91,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliveryTarget?: string | null
   executionContext?: AssistantExecutionContext | null
   expectedActiveTurnId?: string | null
+  hostedDeliveryIdempotency?: AssistantHostedDeliveryIdempotencyContext | null
   includeEarlySessionOnboarding?: boolean
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
