@@ -689,7 +689,7 @@ export class HostedUserRunner {
       preflightWorkspaceRead = idlePreflight.workspaceRead;
     }
 
-    const gate = input.reason === "nudge" || input.reason === "idle_shutdown_checkpoint"
+    const gate = input.reason === "idle_shutdown_checkpoint"
       ? createAllowedHostedAiUsageGateDecision()
       : await this.readHostedAiUsageGateBeforeInvocation({
           notifyUserOnDenied: initialRecord.pendingNudge,

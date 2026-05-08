@@ -1716,7 +1716,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("skips the duplicate web AI usage gate for pending nudge invocations", async () => {
+  it("does not begin a nudge container invocation when the web AI usage gate denies the start", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
     const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
       usageGateResponse: {
         allowed: false,
@@ -1732,16 +1734,25 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     );
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
-      status: "idle",
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
+      nextWakeAt: "2026-05-01T00:00:00.000Z",
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateNotice: "Limit reached.",
+        aiUsageGateNoticeCode: "pulse_upgrade_edge",
+        aiUsageGateReason: "ai_usage_limit_exceeded",
+        aiUsageGateRetryAfter: "2026-05-01T00:00:00.000Z",
+      },
+      status: "scheduled",
     });
 
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(
-      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
-        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
-      ),
-    ).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+    const usageGateCall = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .find(([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH);
+    expect(usageGateCall).toBeDefined();
+    expect(JSON.parse(String(usageGateCall?.[0].body))).toEqual({
+      deniedNoticeContext: "pending_nudge",
+    });
   });
 
   it("refreshes the cached runtime crypto context after the web TTL expires", async () => {
