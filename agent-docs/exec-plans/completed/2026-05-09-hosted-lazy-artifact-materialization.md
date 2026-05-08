@@ -36,8 +36,8 @@ Key decisions:
 - Feed materialized paths into idle/full snapshot creation so deleted materialized artifacts are not resurrected from preserved artifact refs.
 
 State:
-- Planning.
-- Five xhigh static review probes completed. No repo files were edited by those probes and no tests were run during review.
+- Implemented and verified with focused runtime coverage.
+- Five xhigh static review probes completed before implementation. No repo files were edited by those probes and no tests were run during review.
 
 Done:
 - Confirmed the current foreground shape still restores workspace before mailbox import.
@@ -46,23 +46,22 @@ Done:
 - Identified existing runtime-state support for filtered artifact materialization and snapshot `materializedArtifactPaths`.
 - Identified the Cloudflare idle/full snapshot gap: full snapshot creation must receive materialized paths or lazy materialization can preserve stale artifact refs after deletion.
 - Identified tests that currently encode the old behavior and should be inverted into latency/order assertions.
+- Extended runtime-state restore helpers to report exact materialized `root:path` keys and to materialize targeted inline or externalized bundle files.
+- Narrowed hosted foreground restore so broad historical raw/derived inbox and assistant-input content is skipped until exact readers request it.
+- Threaded a restore-scoped materializer through hosted runtime, workspace runner, assistant execution context, prompt building, attachment evidence, and inbox attachment raw-ref materialization.
+- Added snapshot-side materialized path tracking so deleted materialized lazy artifacts are not resurrected from preserved refs during idle/full snapshot compaction.
+- Added focused tests for deferred foreground artifact fetch, targeted materializer missing/restored paths, corrupt targeted artifacts, and Cloudflare preserved-ref exclusion after materialization.
 
 Now:
-- Treat this file as the implementation plan for the lazy artifact materialization direction.
-- Do not start implementation until overlapping hosted runtime sidecar/restore work is resolved or explicitly folded into this plan.
+- Close and archive this plan.
 
 Next:
-- Register implementation in the coordination ledger if/when code work begins.
-- Implement the runtime-state materializer result type.
-- Narrow hosted workspace restore filters.
-- Thread a restore-scoped materializer through hosted runtime and assistant phase input.
-- Add targeted materializer calls at known artifact readers.
-- Persist or otherwise bridge materialized path tracking into idle/full snapshot creation.
-- Rewrite eager-restore tests into ordering and count assertions.
+- Root `pnpm test` remains blocked by an unrelated `packages/contracts` scheduled-log error-message assertion.
+- Full `apps/cloudflare test:node` remains blocked by unrelated hosted deploy/bundle work already present in the checkout; focused bridge coverage for this plan passes.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: whether materialized path tracking should be persisted in a small assistant runtime state file or carried through an existing bridge-visible snapshot context. The implementation must choose the lowest-complexity option that remains correct across process restart before idle shutdown.
-- UNCONFIRMED: the exact injection seam into assistant-engine attachment readers. Prefer an option/context callback over importing hosted-runtime concepts into assistant-engine.
+- Resolved: materialized path tracking is persisted in a small local assistant runtime state file that is excluded from hosted snapshots, then read by the Cloudflare bridge during idle/full snapshot creation.
+- Resolved: assistant-engine receives the materializer through `AssistantExecutionContext.hosted`; engine code does not import hosted-runtime concepts.
 - UNCONFIRMED: whether a narrow foreground correctness checkpoint should be restored before or after this plan. This is a separate risk from artifact hydration, but it affects crash/restart semantics for mailbox/outbox/terminal evidence.
 
 Working set (files/ids/commands):
@@ -289,3 +288,6 @@ pnpm --dir packages/runtime-state test:coverage
 pnpm --dir apps/cloudflare verify
 pnpm verify:acceptance
 ```
+Status: completed
+Updated: 2026-05-09
+Completed: 2026-05-09
