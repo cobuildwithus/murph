@@ -944,36 +944,11 @@ function mergeDeferredPostCheckpointWake(input: {
     return;
   }
 
-  const nextWakeAt = earliestHostedWorkspaceRunnerWakeAt(
-    Object.hasOwn(input.assistantPhaseResult, "nextWakeAt")
-      ? input.assistantPhaseResult.nextWakeAt ?? null
-      : null,
-    input.postCheckpoint.nextWakeAt ?? null,
-  );
-  if (nextWakeAt !== null) {
-    input.assistantPhaseResult.nextWakeAt = nextWakeAt;
+  if (!Object.hasOwn(input.postCheckpoint, "nextWakeAt")) {
+    return;
   }
-}
 
-function earliestHostedWorkspaceRunnerWakeAt(
-  left: string | null,
-  right: string | null,
-): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs)) {
-    return right;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return left;
-  }
-  return rightMs < leftMs ? right : left;
+  input.assistantPhaseResult.nextWakeAt = input.postCheckpoint.nextWakeAt ?? null;
 }
 
 async function writeHostedForegroundCheckpointDeferredLog(input: {
