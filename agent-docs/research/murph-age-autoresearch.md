@@ -200,6 +200,8 @@ R182 added an access-signal check for MIDUS and CRELES. Both look promising from
 
 R183 refined the first external-source target. MIDUS should pivot from a loose MIDUS 3 biomarker-first idea to the tighter MIDUS Refresher Biomarker plus MIDUS Refresher mortality candidate, because the Refresher biomarker file aligns better with the Refresher mortality lineage. CRELES remains the strongest older non-US transport-stress candidate. Neither source is green for row download, feature crosswalk, row join, metric computation, or external validation scoring until repository terms, account/download requirements, row-cache permission, aggregate-export permission, file joinability, and endpoint/denominator policy are green.
 
+R184 added the external-source activation checklist. MIDUS Refresher and CRELES each require six green labels before advancing: repository terms, account/download requirement, row-cache permission, aggregate-export permission, biomarker-mortality joinability, and endpoint/denominator/censoring policy. Even when all six are green, the only unlocked step is a variable-name/endpoint-label crosswalk; external scoring still requires a separate execution gate after the crosswalk.
+
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
