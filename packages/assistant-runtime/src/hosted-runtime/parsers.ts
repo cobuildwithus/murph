@@ -265,6 +265,12 @@ function parseHostedAssistantRuntimeChannelCapabilities(
       record.telegramBotConfigured,
       `${label}.telegramBotConfigured`,
     ),
+    whatsappCloudApiConfigured: record.whatsappCloudApiConfigured === undefined
+      ? false
+      : requireBoolean(
+          record.whatsappCloudApiConfigured,
+          `${label}.whatsappCloudApiConfigured`,
+        ),
   };
 }
 

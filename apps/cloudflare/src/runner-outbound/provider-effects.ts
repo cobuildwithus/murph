@@ -7,6 +7,7 @@ import {
   sendHostedProviderLinqMessage,
   sendHostedProviderTelegramChatAction,
   sendHostedProviderTelegramMessage,
+  sendHostedProviderWhatsAppMessage,
   type HostedProviderEffectDependencies,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
 
@@ -20,6 +21,7 @@ import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
   parseHostedRunnerLinqChatActionRequest,
   parseHostedRunnerLinqDeleteMessagesRequest,
   parseHostedRunnerLinqMarkReadRequest,
@@ -28,6 +30,7 @@ import {
   parseHostedRunnerTelegramDownloadFileRequest,
   parseHostedRunnerTelegramGetFileRequest,
   parseHostedRunnerTelegramSendRequest,
+  parseHostedRunnerWhatsAppSendRequest,
   type HostedRunnerProviderEffectErrorResponse,
 } from "../runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
@@ -169,6 +172,11 @@ async function dispatchRunnerProviderEffectsRequest(input: {
         }),
       );
       return json({ ok: true });
+    case HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH:
+      return json(await sendHostedProviderWhatsAppMessage(
+        parseHostedRunnerWhatsAppSendRequest(input.body),
+        dependencies,
+      ));
     default:
       return jsonError("Not found", 404);
   }
@@ -283,6 +291,8 @@ function sanitizeProviderEffectContext(
   const cleanupTargetAliases = readStringArray(context.cleanupTargetAliases);
   const providerMessageIds = readStringArray(context.providerMessageIds);
   const originalFailure = readOptionalString(context.originalFailure);
+  const operation = readOptionalString(context.operation);
+  const provider = readOptionalString(context.provider);
   const rollbackFailure = readOptionalString(context.rollbackFailure);
   const target = readOptionalString(context.target);
 
@@ -298,13 +308,42 @@ function sanitizeProviderEffectContext(
   if (providerMessageIds) {
     sanitized.providerMessageIds = providerMessageIds;
   }
+  if (provider) {
+    sanitized.provider = provider;
+  }
+  if (operation) {
+    sanitized.operation = operation;
+  }
   if (rollbackFailure) {
     sanitized.rollbackFailure = rollbackFailure;
   }
   if (target) {
     sanitized.target = target;
   }
+  copySafeProviderEffectContextScalar(sanitized, context, "errorCode");
+  copySafeProviderEffectContextScalar(sanitized, context, "errorSubcode");
+  copySafeProviderEffectContextScalar(sanitized, context, "errorType");
+  copySafeProviderEffectContextScalar(sanitized, context, "failureStage");
+  copySafeProviderEffectContextScalar(sanitized, context, "retryable");
+  copySafeProviderEffectContextScalar(sanitized, context, "status");
+  copySafeProviderEffectContextScalar(sanitized, context, "timedOut");
   return sanitized;
+}
+
+function copySafeProviderEffectContextScalar(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string,
+): void {
+  const value = source[key];
+  if (
+    typeof value === "boolean"
+    || typeof value === "number"
+    || typeof value === "string"
+    || value === null
+  ) {
+    target[key] = value;
+  }
 }
 
 function readCleanupMessages(value: unknown) {

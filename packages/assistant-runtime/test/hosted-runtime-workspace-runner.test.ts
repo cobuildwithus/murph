@@ -3046,6 +3046,7 @@ function createConversationRuntime(): Pick<
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
+        whatsappCloudApiConfigured: false,
       },
       deviceSync: null,
       managedAutoReplyChannels: [

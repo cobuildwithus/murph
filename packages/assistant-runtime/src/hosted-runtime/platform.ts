@@ -130,6 +130,20 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
+export interface HostedRuntimeWhatsAppSendRequest {
+  message: string;
+  replyToMessageId?: string | null;
+  target: string;
+}
+
+export interface HostedRuntimeWhatsAppSendResponse {
+  providerMessageId?: string | null;
+  providerMessageIds?: string[] | null;
+  providerThreadId?: string | null;
+  target?: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
 export interface HostedRuntimeLinqChatActionRequest {
   action: "typing" | "typing_stop";
   target: string;
@@ -176,6 +190,9 @@ type HostedRuntimeEffectsPortBase = {
   sendTelegramChatAction?(
     request: HostedRuntimeTelegramChatActionRequest,
   ): Promise<void>;
+  sendWhatsApp?(
+    request: HostedRuntimeWhatsAppSendRequest,
+  ): Promise<HostedRuntimeWhatsAppSendResponse | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
   ): Promise<HostedAssistantDeliveryRecord>;

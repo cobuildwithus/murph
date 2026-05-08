@@ -146,12 +146,9 @@ hosted phone identities. Normal text messages are appended to the hosted mailbox
 only after the member has active access and current `feature.whatsapp-messaging`
 consent; inbound `START` grants that consent and inbound `STOP` revokes it.
 
-Required once WhatsApp outbound delivery is enabled:
-
-- `WHATSAPP_ACCESS_TOKEN`
-- `WHATSAPP_PHONE_NUMBER_ID`
-- `WHATSAPP_WABA_ID`
-- `WHATSAPP_GRAPH_VERSION`
+WhatsApp outbound replies are sent by the Cloudflare hosted runner provider
+effect. Configure those Cloud API delivery credentials on `apps/cloudflare`;
+keep this web surface to ingress verification secrets only.
 
 Optional but recommended:
 

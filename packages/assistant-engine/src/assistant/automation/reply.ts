@@ -2109,7 +2109,10 @@ function replyTargetUsesThreadAsExplicitDeliveryTarget(
   replyTarget: AssistantInputCandidate['event']['replyTarget'],
 ): boolean {
   const channel = normalizeNullableString(replyTarget?.channel)
-  return channel === 'linq' || channel === 'telegram' || channel === 'email'
+  return channel === 'linq'
+    || channel === 'telegram'
+    || channel === 'email'
+    || channel === 'whatsapp'
 }
 
 function autoReplyInputCandidatesFromContext(

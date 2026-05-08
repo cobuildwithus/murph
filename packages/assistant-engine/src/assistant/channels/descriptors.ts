@@ -13,6 +13,10 @@ import {
 import {
   resolveTelegramBotToken,
 } from '@murphai/operator-config/telegram-runtime'
+import {
+  resolveWhatsAppAccessToken,
+  resolveWhatsAppPhoneNumberId,
+} from '@murphai/operator-config/whatsapp-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
@@ -22,12 +26,14 @@ import {
   readDeliveredProviderMessageIds,
   readDeliveredProviderThreadId,
   readDeliveredTarget,
+  readDeliveredTargetKind,
 } from './helpers.js'
 import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry-policy.js'
 import {
   sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  sendWhatsAppMessage,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from './runtime.js'
@@ -221,6 +227,47 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   },
 })
 
+const WHATSAPP_CHANNEL_ADAPTER = createAssistantChannelAdapter({
+  channel: 'whatsapp',
+  canAutoReply(eligibility) {
+    return eligibility.threadIsDirect === true
+      ? null
+      : 'WhatsApp auto-reply only runs for direct chats'
+  },
+  isReadyForSetup(env) {
+    return resolveWhatsAppAccessToken(env) !== null
+      && resolveWhatsAppPhoneNumberId(env) !== null
+  },
+  supportsIdempotencyKey: false,
+  targetRequiredMessage:
+    'WhatsApp delivery requires an explicit wa_id or a stored delivery binding.',
+  async sendMessage({ candidate, dependencies, message, replyToMessageId }) {
+    const delivered = dependencies.sendWhatsApp
+      ? await dependencies.sendWhatsApp({
+          message,
+          replyToMessageId: replyToMessageId ?? null,
+          signal: dependencies.signal,
+          target: candidate.target,
+        })
+      : await sendWhatsAppMessage(
+          {
+            message,
+            replyToMessageId: replyToMessageId ?? null,
+            target: candidate.target,
+          },
+          { signal: dependencies.signal },
+        )
+
+    return {
+      target: readDeliveredTarget(delivered) ?? candidate.target,
+      targetKind: readDeliveredTargetKind(delivered) ?? candidate.kind,
+      providerMessageId: readDeliveredProviderMessageId(delivered),
+      providerMessageIds: readDeliveredProviderMessageIds(delivered),
+      providerThreadId: readDeliveredProviderThreadId(delivered),
+    }
+  },
+})
+
 export const ASSISTANT_CHANNEL_ADAPTERS: Readonly<Record<
   AssistantChannelName,
   AssistantChannelAdapter
@@ -228,6 +275,7 @@ export const ASSISTANT_CHANNEL_ADAPTERS: Readonly<Record<
   telegram: TELEGRAM_CHANNEL_ADAPTER,
   linq: LINQ_CHANNEL_ADAPTER,
   email: EMAIL_CHANNEL_ADAPTER,
+  whatsapp: WHATSAPP_CHANNEL_ADAPTER,
 })
 
 async function maybeRecoverMissingLinqDirectThread(input: {

@@ -103,10 +103,14 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "PWD",
   // The hosted Telegram token and base URLs are platform-owned. Letting
   // member-controlled runner secrets override them can redirect privileged
-  // Bot API traffic to arbitrary endpoints.
+  // provider API traffic to arbitrary endpoints.
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_API_BASE_URL",
+  "WHATSAPP_GRAPH_VERSION",
+  "WHATSAPP_PHONE_NUMBER_ID",
   "VAULT",
 ]);
 
@@ -190,6 +194,7 @@ const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
   "LINQ_API_BASE_URL",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_FILE_BASE_URL",
+  "WHATSAPP_API_BASE_URL",
 ]);
 
 export function rewriteHostedRunnerLoopbackUrlForContainer(

@@ -2,6 +2,8 @@
 // and must not enter user-executable hosted runtime env.
 export const HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES = [
   "LINQ_WEBHOOK_SECRET",
+  "WHATSAPP_APP_SECRET",
+  "WHATSAPP_VERIFY_TOKEN",
 ] as const;
 
 export const HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES = [
@@ -22,6 +24,10 @@ export const HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES = [
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_API_BASE_URL",
+  "WHATSAPP_GRAPH_VERSION",
+  "WHATSAPP_PHONE_NUMBER_ID",
 ] as const;
 
 export const HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES = [
@@ -68,6 +74,10 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
     "TELEGRAM_API_BASE_URL",
     "TELEGRAM_BOT_USERNAME",
     "TELEGRAM_FILE_BASE_URL",
+  ],
+  whatsappConfigured: [
+    "WHATSAPP_API_BASE_URL",
+    "WHATSAPP_GRAPH_VERSION",
   ],
 } as const satisfies Record<string, readonly string[]>;
 

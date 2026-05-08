@@ -16,6 +16,7 @@ import type {
 export interface HostedAssistantRuntimeChannelCapabilities {
   emailSendReady: boolean;
   telegramBotConfigured: boolean;
+  whatsappCloudApiConfigured?: boolean;
 }
 
 export interface HostedAssistantRuntimeManagedAutoReplyChannel {

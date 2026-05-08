@@ -18,6 +18,7 @@ import {
   normalizeAssistantDeliveryError,
   sendLinqMessage,
   sendTelegramMessage,
+  sendWhatsAppMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
   shouldDispatchAssistantOutboxIntent,
@@ -37,7 +38,10 @@ import type {
 import type {
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
-import { buildHostedTelegramChannelEnv } from "./channel-activity.ts";
+import {
+  buildHostedTelegramChannelEnv,
+  buildHostedWhatsAppChannelEnv,
+} from "./channel-activity.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
@@ -281,6 +285,10 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     platformEnv: input.platformEnv,
   }) as NodeJS.ProcessEnv;
+  const whatsAppEnv = buildHostedWhatsAppChannelEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    platformEnv: input.platformEnv,
+  }) as NodeJS.ProcessEnv;
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
     assertHostedDeliveryLiveness(input.signal);
@@ -312,6 +320,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       assistantDeliveryEffect,
       signal: input.signal ?? null,
       telegramEnv,
+      whatsAppEnv,
       userId: input.wake.userId,
       vaultRoot: input.vaultRoot,
     }));
@@ -329,6 +338,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   signal: AbortSignal | null;
   telegramEnv: NodeJS.ProcessEnv;
+  whatsAppEnv: NodeJS.ProcessEnv;
   userId: string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryOutcome> {
@@ -428,6 +438,22 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 targetKind: request.targetKind ?? null,
               })
             : await sendLinqMessage(request, {
+                signal: input.signal ?? undefined,
+              });
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
+        sendWhatsApp: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          providerDispatchEntered = true;
+          const result = input.effectsPort.sendWhatsApp
+            ? await input.effectsPort.sendWhatsApp({
+                message: request.message,
+                replyToMessageId: request.replyToMessageId ?? null,
+                target: request.target,
+              })
+            : await sendWhatsAppMessage(request, {
+                env: input.whatsAppEnv,
                 signal: input.signal ?? undefined,
               });
           await assertHostedDeliveryLiveNow(input);

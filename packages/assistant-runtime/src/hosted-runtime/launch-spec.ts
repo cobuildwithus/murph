@@ -74,6 +74,7 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   // model paths are image-owned toolchain config, not forwarded runtime env.
   parsers: [],
   telegram: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured,
+  whatsapp: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.whatsappConfigured,
 } as const;
 
 export const HOSTED_RUNTIME_ENV_KEY_NAMES: readonly string[] = Array.from(
@@ -288,12 +289,17 @@ export function buildHostedRuntimeResolvedConfig(
 ): HostedAssistantRuntimeResolvedConfig {
   const emailCapabilities = readHostedEmailCapabilities(configSource);
   const deviceSync = readConfiguredDeviceSyncRuntimeConfig(configSource);
+  const telegramBotConfigured =
+    normalizeHostedRuntimeEnvString(configSource.TELEGRAM_BOT_TOKEN) !== null;
+  const whatsappCloudApiConfigured =
+    normalizeHostedRuntimeEnvString(configSource.WHATSAPP_ACCESS_TOKEN) !== null
+    && normalizeHostedRuntimeEnvString(configSource.WHATSAPP_PHONE_NUMBER_ID) !== null;
 
   return {
     channelCapabilities: {
       emailSendReady: emailCapabilities.sendReady,
-      telegramBotConfigured:
-        normalizeHostedRuntimeEnvString(configSource.TELEGRAM_BOT_TOKEN) !== null,
+      telegramBotConfigured,
+      whatsappCloudApiConfigured,
     },
     deviceSync,
     managedAutoReplyChannels: [
@@ -308,10 +314,13 @@ export function buildHostedRuntimeResolvedConfig(
         memberChannel: "linq",
       },
       {
-        capabilityReady:
-          normalizeHostedRuntimeEnvString(configSource.TELEGRAM_BOT_TOKEN) !== null,
+        capabilityReady: telegramBotConfigured,
         channel: "telegram",
         memberChannel: "telegram",
+      },
+      {
+        capabilityReady: whatsappCloudApiConfigured,
+        channel: "whatsapp",
       },
     ],
   };
