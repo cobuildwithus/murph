@@ -38,6 +38,7 @@ import {
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   mocks.decryptHostedStoragePayload.mockReset();
@@ -123,6 +124,39 @@ test("browser-vault provider refresh skips the session route when auth context i
   await waitForText(rendered.container, "empty:none");
   assert.equal(fetchMock.mock.calls.length, 0);
   assert.equal(mocks.generateHostedUserRecipientKeyPair.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider does not poll stale empty sessions without pending refresh", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    encryptedReplica: null,
+    freshness: "stale",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: false,
+    state: "empty",
+    workspaceVersion: null,
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "empty:none");
+  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25_000);
+  });
+
+  assert.equal(fetchMock.mock.calls.length, 1);
 
   await rendered.cleanup();
 });
