@@ -140,6 +140,8 @@ R159 asked three GPT-5.5 Extended Pro ReviewGPT lanes the direct validation-stra
 
 R161 materialized the R159 consensus as a local validation strategy snapshot. The validator passed with 5 validation-stack lanes, 8 source-priority entries, and 7 overfit controls. The active controls are to freeze the current NHANES Bench-0 split, avoid resplitting to chase scores, prefer train/calibration work before public-test reads, label every result as internal/same-family/true-external, prohibit NHANES-only product claims, require external validation before promotion, and keep controlled-source execution blind until source-specific gates approve more.
 
+R162 created a true-external source feasibility handoff for UK Biobank and All of Us, reconciling the older R146/R150/R152 source artifacts with the R159/R161 priority update. The validator passed with 2 target sources, 15 required label fields, all entries blocked, and no authorization for source activation, source requests, source login, downloads, agreement/codebook/dictionary inspection, row hydration, endpoint extraction, denominator construction, external scoring, model mutation, benchmark mutation, claims, or embeddings. The packet is ready for human/admin label filling only; it is not evidence of access and does not unlock external validation.
+
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
