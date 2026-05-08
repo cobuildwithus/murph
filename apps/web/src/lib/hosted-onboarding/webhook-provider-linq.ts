@@ -91,6 +91,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     summary,
   } = context;
 
+  if (isHostedLinqGroupChat(messageEvent)) {
+    return buildIgnoredLinqWebhookPlan("group-chat");
+  }
+
   if (!participantContact) {
     return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-contact");
   }
@@ -625,6 +629,10 @@ function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
     && error instanceof Error
     && error.message === "Hosted domain root envelope authority signature verification failed."
   );
+}
+
+function isHostedLinqGroupChat(messageEvent: HostedLinqMessageReceivedEvent): boolean {
+  return messageEvent.data.chat?.is_group === true;
 }
 
 function normalizeHostedLinqPartText(value: unknown): string | null {
