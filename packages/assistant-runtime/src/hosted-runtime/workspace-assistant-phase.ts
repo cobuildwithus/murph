@@ -596,11 +596,17 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
       const nextWakeAt = postDelivery.nextWakeAt ?? null;
+      const wakeStateProgressed = hostedAssistantWakeStateProgressed({
+        assistantMetrics,
+        input,
+        nextWakeAt,
+        skippedDeviceSyncWakeAt,
+      });
       const progressed = assistantMetricsProgressed({
         ...assistantMetrics,
         nextWakeAt,
       }, deliveryEffects.length)
-        || consumedScheduledWorkspaceWake(input)
+        || wakeStateProgressed
         || terminalLinqCleanupDue;
       await writeHostedAssistantAutomationDetailRuntimeLogs({
         assistantMetrics,
@@ -628,6 +634,7 @@ export async function runHostedWorkspaceAssistantPhase(
       };
       if (!phaseProgressed) {
         return {
+          ...(nextWakeAt ? { nextWakeAt } : {}),
           progressed: false,
           redactedStatus,
         };
@@ -653,11 +660,17 @@ export async function runHostedWorkspaceAssistantPhase(
       ),
       systemMailboxWakeAt,
     );
+    const wakeStateProgressed = hostedAssistantWakeStateProgressed({
+      assistantMetrics,
+      input,
+      nextWakeAt,
+      skippedDeviceSyncWakeAt,
+    });
     const progressed = assistantMetricsProgressed({
       ...assistantMetrics,
       nextWakeAt,
     }, deliveryEffects.length)
-      || consumedScheduledWorkspaceWake(input)
+      || wakeStateProgressed
       || terminalLinqCleanupDue;
     await writeHostedAssistantAutomationDetailRuntimeLogs({
       assistantMetrics,
@@ -687,6 +700,7 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     if (!phaseProgressed) {
       return {
+        ...(nextWakeAt ? { nextWakeAt } : {}),
         progressed: false,
         redactedStatus,
       };
@@ -750,9 +764,9 @@ export async function runHostedWorkspaceAssistantPhase(
               ...assistantMetrics,
               nextWakeAt,
             },
-            consumedScheduledWake: consumedScheduledWorkspaceWake(input),
             providerCleanupDue,
             terminalLinqCleanupDue,
+            wakeStateProgressed,
           }),
       nextWakeAt,
       progressed: true,
@@ -1061,6 +1075,8 @@ async function writeHostedAssistantPassRuntimeLog(input: {
         assistantAutomationElapsedMs: input.assistantMetrics.assistantAutomationElapsedMs ?? null,
         assistantAutomationPassElapsedMs:
           input.assistantMetrics.assistantAutomationPassElapsedMs ?? null,
+        assistantAutomationProgressed:
+          input.assistantMetrics.assistantAutomationProgressed ?? null,
         assistantAutomationTotalElapsedMs:
           input.assistantMetrics.assistantAutomationTotalElapsedMs ?? null,
         deliveryEffectCount: input.deliveryEffectCount,
@@ -1353,6 +1369,24 @@ function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPh
   return Number.isFinite(wakeTime) && wakeTime <= resolveHostedAssistantPhaseNowMs(input);
 }
 
+function hostedAssistantWakeStateProgressed(input: {
+  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  nextWakeAt: string | null;
+  skippedDeviceSyncWakeAt: string | null;
+}): boolean {
+  if (input.skippedDeviceSyncWakeAt !== null) {
+    const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;
+    return (
+      input.input.initialMailboxImport.importResult.importedCount > 0
+      || input.assistantMetrics.activeTurnInputIngested === true
+      || input.skippedDeviceSyncWakeAt !== existingWakeAt
+    );
+  }
+
+  return consumedScheduledWorkspaceWake(input.input) && input.nextWakeAt === null;
+}
+
 function resolveHostedWorkspaceDeviceConnectProviders(
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">,
 ): Array<{ label: string; provider: string }> {
@@ -1509,8 +1543,8 @@ function assistantMetricsProgressed(
 ): boolean {
   return (
     deliveryEffectCount > 0
+    || metrics.assistantAutomationProgressed === true
     || metrics.deviceSyncProcessed > 0
-    || metrics.nextWakeAt !== null
     || metrics.parserProcessed > 0
     || (metrics.postCheckpointRecord ?? null) !== null
   );
@@ -1520,21 +1554,21 @@ function assistantMetricsCanonicalRuntimeProgressed(
   metrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>,
 ): boolean {
   return (
-    metrics.deviceSyncProcessed > 0
-    || metrics.nextWakeAt !== null
+    metrics.assistantAutomationProgressed === true
+    || metrics.deviceSyncProcessed > 0
     || metrics.parserProcessed > 0
   );
 }
 
 function resolveHostedAssistantTimerCheckpointReason(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
-  consumedScheduledWake: boolean;
   providerCleanupDue: boolean;
   terminalLinqCleanupDue: boolean;
+  wakeStateProgressed: boolean;
 }): HostedWorkspaceCheckpointReason {
   if (
     assistantMetricsCanonicalRuntimeProgressed(input.assistantMetrics)
-    || input.consumedScheduledWake
+    || input.wakeStateProgressed
   ) {
     return "canonical_runtime_commit";
   }

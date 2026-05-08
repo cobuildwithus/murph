@@ -168,6 +168,7 @@ beforeEach(() => {
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValue({
+    assistantAutomationProgressed: false,
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
     nextWakeAt: null,
@@ -309,6 +310,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(result.progressed).toBe(true);
     expect(result.nextWakeAt).toBeNull();
+  });
+
+  it("does not checkpoint no-op alarms only because automation returned a future wake", async () => {
+    const nextWakeAt = "2026-04-27T00:01:00.000Z";
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(result).toEqual({
+      nextWakeAt,
+      progressed: false,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: nextWakeAt,
+        hostedAssistantProgressed: false,
+      }),
+    });
+    expect("checkpointReason" in result).toBe(false);
+    expect(logRequests.at(-1)?.entries[0]).toEqual(expect.objectContaining({
+      eventCode: "assistant.pass_finished",
+      redactedJson: expect.objectContaining({
+        assistantAutomationProgressed: false,
+        nextWakeAtPresent: true,
+        progressed: false,
+      }),
+    }));
   });
 
   it("preserves an existing workspace wake when active input skips device-sync work", async () => {
