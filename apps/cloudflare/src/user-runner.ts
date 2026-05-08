@@ -1613,8 +1613,8 @@ export class HostedUserRunner {
       return false;
     }
 
-    void this.runUntilIdleOrBudget({ reason: input.reason })
-      .catch(async (error) => {
+    const drive = this.runUntilIdleOrBudget({ reason: input.reason })
+      .then(() => undefined, async (error) => {
         const record = await this.tryReadStateForRetryScheduling();
         const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
           defaultRetryDelayMs: this.env.retryDelayMs,
@@ -1654,6 +1654,22 @@ export class HostedUserRunner {
           });
         }
       });
+    try {
+      this.state.waitUntil?.(drive);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          reason: input.reason,
+        },
+        error,
+        level: "warn",
+        message: "Hosted runner immediate wake drive could not be registered with Durable Object waitUntil.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+    }
+    void drive;
 
     return true;
   }

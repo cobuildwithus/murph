@@ -881,6 +881,37 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("anchors the immediate nudge drive in Durable Object waitUntil", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const waitUntil = vi.fn();
+    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+      waitUntil,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    const drive = waitUntil.mock.calls[0]?.[0];
+    expect(drive).toBeInstanceOf(Promise);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    invocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(drive).resolves.toBeUndefined();
+  });
+
   it("syncs only the recovery alarm for a duplicate alarm while an invocation is still active with no pending work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2655,6 +2686,7 @@ function createRunnerCryptoContextHarness(
 	    onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
 	    usageGateResponse?: Record<string, unknown>;
 	    usageGateStatus?: number;
+	    waitUntil?(promise: Promise<unknown>): void;
   } = {},
 ) {
   const sql = createTestSqlStorage();
@@ -2733,6 +2765,7 @@ function createRunnerCryptoContextHarness(
   const runner = new HostedUserRunner(
     {
       storage,
+      ...(options.waitUntil ? { waitUntil: options.waitUntil } : {}),
     },
     {
       ...readHostedExecutionEnvironment(createHostedExecutionTestEnv({
