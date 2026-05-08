@@ -47,24 +47,7 @@ import { describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   ensureHostedInboxSidecarReady: vi.fn(),
-  snapshotHostedExecutionContext: vi.fn(),
-  snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
-
-vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@murphai/runtime-state/node")>();
-
-  return {
-    ...actual,
-    snapshotHostedExecutionContext: mocks.snapshotHostedExecutionContext.mockImplementation(
-      actual.snapshotHostedExecutionContext,
-    ),
-    snapshotHostedPortableWorkspaceDelta:
-      mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(
-        actual.snapshotHostedPortableWorkspaceDelta,
-      ),
-  };
-});
 
 vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/hosted-runtime/context.ts")>();
@@ -1467,16 +1450,19 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.equal(livenessTouches, 0);
   });
 
-  test("normal foreground turns complete without checkpointing the workspace", async () => {
+  test("normal foreground turns complete even when checkpoint construction and checkpointing would fail", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const createCheckpointSnapshot = vi.fn(async () => {
       throw new Error("Foreground test should not build checkpoint snapshots.");
     });
+    const restoreBuilder =
+      mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.getMockImplementation();
     mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockClear();
-    mocks.snapshotHostedExecutionContext.mockClear();
-    mocks.snapshotHostedPortableWorkspaceDelta.mockClear();
+    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(() => {
+      throw new Error("Foreground test should not build checkpoint requests.");
+    });
 
     const workspacePort = {
       async read(): Promise<HostedWorkspaceReadResponse> {
@@ -1489,7 +1475,7 @@ describe("hosted workspace runtime entrypoint", () => {
       async checkpoint(request: HostedWorkspaceCheckpointRequest): Promise<HostedWorkspaceCheckpointResponse> {
         events.push("workspace.checkpoint");
         checkpointRequests.push(request);
-        return await new Promise<HostedWorkspaceCheckpointResponse>(() => undefined);
+        throw new Error("Foreground test should not call the real workspace checkpoint port.");
       },
     };
 
@@ -1525,17 +1511,30 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests, []);
       expect(mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder).not.toHaveBeenCalled();
       expect(createCheckpointSnapshot).not.toHaveBeenCalled();
-      expect(mocks.snapshotHostedExecutionContext).not.toHaveBeenCalled();
-      expect(mocks.snapshotHostedPortableWorkspaceDelta).not.toHaveBeenCalled();
     } finally {
+      if (restoreBuilder) {
+        mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(
+          restoreBuilder,
+        );
+      }
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
-  test("normal foreground turns fail closed if code calls the workspace checkpoint port", async () => {
+  test("normal foreground turns fail closed on every checkpoint-capable runtime surface", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointRequest: HostedWorkspaceCheckpointRequest = {
+      attemptId: "attempt_foreground_tripwire",
+      expectedWorkspaceVersion: "0",
+      leaseGeneration: "1",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "assistant_runtime_commit",
+      redactedStatus: null,
+      snapshotRef: null,
+    };
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -1557,21 +1556,21 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           async runAssistantPhase(input) {
-            await input.platform.workspacePort!.checkpoint({
-              attemptId: "attempt_foreground_tripwire",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              reason: "assistant_runtime_commit",
-              redactedStatus: null,
-              snapshotRef: null,
-            });
+            await assert.rejects(
+              () => input.platform.workspacePort!.checkpoint(checkpointRequest),
+              /Foreground hosted runner must not checkpoint workspace/u,
+            );
+            await assert.rejects(
+              () => input.runtime.platform.workspacePort!.checkpoint(checkpointRequest),
+              /Foreground hosted runner must not checkpoint workspace/u,
+            );
             return {};
           },
           vaultRoot,
         }),
-      ).rejects.toThrow("Foreground hosted runner must not checkpoint workspace.");
+      ).resolves.toMatchObject({
+        status: "idle",
+      });
 
       assert.deepEqual(checkpointRequests, []);
     } finally {
