@@ -12,6 +12,9 @@ import { createJsonPostRequest } from "./route-test-helpers";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  afterResponse: vi.fn((callback: () => void | Promise<void>) => {
+    void callback();
+  }),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
@@ -23,6 +26,14 @@ const mocks = vi.hoisted(() => ({
   requireActivePrivyMemberAuth: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
 }));
+
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    after: mocks.afterResponse,
+  };
+});
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
@@ -64,6 +75,9 @@ describe("browser vault session route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.afterResponse.mockImplementation((callback: () => void | Promise<void>) => {
+      void callback();
+    });
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -480,6 +494,7 @@ describe("browser vault session route", () => {
         userId: "member_123",
       });
     });
+    expect(mocks.afterResponse).toHaveBeenCalledWith(expect.any(Function));
     const responseOrBlocked = await Promise.race([
       responsePromise,
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
@@ -495,6 +510,64 @@ describe("browser vault session route", () => {
       refreshPending: true,
       state: "empty",
       workspaceVersion: "1",
+    });
+  });
+
+  it("falls back to detached scheduling when the after-response hook is unavailable", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    let releaseSchedule: () => void = () => {};
+    const createBrowserVaultSession = vi.fn();
+    const scheduleBrowserVaultRefresh = vi.fn(() =>
+      new Promise<void>((resolve) => {
+        releaseSchedule = resolve;
+      }));
+    mocks.afterResponse.mockImplementationOnce(() => {
+      throw new Error("after unavailable outside a Next request lifecycle");
+    });
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: null,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "2",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
+    });
+
+    const responsePromise = browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+        sourceStateHash: "b".repeat(64),
+        userId: "member_123",
+      });
+    });
+    const responseOrBlocked = await Promise.race([
+      responsePromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
+    ]);
+    releaseSchedule();
+
+    expect(responseOrBlocked).toBeInstanceOf(Response);
+    const response = responseOrBlocked as Response;
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      freshness: "stale",
+      refreshPending: true,
+      state: "empty",
+      workspaceVersion: "2",
     });
   });
 
@@ -535,6 +608,7 @@ describe("browser vault session route", () => {
         userId: "member_123",
       });
     });
+    expect(mocks.afterResponse).toHaveBeenCalledWith(expect.any(Function));
     const responseOrBlocked = await Promise.race([
       responsePromise,
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
