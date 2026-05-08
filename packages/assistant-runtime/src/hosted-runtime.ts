@@ -334,11 +334,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     response: Awaited<ReturnType<NonNullable<typeof workspacePort>["checkpoint"]>>,
   ) => {
     if (response.checkpointed && hotRestoreCacheVaultRoot) {
-      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-        snapshotRef: response.workspace.snapshotRef,
-        vaultRoot: hotRestoreCacheVaultRoot,
-      });
+      await recordHotRestoreCacheForSnapshotRef(response.workspace.snapshotRef);
     }
+  };
+  const recordHotRestoreCacheForSnapshotRef = async (
+    snapshotRef: HostedWorkspaceState["snapshotRef"],
+  ) => {
+    if (!hotRestoreCacheVaultRoot) {
+      return;
+    }
+
+    await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+      snapshotRef,
+      vaultRoot: hotRestoreCacheVaultRoot,
+    });
   };
   const cacheRecordingWorkspacePort: typeof guardedWorkspacePort = {
     read: () => guardedWorkspacePort.read!(),
@@ -601,6 +610,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
+    if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
+      await recordHotRestoreCacheForSnapshotRef(committedWorkspace?.snapshotRef ?? null);
+    }
     const mailboxImportRetryAt = result.initialMailboxImport.importResult.nextRetryAt ?? null;
     const nextWakeAt = resolveHostedWorkspaceRunNextWakeAt({
       assistantPhaseResult: result.assistantPhaseResult,
@@ -766,6 +778,21 @@ function shouldDeferInitialMailboxImportCheckpoint(
   request: HostedAssistantWorkspaceRuntimeJobInput["request"],
 ): boolean {
   return request.reason === "nudge" || request.reason === "alarm";
+}
+
+function shouldRefreshHotRestoreCacheAfterNoProgressRun(
+  result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>,
+): boolean {
+  const initialImport = result.initialMailboxImport;
+  return (
+    initialImport.checkpoint === null
+    && !initialImport.checkpointDeferred
+    && !initialImport.stateChanged
+    && initialImport.importResult.importedCount === 0
+    && initialImport.importResult.blocked.length === 0
+    && !initialImport.importResult.nextRetryAt
+    && result.assistantPhaseResult?.progressed !== true
+  );
 }
 
 function raceHostedRuntimeLiveness<T>(

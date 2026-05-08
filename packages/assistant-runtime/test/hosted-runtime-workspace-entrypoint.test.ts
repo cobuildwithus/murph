@@ -2258,6 +2258,167 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps the hot restore cache warm after no-progress alarms", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
+    const sourceHotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-hot-"));
+    const events: string[] = [];
+    const artifactGetCalls: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceBaseVaultRoot });
+      await writeFile(path.join(sourceBaseVaultRoot, "base-note.md"), "base\n", "utf8");
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const baseRef = createBundleRef({
+        hash: baseHash,
+        key: "users/bundles/member-synthetic/no-progress-base.bundle.json",
+        size: baseBundle.byteLength,
+      });
+      artifactBytesByHash.set(baseHash, baseBundle);
+
+      const hotAssistantRoot = resolveAssistantStatePaths(sourceHotVaultRoot).assistantStateRoot;
+      await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
+      await writeFile(
+        path.join(hotAssistantRoot, "sessions", "session-initial.json"),
+        "{\"session\":\"initial\"}\n",
+        "utf8",
+      );
+      const initialHotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+        vaultRoot: sourceHotVaultRoot,
+      });
+      const initialHotHash = sha256HostedBundleHex(initialHotSnapshot.bundle);
+      const initialHotRef = createBundleRef({
+        hash: initialHotHash,
+        key: "users/bundles/member-synthetic/no-progress-hot-initial.bundle.json",
+        size: initialHotSnapshot.bundle.byteLength,
+      });
+      artifactBytesByHash.set(initialHotHash, initialHotSnapshot.bundle);
+
+      let currentWorkspace = createWorkspaceState({
+        snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+          base: baseRef,
+          hot: initialHotRef,
+        }),
+        version: "9",
+      });
+      const workspacePort: HostedRuntimeWorkspacePort = {
+        async read() {
+          events.push("workspace.read");
+          return {
+            fetchedAt: TEST_NOW,
+            workspace: currentWorkspace,
+          };
+        },
+        async checkpoint(request) {
+          events.push("workspace.checkpoint");
+          checkpointRequests.push(request);
+          currentWorkspace = createWorkspaceState({
+            redactedStatus: request.redactedStatus ?? null,
+            snapshotRef: request.snapshotRef,
+            version: String(BigInt(currentWorkspace.version) + 1n),
+          });
+          return {
+            checkpointed: true,
+            workspace: currentWorkspace,
+          };
+        },
+      };
+      const platform = createPlatform({
+        artifactBytesByHash,
+        artifactGetCalls,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort,
+      });
+      let firstRun = true;
+      const runOnce = async () =>
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_no_progress_cache_${checkpointRequests.length}`,
+              reason: "alarm",
+              workspaceVersion: currentWorkspace.version,
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
+              const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+              artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+              return {
+                snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+                  base: baseRef,
+                  hot: createBundleRef({
+                    hash: hotHash,
+                    key: `users/bundles/member-synthetic/no-progress-hot-${hotHash}.bundle.json`,
+                    size: hotSnapshot.bundle.byteLength,
+                  }),
+                }),
+              };
+            },
+            async importItem() {
+              throw new Error("Mailbox import should not run without mailbox items.");
+            },
+            platform,
+            async runAssistantPhase() {
+              if (!firstRun) {
+                return { progressed: false };
+              }
+              firstRun = false;
+              const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+              await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+              await writeFile(
+                path.join(assistantRoot, "sessions", "session-checkpointed.json"),
+                "{\"session\":\"checkpointed\"}\n",
+                "utf8",
+              );
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            },
+            vaultRoot,
+          },
+        );
+
+      await runOnce();
+      assert.deepEqual(artifactGetCalls, [baseHash, initialHotHash]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "assistant_runtime_commit",
+      ]);
+      artifactGetCalls.length = 0;
+
+      await runOnce();
+      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(checkpointRequests.length, 1);
+      artifactGetCalls.length = 0;
+
+      await runOnce();
+      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(checkpointRequests.length, 1);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
+      await rm(sourceHotVaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("restores raw inbox artifacts from workspace snapshots before mailbox import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-artifact-"));
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-source-artifact-"));
