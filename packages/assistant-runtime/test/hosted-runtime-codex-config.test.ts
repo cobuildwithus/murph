@@ -5,6 +5,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterEach, test } from "vitest";
 
@@ -53,10 +54,7 @@ const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
 afterEach(async () => {
   await Promise.all(
     temporaryPaths.splice(0).map((target) =>
-      rm(target, {
-        force: true,
-        recursive: true,
-      })
+      removeTemporaryPath(target)
     ),
   );
 });
@@ -1120,6 +1118,40 @@ async function createTemporaryDirectory(): Promise<string> {
   const target = await mkdtemp(path.join(tmpdir(), "hosted-codex-config-"));
   temporaryPaths.push(target);
   return target;
+}
+
+async function removeTemporaryPath(target: string): Promise<void> {
+  const maxAttempts = 5;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await rm(target, {
+        force: true,
+        maxRetries: 3,
+        recursive: true,
+        retryDelay: 50,
+      });
+      return;
+    } catch (error) {
+      if (attempt === maxAttempts || !isRetryableTemporaryCleanupError(error)) {
+        throw error;
+      }
+
+      await sleep(attempt * 50);
+    }
+  }
+}
+
+function isRetryableTemporaryCleanupError(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error)) {
+    return false;
+  }
+
+  return error.code === "EBUSY"
+    || error.code === "ENFILE"
+    || error.code === "ENOTEMPTY"
+    || error.code === "EMFILE"
+    || error.code === "EPERM";
 }
 
 async function startResponsesStubServer(input: {
