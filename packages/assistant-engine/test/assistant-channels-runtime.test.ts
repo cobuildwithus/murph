@@ -749,6 +749,88 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
+  it('passes the dependency abort signal to Linq send and direct chat creation', async () => {
+    const dependencyController = new AbortController()
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: {
+        id: 'linq-message-id',
+      },
+    })
+    runtimeMocks.createLinqChat.mockResolvedValue({
+      chatId: 'linq-chat-id',
+      messageId: 'linq-created-message-id',
+    })
+
+    await expect(
+      sendLinqMessage(
+        {
+          message: 'hello',
+          target: 'chat-1',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: 'linq-token',
+          },
+          signal: dependencyController.signal,
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: 'linq-message-id',
+      target: 'chat-1',
+    })
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith(
+      {
+        chatId: 'chat-1',
+        idempotencyKey: null,
+        message: 'hello',
+        replyToMessageId: null,
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: undefined,
+        signal: dependencyController.signal,
+      },
+    )
+
+    await expect(
+      sendLinqMessage(
+        {
+          fromPhoneNumber: '+15550000',
+          message: 'welcome',
+          target: '+15550001',
+          targetKind: 'participant',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: 'linq-token',
+          },
+          signal: dependencyController.signal,
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: 'linq-created-message-id',
+      providerThreadId: 'linq-chat-id',
+      target: 'linq-chat-id',
+    })
+    expect(runtimeMocks.createLinqChat).toHaveBeenCalledWith(
+      {
+        from: '+15550000',
+        idempotencyKey: null,
+        message: 'welcome',
+        to: ['+15550001'],
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: undefined,
+        signal: dependencyController.signal,
+      },
+    )
+  })
+
   it('refreshes the Linq typing indicator until stop', async () => {
     vi.useFakeTimers()
     runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)

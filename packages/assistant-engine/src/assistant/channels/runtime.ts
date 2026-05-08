@@ -158,6 +158,7 @@ export async function sendLinqMessage(
       {
         env,
         fetchImplementation: dependencies.fetchImplementation,
+        ...(dependencies.signal ? { signal: dependencies.signal } : {}),
       },
     )
 
@@ -178,6 +179,7 @@ export async function sendLinqMessage(
     {
       env,
       fetchImplementation: dependencies.fetchImplementation,
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     },
   )
   return {

@@ -7,6 +7,7 @@ import {
   sendHostedProviderLinqMessage,
   sendHostedProviderTelegramChatAction,
   sendHostedProviderTelegramMessage,
+  type HostedProviderEffectDependencies,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
 
 import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
@@ -40,6 +41,8 @@ import type {
 
 const PROVIDER_EFFECT_BODY_LIMIT_BYTES = 1024 * 1024;
 const TELEGRAM_FILE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const HOSTED_FOREGROUND_LINQ_SEND_EFFECT_TIMEOUT_MS = 7_500;
+const HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS = 800;
 
 export async function handleRunnerProviderEffectsRequest(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -85,6 +88,7 @@ export async function handleRunnerProviderEffectsRequest(input: {
       body,
       env: input.env,
       pathname: input.pathname,
+      requestSignal: input.request.signal,
     });
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof TypeError || error instanceof RangeError) {
@@ -98,10 +102,12 @@ async function dispatchRunnerProviderEffectsRequest(input: {
   body: Record<string, unknown>;
   env: RunnerOutboundEnvironmentSource;
   pathname: string;
+  requestSignal: AbortSignal;
 }): Promise<Response> {
-  const dependencies = {
-    env: asWorkerStringEnvironment(input.env) as NodeJS.ProcessEnv,
-  };
+  const dependencies = createProviderEffectDependencies({
+    env: input.env,
+    requestSignal: input.requestSignal,
+  });
 
   switch (input.pathname) {
     case HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH:
@@ -127,24 +133,40 @@ async function dispatchRunnerProviderEffectsRequest(input: {
     case HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH:
       return json(await sendHostedProviderLinqMessage(
         parseHostedRunnerLinqSendRequest(input.body),
-        dependencies,
+        createProviderEffectDependencies({
+          env: input.env,
+          requestSignal: input.requestSignal,
+          timeoutMs: HOSTED_FOREGROUND_LINQ_SEND_EFFECT_TIMEOUT_MS,
+        }),
       ));
     case HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH:
       await sendHostedProviderLinqChatAction(
         parseHostedRunnerLinqChatActionRequest(input.body),
-        dependencies,
+        createProviderEffectDependencies({
+          env: input.env,
+          requestSignal: input.requestSignal,
+          timeoutMs: HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS,
+        }),
       );
       return json({ ok: true });
     case HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH:
       await markHostedProviderLinqRead(
         parseHostedRunnerLinqMarkReadRequest(input.body),
-        dependencies,
+        createProviderEffectDependencies({
+          env: input.env,
+          requestSignal: input.requestSignal,
+          timeoutMs: HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS,
+        }),
       );
       return json({ ok: true });
     case HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH:
       await deleteHostedProviderLinqMessages(
         parseHostedRunnerLinqDeleteMessagesRequest(input.body),
-        dependencies,
+        createProviderEffectDependencies({
+          env: input.env,
+          requestSignal: input.requestSignal,
+          timeoutMs: HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS,
+        }),
       );
       return json({ ok: true });
     default:
@@ -152,9 +174,44 @@ async function dispatchRunnerProviderEffectsRequest(input: {
   }
 }
 
+function createProviderEffectDependencies(input: {
+  env: RunnerOutboundEnvironmentSource;
+  requestSignal: AbortSignal;
+  timeoutMs?: number;
+}): HostedProviderEffectDependencies {
+  return {
+    env: asWorkerStringEnvironment(input.env) as NodeJS.ProcessEnv,
+    signal: typeof input.timeoutMs === "number"
+      ? combineProviderEffectAbortSignals(input.requestSignal, AbortSignal.timeout(input.timeoutMs))
+      : input.requestSignal,
+  };
+}
+
+function combineProviderEffectAbortSignals(
+  requestSignal: AbortSignal,
+  timeoutSignal: AbortSignal,
+): AbortSignal {
+  if (requestSignal.aborted) {
+    return requestSignal;
+  }
+  if (timeoutSignal.aborted) {
+    return timeoutSignal;
+  }
+
+  const controller = new AbortController();
+  const abort = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason);
+    }
+  };
+  requestSignal.addEventListener("abort", () => abort(requestSignal), { once: true });
+  timeoutSignal.addEventListener("abort", () => abort(timeoutSignal), { once: true });
+  return controller.signal;
+}
+
 async function handleTelegramDownloadFileEffect(
   body: Record<string, unknown>,
-  dependencies: { env: NodeJS.ProcessEnv },
+  dependencies: HostedProviderEffectDependencies,
 ): Promise<Response> {
   const request = parseHostedRunnerTelegramDownloadFileRequest(body);
   const bytes = await downloadHostedProviderTelegramFile(request, dependencies);
