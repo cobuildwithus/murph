@@ -57,7 +57,6 @@ const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
   WORKSPACE_OPERATOR_HOME_ROOT,
   "vault",
 ]);
-const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
 const HOSTED_WORKSPACE_SNAPSHOT_DIAGNOSTIC_LIST_LIMIT = 16;
 const HOSTED_HOT_STATE_MAX_FILES = 5_000;
 const HOSTED_HOT_STATE_MAX_INLINE_BYTES = 16 * 1024 * 1024;
@@ -3275,41 +3274,7 @@ function normalizeHostedCodexHomeSnapshotHashSecret(
 }
 
 function shouldExternalizeWorkspaceArtifact(input: HostedBundleArtifactSnapshotInput): boolean {
-  if (input.root !== "vault" || !input.path.startsWith(`raw${path.posix.sep}`)) {
-    return false;
-  }
-
-  if (isDefinitelyBinaryRawArtifact(input.path)) {
-    return true;
-  }
-
-  if (input.bytes.byteLength < RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES) {
-    return false;
-  }
-
-  return !isLikelyTextBytes(input.bytes);
-}
-
-function isDefinitelyBinaryRawArtifact(relativePath: string): boolean {
-  const extension = path.posix.extname(relativePath).toLowerCase();
-  return BINARY_RAW_ARTIFACT_EXTENSIONS.has(extension);
-}
-
-function isLikelyTextBytes(bytes: Uint8Array): boolean {
-  const sample = bytes.subarray(0, Math.min(bytes.byteLength, 8 * 1024));
-
-  for (const value of sample) {
-    if (value === 0) {
-      return false;
-    }
-  }
-
-  try {
-    new TextDecoder("utf-8", { fatal: true }).decode(sample);
-    return true;
-  } catch {
-    return false;
-  }
+  return input.root === "vault" && input.path.startsWith(`raw${path.posix.sep}`);
 }
 
 function createHostedWorkspaceArtifactRef(bytes: Uint8Array): HostedBundleArtifactRef {
@@ -3318,32 +3283,6 @@ function createHostedWorkspaceArtifactRef(bytes: Uint8Array): HostedBundleArtifa
     sha256: createHash("sha256").update(bytes).digest("hex"),
   };
 }
-
-const BINARY_RAW_ARTIFACT_EXTENSIONS = new Set([
-  ".aac",
-  ".avi",
-  ".bmp",
-  ".doc",
-  ".docx",
-  ".gif",
-  ".heic",
-  ".heif",
-  ".jpeg",
-  ".jpg",
-  ".m4a",
-  ".mov",
-  ".mp3",
-  ".mp4",
-  ".ogg",
-  ".opus",
-  ".pdf",
-  ".png",
-  ".tif",
-  ".tiff",
-  ".wav",
-  ".webm",
-  ".webp",
-]);
 
 const ASSISTANT_RUNTIME_EXCLUDED_PATH_PREFIXES = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/secrets`,
