@@ -46,6 +46,11 @@ const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
     queryable: true,
   },
   {
+    entityKind: "protocol",
+    prefix: "prot_",
+    queryable: true,
+  },
+  {
     entityKind: "sample",
     prefix: "smp_",
     queryable: true,

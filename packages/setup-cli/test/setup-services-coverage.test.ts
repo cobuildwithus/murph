@@ -1227,6 +1227,82 @@ test('configureSetupChannels skips missing-env channels cleanly when no connecto
   }
 })
 
+test('configureSetupChannels does not manage unrelated email connectors', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-email-owned-'))
+  const setEnabledCalls: Array<{ connectorId: string; enabled: boolean }> = []
+
+  try {
+    const configured = await configureSetupChannels({
+      channels: ['telegram'],
+      dryRun: false,
+      env: {
+        TELEGRAM_BOT_TOKEN: 'telegram-token',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not run in this test')
+        },
+        async doctor() {
+          return makeInboxDoctorResult(vaultRoot, {
+            checks: [
+              { name: 'probe', status: 'pass', message: 'Telegram ready' },
+              { name: 'driver-import', status: 'pass', message: 'Telegram import ready' },
+            ],
+          })
+        },
+        async sourceList() {
+          return makeInboxSourceListResult(vaultRoot, [
+            makeInboxConnector({
+              accountId: 'personal',
+              enabled: true,
+              id: 'email:personal',
+              source: 'email',
+            }),
+            makeInboxConnector({
+              accountId: 'bot',
+              enabled: false,
+              id: 'telegram:bot',
+              source: 'telegram',
+            }),
+          ])
+        },
+        async sourceAdd() {
+          throw new Error('sourceAdd should not run when telegram already exists')
+        },
+        async sourceSetEnabled(input) {
+          setEnabledCalls.push({
+            connectorId: input.connectorId,
+            enabled: input.enabled,
+          })
+          return makeInboxSourceSetEnabledResult(
+            vaultRoot,
+            makeInboxConnector({
+              accountId: input.connectorId === 'telegram:bot' ? 'bot' : 'personal',
+              enabled: input.enabled,
+              id: input.connectorId,
+              source: input.connectorId === 'telegram:bot' ? 'telegram' : 'email',
+            }),
+          )
+        },
+      },
+      platform: 'linux',
+      requestId: 'req-email-owned',
+      steps: [],
+      vault: vaultRoot,
+    })
+
+    assert.equal(configured[0]?.connectorId, 'telegram:bot')
+    assert.deepEqual(setEnabledCalls, [
+      {
+        connectorId: 'telegram:bot',
+        enabled: true,
+      },
+    ])
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
 test('process, shell, and toolchain helpers exercise installation and download flows deterministically', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-service-helpers-'))
   const homeDirectory = path.join(root, 'home')

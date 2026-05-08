@@ -820,34 +820,37 @@ describe("workout-import", () => {
       await writeFile(
         csvPath,
         [
-          "workout name,date,start time,end time,exercise name,set order,reps,weight,weight unit,note",
-          "Upper,2026-04-08,10:00:00,10:45:00,Squat,1,5,100,lb,Main work",
-          "Upper,2026-04-08,10:00:00,10:45:00,Push Up,1,12,,,",
+          "workout name,date,start time,end time,duration,exercise name,set order,reps,weight,weight unit,note",
+          "Upper,2026-04-08,10:00:00,,1H 30M,Squat,1,5,100,lb,Main work",
+          "Upper,2026-04-08,10:00:00,,1H 30M,Push Up,1,12,,,",
           "",
         ].join("\n"),
         "utf8",
       );
 
+      const addActivitySession = vi.fn(
+        async (_input: { draft: { durationMinutes?: number }; vaultRoot: string }) => ({
+          eventId: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          ledgerFile: "journal/workout.md",
+          created: true,
+          manifestPath: "bank/raw/workout/manifest.json",
+          event: {
+            occurredAt: "2026-04-08T10:00:00.000Z",
+            title: "Upper",
+            activityType: "strength-training",
+            durationMinutes: 90,
+            distanceKm: null,
+            workout: null,
+            note: "Main work",
+          },
+        }),
+      );
       const workoutImportModule = (await importWithMocks(
         "../src/usecases/workout-import.ts",
         {
           "../src/usecases/workout-core.js": () => ({
             loadWorkoutCoreRuntime: vi.fn(async () => ({
-              addActivitySession: vi.fn(async () => ({
-                eventId: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-                ledgerFile: "journal/workout.md",
-                created: true,
-                manifestPath: "bank/raw/workout/manifest.json",
-                event: {
-                  occurredAt: "2026-04-08T10:00:00.000Z",
-                  title: "Upper",
-                  activityType: "strength-training",
-                  durationMinutes: 45,
-                  distanceKm: null,
-                  workout: null,
-                  note: "Main work",
-                },
-              })),
+              addActivitySession,
             })),
           }),
         },
@@ -863,11 +866,12 @@ describe("workout-import", () => {
       const imported = await workoutImportModule.importWorkoutCsv({
         vault: tempDir,
         file: csvPath,
-        storeRawOnly: true,
       });
-      assert.equal(imported.rawOnly, true);
-      assert.equal(imported.importedCount, 0);
-      assert.deepEqual(imported.lookupIds, []);
+      assert.equal(imported.rawOnly, false);
+      assert.equal(imported.importedCount, 1);
+      assert.deepEqual(imported.lookupIds, ["evt_01ARZ3NDEKTSV4RRFFQ69G5FAV"]);
+      assert.equal(addActivitySession.mock.calls.length, 1);
+      assert.equal(addActivitySession.mock.calls[0]?.[0].draft.durationMinutes, 90);
       assert.equal(imported.warnings.includes("No structured workouts were detected; only the raw CSV was stored."), false);
 
       const storedCsv = await readFile(path.join(tempDir, imported.rawFile), "utf8");

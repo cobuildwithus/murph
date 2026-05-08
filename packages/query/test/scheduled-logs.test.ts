@@ -300,6 +300,41 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await writeVaultFile(
       vaultRoot,
+      "bank/scheduled-logs/bad-status.md",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.scheduled-log.v1",
+        "docType: scheduled_log",
+        "scheduledLogId: slog_01JX8T9QY2M5ZBV64ZP4N1DRB9",
+        "slug: bad-status",
+        "title: Bad status",
+        "status: disabled",
+        "schedule:",
+        "  kind: dailyLocal",
+        "  localTime: 07:00",
+        "action:",
+        "  kind: intervention_session.add",
+        "  title: Bad status",
+        "  interventionType: sauna",
+        "createdAt: 2026-04-22T07:00:00.000Z",
+        "updatedAt: 2026-04-22T07:00:00.000Z",
+        "---",
+      ].join("\n"),
+    );
+
+    await assert.rejects(
+      () => listScheduledLogs(vaultRoot),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "status must be one of active, paused, archived.",
+    );
+
+    await rm(path.join(vaultRoot, "bank/scheduled-logs/bad-status.md"), {
+      force: true,
+    });
+
+    await writeVaultFile(
+      vaultRoot,
       "bank/scheduled-logs/bad-action.md",
       [
         "---",
