@@ -2320,7 +2320,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(
-      runner["finishIdleShutdownCheckpoint"]({ userId: "member_123" }),
+      runner["finishIdleShutdownCheckpoint"]({
+        preferredWakeAt: null,
+        userId: "member_123",
+      }),
     ).resolves.toBeUndefined();
 
     expect(destroyInstance).toHaveBeenCalledOnce();
