@@ -122,11 +122,29 @@ export function normalizeGarminActivityFiles(
     anonymousCount = nextAnonymousCount;
     const extractedContent = firstDefined(file.content, file.fileContent, file.payload, file.data);
     const hasFileContent = extractedContent !== undefined && extractedContent !== null;
-    const descriptorOnly =
-      !hasFileContent ||
-      (isStructuredGarminPayload(extractedContent) && format !== "json");
+    const canWriteContent =
+      typeof extractedContent === "string" ||
+      (format === "json" && isStructuredGarminPayload(extractedContent));
+    const descriptorOnly = !hasFileContent || !canWriteContent;
 
     if (descriptorOnly) {
+      const descriptorContent = stripEmptyObject(stripUndefined({
+        activityId,
+        fileType: format,
+        fileName: firstStringFromPaths(file, ["fileName", "filename", "name"]),
+        mediaType: firstStringFromPaths(file, ["mediaType", "mimeType", "contentType"]),
+        checksum: firstStringFromPaths(file, ["checksum", "sha256", "md5"]),
+        downloadUrl: firstStringFromPaths(file, ["downloadUrl", "url", "sourceUrl"]),
+        downloadedAt: firstIsoFromPaths(file, ["downloadedAt", "createdAt", "timestamp"]),
+        byteLength: firstNumberFromPaths(file, ["byteLength", "contentLength", "fileSize", "size"]) ??
+          (typeof extractedContent === "object" &&
+            extractedContent !== null &&
+            "byteLength" in extractedContent &&
+            typeof extractedContent.byteLength === "number"
+            ? extractedContent.byteLength
+            : undefined),
+        descriptorOnly: true,
+      }));
       const descriptorMetadata = stripEmptyObject({
         activityId,
         intendedFileType: format,
@@ -146,7 +164,7 @@ export function normalizeGarminActivityFiles(
         rawArtifacts,
         role,
         nextActivityAssetDescriptorFileName(activityId, format, role, anonymousCount),
-        file,
+        descriptorContent,
         {
           mediaType: "application/json",
           metadata: descriptorMetadata,

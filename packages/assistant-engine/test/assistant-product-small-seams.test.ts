@@ -1237,6 +1237,49 @@ describe('assistant product small seams', () => {
     expect(recovered.schema).toBe('murph.assistant-runtime-budget.v1')
   })
 
+  it('derives expired quarantine payload cleanup from the metadata sidecar path', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-runtime-budget-quarantine-sidecar-',
+    )
+    tempRoots.push(parentRoot)
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await mkdir(paths.quarantineDirectory, {
+      recursive: true,
+    })
+    const oldDate = new Date('2026-01-01T00:00:00.000Z')
+    const payloadPath = path.join(paths.quarantineDirectory, 'payload.invalid.json')
+    const metadataPath = `${payloadPath}.meta.json`
+    const victimPath = path.join(paths.quarantineDirectory, 'victim.invalid.json')
+
+    await writeFile(payloadPath, '{"bad":true}', 'utf8')
+    await writeFile(victimPath, '{"keep":true}', 'utf8')
+    await writeFile(
+      metadataPath,
+      JSON.stringify({
+        schema: 'murph.assistant-quarantine-entry.v1',
+        artifactKind: 'runtime-budget',
+        quarantineId: 'quarantine-1',
+        quarantinedAt: oldDate.toISOString(),
+        quarantinedPath: victimPath,
+        sourcePath: paths.resourceBudgetPath,
+      }),
+      'utf8',
+    )
+    await utimes(payloadPath, oldDate, oldDate)
+    await utimes(metadataPath, oldDate, oldDate)
+
+    const maintained = await runAssistantRuntimeMaintenance({
+      now: new Date('2026-02-10T00:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(maintained.maintenance.staleQuarantinePruned).toBe(1)
+    await expect(stat(payloadPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(metadataPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(victimPath, 'utf8')).resolves.toBe('{"keep":true}')
+  })
+
   it('delegates local-service conversation open and option updates through the existing store helpers', async () => {
     const resolveAssistantSessionMock = vi.fn()
     const saveAssistantSessionMock = vi.fn()

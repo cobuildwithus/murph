@@ -358,6 +358,68 @@ test.sequential('workout format save supports metadata-only typed templates with
   assert.deepEqual(attributes.template, { exercises: [] })
 })
 
+test.sequential('workout format save preserves existing templates on metadata-only updates', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-workout-format-metadata-update-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const cli = createWorkoutFormatCli()
+  await initializeVault({ vaultRoot })
+
+  const created = await runInProcessJsonCli<WorkoutFormatSaveResult>(cli, [
+    'workout',
+    'format',
+    'save',
+    'Push Day',
+    '--slug',
+    'push-day',
+    '--type',
+    'strength-training',
+    '--exercise',
+    'order=1;name=pushups;mode=bodyweight',
+    '--set-template',
+    'exercise=1;order=1;targetReps=20',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(created.exitCode, null)
+
+  const updated = await runInProcessJsonCli<WorkoutFormatSaveResult>(cli, [
+    'workout',
+    'format',
+    'save',
+    'Push Day',
+    '--slug',
+    'push-day',
+    '--summary',
+    'Updated metadata only.',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(updated.exitCode, null)
+
+  const saved = requireData(updated.envelope)
+  const attributes = await readSavedAttributes(vaultRoot, saved.path)
+  assert.equal(attributes.summary, 'Updated metadata only.')
+  assert.deepEqual(
+    (attributes.template as { exercises?: unknown[] }).exercises,
+    [
+      {
+        name: 'pushups',
+        order: 1,
+        mode: 'bodyweight',
+        plannedSets: [
+          {
+            order: 1,
+            targetReps: 20,
+          },
+        ],
+      },
+    ],
+  )
+})
+
 test.sequential('workout format save rejects raw input because JSON imports are explicit', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-workout-format-input-mix-',

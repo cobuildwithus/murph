@@ -48,6 +48,7 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
     }) => Promise<unknown>;
 
     const createSignalRecord = vi.fn<DeviceSyncSignalCreate>(async () => ({ id: 1 }));
+    let lockDepth = 0;
     const updateConnectionRecord = vi.fn<DeviceConnectionUpdate>(async () => ({
       ...createConnectionRecord(),
       status: "reauthorization_required",
@@ -141,12 +142,33 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
           _connectionId: string,
           callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
         ): Promise<TResult> {
-          return callback(transactionClient);
+          lockDepth++;
+          try {
+            return await callback(transactionClient);
+          } finally {
+            lockDepth--;
+          }
+        },
+        async withConnectionRefreshLock<TResult>(
+          _connectionId: string,
+          callback: () => Promise<TResult>,
+        ): Promise<TResult> {
+          return await callback();
         },
         touchAgentSession,
       },
     );
-    const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+    const registry = createDeviceSyncRegistry([createWhoopProvider({
+      refreshTokens: async () => {
+        expect(lockDepth).toBe(0);
+        throw deviceSyncError({
+          code: "WHOOP_REFRESH_TOKEN_MISSING",
+          message: "WHOOP refresh token is missing.",
+          retryable: false,
+          accountStatus: "reauthorization_required",
+        });
+      },
+    })]);
     const service = new HostedDeviceSyncAgentSessionService({
       request: new Request("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle"),
       store,
@@ -451,6 +473,11 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       expect(firstRefresh).toMatchObject({
+        connection: {
+          metadata: {
+            sourceLabel: "WHOOP band",
+          },
+        },
         refreshed: true,
         tokenVersionChanged: true,
         tokenBundle: {
@@ -459,6 +486,9 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
           tokenVersion: 3,
         },
       });
+      expect(firstRefresh.connection).not.toHaveProperty("credential");
+      expect(firstRefresh.connection).not.toHaveProperty("accessToken");
+      expect(firstRefresh.connection).not.toHaveProperty("refreshToken");
       expect(firstRefresh).not.toHaveProperty("agentSession");
       expect(JSON.stringify(firstRefresh)).not.toContain(bearerToken);
       expect(refreshTokens).toHaveBeenCalledTimes(1);
@@ -483,6 +513,9 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
           tokenVersion: 3,
         },
       });
+      expect(retryRefresh.connection).not.toHaveProperty("credential");
+      expect(retryRefresh.connection).not.toHaveProperty("accessToken");
+      expect(retryRefresh.connection).not.toHaveProperty("refreshToken");
       expect(retryRefresh).not.toHaveProperty("agentSession");
       expect(JSON.stringify(retryRefresh)).not.toContain(bearerToken);
       expect(refreshTokens).toHaveBeenCalledTimes(1);
@@ -496,6 +529,79 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         tokenVersion: 3,
         tokenVersionChanged: true,
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("serializes overlapping provider refreshes for the same connection", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      let releaseRefresh!: () => void;
+      let markRefreshStarted!: () => void;
+      const refreshStarted = new Promise<void>((resolve) => {
+        markRefreshStarted = resolve;
+      });
+      const refreshTokens = vi.fn(async () => {
+        markRefreshStarted();
+        await new Promise<void>((release) => {
+          releaseRefresh = release;
+        });
+        return {
+          accessToken: "access-token-refreshed",
+          accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+          refreshToken: "refresh-token-refreshed",
+        };
+      });
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+      const firstService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+      const secondService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const firstSession = await firstService.requireAgentSession();
+      const firstRefresh = firstService.refreshTokenBundle(firstSession, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      });
+
+      await refreshStarted;
+      const secondSession = await secondService.requireAgentSession();
+      const secondRefresh = secondService.refreshTokenBundle(secondSession, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      });
+
+      releaseRefresh();
+      const [firstResult, secondResult] = await Promise.all([firstRefresh, secondRefresh]);
+
+      expect(firstResult).toMatchObject({
+        refreshed: true,
+        tokenBundle: {
+          tokenVersion: 3,
+        },
+      });
+      expect(secondResult).toMatchObject({
+        refreshed: false,
+        tokenVersionChanged: true,
+        tokenBundle: {
+          tokenVersion: 3,
+        },
+      });
+      expect(firstResult.connection).not.toHaveProperty("credential");
+      expect(secondResult.connection).not.toHaveProperty("credential");
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
@@ -678,6 +784,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   };
   const audits: Array<Record<string, unknown>> = [];
   const connection = createConnectionRecord();
+  let refreshTail: Promise<unknown> = Promise.resolve();
   let publicConnection = {
     ...connection,
     accessTokenExpiresAt: connection.accessTokenExpiresAt.toISOString(),
@@ -687,6 +794,9 @@ function createRetrySafeStoreHarness(bearerToken: string): {
     lastSyncErrorAt: null,
     lastSyncStartedAt: null,
     lastWebhookAt: null,
+    metadata: {
+      sourceLabel: "WHOOP band",
+    },
     nextReconcileAt: null,
     updatedAt: connection.updatedAt.toISOString(),
   };
@@ -831,6 +941,25 @@ function createRetrySafeStoreHarness(bearerToken: string): {
         );
 
         return callback(transactionClient);
+      },
+      async withConnectionRefreshLock<TResult>(
+        _connectionId: string,
+        callback: () => Promise<TResult>,
+      ): Promise<TResult> {
+        const previous = refreshTail;
+        let releaseCurrent!: () => void;
+        refreshTail = previous
+          .catch(() => undefined)
+          .then(() => new Promise<void>((resolve) => {
+            releaseCurrent = resolve;
+          }));
+        await previous.catch(() => undefined);
+
+        try {
+          return await callback();
+        } finally {
+          releaseCurrent();
+        }
       },
     },
   );

@@ -133,8 +133,36 @@ function buildGoalLinksFromFields(input: {
   ];
 }
 
+function normalizeGoalLink(link: GoalLink): GoalLink {
+  switch (link.type) {
+    case "parent_goal":
+    case "related_goal": {
+      const targetId = normalizeRecordIdList([link.targetId], "links.targetId", "goal")?.[0];
+      if (!targetId) {
+        throw new VaultError("VAULT_INVALID_INPUT", "links.targetId is invalid.");
+      }
+      return {
+        type: link.type,
+        targetId,
+      };
+    }
+    case "related_experiment": {
+      const targetId = normalizeRecordIdList([link.targetId], "links.targetId", "exp")?.[0];
+      if (!targetId) {
+        throw new VaultError("VAULT_INVALID_INPUT", "links.targetId is invalid.");
+      }
+      return {
+        type: link.type,
+        targetId,
+      };
+    }
+    default:
+      throw new VaultError("VAULT_INVALID_INPUT", "links.type is invalid.");
+  }
+}
+
 function normalizeGoalLinks(rawLinks: readonly GoalLink[], goalId: string): GoalLink[] {
-  const sortedLinks = [...rawLinks].sort(compareGoalLinks);
+  const sortedLinks = rawLinks.map(normalizeGoalLink).sort(compareGoalLinks);
   const links: GoalLink[] = [];
   let parentGoalId: string | null = null;
   const seen = new Set<string>();

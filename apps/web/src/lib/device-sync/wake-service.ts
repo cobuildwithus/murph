@@ -183,7 +183,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   });
 
   if (disconnectResult.mailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(disconnectResult.mailboxItemId);
+    await startHostedDeviceSyncWakeWorkflowBestEffort(disconnectResult.mailboxItemId);
   }
 
   return {
@@ -412,24 +412,23 @@ async function persistHostedDeviceSyncWake(input: {
     });
   }
 
-  await startHostedDeviceSyncWakeWorkflow(mailboxItemId);
+  await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId);
 
   await input.complete?.();
 }
 
-async function startHostedDeviceSyncWakeWorkflow(mailboxItemId: string): Promise<void> {
+async function startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId: string): Promise<void> {
   try {
     await startHostedWebhookNudgeWorkflow({
       mailboxItemId,
       source: "device-sync",
     });
   } catch (error) {
-    throw deviceSyncError({
-      cause: error,
-      code: "HOSTED_DEVICE_SYNC_NUDGE_WORKFLOW_START_RETRY_REQUIRED",
-      httpStatus: 503,
-      message: "Hosted device-sync wake is temporarily unavailable.",
-      retryable: true,
+    console.warn("Hosted device-sync wake workflow start failed after mailbox append.", {
+      code: sanitizeHostedRuntimeErrorCode(
+        isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_NUDGE_WORKFLOW_START_FAILED",
+      ),
+      mailboxItemIdPresent: mailboxItemId.length > 0,
     });
   }
 }

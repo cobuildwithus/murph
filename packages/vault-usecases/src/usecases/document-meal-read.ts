@@ -123,6 +123,11 @@ async function loadOwnedRecord(
     throw new VaultCliError('not_found', `No ${expectedKind} found for "${lookup}".`)
   }
 
+  const normalizedLookup = lookup.trim()
+  if (normalizedLookup !== record.entityId && normalizedLookup !== record.primaryLookupId) {
+    throw new VaultCliError('not_found', `No ${expectedKind} found for "${lookup}".`)
+  }
+
   return record
 }
 

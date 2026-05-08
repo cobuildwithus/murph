@@ -509,7 +509,7 @@ describe("buildHostedDataExport", () => {
 });
 
 describe("deleteHostedAccountData", () => {
-  it("runs Cloudflare cleanup after deleting Prisma rows", async () => {
+  it("runs Cloudflare cleanup before deleting Prisma rows", async () => {
     const order: string[] = [];
     serviceMocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
       order.push("cloudflare");
@@ -525,7 +525,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "cloudflare"]);
+    expect(order).toEqual(["cloudflare", "prisma"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
       context: "settings.account-data.delete",
@@ -533,7 +533,57 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("skips Cloudflare cleanup when the Prisma transaction fails", async () => {
+  it("does not delete Prisma rows when configured Cloudflare cleanup is incomplete", async () => {
+    const order: string[] = [];
+    serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue({
+      ...makeCloudflareDeletionResult(),
+      deleted: false,
+      r2SkippedUserScopedPrefixes: true,
+      r2UserScopedSkipReason: "HostedUserCryptoRepairNeededError",
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => order.push("prisma"),
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_ACCOUNT_CLOUDFLARE_DELETE_INCOMPLETE",
+    });
+
+    expect(order).toEqual([]);
+  });
+
+  it("does not delete Prisma rows when Cloudflare cleanup is unconfigured", async () => {
+    const order: string[] = [];
+    serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue({
+      ...makeCloudflareDeletionResult(),
+      alarmCleared: null,
+      configured: false,
+      deleted: false,
+      r2DeletedObjectCount: null,
+      r2SkippedUserScopedPrefixes: null,
+      r2Supported: null,
+      runnerStateDeleted: null,
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => order.push("prisma"),
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_ACCOUNT_CLOUDFLARE_DELETE_INCOMPLETE",
+    });
+
+    expect(order).toEqual([]);
+  });
+
+  it("keeps Cloudflare cleanup outside a failing Prisma transaction", async () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => {
         throw new Error("transaction failed");
@@ -546,7 +596,10 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).rejects.toThrow("transaction failed");
 
-    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
+      context: "settings.account-data.delete",
+      userId: "member_123",
+    });
   });
 
   it("does not report provider-config device connections as provider-revoked without OAuth tokens", async () => {

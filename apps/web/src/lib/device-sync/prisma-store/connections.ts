@@ -36,6 +36,8 @@ import {
   type HostedConnectionRecord,
   type HostedStoredDeviceSyncAccount,
 } from "./connection-records";
+
+export { sanitizeHostedDeviceSyncConnectionMetadata } from "./connection-records";
 import {
   HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
   encryptHostedConnectionSecret,
