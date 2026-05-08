@@ -18,7 +18,8 @@ const mocks = vi.hoisted(() => ({
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
-  publishHostedBrowserVaultReplicaRef: vi.fn(),
+  publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuard: vi.fn(),
+  publishLatestBrowserVaultReplicaRef: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
@@ -38,7 +39,9 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
-  publishHostedBrowserVaultReplicaRef: mocks.publishHostedBrowserVaultReplicaRef,
+  publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuard:
+    mocks.publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuard,
+  publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
 }));
@@ -279,7 +282,6 @@ describe("hosted runtime internal web routes", () => {
         conversationImportedSeq: "12",
         state: "idle",
       },
-      browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_2_hash"),
       snapshotRef: createBundleRef("snapshot_2"),
       userId: "member_routes_1",
     });
@@ -348,9 +350,9 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("publishes browser-vault replica refs through the separate derived-data route", async () => {
+  it("publishes latest browser-vault replica refs through the separate derived-data route", async () => {
     const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
-    mocks.publishHostedBrowserVaultReplicaRef.mockResolvedValue({
+    mocks.publishLatestBrowserVaultReplicaRef.mockResolvedValue({
       status: "published",
       workspace: buildWorkspaceRecord({
         browserVaultReplicaRef: replicaRef,
@@ -362,7 +364,6 @@ describe("hosted runtime internal web routes", () => {
     const response = await browserVaultReplicaRoute.POST(jsonRequest(
       "/api/internal/hosted-workspace/browser-vault-replica",
       {
-        expectedSourceStateHash: "snapshot_2_hash",
         replicaRef,
       },
     ));
@@ -379,16 +380,44 @@ describe("hosted runtime internal web routes", () => {
         version: "5",
       },
     });
-    expect(mocks.publishHostedBrowserVaultReplicaRef).toHaveBeenCalledWith({
-      expectedSourceStateHash: "snapshot_2_hash",
+    expect(mocks.publishLatestBrowserVaultReplicaRef).toHaveBeenCalledWith({
       replicaRef,
       userId: "member_routes_1",
     });
   });
 
+  it("fences legacy source-hash browser-vault publishes behind the compatibility helper", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
+    mocks.publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuard.mockResolvedValue({
+      status: "published",
+      workspace: buildWorkspaceRecord({
+        browserVaultReplicaRef: replicaRef,
+        snapshotRef: createBundleRef("snapshot_2"),
+        version: "5",
+      }),
+    });
+
+    const response = await browserVaultReplicaRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/browser-vault-replica",
+      {
+        expectedSourceStateHash: "snapshot_2_hash",
+        replicaRef,
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuard)
+      .toHaveBeenCalledWith({
+        expectedSourceStateHash: "snapshot_2_hash",
+        replicaRef,
+        userId: "member_routes_1",
+      });
+    expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
+  });
+
   it("treats missing workspace browser-vault publishes as stale work", async () => {
     const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
-    mocks.publishHostedBrowserVaultReplicaRef.mockResolvedValue({
+    mocks.publishLatestBrowserVaultReplicaRef.mockResolvedValue({
       status: "missing",
       workspace: null,
     });
@@ -396,7 +425,6 @@ describe("hosted runtime internal web routes", () => {
     const response = await browserVaultReplicaRoute.POST(jsonRequest(
       "/api/internal/hosted-workspace/browser-vault-replica",
       {
-        expectedSourceStateHash: "snapshot_2_hash",
         replicaRef,
       },
     ));
@@ -409,8 +437,7 @@ describe("hosted runtime internal web routes", () => {
       published: false,
       workspace: null,
     });
-    expect(mocks.publishHostedBrowserVaultReplicaRef).toHaveBeenCalledWith({
-      expectedSourceStateHash: "snapshot_2_hash",
+    expect(mocks.publishLatestBrowserVaultReplicaRef).toHaveBeenCalledWith({
       replicaRef,
       userId: "member_routes_1",
     });

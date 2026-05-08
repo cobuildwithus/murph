@@ -151,14 +151,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).toHaveBeenCalled();
   });
 
-  it("keeps full checkpoint snapshots when the browser-vault replica port is unavailable", async () => {
+  it("writes idle shutdown full snapshots without the browser-vault replica port", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
     const putArtifact = vi.fn(async () => {});
-    const writeLog = vi.fn(async (request) => ({
-      loggedCount: request.entries.length,
-    }));
     const artifactBundles = new Map<string, Uint8Array>();
     const baseSnapshotRef = await createStoredBaseSnapshotRef({
       artifactBundles,
@@ -173,7 +170,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           snapshotRef: baseSnapshotRef,
           version: "7",
         }),
-        writeLog,
       }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
@@ -200,145 +196,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
       sha256: snapshotRef.hash,
     }));
-    expect(writeLog).toHaveBeenCalledWith({
-      entries: [
-        expect.objectContaining({
-          component: "workspace",
-          eventCode: "checkpoint.optional_sidecar_degraded",
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson: expect.objectContaining({
-            degradedBy: "replica-port-missing",
-            sidecar: "browser-vault-replica",
-          }),
-        }),
-      ],
-    });
-  });
-
-  it("keeps full checkpoint snapshots when browser-vault replica publishing fails", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
-    cleanupPaths.push(vaultRoot);
-    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
-    const putArtifact = vi.fn(async () => {});
-    const writeBrowserVaultReplica = vi.fn(async () => {
-      throw new Error("replica unavailable");
-    });
-    const writeLog = vi.fn(async (request) => ({
-      loggedCount: request.entries.length,
-    }));
-    const artifactBundles = new Map<string, Uint8Array>();
-    const baseSnapshotRef = await createStoredBaseSnapshotRef({
-      artifactBundles,
-      vaultRoot,
-    });
-    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      platform: createPlatform({
-        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
-        putArtifact,
-        readWorkspace: async () => createWorkspaceReadResponse({
-          snapshotRef: baseSnapshotRef,
-          version: "7",
-        }),
-        writeBrowserVaultReplica,
-        writeLog,
-      }),
-      readCurrentLease: () => ({
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        userId: "member_1",
-        workspaceVersion: "7",
-      }),
-      request: {
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        reason: "nudge",
-        userId: "member_1",
-        workspaceVersion: "7",
-      },
-      runtime: {},
-      vaultRoot,
-    });
-
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
-
-    expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
-    expect(snapshotRef.hash).toMatch(/^[a-f0-9]{64}$/u);
-    expect(result).not.toHaveProperty("browserVaultReplicaRef");
-    expect(writeLog).toHaveBeenCalledWith({
-      entries: [
-        expect.objectContaining({
-          component: "workspace",
-          eventCode: "checkpoint.optional_sidecar_degraded",
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson: expect.objectContaining({
-            degradedBy: "replica-write",
-            sidecar: "browser-vault-replica",
-          }),
-        }),
-      ],
-    });
-  });
-
-  it("degrades a published browser-vault replica ref for a different snapshot", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
-    cleanupPaths.push(vaultRoot);
-    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
-    const writeLog = vi.fn(async (request) => ({
-      loggedCount: request.entries.length,
-    }));
-    const artifactBundles = new Map<string, Uint8Array>();
-    const baseSnapshotRef = await createStoredBaseSnapshotRef({
-      artifactBundles,
-      vaultRoot,
-    });
-    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      platform: createPlatform({
-        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
-        putArtifact: async () => {},
-        readWorkspace: async () => createWorkspaceReadResponse({
-          snapshotRef: baseSnapshotRef,
-          version: "7",
-        }),
-        writeLog,
-        writeBrowserVaultReplica: async () => createBrowserVaultReplicaRef("b".repeat(64)),
-      }),
-      readCurrentLease: () => ({
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        userId: "member_1",
-        workspaceVersion: "7",
-      }),
-      request: {
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        reason: "nudge",
-        userId: "member_1",
-        workspaceVersion: "7",
-      },
-      runtime: {},
-      vaultRoot,
-    });
-
-    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-
-    expect(result).not.toHaveProperty("browserVaultReplicaRef");
-    expect(writeLog).toHaveBeenCalledWith({
-      entries: [
-        expect.objectContaining({
-          component: "workspace",
-          eventCode: "checkpoint.optional_sidecar_degraded",
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson: expect.objectContaining({
-            degradedBy: "replica-ref-mismatch",
-            sidecar: "browser-vault-replica",
-          }),
-        }),
-      ],
-    });
   });
 
   it("writes working user-path commits with externalized Codex continuity and no browser-vault replica", async () => {
@@ -1601,7 +1458,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
       .resolves.toEqual({
-        browserVaultReplicaRef,
         snapshotRef: baseSnapshotRef,
       });
 
@@ -1675,7 +1531,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
       .resolves.toEqual({
-        browserVaultReplicaRef,
         snapshotRef: baseSnapshotRef,
       });
 
@@ -1957,17 +1812,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       if (expectedCheckpointSnapshotMode(reason) === "full") {
         const snapshotRef = requireBundleRef(result.snapshotRef);
         expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-        expect(writeBrowserVaultReplica).toHaveBeenCalledTimes(1);
-        expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
-          sourceBundleHash: snapshotRef.hash,
-        }));
       } else {
         const snapshotRef = requireWorkingSnapshotRef(result.snapshotRef);
         expect(snapshotRef.base).toEqual(baseSnapshotRef);
         expect(snapshotRef.delta.key).toMatch(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u);
-        expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
-        expect(result.browserVaultReplicaRef).toBeUndefined();
       }
+      expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+      expect(result.browserVaultReplicaRef).toBeUndefined();
     }
   });
 
@@ -2217,6 +2068,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     const fullResult = await fullOptions.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
     const fullRef = requireBundleRef(fullResult.snapshotRef);
+    expect(fullResult).not.toHaveProperty("browserVaultReplicaRef");
+    expect(checkpointReplicas).toHaveLength(0);
     expect(listHostedBundleArtifacts({
       bytes: requireStoredBundle(artifactBundles, fullRef.hash),
       expectedKind: "vault",
@@ -2226,17 +2079,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         root: "vault",
       }),
     ]));
-
-    const checkpointExperiment = findBrowserVaultReplicaEntity(
-      checkpointReplicas[0],
-      "exp_01KQQYJGP8XF78MBXD9R2RAG14",
-    );
-    expect(checkpointExperiment?.attributes.commonsProtocolRef).toEqual(expect.objectContaining({
-      key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    }));
-    expect(checkpointExperiment?.attributes.effectiveProtocolSnapshot).toEqual(expect.objectContaining({
-      effectiveSpecHash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    }));
   });
 
   it("logs hashed Codex home snapshot diagnostics when checkpointing", async () => {
@@ -3242,38 +3084,6 @@ function readBrowserVaultReplicaSourceBundleHash(replica: unknown): string {
   }
 
   return sourceBundleHash;
-}
-
-function findBrowserVaultReplicaEntity(replica: unknown, id: string): {
-  attributes: Record<string, unknown>;
-} | null {
-  if (!replica || typeof replica !== "object" || Array.isArray(replica)) {
-    throw new TypeError("Browser vault replica must be an object.");
-  }
-
-  const entities = (replica as Record<string, unknown>).entities;
-  if (!Array.isArray(entities)) {
-    throw new TypeError("Browser vault replica entities must be an array.");
-  }
-
-  for (const entity of entities) {
-    if (!entity || typeof entity !== "object" || Array.isArray(entity)) {
-      continue;
-    }
-    const record = entity as Record<string, unknown>;
-    if (record.id !== id) {
-      continue;
-    }
-    const attributes = record.attributes;
-    if (!attributes || typeof attributes !== "object" || Array.isArray(attributes)) {
-      throw new TypeError("Browser vault replica entity attributes must be an object.");
-    }
-    return {
-      attributes: attributes as Record<string, unknown>,
-    };
-  }
-
-  return null;
 }
 
 function createBrowserVaultReplicaRef(sourceBundleHash: string) {

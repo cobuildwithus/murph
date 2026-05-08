@@ -266,10 +266,10 @@ new correctness-barrier producers emit working refs instead.
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. Foreground working commits do not generate or publish browser-vault
 replicas inline. They may leave an existing `browserVaultReplicaRef` in place as
-stale derived data, then schedule an async refresh keyed by the committed
-browser-vault source-state hash (`delta.hash` for working refs, otherwise
-`base.hash`). Full/base compaction may publish a fresh browser-vault replica
-off-path.
+stale derived data, then schedule an async refresh from the live warm workspace.
+Idle/full checkpoints write only the workspace snapshot ref; they do not publish
+browser-vault replicas. The detached browser-vault refresh publishes the latest
+replica ref separately, without changing the workspace checkpoint version.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint
@@ -277,10 +277,10 @@ from an older or partially deployed runner when `browserVaultReplicaRef` is
 absent or explicitly null. Missing browser-vault replica continuity is
 recoverable dashboard state and must not stop mailbox import, assistant
 admission, outbox checkpointing, or the runner's ability to reach idle. Browser
-session reads compare any existing replica against the current source-state hash
-and return stale data only to clients that explicitly opt in. Stale or
-mismatched replica metadata may be rejected because that indicates an internally
-inconsistent sidecar, not a recoverable omission. Future
+session reads return not-modified only when the client already knows the latest
+`browserVaultReplicaRef`. Stale or malformed replica metadata may be rejected
+because that indicates an internally inconsistent sidecar, not a recoverable
+omission. Future
 checkpoint fields that are not required to answer user messages must follow the
 same compatibility rule: old deployed runners may omit them without blocking
 assistant progress, and any stricter lockstep contract needs an explicit

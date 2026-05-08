@@ -2,7 +2,6 @@ import { createHmac } from "node:crypto";
 import path from "node:path";
 
 import {
-  createHostedBrowserVaultReplicaForSourceState,
   createHostedConversationMailboxImportItem,
   enqueueHostedSystemMailboxItem,
   normalizeHostedAssistantRuntimeConfig,
@@ -257,14 +256,12 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   userId: string;
   vaultRoot: string;
 }): Promise<{
-  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const currentRefs = input.platform.workspacePort?.read
     ? await readHostedWorkspaceCurrentCheckpointRefs(input)
     : {
         baseSnapshotRef: null,
-        browserVaultReplicaRef: null,
         snapshotRef: null,
       };
   const commitKind = resolveHostedWorkspaceCommitKind({
@@ -337,17 +334,13 @@ type HostedWorkspaceFullCheckpointCommitKind = Exclude<
   HostedWorkspaceCommitKind,
   "working_commit"
 >;
-type HostedWorkspaceBrowserVaultReplicaPolicy = "omit" | "publish";
-
 async function createFullSeedSnapshot(
   input: HostedWorkspaceBridgeFullSnapshotInput,
 ): Promise<{
-  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionBundleRef;
 }> {
   return await createFullSnapshot({
     ...input,
-    browserVaultReplicaPolicy: "omit",
     commitKind: "full_seed",
   });
 }
@@ -355,12 +348,10 @@ async function createFullSeedSnapshot(
 async function createFullCompactionSnapshot(
   input: HostedWorkspaceBridgeFullSnapshotInput,
 ): Promise<{
-  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionBundleRef;
 }> {
   return await createFullSnapshot({
     ...input,
-    browserVaultReplicaPolicy: "publish",
     commitKind: "full_compaction",
   });
 }
@@ -376,10 +367,8 @@ interface HostedWorkspaceBridgeFullSnapshotInput {
 }
 
 async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput & {
-  browserVaultReplicaPolicy: HostedWorkspaceBrowserVaultReplicaPolicy;
   commitKind: HostedWorkspaceFullCheckpointCommitKind;
 }): Promise<{
-  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionBundleRef;
 }> {
   const startedAt = Date.now();
@@ -478,21 +467,10 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     },
   });
 
-  const browserVaultReplica = input.browserVaultReplicaPolicy === "publish"
-    ? await publishHostedWorkspaceBridgeBrowserVaultReplica({
-        platform: input.platform,
-        request: input.request,
-        sourceRef: snapshotRef,
-        vaultRoot: input.vaultRoot,
-      })
-    : {};
-
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
     bundlePutCount: 1,
-    browserVaultReplicaState: input.browserVaultReplicaPolicy === "publish"
-      ? browserVaultReplica.browserVaultReplicaRef ? "written" : "degraded"
-      : "omitted",
+    browserVaultReplicaState: "omitted",
     commitKind: input.commitKind,
     externalArtifactPutBytes,
     externalArtifactPutCount,
@@ -505,7 +483,6 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
   });
 
   return {
-    ...browserVaultReplica,
     snapshotRef,
   };
 }
@@ -514,7 +491,6 @@ async function createWorkingCommitSnapshot(input: {
   codexHomeSnapshotHashSecret: string | null;
   currentRefs: {
     baseSnapshotRef: HostedExecutionBundleRef | null;
-    browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"] | null;
     snapshotRef: HostedExecutionSnapshotRef | null;
   };
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -523,7 +499,6 @@ async function createWorkingCommitSnapshot(input: {
   userId: string;
   vaultRoot: string;
 }): Promise<{
-  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const baseSnapshotRef = input.currentRefs.baseSnapshotRef;
@@ -699,72 +674,6 @@ async function createWorkingCommitSnapshot(input: {
       base: baseSnapshotRef,
       delta: deltaRef,
     }),
-  };
-}
-
-async function publishHostedWorkspaceBridgeBrowserVaultReplica(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
-  sourceRef: HostedExecutionBundleRef;
-  vaultRoot: string;
-}): Promise<{
-  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
-}> {
-  let replica: Awaited<ReturnType<typeof createHostedBrowserVaultReplicaForSourceState>>;
-  try {
-    replica = await createHostedBrowserVaultReplicaForSourceState({
-      generatedAt: input.sourceRef.updatedAt,
-      sourceStateHash: input.sourceRef.hash,
-      vaultRoot: input.vaultRoot,
-    });
-  } catch (error) {
-    await writeHostedCheckpointOptionalSidecarDegradedLog({
-      degradedBy: "replica-create",
-      error,
-      platform: input.platform,
-      request: input.request,
-      sidecar: "browser-vault-replica",
-    });
-    return {};
-  }
-
-  const browserVaultReplicaPort = input.platform.browserVaultReplicaPort;
-  if (!browserVaultReplicaPort) {
-    await writeHostedCheckpointOptionalSidecarDegradedLog({
-      degradedBy: "replica-port-missing",
-      platform: input.platform,
-      request: input.request,
-      sidecar: "browser-vault-replica",
-    });
-    return {};
-  }
-
-  let browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
-  try {
-    browserVaultReplicaRef = await browserVaultReplicaPort.write({ replica });
-  } catch (error) {
-    await writeHostedCheckpointOptionalSidecarDegradedLog({
-      degradedBy: "replica-write",
-      error,
-      platform: input.platform,
-      request: input.request,
-      sidecar: "browser-vault-replica",
-    });
-    return {};
-  }
-
-  if (browserVaultReplicaRef.sourceBundleHash !== input.sourceRef.hash) {
-    await writeHostedCheckpointOptionalSidecarDegradedLog({
-      degradedBy: "replica-ref-mismatch",
-      platform: input.platform,
-      request: input.request,
-      sidecar: "browser-vault-replica",
-    });
-    return {};
-  }
-
-  return {
-    browserVaultReplicaRef,
   };
 }
 
@@ -1198,7 +1107,6 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
 }): Promise<{
   baseSnapshotRef: HostedExecutionBundleRef | null;
-  browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"] | null;
   snapshotRef: HostedExecutionSnapshotRef | null;
 }> {
   if (!input.platform.workspacePort?.read) {
@@ -1210,7 +1118,6 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
   const currentWorkspace = await input.platform.workspacePort.read();
   return {
     baseSnapshotRef: readHostedExecutionSnapshotBaseRef(currentWorkspace.workspace?.snapshotRef ?? null),
-    browserVaultReplicaRef: currentWorkspace.workspace?.browserVaultReplicaRef ?? null,
     snapshotRef: currentWorkspace.workspace?.snapshotRef ?? null,
   };
 }
@@ -1224,7 +1131,6 @@ async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
   userId: string;
   vaultRoot: string;
 }): Promise<{
-  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
@@ -1239,66 +1145,8 @@ async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
   });
 
   return {
-    browserVaultReplicaRef: currentRefs.browserVaultReplicaRef,
     snapshotRef: currentRefs.snapshotRef,
   };
-}
-
-async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
-  degradedBy:
-    | "current-ref-read"
-    | "replica-create"
-    | "replica-port-missing"
-    | "replica-ref-mismatch"
-    | "replica-write";
-  error?: unknown;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
-  sidecar: "browser-vault-replica" | "working-checkpoint-base";
-}): Promise<void> {
-  const errorName = params.error instanceof Error
-    ? params.error.name
-    : params.error === undefined
-      ? null
-      : typeof params.error;
-  console.warn("Hosted checkpoint optional sidecar degraded.", {
-    degradedBy: params.degradedBy,
-    errorName,
-    sidecar: params.sidecar,
-  });
-
-  if (!params.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointReason: params.request.reason,
-    degradedBy: params.degradedBy,
-    errorName,
-    sidecar: params.sidecar,
-  };
-
-  try {
-    await params.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: params.request.attemptId,
-          component: "workspace",
-          eventCode: "checkpoint.optional_sidecar_degraded",
-          leaseGeneration: params.request.leaseGeneration,
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: params.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (logError) {
-    console.warn("Hosted checkpoint optional sidecar degradation log write failed.", {
-      errorName: logError instanceof Error ? logError.name : typeof logError,
-    });
-  }
 }
 
 async function writeHostedCheckpointIdleShutdownSkippedLog(params: {

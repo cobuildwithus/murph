@@ -18,9 +18,6 @@ export const POST = withJsonError(async (request: Request) => {
     reason: body.reason,
     snapshotRef: body.snapshotRef,
     userId,
-    ...("browserVaultReplicaRef" in body
-      ? { browserVaultReplicaRef: body.browserVaultReplicaRef }
-      : {}),
     ...("nextWakeAt" in body ? { nextWakeAt: body.nextWakeAt } : {}),
     ...("nextWakeReason" in body ? { nextWakeReason: body.nextWakeReason } : {}),
     ...("redactedStatus" in body ? { redactedStatusJson: body.redactedStatus } : {}),
