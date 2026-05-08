@@ -101,6 +101,7 @@ export async function claimResolvedAssistantCronJob(input: {
   }
 
   const now = new Date().toISOString()
+  const runningClaimId = cryptoRandomCronClaimId()
   const occurrenceAt =
     resolveCanonicalAssistantCronOccurrenceAt(
       input.job.source,
@@ -116,6 +117,7 @@ export async function claimResolvedAssistantCronJob(input: {
       pendingOccurrenceAt: occurrenceAt,
       retryAfterAt: null,
       runningAt: now,
+      runningClaimId,
       runningPid: process.pid,
     },
   }
@@ -238,6 +240,13 @@ export async function executeClaimedAssistantCronJob(input: {
       )
     }
 
+    if (input.job.kind === 'canonical') {
+      await assertCanonicalRuntimeClaimCurrent({
+        job: input.job,
+        paths: input.paths,
+      })
+    }
+
     if (input.job.kind === 'canonical' && input.job.source.kind === 'scheduledLog') {
       response = await runScheduledLogCronJob({
         vault: input.vault,
@@ -293,9 +302,9 @@ export async function executeClaimedAssistantCronJob(input: {
   })
 
   const finalized = await withAssistantCronWriteLock(input.paths, async () => {
-    await appendAssistantCronRun(input.paths, run)
-
     if (input.job.kind === 'local') {
+      await appendAssistantCronRun(input.paths, run)
+
       const store = await readAssistantCronStore(input.paths)
       const index = store.jobs.findIndex((job) => job.jobId === claimedJob.jobId)
 
@@ -339,6 +348,17 @@ export async function executeClaimedAssistantCronJob(input: {
         runtimeStore,
         resolveCanonicalAssistantCronJobId(input.job.source),
       ) ?? input.job.runtimeState
+    if (!canonicalRuntimeClaimMatches(input.job.runtimeState, currentRuntimeState)) {
+      return {
+        job: projectCanonicalAssistantCronJob({
+          source: input.job.source,
+          runtimeState: currentRuntimeState,
+        }),
+        removedAfterRun: false,
+      }
+    }
+    await appendAssistantCronRun(input.paths, run)
+
     const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
       finishedAt,
       run: {
@@ -549,6 +569,7 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
   const runningClearedState: AssistantCronCanonicalRuntimeState = {
     ...input.runtimeState.state,
     runningAt: null,
+    runningClaimId: null,
     runningPid: null,
     lastRunAt: input.finishedAt,
   }
@@ -612,4 +633,35 @@ function truncateAssistantCronResponse(response: string | null): string | null {
 
 function cryptoRandomRunId(): string {
   return `cronrun_${randomUUID().replace(/-/gu, '')}`
+}
+
+function cryptoRandomCronClaimId(): string {
+  return `cronclaim_${randomUUID().replace(/-/gu, '')}`
+}
+
+function canonicalRuntimeClaimMatches(
+  claimed: AssistantCronCanonicalRuntimeRecord,
+  current: AssistantCronCanonicalRuntimeRecord,
+): boolean {
+  return claimed.state.runningClaimId !== null &&
+    claimed.state.runningClaimId === current.state.runningClaimId
+}
+
+async function assertCanonicalRuntimeClaimCurrent(input: {
+  job: Extract<ResolvedAssistantCronJob, { kind: 'canonical' }>
+  paths: AssistantStatePaths
+}): Promise<void> {
+  const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths)
+  const currentRuntimeState =
+    findAssistantCronCanonicalRuntimeRecord(
+      runtimeStore,
+      resolveCanonicalAssistantCronJobId(input.job.source),
+    ) ?? input.job.runtimeState
+
+  if (!canonicalRuntimeClaimMatches(input.job.runtimeState, currentRuntimeState)) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_CLAIM_LOST',
+      `Assistant cron job "${input.job.job.name}" was reclaimed before it started.`,
+    )
+  }
 }

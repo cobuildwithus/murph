@@ -29,6 +29,7 @@ const assistantCronCanonicalRuntimeStateSchema = z
     consecutiveFailures: z.number().int().nonnegative(),
     lastError: z.string().nullable(),
     runningAt: z.string().min(1).nullable(),
+    runningClaimId: z.string().min(1).nullable().default(null),
     runningPid: z.number().int().positive().nullable(),
   })
   .strict()
@@ -156,6 +157,7 @@ export function createAssistantCronCanonicalRuntimeRecord(input: {
       consecutiveFailures: 0,
       lastError: null,
       runningAt: null,
+      runningClaimId: null,
       runningPid: null,
     },
   })
@@ -231,6 +233,7 @@ function normalizeAssistantCronCanonicalRuntimeRecord(
     state: {
       ...record.state,
       runningAt: null,
+      runningClaimId: null,
       runningPid: null,
     },
   })

@@ -901,7 +901,6 @@ function normalizeOptionalNumber(value: unknown, stream: SampleStream): number |
   }
 
   const normalizedBase = trimmed
-    .replace(/(?<=\d),(?=\d)/gu, "")
     .replace(/[°]/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
@@ -917,9 +916,40 @@ function normalizeOptionalNumber(value: unknown, stream: SampleStream): number |
     if (Number.isFinite(numeric)) {
       return numeric;
     }
+
+    const groupedNumeric = normalizeGroupedNumberCandidate(candidate);
+    if (groupedNumeric !== null) {
+      const grouped = Number(groupedNumeric);
+      if (Number.isFinite(grouped)) {
+        return grouped;
+      }
+    }
   }
 
   return undefined;
+}
+
+function normalizeGroupedNumberCandidate(value: string): string | null {
+  if (!value.includes(",")) {
+    return null;
+  }
+
+  const parts = value.split(".");
+  if (parts.length > 2) {
+    return null;
+  }
+
+  const [integerPart = "", fractionalPart] = parts;
+  const sign = /^[+-]/u.test(integerPart) ? integerPart.slice(0, 1) : "";
+  const unsignedInteger = sign ? integerPart.slice(1) : integerPart;
+  if (!/^\d{1,3}(?:,\d{3})+$/u.test(unsignedInteger)) {
+    return null;
+  }
+  if (fractionalPart !== undefined && !/^\d+$/u.test(fractionalPart)) {
+    return null;
+  }
+
+  return `${sign}${unsignedInteger.replace(/,/gu, "")}${fractionalPart === undefined ? "" : `.${fractionalPart}`}`;
 }
 
 function stripNumericSuffix(value: string, suffix: string): string {

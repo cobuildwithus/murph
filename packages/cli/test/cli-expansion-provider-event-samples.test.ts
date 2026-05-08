@@ -2477,6 +2477,29 @@ test.sequential(
       assert.equal(setExplicitTimeZoneAndRecompute.ok, true)
       assert.equal(requireData(setExplicitTimeZoneAndRecompute).entity.data.timeZone, 'America/New_York')
       assert.equal(requireData(setExplicitTimeZoneAndRecompute).entity.data.dayKey, '2026-03-27')
+
+      const dateOnlyEdit = await runSliceCli<{
+        entity: {
+          occurredAt: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--occurred-at',
+        '2026-03-28',
+        '--time-zone',
+        'Australia/Melbourne',
+        '--day-key-policy',
+        'recompute',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(dateOnlyEdit.ok, true)
+      assert.equal(requireData(dateOnlyEdit).entity.occurredAt, '2026-03-28T01:00:00.000Z')
+      assert.equal(requireData(dateOnlyEdit).entity.data.timeZone, 'Australia/Melbourne')
+      assert.equal(requireData(dateOnlyEdit).entity.data.dayKey, '2026-03-28')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

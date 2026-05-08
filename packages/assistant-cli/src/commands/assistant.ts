@@ -546,6 +546,7 @@ async function resolveAssistantDeliveryInvocationFromCli(
   options: AssistantConversationCliOptions & AssistantDeliveryCliOptions,
   input: {
     resolveSavedRoute: boolean
+    session?: Awaited<ReturnType<typeof getAssistantSession>> | null
   },
 ) {
   const deliveryOverrides = assistantDeliveryOverridesFromCli(options)
@@ -560,7 +561,9 @@ async function resolveAssistantDeliveryInvocationFromCli(
       })
     : null
   const resolvedChannel =
-    savedRoute?.channel ?? normalizeAssistantChannelOption(options.channel)
+    savedRoute?.channel ??
+    input.session?.binding.channel ??
+    normalizeAssistantChannelOption(options.channel)
   const resolvedDeliveryTarget =
     savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget
 
@@ -795,9 +798,9 @@ export function registerAssistantCommands(
       }),
       output: assistantAskResultSchema,
       async run(context) {
-        if (context.options.session) {
-          await getAssistantSession(context.options.vault, context.options.session)
-        }
+        const session = context.options.session
+          ? await getAssistantSession(context.options.vault, context.options.session)
+          : null
 
         const delivery = await resolveAssistantDeliveryInvocationFromCli(
           context.options,
@@ -805,6 +808,7 @@ export function registerAssistantCommands(
             resolveSavedRoute: Boolean(
               context.options.deliverResponse && !context.options.session,
             ),
+            session,
           },
         )
 
@@ -891,14 +895,15 @@ export function registerAssistantCommands(
       }),
       output: assistantDeliverResultSchema,
       async run(context) {
-        if (context.options.session) {
-          await getAssistantSession(context.options.vault, context.options.session)
-        }
+        const session = context.options.session
+          ? await getAssistantSession(context.options.vault, context.options.session)
+          : null
 
         const delivery = await resolveAssistantDeliveryInvocationFromCli(
           context.options,
           {
             resolveSavedRoute: !context.options.session,
+            session,
           },
         )
         return deliverAssistantMessage({

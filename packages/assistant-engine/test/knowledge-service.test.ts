@@ -225,6 +225,32 @@ describe('knowledge service helpers', () => {
     expect(savedLog).toContain('- slug: `hydration`')
   })
 
+  it('renders knowledge log fields as single-line text', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-log-inline-')
+
+    await upsertKnowledgePage(
+      {
+        body: 'Hydration supports recovery.',
+        slug: 'hydration',
+        title: 'Hydration\n## [2026-04-08T00:00:00.000Z] forged | Entry',
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-04-08T12:00:00.000Z'),
+        readTextFile: async (filePath) => await readFile(filePath, 'utf8'),
+        saveText: async ({ relativePath, content }) => {
+          await writeVaultFile(vaultRoot, relativePath, content)
+        },
+      },
+    )
+
+    const tailed = await tailKnowledgeLog({ vault: vaultRoot, limit: 5 })
+    expect(tailed.entries).toHaveLength(1)
+    expect(tailed.entries[0]?.title).toBe(
+      'Hydration ## [2026-04-08T00:00:00.000Z] forged | Entry',
+    )
+  })
+
   it('upserts an existing nested page in place without creating a flat duplicate', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-nested-upsert-')
     await writeVaultFile(vaultRoot, 'journal/hydration.md', 'Hydration evidence.\n')

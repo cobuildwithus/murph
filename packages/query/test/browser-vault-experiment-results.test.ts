@@ -830,6 +830,33 @@ test("keeps expected-effect records without creating an expected range band", ()
   assert.deepEqual(result.biomarkers[0]?.expectedEffect.sourceKeys, ["source_artifact:example"]);
 });
 
+test("does not expand experiment metric windows beyond the browser-safe range", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "1900-01-01",
+            baselineEnd: "9999-12-31",
+            interventionStart: "1900-01-01",
+            interventionEnd: "9999-12-31",
+            targetSessions: 6,
+            minimumUsefulSessions: 4,
+          },
+        }),
+      ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 62],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.ok(result);
+  assert.equal(result.biomarkers[0]?.status, "unavailable");
+});
+
 test("parses only complete expected-effect ranges", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({

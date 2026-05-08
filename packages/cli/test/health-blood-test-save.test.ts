@@ -459,3 +459,44 @@ test("blood-test save rejects non-vault raw refs before writing an event", async
     });
   }
 });
+
+test("blood-test save rejects raw refs with traversal segments before writing an event", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-traversal-raw-ref-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Panel with traversal raw ref",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "traversal_raw_ref_panel",
+      "--raw-ref",
+      "raw/../lab.pdf",
+      "--result",
+      "analyte=Ferritin;value=45;unit=ng/mL",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "VALIDATION_ERROR");
+    assert.match(result.envelope.error.message ?? "", /raw/i);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});

@@ -24,6 +24,7 @@ import {
 } from "./hosted-member-store";
 import {
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
+  tryCreateHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-store";
 import {
@@ -31,6 +32,7 @@ import {
   lookupHostedMemberIdentityByPhoneNumber,
   readHostedMemberIdentity,
   type HostedMemberIdentityLookup,
+  tryCreateHostedMemberIdentity,
   upsertHostedMemberIdentity,
 } from "./hosted-member-identity-store";
 import {
@@ -97,41 +99,51 @@ export async function ensureHostedMemberForPhoneTx(input: {
   const phoneIdentityFields = buildHostedMemberPhoneIdentityFields(input.phoneNumber);
   const memberId = generateHostedMemberId();
 
-  try {
-    const createdMember = await createHostedMember({
-      billingStatus: HostedBillingStatus.not_started,
-      memberId,
-      prisma: input.prisma,
-    });
-    await upsertHostedMemberIdentity({
-      ...phoneIdentityFields,
-      memberId,
-      prisma: input.prisma,
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: input.phoneNumber,
-    });
+  const createdMember = await createHostedMember({
+    billingStatus: HostedBillingStatus.not_started,
+    memberId,
+    prisma: input.prisma,
+  });
+  const identityCreated = await tryCreateHostedMemberIdentity({
+    ...phoneIdentityFields,
+    memberId,
+    prisma: input.prisma,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: input.phoneNumber,
+  });
+
+  if (identityCreated) {
     return createdMember;
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const concurrentIdentity = await lookupHostedMemberIdentityByPhoneLookupKey({
-        phoneLookupKey: phoneIdentityFields.phoneLookupKey,
-        prisma: input.prisma,
-      });
-
-      if (concurrentIdentity) {
-        return refreshHostedMemberForPhoneTx({
-          currentIdentity: concurrentIdentity.identity,
-          member: concurrentIdentity.core,
-          phoneNumber: input.phoneNumber,
-          prisma: input.prisma,
-        });
-      }
-    }
-
-    throw error;
   }
+
+  await input.prisma.hostedMember.delete({
+    where: {
+      id: memberId,
+    },
+  });
+  const concurrentIdentity = await lookupHostedMemberIdentityByPhoneLookupKey({
+    phoneLookupKey: phoneIdentityFields.phoneLookupKey,
+    prisma: input.prisma,
+  });
+
+  if (concurrentIdentity) {
+    return refreshHostedMemberForPhoneTx({
+      currentIdentity: concurrentIdentity.identity,
+      member: concurrentIdentity.core,
+      phoneNumber: input.phoneNumber,
+      prisma: input.prisma,
+    });
+  }
+
+  throw new Prisma.PrismaClientKnownRequestError(
+    "Hosted member phone identity was not created and no concurrent identity was found.",
+    {
+      clientVersion: Prisma.prismaVersion.client,
+      code: "P2002",
+    },
+  );
 }
 
 export async function ensureHostedMemberForPendingLinqParticipantContactTx(input: {
@@ -174,52 +186,62 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
 
   const memberId = generateHostedMemberId();
 
-  try {
-    const createdMember = await createHostedMember({
-      billingStatus: HostedBillingStatus.not_started,
-      memberId,
-      prisma: input.prisma,
-    });
-    await upsertHostedMemberIdentity({
-      maskedPhoneNumberHint: null,
-      memberId,
-      phoneLookupKey: null,
-      phoneNumber: null,
-      phoneNumberVerifiedAt: null,
-      prisma: input.prisma,
-      privyUserId: null,
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      walletAddress: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
-    });
-    await upsertHostedMemberPendingLinqParticipantContactTx({
-      contact: input.contact,
-      memberId,
-      observedAt: input.observedAt,
-      prisma: input.prisma,
-    });
+  const createdMember = await createHostedMember({
+    billingStatus: HostedBillingStatus.not_started,
+    memberId,
+    prisma: input.prisma,
+  });
+  await upsertHostedMemberIdentity({
+    maskedPhoneNumberHint: null,
+    memberId,
+    phoneLookupKey: null,
+    phoneNumber: null,
+    phoneNumberVerifiedAt: null,
+    prisma: input.prisma,
+    privyUserId: null,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+    walletAddress: null,
+    walletChainType: null,
+    walletCreatedAt: null,
+    walletProvider: null,
+  });
+  const routingCreated = await tryCreateHostedMemberPendingLinqParticipantContactTx({
+    contact: input.contact,
+    memberId,
+    observedAt: input.observedAt,
+    prisma: input.prisma,
+  });
+
+  if (routingCreated) {
     return createdMember;
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const concurrentRoutingLookup =
-        await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
-          lookupKey: input.contact.lookupKey,
-          prisma: input.prisma,
-        });
-
-      if (concurrentRoutingLookup) {
-        assertHostedMemberNotSuspended(concurrentRoutingLookup.core);
-        return concurrentRoutingLookup.core;
-      }
-    }
-
-    throw error;
   }
+
+  await input.prisma.hostedMember.delete({
+    where: {
+      id: memberId,
+    },
+  });
+  const concurrentRoutingLookup =
+    await lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
+      lookupKey: input.contact.lookupKey,
+      prisma: input.prisma,
+    });
+
+  if (concurrentRoutingLookup) {
+    assertHostedMemberNotSuspended(concurrentRoutingLookup.core);
+    return concurrentRoutingLookup.core;
+  }
+
+  throw new Prisma.PrismaClientKnownRequestError(
+    "Hosted member pending Linq route was not created and no concurrent route was found.",
+    {
+      clientVersion: Prisma.prismaVersion.client,
+      code: "P2002",
+    },
+  );
 }
 
 async function refreshHostedMemberForPhoneTx(input: {

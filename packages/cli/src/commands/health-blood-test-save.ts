@@ -61,6 +61,10 @@ const rawVaultPathSchema = z
   .regex(
     /^raw\/[A-Za-z0-9._/-]+$/u,
     "Expected a vault-relative raw/... path.",
+  )
+  .refine(
+    (value) => value.split("/").every((segment) => segment !== "." && segment !== ".."),
+    "raw/... paths cannot contain . or .. segments.",
   );
 
 export const bloodTestSaveResultSchema = z.object({

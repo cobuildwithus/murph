@@ -18,6 +18,7 @@ import type {
 import type {
   CoreRuntimeModule,
   CoreWriteServices,
+  PrivateProtocolListInput,
   PrivateProtocolSummaryResult,
   QueryRuntimeModule,
   QueryServices,
@@ -658,6 +659,32 @@ function toPrivateProtocolSummary(
   };
 }
 
+function privateProtocolMatchesCommonsProtocol(
+  protocol: PrivateProtocolSummaryResult["protocol"],
+  lookup: string,
+): boolean {
+  const ref = protocol.commonsProtocolRef;
+  if (!ref) {
+    return false;
+  }
+
+  const candidates = ["key", "slug", "routeId"]
+    .map((field) => ref[field])
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+
+  return candidates.some((candidate) => {
+    if (candidate === lookup) {
+      return true;
+    }
+
+    const withoutPrefix = candidate.includes(":")
+      ? candidate.slice(candidate.indexOf(":") + 1)
+      : candidate;
+
+    return withoutPrefix === lookup || withoutPrefix.endsWith(`/${lookup}`);
+  });
+}
+
 function createRegistryDocCoreServices(
   loadRuntime: () => Promise<{ core: CoreRuntimeModule }>,
 ): Pick<CoreWriteServices, RegistryCoreServiceMethodName> {
@@ -917,21 +944,26 @@ export function createExplicitHealthQueryServices(
         protocol: toPrivateProtocolSummary(summary),
       };
     },
-    async listPrivateProtocols(input: HealthListInput) {
+    async listPrivateProtocols(input: PrivateProtocolListInput) {
       const { query } = await loadRuntime();
       const vault = await query.readVault(input.vault);
       const summaries = query
         .listProtocolSummaries(vault, {
           statuses: input.status ? [input.status] : undefined,
         })
-        .slice(0, input.limit ?? 50)
-        .map((summary) => toPrivateProtocolSummary(summary));
+        .map((summary) => toPrivateProtocolSummary(summary))
+        .filter((summary) =>
+          !input.commonsProtocol ||
+          privateProtocolMatchesCommonsProtocol(summary, input.commonsProtocol)
+        )
+        .slice(0, input.limit ?? 50);
 
       return {
         vault: input.vault,
         filters: {
           limit: input.limit ?? 50,
           ...(input.status ? { status: input.status } : {}),
+          ...(input.commonsProtocol ? { commonsProtocol: input.commonsProtocol } : {}),
         },
         protocols: summaries,
         count: summaries.length,

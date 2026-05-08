@@ -962,7 +962,7 @@ function renderKnowledgeLogMarkdown(
       ]
 
   lines.push(
-    `## [${entry.occurredAt}] ${entry.action} | ${entry.title}`,
+    `## [${renderKnowledgeLogInlineText(entry.occurredAt)}] ${renderKnowledgeLogInlineText(entry.action)} | ${renderKnowledgeLogInlineText(entry.title)}`,
     '',
     `- slug: ${renderKnowledgeLogScalar(entry.slug)}`,
     `- pagePath: ${renderKnowledgeLogScalar(entry.pagePath)}`,
@@ -1012,7 +1012,7 @@ function parseKnowledgeLogEntries(markdown: string): KnowledgeLogTailResult['ent
 }
 
 function renderKnowledgeLogScalar(value: string | null): string {
-  return value ? `\`${value}\`` : '(none)'
+  return value ? `\`${renderKnowledgeLogInlineText(value)}\`` : '(none)'
 }
 
 function renderKnowledgeLogList(values: readonly string[]): string {
@@ -1020,7 +1020,11 @@ function renderKnowledgeLogList(values: readonly string[]): string {
     return '(none)'
   }
 
-  return values.map((value) => `\`${value}\``).join(', ')
+  return values.map((value) => `\`${renderKnowledgeLogInlineText(value)}\``).join(', ')
+}
+
+function renderKnowledgeLogInlineText(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
 }
 
 function normalizeKnowledgeLogLimit(limit: number | null | undefined): number {

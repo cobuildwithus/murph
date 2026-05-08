@@ -261,6 +261,7 @@ type HostedMemberFixture = {
 };
 
 type HostedMemberIdentityFixture = {
+  createMany?: MockedFunction;
   findFirst?: (input: {
     include?: Record<string, unknown>;
     where: Record<string, unknown>;
@@ -280,6 +281,7 @@ type HostedMemberEmailAuthorizationFixture = {
 };
 
 type HostedMemberRoutingFixture = {
+  createMany?: MockedFunction;
   findFirst?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
   findUnique?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
   updateMany?: (input: {
@@ -3057,6 +3059,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
           ...create,
           ...update,
         })),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
   } else if (!hostedMemberIdentity.findFirst && hostedMemberIdentity.findUnique) {
@@ -3089,6 +3092,9 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       });
     });
   }
+  if (prisma.hostedMemberIdentity && !prisma.hostedMemberIdentity.createMany) {
+    prisma.hostedMemberIdentity.createMany = vi.fn().mockResolvedValue({ count: 1 });
+  }
 
   if (!hostedMemberRouting?.upsert) {
     Object.defineProperty(prisma, "hostedMemberRouting", {
@@ -3098,10 +3104,14 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
         findUnique: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
   } else if (!hostedMemberRouting.findFirst && hostedMemberRouting.findUnique) {
     hostedMemberRouting.findFirst = hostedMemberRouting.findUnique;
+  }
+  if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.createMany) {
+    prisma.hostedMemberRouting.createMany = vi.fn().mockResolvedValue({ count: 1 });
   }
 
   if (!prisma.hostedWebhookReceiptSideEffect?.deleteMany || !prisma.hostedWebhookReceiptSideEffect?.upsert) {

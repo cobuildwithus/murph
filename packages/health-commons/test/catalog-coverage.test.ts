@@ -571,7 +571,7 @@ describe("@murphai/health-commons catalog coverage", () => {
     expect(() => validateHealthCommonsContent(groupedCoverageMismatchContent)).not.toThrow();
   });
 
-  it("allows duplicate source identities from imported source copies", () => {
+  it("requires explicit relations for duplicate source identities", () => {
     const firstSource = {
       ...sourcePage("source_artifact:example/one", "example-one"),
       frontmatter: {
@@ -602,7 +602,9 @@ describe("@murphai/health-commons catalog coverage", () => {
       pages: [firstSource, secondSource],
     };
 
-    expect(() => validateHealthCommonsContent(duplicateIdentityContent)).not.toThrow();
+    expect(() => validateHealthCommonsContent(duplicateIdentityContent)).toThrow(
+      /Duplicate Health Commons source identity/u,
+    );
 
     const explicitlyRelatedContent: HealthCommonsContentSet = {
       ...duplicateIdentityContent,

@@ -104,6 +104,15 @@ import {
   setAssistantCronJobTarget,
 } from '../src/assistant-cron.ts'
 import {
+  listCanonicalAssistantCronRecords,
+  projectCanonicalAssistantCronJob,
+  resolveCanonicalRuntimeState,
+} from '../src/assistant/cron/canonical-jobs.ts'
+import {
+  claimResolvedAssistantCronJob,
+  executeClaimedAssistantCronJob,
+} from '../src/assistant/cron/execution.ts'
+import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
@@ -735,6 +744,73 @@ describe('assistant cron runtime orchestration', () => {
     expect(stillRunning.state.runningAt).toBe('2026-04-08T12:30:00.000Z')
     expect(stillRunning.state.runningPid).toBe(222)
     expect(stillRunning.state.lastSucceededAt).toBeNull()
+  })
+
+  it('does not run or append a canonical cron result after the claim is replaced', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-claim-replaced-',
+    )
+    await createCanonicalJob(vaultRoot, 'claim-replaced-canonical')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, claimed.job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        runningAt: '2026-04-08T13:01:00.000Z',
+        runningClaimId: 'cronclaim_replacement',
+        runningPid: 999,
+      },
+      updatedAt: '2026-04-08T13:01:00.000Z',
+    }))
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('failed')
+    expect(result.run.error).toBe(
+      'Assistant cron job "claim-replaced-canonical" was reclaimed before it started.',
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(
+      listAssistantCronRuns({
+        job: claimed.job.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      jobId: claimed.job.jobId,
+      runs: [],
+    })
+
+    const current = await getAssistantCronJob(vaultRoot, claimed.job.jobId)
+    expect(current.state.runningAt).toBe('2026-04-08T13:01:00.000Z')
+    expect(current.state.lastSucceededAt).toBeNull()
   })
 
   it('processes a canonical daily-local midnight job when runtime state is missing', async () => {

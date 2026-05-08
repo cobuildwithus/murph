@@ -124,7 +124,11 @@ async function loadOwnedRecord(
   }
 
   const normalizedLookup = lookup.trim()
-  if (normalizedLookup !== record.entityId && normalizedLookup !== record.primaryLookupId) {
+  if (
+    normalizedLookup !== record.entityId &&
+    normalizedLookup !== record.primaryLookupId &&
+    !record.lookupIds.includes(normalizedLookup)
+  ) {
     throw new VaultCliError('not_found', `No ${expectedKind} found for "${lookup}".`)
   }
 

@@ -2,6 +2,7 @@ import {
   foodUpsertPayloadSchema,
   ID_PREFIXES,
   isContractId,
+  type FoodUpsertPayload,
   type FoodNutrition,
   type JsonObject,
 } from '@murphai/contracts'
@@ -44,6 +45,7 @@ interface FoodReadModel {
   tags?: string[]
   note?: string
   attachedRegimenIds?: string[]
+  links?: FoodUpsertPayload['links']
   relativePath: string
   markdown: string
 }
@@ -75,6 +77,7 @@ interface FoodCoreRuntime {
     tags?: string[]
     note?: string
     attachedRegimenIds?: string[]
+    links?: FoodUpsertPayload['links']
   }): Promise<{
     created: boolean
     record: {
@@ -336,6 +339,7 @@ export async function renameFoodRecord(input: {
         tags: existing.tags,
         note: existing.note,
         attachedRegimenIds: existing.attachedRegimenIds,
+        links: existing.links,
       },
     })
 
@@ -573,6 +577,7 @@ interface FoodCoreUpsertInput {
   tags?: string[]
   note?: string
   attachedRegimenIds?: string[]
+  links?: FoodUpsertPayload['links']
 }
 
 function buildFoodCoreInput(input: {
@@ -604,7 +609,34 @@ function buildFoodCoreInput(input: {
     attachedRegimenIds: clearedFields.has('attachedRegimenIds')
       ? []
       : input.payload.attachedRegimenIds,
+    links: buildFoodCoreLinks(input.payload, clearedFields),
   }) as FoodCoreUpsertInput
+}
+
+function buildFoodCoreLinks(
+  payload: FoodPayload,
+  clearedFields: ReadonlySet<string>,
+): FoodUpsertPayload['links'] | undefined {
+  if (clearedFields.has('links')) {
+    return []
+  }
+
+  const explicitLinks = payload.links ?? []
+  const attachedRegimenIds = clearedFields.has('attachedRegimenIds')
+    ? []
+    : payload.attachedRegimenIds ?? []
+
+  if (explicitLinks.length === 0 && attachedRegimenIds.length === 0) {
+    return undefined
+  }
+
+  return [
+    ...explicitLinks,
+    ...attachedRegimenIds.map((targetId) => ({
+      type: 'related_regimen' as const,
+      targetId,
+    })),
+  ]
 }
 
 function buildFoodPayload(food: FoodReadModel): FoodPayload {

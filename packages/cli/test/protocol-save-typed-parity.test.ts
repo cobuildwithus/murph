@@ -6,7 +6,10 @@ import { Cli } from "incur";
 import { test } from "vitest";
 
 import { parseFrontmatterDocument } from "@murphai/core";
-import { createIntegratedVaultServices } from "@murphai/vault-usecases";
+import {
+  createIntegratedVaultServices,
+  type VaultServices,
+} from "@murphai/vault-usecases";
 
 import { registerProtocolCommands } from "../src/commands/protocol.js";
 import { registerVaultCommands } from "../src/commands/vault.js";
@@ -47,6 +50,16 @@ function createRegimenSaveCli() {
   registerVaultCommands(cli, services);
   registerProtocolCommands(cli, services);
 
+  return cli;
+}
+
+function createProtocolListCli(services: VaultServices) {
+  const cli = Cli.create("vault-cli", {
+    description: "protocol list test cli",
+    version: "0.0.0-test",
+  });
+  cli.use(incurErrorBridge);
+  registerProtocolCommands(cli, services);
   return cli;
 }
 
@@ -129,6 +142,51 @@ test("regimen save schema exposes typed product and primary ingredient fields", 
   assert.equal("input" in regimenJsonFallback.options.properties, true);
   assert.equal(regimenJsonFallback.options.required?.includes("input") ?? false, true);
   assert.deepEqual(regimenJsonFallback.args.required ?? [], []);
+});
+
+test("protocol list forwards commons-protocol filtering to the query service before limiting", async () => {
+  const calls: Array<{ commonsProtocol?: string; limit?: number }> = [];
+  const cli = createProtocolListCli({
+    query: {
+      async listPrivateProtocols(
+        input: Parameters<VaultServices["query"]["listPrivateProtocols"]>[0],
+      ) {
+        calls.push({
+          commonsProtocol: input.commonsProtocol,
+          limit: input.limit,
+        });
+        return {
+          vault: input.vault,
+          filters: {
+            commonsProtocol: input.commonsProtocol,
+            limit: input.limit ?? 50,
+          },
+          protocols: [],
+          count: 0,
+          nextCursor: null,
+        };
+      },
+    },
+  } as unknown as VaultServices);
+
+  const result = await runInProcessJsonCli(cli, [
+    "protocol",
+    "list",
+    "--commons-protocol",
+    "hc:protocol/demo",
+    "--limit",
+    "25",
+    "--vault",
+    "/tmp/vault",
+  ]);
+
+  assert.equal(result.exitCode, null);
+  assert.deepEqual(calls, [
+    {
+      commonsProtocol: "hc:protocol/demo",
+      limit: 25,
+    },
+  ]);
 });
 
 test("regimen save persists typed product metadata and primary ingredient fields", async () => {

@@ -215,6 +215,22 @@ export async function upsertHostedMemberIdentity(
   return projectHostedMemberIdentityState(identity, input.prisma);
 }
 
+export async function tryCreateHostedMemberIdentity(
+  input: HostedMemberIdentityWriteInput,
+): Promise<boolean> {
+  await ensureHostedMemberIdentityControlRootTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  const result = await input.prisma.hostedMemberIdentity.createMany({
+    data: await buildHostedMemberIdentityCreateData(input),
+    skipDuplicates: true,
+  });
+
+  return result.count > 0;
+}
+
 export async function writeHostedMemberSignupPhoneState(
   input: HostedMemberSignupPhoneStateWriteInput,
 ): Promise<void> {
