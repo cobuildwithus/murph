@@ -63,7 +63,6 @@ import {
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.ts";
-import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import { handleLegacyHostedRunnerWakeQueue } from "./legacy-runner-wake-queue.ts";
 import {
@@ -294,7 +293,7 @@ export default {
     }
   },
   async email(
-    message: HostedEmailWorkerRequest,
+    message: ForwardableEmailMessage,
     env: WorkerEnvironmentSource,
     ctx?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<void> {

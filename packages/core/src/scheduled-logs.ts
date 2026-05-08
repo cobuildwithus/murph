@@ -4,14 +4,14 @@ import {
   ID_PREFIXES as CONTRACT_ID_PREFIXES,
   SCHEDULED_LOG_DOC_TYPE,
   SCHEDULED_LOG_SCHEMA_VERSION,
+  executableScheduleIntentSchema,
   formatScheduleIntentIssues,
-  scheduleIntentSchema,
   scheduledLogActionSchema,
   scheduledLogStatusValues,
+  type ExecutableScheduleIntent,
   type ExternalRef,
   type FoodNutrition,
   type MealNutrition,
-  type ScheduleIntent,
   type ScheduledLogAction,
   type ScheduledLogScaffoldPayload as ContractScheduledLogScaffoldPayload,
   type ScheduledLogStatus,
@@ -53,6 +53,8 @@ const scheduledLogRegistryResource = canonicalLogicalResource(
 );
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+type ScheduleIntent = ExecutableScheduleIntent;
 
 export type { ScheduleIntent, ScheduledLogAction, ScheduledLogStatus };
 
@@ -162,7 +164,7 @@ function normalizeScheduledLogStatus(value: unknown): ScheduledLogStatus {
 }
 
 function normalizeScheduleIntent(value: unknown): ScheduleIntent {
-  const parsed = scheduleIntentSchema.safeParse(value);
+  const parsed = executableScheduleIntentSchema.safeParse(value);
   if (!parsed.success) {
     const message = formatScheduleIntentIssues(parsed.error) ||
       "schedule must match a supported scheduled-log schedule.";
@@ -214,7 +216,7 @@ function normalizeScheduledLogBody(value: unknown): string {
 }
 
 function normalizeDailyFoodLocalTime(value: string): string {
-  const parsed = scheduleIntentSchema.safeParse({ kind: "dailyLocal", localTime: value });
+  const parsed = executableScheduleIntentSchema.safeParse({ kind: "dailyLocal", localTime: value });
   if (!parsed.success || parsed.data.kind !== "dailyLocal") {
     throw new VaultError("VAULT_INVALID_INPUT", "localTime must use 24-hour HH:MM form.");
   }

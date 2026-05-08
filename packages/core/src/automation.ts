@@ -33,9 +33,17 @@ import {
   requireObject,
   requireString,
 } from "./bank/shared.ts";
+import {
+  canonicalLogicalResource,
+  withCanonicalResourceLocks,
+} from "./operations/index.ts";
 import type { FrontmatterObject } from "./types.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
+const automationRegistryResource = canonicalLogicalResource(
+  "bank/automations",
+  AUTOMATIONS_DIRECTORY,
+);
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
@@ -497,6 +505,12 @@ export async function showAutomation(
 export async function upsertAutomation(
   input: UpsertAutomationInput,
 ): Promise<UpsertAutomationResult> {
+  return withAutomationRegistryLock(input.vaultRoot, () => upsertAutomationWithLatestRegistry(input));
+}
+
+async function upsertAutomationWithLatestRegistry(
+  input: UpsertAutomationInput,
+): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
   const requestedSlug = normalizeSlug(input.slug, "slug", title);
@@ -573,6 +587,17 @@ export async function upsertAutomation(
     created: target.created,
     record: writtenRecord,
   };
+}
+
+function withAutomationRegistryLock<TResult>(
+  vaultRoot: string,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  return withCanonicalResourceLocks({
+    vaultRoot,
+    resources: [automationRegistryResource],
+    run,
+  });
 }
 
 export function buildAutomationMarkdownPreview(

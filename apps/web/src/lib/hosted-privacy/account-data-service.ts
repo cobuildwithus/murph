@@ -1245,17 +1245,6 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     request: input.request,
   });
-  const cloudflare = await deleteHostedRunnerUserDataBestEffort({
-    context: "settings.account-data.delete",
-    userId: input.memberId,
-  });
-  if (!cloudflare.deleted) {
-    throw hostedOnboardingError({
-      code: "HOSTED_ACCOUNT_CLOUDFLARE_DELETE_INCOMPLETE",
-      httpStatus: 502,
-      message: "Hosted runner data deletion did not complete. Try account deletion again.",
-    });
-  }
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     return deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
@@ -1263,6 +1252,10 @@ export async function deleteHostedAccountData(input: {
       prisma: tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const cloudflare = await deleteHostedRunnerUserDataBestEffort({
+    context: "settings.account-data.delete",
+    userId: input.memberId,
+  });
 
   return {
     cloudflare,

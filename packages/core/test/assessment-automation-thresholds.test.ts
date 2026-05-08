@@ -586,6 +586,37 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
   assert.deepEqual(updated.record.tags, []);
 });
 
+test("automation concurrent creates resolve through the public registry lock", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-automation-concurrent-upsert");
+  await initializeVault({ vaultRoot });
+
+  const [first, second] = await Promise.all([
+    upsertAutomation({
+      vaultRoot,
+      ...createUnsafeAutomationPayload({
+        title: "Morning Check",
+        slug: "morning-check",
+        instructions: "First caller instructions.",
+      }),
+    }),
+    upsertAutomation({
+      vaultRoot,
+      ...createUnsafeAutomationPayload({
+        title: "Morning Check",
+        slug: "morning-check",
+        instructions: "Second caller instructions.",
+      }),
+    }),
+  ]);
+
+  assert.equal(first.record.automationId, second.record.automationId);
+  assert.equal(first.record.slug, "morning-check");
+  assert.deepEqual([first.created, second.created].sort(), [false, true]);
+
+  const files = await fs.readdir(path.join(vaultRoot, "bank", "automations"));
+  assert.deepEqual(files.filter((file) => file === "morning-check.md"), ["morning-check.md"]);
+});
+
 test("automation loading rejects malformed registry documents", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-automation-invalid-record");
   await initializeVault({ vaultRoot });

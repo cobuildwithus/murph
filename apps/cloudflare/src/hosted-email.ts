@@ -4,8 +4,6 @@
  * and the shared worker request shape together.
  */
 
-import type { HostedEmailAuthenticatedSenderVerdict } from "@murphai/runtime-state";
-
 import type { R2BucketLike } from "./bundle-store.ts";
 import { buildHostedStorageAad } from "./crypto-context.js";
 import {
@@ -41,7 +39,6 @@ export class HostedEmailRawMessageMissingError extends Error {
 }
 
 export interface HostedEmailWorkerRequest {
-  authenticatedSender?: HostedEmailAuthenticatedSenderVerdict | null;
   headers?: Headers;
   from: string;
   raw: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array | string;

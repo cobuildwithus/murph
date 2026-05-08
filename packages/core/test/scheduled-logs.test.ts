@@ -201,6 +201,47 @@ test("scheduled logs support preview, filters, renames, conflicts, and status ch
   );
 });
 
+test("scheduled logs reject schedules the cron runner cannot execute", async () => {
+  const vaultRoot = await makeTempDirectory("murph-scheduled-logs-invalid-schedule");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () => upsertScheduledLog({
+      vaultRoot,
+      scheduledLogId: "slog_01JX8VCQY2M5ZBV64ZP4N1DRBC",
+      title: "Broken Cron",
+      status: "active",
+      schedule: {
+        kind: "cron",
+        expression: "not executable",
+      },
+      action: {
+        kind: "measurement.add",
+        measurements: [{ metric: "body-weight", value: 181, unit: "lb" }],
+      },
+    }),
+    /Expected a five-field cron expression/u,
+  );
+
+  await assert.rejects(
+    () => upsertScheduledLog({
+      vaultRoot,
+      scheduledLogId: "slog_01JX8VDQY2M5ZBV64ZP4N1DRBD",
+      title: "Broken One Shot",
+      status: "active",
+      schedule: {
+        kind: "at",
+        at: "tomorrow morning",
+      },
+      action: {
+        kind: "measurement.add",
+        measurements: [{ metric: "body-weight", value: 181, unit: "lb" }],
+      },
+    }),
+    /Invalid ISO datetime/u,
+  );
+});
+
 test("scheduled log upserts resolve creates and updates under one registry lock", async () => {
   const vaultRoot = await makeTempDirectory("murph-scheduled-logs-concurrent");
   await initializeVault({ vaultRoot });
