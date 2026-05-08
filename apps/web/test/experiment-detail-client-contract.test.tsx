@@ -36,9 +36,12 @@ const mocks = vi.hoisted(() => ({
     client: null,
     dataVersion: null,
     error: null,
+    freshness: "fresh",
     ref: null,
+    refreshPending: false,
     refresh: vi.fn(async () => {}),
     status: "ready",
+    workspaceVersion: null,
   })),
 }));
 
@@ -135,9 +138,12 @@ beforeEach(() => {
     client: null,
     dataVersion: null,
     error: null,
+    freshness: "fresh",
     ref: null,
+    refreshPending: false,
     refresh: vi.fn(async () => {}),
     status: "ready",
+    workspaceVersion: null,
   });
 });
 
@@ -314,9 +320,12 @@ test("experiment start action becomes a results link for a running browser-vault
     client: null,
     dataVersion: null,
     error: null,
+    freshness: "fresh",
     ref: null,
+    refreshPending: false,
     refresh: vi.fn(async () => {}),
     status: "ready",
+    workspaceVersion: null,
   });
   mocks.resolveBrowserVaultExperimentRun.mockReturnValue(activeRun);
 

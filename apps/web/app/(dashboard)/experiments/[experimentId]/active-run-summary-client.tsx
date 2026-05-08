@@ -55,10 +55,18 @@ function ActiveRunSummaryInner({
   if (!hasData) return null;
 
   return (
-    <ResultsSummary
-      signals={privateRun.signals}
-      trends={privateRun.trends}
-      schedule={privateRun.schedule}
-    />
+    <section id="results" className="scroll-mt-24">
+      <div className="flex flex-col gap-4">
+        <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-foreground/50">
+          <span className="size-1.5 rounded-full bg-primary" />
+          Your active run
+        </span>
+        <ResultsSummary
+          signals={privateRun.signals}
+          trends={privateRun.trends}
+          schedule={privateRun.schedule}
+        />
+      </div>
+    </section>
   );
 }

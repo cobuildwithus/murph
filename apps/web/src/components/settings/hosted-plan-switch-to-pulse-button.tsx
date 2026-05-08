@@ -66,19 +66,21 @@ export function SwitchToPulseButton(props: {
     <div className="flex flex-col items-start gap-2 sm:items-end">
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         onClick={() => setConfirmationOpen(true)}
         disabled={disabled}
       >
         {label}
       </Button>
-      <p
-        role={confirmationOpen || !errorMessage ? undefined : "alert"}
-        aria-live="polite"
-        className="min-h-[1rem] text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
-      >
-        {confirmationOpen ? null : errorMessage}
-      </p>
+      {!confirmationOpen && errorMessage ? (
+        <p
+          role="alert"
+          aria-live="polite"
+          className="text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
       <PulseSwitchConfirmationDialog
         currentPeriodEnd={props.currentPeriodEnd}
         errorMessage={errorMessage}
