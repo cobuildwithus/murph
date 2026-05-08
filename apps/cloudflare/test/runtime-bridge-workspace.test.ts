@@ -719,6 +719,218 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     );
   });
 
+  it("logs redacted working delta reasons and previous-state carry-forward counts", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
+    cleanupPaths.push(vaultRoot, baseVaultRoot);
+    await writeFile(path.join(baseVaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await mkdir(path.join(vaultRoot, "bank"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox"), {
+      recursive: true,
+    });
+    await writeFile(path.join(vaultRoot, "bank", "memory.md"), "remember this\n", "utf8");
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent.json"),
+      "{\"intent\":\"ready\"}\n",
+      "utf8",
+    );
+
+    const artifactBundles = new Map<string, Uint8Array>();
+    const baseSnapshotRef = await createStoredBaseSnapshotRef({
+      artifactBundles,
+      vaultRoot: baseVaultRoot,
+    });
+    let currentSnapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] =
+      baseSnapshotRef;
+    let currentVersion = "7";
+    const putArtifact = vi.fn(async (payload: { bytes: Uint8Array; sha256: string }) => {
+      artifactBundles.set(payload.sha256, payload.bytes);
+    });
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const createOptions = () => createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: currentSnapshotRef,
+          version: currentVersion,
+        }),
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: currentVersion,
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: currentVersion,
+      },
+      runtime: {
+        forwardedEnv: {
+          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
+        },
+      },
+      vaultRoot,
+    });
+
+    const firstResult = await createOptions().createCheckpointSnapshot(
+      createCheckpointInput("import"),
+    );
+    currentSnapshotRef = requireWorkingSnapshotRef(firstResult.snapshotRef);
+    currentVersion = "8";
+    writeLog.mockClear();
+    await writeFile(
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "receipt.json"),
+      "{\"receipt\":\"sent\"}\n",
+      "utf8",
+    );
+
+    await createOptions().createCheckpointSnapshot(createCheckpointInput("outbox_receipt"));
+
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    const snapshotLog = entries.find((entry) =>
+      typeof entry === "object"
+      && entry !== null
+      && "eventCode" in entry
+      && entry.eventCode === "checkpoint.snapshot_finished");
+    expect(snapshotLog).toEqual(expect.objectContaining({
+      eventCode: "checkpoint.snapshot_finished",
+      redactedJson: expect.objectContaining({
+        checkpointPolicy: "working",
+        checkpointReason: "outbox_receipt",
+        workingDeltaBaseFileCount: 1,
+        workingDeltaCurrentFileCount: 4,
+        workingDeltaUpsertCount: 3,
+        workingDeltaUpsertPreviousStateSummary: expect.arrayContaining([
+          "state=carried_forward_from_previous,class=bank,files=1,bytes=14,externalCount=0",
+          "state=carried_forward_from_previous,class=runtime-assistant,files=1,bytes=19,externalCount=0",
+          "state=new_since_previous_effective,class=runtime-assistant,files=1,bytes=19,externalCount=0",
+        ]),
+        workingDeltaUpsertReasonSummary: expect.arrayContaining([
+          "reason=new_path,class=runtime-assistant,files=2,bytes=38,externalCount=0",
+          "reason=new_path,class=bank,files=1,bytes=14,externalCount=0",
+        ]),
+      }),
+    }));
+    expect(snapshotLog).toEqual(expect.objectContaining({
+      redactedJson: expect.objectContaining({
+        workingDeltaLargestUpserts: expect.arrayContaining([
+          expect.stringMatching(
+            /^class=runtime-assistant,root=vault,bytes=19,external=0,ext=\.json,depth=5,relHash=h1_[a-f0-9]{24}$/u,
+          ),
+          expect.stringMatching(
+            /^class=bank,root=vault,bytes=14,external=0,ext=\.md,depth=2,relHash=h1_[a-f0-9]{24}$/u,
+          ),
+        ]),
+      }),
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("memory.md");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("intent.json");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("receipt.json");
+  });
+
+  it("logs redacted working delta changed-file and tombstone reasons", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
+    cleanupPaths.push(vaultRoot, baseVaultRoot);
+    const baseProfile = "base profile\n";
+    const changedProfile = "changed profile value\n";
+    const deletedJournal = "old journal\n";
+    await mkdir(path.join(baseVaultRoot, "bank"), { recursive: true });
+    await mkdir(path.join(baseVaultRoot, "journal"), { recursive: true });
+    await writeFile(path.join(baseVaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(path.join(baseVaultRoot, "bank", "profile.md"), baseProfile, "utf8");
+    await writeFile(path.join(baseVaultRoot, "journal", "old.md"), deletedJournal, "utf8");
+    await mkdir(path.join(vaultRoot, "bank"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(path.join(vaultRoot, "bank", "profile.md"), changedProfile, "utf8");
+
+    const artifactBundles = new Map<string, Uint8Array>();
+    const baseSnapshotRef = await createStoredBaseSnapshotRef({
+      artifactBundles,
+      vaultRoot: baseVaultRoot,
+    });
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact: async ({ bytes, sha256 }) => {
+          artifactBundles.set(sha256, bytes);
+        },
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: baseSnapshotRef,
+          version: "7",
+        }),
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {
+        forwardedEnv: {
+          HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-secret",
+        },
+      },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
+
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    const snapshotLog = entries.find((entry) =>
+      typeof entry === "object"
+      && entry !== null
+      && "eventCode" in entry
+      && entry.eventCode === "checkpoint.snapshot_finished");
+    expect(snapshotLog).toEqual(expect.objectContaining({
+      eventCode: "checkpoint.snapshot_finished",
+      redactedJson: expect.objectContaining({
+        checkpointPolicy: "working",
+        checkpointReason: "canonical_runtime_commit",
+        workingDeltaTombstoneClassSummary: [
+          `reason=deleted_from_base,class=journal,files=1,bytes=${Buffer.byteLength(deletedJournal)},externalCount=0`,
+        ],
+        workingDeltaUpsertPreviousStateSummary: [
+          `state=changed_since_previous,class=bank,files=1,bytes=${Buffer.byteLength(changedProfile)},externalCount=0`,
+        ],
+        workingDeltaUpsertReasonSummary: [
+          `reason=content_hash_and_size_changed,class=bank,files=1,bytes=${Buffer.byteLength(changedProfile)},externalCount=0`,
+        ],
+      }),
+    }));
+    expect(snapshotLog).toEqual(expect.objectContaining({
+      redactedJson: expect.objectContaining({
+        workingDeltaLargestUpserts: [
+          expect.stringMatching(
+            /^class=bank,root=vault,bytes=22,external=0,ext=\.md,depth=2,relHash=h1_[a-f0-9]{24}$/u,
+          ),
+        ],
+      }),
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("profile.md");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("old.md");
+  });
+
   it("reuses legacy hot Codex continuity artifact refs when building a working commit", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));

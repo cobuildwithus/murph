@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import path from "node:path";
 
 import {
@@ -553,6 +554,7 @@ async function createWorkingCommitSnapshot(input: {
   let bundlePutBytes = 0;
   let leaseCheckCount = 0;
   let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
+  let workingDeltaDiagnostics: HostedWorkingDeltaDiagnostics | null = null;
   let workingDeltaUpsertCount = 0;
   let workingDeltaTombstoneCount = 0;
   const pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[] = [];
@@ -627,6 +629,7 @@ async function createWorkingCommitSnapshot(input: {
       snapshotElapsedMs: Date.now() - startedAt,
       workingDeltaTombstoneCount,
       workingDeltaUpsertCount,
+      workingDeltaDiagnostics,
       workspaceSnapshotSizeDiagnostics,
     });
 
@@ -637,6 +640,12 @@ async function createWorkingCommitSnapshot(input: {
 
   workingDeltaUpsertCount = snapshot.manifest.upserts.length;
   workingDeltaTombstoneCount = snapshot.manifest.tombstones.length;
+  workingDeltaDiagnostics = createHostedWorkingDeltaDiagnostics({
+    baseManifest,
+    deltaManifest: snapshot.manifest,
+    hashSecret: input.codexHomeSnapshotHashSecret,
+    previousEffectiveManifest: preservedState.manifest,
+  });
 
   leaseCheckCount += 1;
   assertHostedWorkspaceBridgeCheckpointLease({
@@ -681,6 +690,7 @@ async function createWorkingCommitSnapshot(input: {
     snapshotElapsedMs: Date.now() - startedAt,
     workingDeltaTombstoneCount,
     workingDeltaUpsertCount,
+    workingDeltaDiagnostics,
     workspaceSnapshotSizeDiagnostics,
   });
 
@@ -1405,6 +1415,35 @@ type HostedWorkspaceCommitKind =
   | "working_commit";
 type HostedWorkspaceCheckpointSnapshotMode = "full" | "working";
 
+interface HostedWorkingDeltaDiagnostics {
+  workingDeltaBaseFileCount: number;
+  workingDeltaCurrentFileCount: number;
+  workingDeltaLargestUpserts: string[];
+  workingDeltaTombstoneClassSummary: string[];
+  workingDeltaUpsertBytes: number;
+  workingDeltaUpsertExternalArtifactCount: number;
+  workingDeltaUpsertPreviousStateSummary: string[];
+  workingDeltaUpsertReasonSummary: string[];
+}
+
+interface HostedWorkingDeltaGroupMetrics {
+  bytes: number;
+  externalCount: number;
+  files: number;
+}
+
+interface HostedWorkingDeltaLargestUpsertMetric {
+  bytes: number;
+  className: string;
+  depth: number;
+  externalized: boolean;
+  extension: string;
+  relHash: string;
+  root: string;
+}
+
+const HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT = 16;
+
 function resolveHostedWorkspaceCommitKind(input: {
   currentSnapshotRef: HostedExecutionSnapshotRef | null;
   reason: HostedWorkspaceCheckpointRequest["reason"];
@@ -1432,6 +1471,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
   snapshotElapsedMs: number;
+  workingDeltaDiagnostics?: HostedWorkingDeltaDiagnostics | null;
   workingDeltaTombstoneCount?: number;
   workingDeltaUpsertCount?: number;
   workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
@@ -1458,6 +1498,9 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   }
   if (input.workingDeltaUpsertCount !== undefined) {
     redactedJson.workingDeltaUpsertCount = input.workingDeltaUpsertCount;
+  }
+  if (input.workingDeltaDiagnostics) {
+    appendHostedWorkingDeltaDiagnostics(redactedJson, input.workingDeltaDiagnostics);
   }
   if (input.workspaceSnapshotSizeDiagnostics) {
     appendHostedWorkspaceSnapshotSizeDiagnostics(
@@ -1487,6 +1530,354 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
       errorName: error instanceof Error ? error.name : typeof error,
     });
   }
+}
+
+function createHostedWorkingDeltaDiagnostics(input: {
+  baseManifest: HostedPortableWorkspaceManifest;
+  deltaManifest: HostedPortableWorkspaceDeltaManifest;
+  hashSecret: string | null;
+  previousEffectiveManifest: HostedPortableWorkspaceManifest;
+}): HostedWorkingDeltaDiagnostics {
+  const baseFiles = createHostedPortableWorkspaceManifestFileMap(input.baseManifest);
+  const previousEffectiveFiles = createHostedPortableWorkspaceManifestFileMap(
+    input.previousEffectiveManifest,
+  );
+  const reasonMetrics = new Map<string, HostedWorkingDeltaGroupMetrics>();
+  const previousStateMetrics = new Map<string, HostedWorkingDeltaGroupMetrics>();
+  const tombstoneMetrics = new Map<string, HostedWorkingDeltaGroupMetrics>();
+  const largestUpserts: HostedWorkingDeltaLargestUpsertMetric[] = [];
+  const newPathUpsertCount = input.deltaManifest.upserts.filter((upsert) =>
+    !baseFiles.has(createHostedWorkingDeltaManifestFileKey(upsert))
+  ).length;
+  let upsertBytes = 0;
+  let upsertExternalArtifactCount = 0;
+
+  for (const upsert of input.deltaManifest.upserts) {
+    const key = createHostedWorkingDeltaManifestFileKey(upsert);
+    const className = classifyHostedWorkingDeltaPath(upsert.root, upsert.path);
+    const reason = classifyHostedWorkingDeltaUpsertReason({
+      baseFile: baseFiles.get(key) ?? null,
+      upsert,
+    });
+    const previousState = classifyHostedWorkingDeltaPreviousState({
+      previousFile: previousEffectiveFiles.get(key) ?? null,
+      upsert,
+    });
+    const externalized = Boolean(upsert.artifact);
+
+    upsertBytes += upsert.size;
+    if (externalized) {
+      upsertExternalArtifactCount += 1;
+    }
+    incrementHostedWorkingDeltaGroup(reasonMetrics, reason, className, upsert);
+    incrementHostedWorkingDeltaGroup(
+      previousStateMetrics,
+      previousState,
+      className,
+      upsert,
+    );
+    recordHostedWorkingDeltaLargestUpsert(largestUpserts, {
+      bytes: upsert.size,
+      className,
+      depth: hostedWorkingDeltaPathDepth(upsert.path),
+      externalized,
+      extension: hostedWorkingDeltaSafeExtension(upsert.path),
+      relHash: fingerprintHostedWorkingDeltaPath({
+        hashSecret: input.hashSecret,
+        path: upsert.path,
+        root: upsert.root,
+      }),
+      root: sanitizeHostedWorkingDeltaRootForLog(upsert.root),
+    });
+  }
+
+  for (const tombstone of input.deltaManifest.tombstones) {
+    const key = createHostedWorkingDeltaManifestFileKey(tombstone);
+    const baseFile = baseFiles.get(key);
+    const className = classifyHostedWorkingDeltaPath(tombstone.root, tombstone.path);
+    incrementHostedWorkingDeltaGroup(
+      tombstoneMetrics,
+      "deleted_from_base",
+      className,
+      baseFile ?? {
+        path: tombstone.path,
+        root: tombstone.root,
+        sha256: "",
+        size: 0,
+      },
+    );
+  }
+
+  return {
+    workingDeltaBaseFileCount: input.baseManifest.files.length,
+    workingDeltaCurrentFileCount:
+      input.baseManifest.files.length
+      - input.deltaManifest.tombstones.length
+      + newPathUpsertCount,
+    workingDeltaLargestUpserts:
+      summarizeHostedWorkingDeltaLargestUpserts(largestUpserts),
+    workingDeltaTombstoneClassSummary:
+      summarizeHostedWorkingDeltaGroups(tombstoneMetrics, "reason"),
+    workingDeltaUpsertBytes: upsertBytes,
+    workingDeltaUpsertExternalArtifactCount: upsertExternalArtifactCount,
+    workingDeltaUpsertPreviousStateSummary:
+      summarizeHostedWorkingDeltaGroups(previousStateMetrics, "state"),
+    workingDeltaUpsertReasonSummary:
+      summarizeHostedWorkingDeltaGroups(reasonMetrics, "reason"),
+  };
+}
+
+function recordHostedWorkingDeltaLargestUpsert(
+  largestUpserts: HostedWorkingDeltaLargestUpsertMetric[],
+  metric: HostedWorkingDeltaLargestUpsertMetric,
+): void {
+  largestUpserts.push(metric);
+  largestUpserts.sort((left, right) => right.bytes - left.bytes);
+  largestUpserts.splice(HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT);
+}
+
+function appendHostedWorkingDeltaDiagnostics(
+  redactedJson: HostedRuntimeRedactedJson,
+  diagnostics: HostedWorkingDeltaDiagnostics,
+): void {
+  redactedJson.workingDeltaBaseFileCount = diagnostics.workingDeltaBaseFileCount;
+  redactedJson.workingDeltaCurrentFileCount = diagnostics.workingDeltaCurrentFileCount;
+  redactedJson.workingDeltaLargestUpserts = diagnostics.workingDeltaLargestUpserts;
+  redactedJson.workingDeltaTombstoneClassSummary =
+    diagnostics.workingDeltaTombstoneClassSummary;
+  redactedJson.workingDeltaUpsertBytes = diagnostics.workingDeltaUpsertBytes;
+  redactedJson.workingDeltaUpsertExternalArtifactCount =
+    diagnostics.workingDeltaUpsertExternalArtifactCount;
+  redactedJson.workingDeltaUpsertPreviousStateSummary =
+    diagnostics.workingDeltaUpsertPreviousStateSummary;
+  redactedJson.workingDeltaUpsertReasonSummary =
+    diagnostics.workingDeltaUpsertReasonSummary;
+}
+
+function createHostedPortableWorkspaceManifestFileMap(
+  manifest: HostedPortableWorkspaceManifest,
+): Map<string, HostedPortableWorkspaceManifestFile> {
+  return new Map(manifest.files.map((file) => [
+    createHostedWorkingDeltaManifestFileKey(file),
+    file,
+  ]));
+}
+
+function createHostedWorkingDeltaManifestFileKey(
+  file: Pick<HostedPortableWorkspaceManifestFile, "path" | "root">,
+): string {
+  return `${file.root}:${file.path}`;
+}
+
+function classifyHostedWorkingDeltaUpsertReason(input: {
+  baseFile: HostedPortableWorkspaceManifestFile | null;
+  upsert: HostedPortableWorkspaceManifestFile;
+}): string {
+  if (!input.baseFile) {
+    return "new_path";
+  }
+  const hashChanged = input.baseFile.sha256 !== input.upsert.sha256;
+  const sizeChanged = input.baseFile.size !== input.upsert.size;
+  if (hashChanged && sizeChanged) {
+    return "content_hash_and_size_changed";
+  }
+  if (hashChanged) {
+    return "content_hash_changed";
+  }
+  if (sizeChanged) {
+    return "size_changed";
+  }
+  if (!hostedWorkingDeltaManifestFileArtifactsEqual(
+    input.baseFile.artifact ?? null,
+    input.upsert.artifact ?? null,
+  )) {
+    return "representation_changed";
+  }
+  return "metadata_changed";
+}
+
+function classifyHostedWorkingDeltaPreviousState(input: {
+  previousFile: HostedPortableWorkspaceManifestFile | null;
+  upsert: HostedPortableWorkspaceManifestFile;
+}): string {
+  if (!input.previousFile) {
+    return "new_since_previous_effective";
+  }
+  return hostedWorkingDeltaManifestFilesEqual(input.previousFile, input.upsert)
+    ? "carried_forward_from_previous"
+    : "changed_since_previous";
+}
+
+function hostedWorkingDeltaManifestFilesEqual(
+  left: HostedPortableWorkspaceManifestFile,
+  right: HostedPortableWorkspaceManifestFile,
+): boolean {
+  return left.root === right.root
+    && left.path === right.path
+    && left.sha256 === right.sha256
+    && left.size === right.size
+    && hostedWorkingDeltaManifestFileArtifactsEqual(left.artifact ?? null, right.artifact ?? null);
+}
+
+function hostedWorkingDeltaManifestFileArtifactsEqual(
+  left: HostedBundleArtifactRef | null,
+  right: HostedBundleArtifactRef | null,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return left.sha256 === right.sha256 && left.byteSize === right.byteSize;
+}
+
+function incrementHostedWorkingDeltaGroup(
+  metrics: Map<string, HostedWorkingDeltaGroupMetrics>,
+  group: string,
+  className: string,
+  file: Pick<HostedPortableWorkspaceManifestFile, "artifact" | "size">,
+): void {
+  const key = `${group}\0${className}`;
+  const current = metrics.get(key) ?? {
+    bytes: 0,
+    externalCount: 0,
+    files: 0,
+  };
+  current.bytes += file.size;
+  current.externalCount += file.artifact ? 1 : 0;
+  current.files += 1;
+  metrics.set(key, current);
+}
+
+function summarizeHostedWorkingDeltaGroups(
+  metrics: ReadonlyMap<string, HostedWorkingDeltaGroupMetrics>,
+  groupLabel: "reason" | "state",
+): string[] {
+  return [...metrics.entries()]
+    .map(([key, entry]) => {
+      const [group, className] = key.split("\0", 2);
+      return {
+        bytes: entry.bytes,
+        className: className ?? "unknown",
+        externalCount: entry.externalCount,
+        files: entry.files,
+        group: group ?? "unknown",
+      };
+    })
+    .sort((left, right) =>
+      right.files - left.files
+      || right.bytes - left.bytes
+      || left.group.localeCompare(right.group)
+      || left.className.localeCompare(right.className))
+    .slice(0, HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT)
+    .map((entry) =>
+      [
+        `${groupLabel}=${entry.group}`,
+        `class=${entry.className}`,
+        `files=${entry.files}`,
+        `bytes=${entry.bytes}`,
+        `externalCount=${entry.externalCount}`,
+      ].join(","));
+}
+
+function summarizeHostedWorkingDeltaLargestUpserts(
+  upserts: readonly HostedWorkingDeltaLargestUpsertMetric[],
+): string[] {
+  return upserts
+    .slice(0, HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT)
+    .map((entry) =>
+      [
+        `class=${entry.className}`,
+        `root=${entry.root}`,
+        `bytes=${entry.bytes}`,
+        `external=${entry.externalized ? 1 : 0}`,
+        `ext=${entry.extension}`,
+        `depth=${entry.depth}`,
+        `relHash=${entry.relHash}`,
+      ].join(","));
+}
+
+function classifyHostedWorkingDeltaPath(root: string, relativePath: string): string {
+  const normalizedPath = normalizeHostedWorkingDeltaRelativePath(relativePath);
+
+  if (root === "operator-home") {
+    if (hasHostedWorkingDeltaPathPrefix(normalizedPath, ".codex-hosted")) {
+      return "operator-codex-home";
+    }
+
+    return "operator-home-other";
+  }
+
+  if (root !== "vault") {
+    return "unknown-root";
+  }
+
+  if (hasHostedWorkingDeltaPathPrefix(normalizedPath, ".runtime/operations/assistant")) {
+    return "runtime-assistant";
+  }
+
+  if (hasHostedWorkingDeltaPathPrefix(normalizedPath, ".runtime")) {
+    return "runtime-other";
+  }
+
+  const firstSegment = normalizedPath.split(path.posix.sep).filter(Boolean)[0] ?? "root";
+  switch (firstSegment) {
+    case "bank":
+    case "derived":
+    case "journal":
+    case "ledger":
+    case "raw":
+      return firstSegment;
+    default:
+      return "vault-canonical";
+  }
+}
+
+function sanitizeHostedWorkingDeltaRootForLog(root: string): string {
+  switch (root) {
+    case "operator-home":
+    case "vault":
+      return root;
+    default:
+      return "unknown-root";
+  }
+}
+
+function fingerprintHostedWorkingDeltaPath(input: {
+  hashSecret: string | null;
+  path: string;
+  root: string;
+}): string {
+  if (!input.hashSecret) {
+    return "disabled";
+  }
+  const normalizedPath = normalizeHostedWorkingDeltaRelativePath(input.path);
+  const hash = createHmac("sha256", input.hashSecret)
+    .update(`workspace_snapshot_rel:${input.root}:${normalizedPath}`, "utf8")
+    .digest("hex");
+  return `h1_${hash.slice(0, 24)}`;
+}
+
+function hasHostedWorkingDeltaPathPrefix(relativePath: string, prefix: string): boolean {
+  return relativePath === prefix || relativePath.startsWith(`${prefix}/`);
+}
+
+function hostedWorkingDeltaPathDepth(relativePath: string): number {
+  return normalizeHostedWorkingDeltaRelativePath(relativePath)
+    .split(path.posix.sep)
+    .filter(Boolean)
+    .length;
+}
+
+function hostedWorkingDeltaSafeExtension(relativePath: string): string {
+  const extension = path.posix.extname(normalizeHostedWorkingDeltaRelativePath(relativePath))
+    .toLowerCase();
+  return extension && /^[.][a-z0-9]{1,12}$/u.test(extension) ? extension : "none";
+}
+
+function normalizeHostedWorkingDeltaRelativePath(relativePath: string): string {
+  return relativePath
+    .split(/[\\/]+/u)
+    .filter((segment) => segment.length > 0 && segment !== ".")
+    .join(path.posix.sep);
 }
 
 async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
