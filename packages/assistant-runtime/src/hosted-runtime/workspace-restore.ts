@@ -50,6 +50,7 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
+const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
 const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-base-restore-cache.v2";
 const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-restore-cache.json";
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-hot-restore-cache.v2";
@@ -240,7 +241,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         [HOSTED_OPERATOR_HOME_ROOT_KEY]: restored.operatorHomeRoot,
         vault: restored.vaultRoot,
       },
-      shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
+      shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
     });
     await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
       assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
@@ -795,7 +796,7 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
         [HOSTED_OPERATOR_HOME_ROOT_KEY]: input.restored.operatorHomeRoot,
         vault: input.restored.vaultRoot,
       },
-      shouldRestoreArtifact: shouldRestoreHostedAssistantInputEvidenceArtifact,
+      shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
     });
     await verifyRestoredHostedCodexContinuityManifest(input.restored.operatorHomeRoot, {
       assistantStateRoot: resolveAssistantStatePaths(input.restored.vaultRoot).assistantStateRoot,
@@ -818,23 +819,30 @@ async function readHostedWorkspaceRuntimeBundle(input: {
   return bundle;
 }
 
-function shouldRestoreHostedAssistantInputEvidenceArtifact(input: {
+function shouldRestoreHostedRuntimeEagerArtifact(input: {
   path: string;
   root: string;
 }): boolean {
+  if (input.root === HOSTED_OPERATOR_HOME_ROOT_KEY) {
+    return hasHostedRuntimeEagerArtifactPrefix(
+      input.path,
+      HOSTED_CODEX_HOME_RELATIVE_PATH,
+    );
+  }
+
   if (input.root !== "vault") {
     return false;
   }
 
   return (
-    hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "raw/inbox")
-    || hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "raw/assistant-input")
-    || hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "derived/inbox")
-    || hasHostedAssistantInputEvidenceArtifactPrefix(input.path, "derived/assistant-input")
+    hasHostedRuntimeEagerArtifactPrefix(input.path, "raw/inbox")
+    || hasHostedRuntimeEagerArtifactPrefix(input.path, "raw/assistant-input")
+    || hasHostedRuntimeEagerArtifactPrefix(input.path, "derived/inbox")
+    || hasHostedRuntimeEagerArtifactPrefix(input.path, "derived/assistant-input")
   );
 }
 
-function hasHostedAssistantInputEvidenceArtifactPrefix(
+function hasHostedRuntimeEagerArtifactPrefix(
   relativePath: string,
   prefix: string,
 ): boolean {

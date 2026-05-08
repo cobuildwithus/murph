@@ -198,6 +198,84 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
+  test("restores externalized hot Codex rollout artifacts before continuity verification", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-hot-artifact-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceHotVaultRoot = path.join(workspaceRoot, "hot-vault");
+      const sourceHotOperatorHomeRoot = path.join(workspaceRoot, "hot-operator-home");
+      const hotAssistantRoot = resolveAssistantStatePaths(sourceHotVaultRoot).assistantStateRoot;
+      const threadId = "00000000-0000-4000-8000-000000000045";
+      const rolloutRelativePath =
+        `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+      const rolloutJson = `${"{\"codex\":\"artifact\"}\n".repeat(64)}`;
+      const resumeState = {
+        codexRolloutRelativePath: rolloutRelativePath,
+        providerSessionId: threadId,
+        resumeRouteId: "route-artifact",
+      };
+      const artifactBytesByHash = new Map<string, Uint8Array>();
+      await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
+      await mkdir(path.join(sourceHotOperatorHomeRoot, ".codex-hosted", path.dirname(rolloutRelativePath)), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(hotAssistantRoot, "sessions", "session-latest.json"),
+        JSON.stringify({
+          resumeState,
+          session: "artifact",
+        }) + "\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceHotOperatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+        rolloutJson,
+        "utf8",
+      );
+
+      const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+        codexContinuityArtifactSink: async (artifact) => {
+          artifactBytesByHash.set(artifact.ref.sha256, new Uint8Array(artifact.bytes));
+        },
+        operatorHomeRoot: sourceHotOperatorHomeRoot,
+        vaultRoot: sourceHotVaultRoot,
+      });
+      const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+      const rolloutHash = sha256HostedBundleHex(Buffer.from(rolloutJson));
+      assert.ok(artifactBytesByHash.has(rolloutHash));
+      artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+      const artifactGetCalls: string[] = [];
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash,
+          artifactGetCalls,
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: createBundleRef({
+            hash: hotHash,
+            key: `cloudflare-workspace-hot-state/${hotHash}.bundle`,
+            size: hotSnapshot.bundle.byteLength,
+          }),
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, [hotHash, rolloutHash]);
+      const restoredOperatorHomeRoot = path.join(
+        path.dirname(restoredVaultRoot),
+        `${path.basename(restoredVaultRoot)}-operator-home`,
+      );
+      assert.equal(
+        await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
+        rolloutJson,
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   test("skips unchanged base snapshot restore when warm local roots already contain it", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-base-cache-"));
 
