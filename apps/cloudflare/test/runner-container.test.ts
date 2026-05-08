@@ -1367,6 +1367,70 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("lets explicit destroy preempt an active browser-vault refresh lifecycle", async () => {
+    let resolveRefresh = (_response: Response): void => {
+      throw new Error("Expected browser-vault refresh resolver to be initialized.");
+    };
+    const refreshResponse = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/browser-vault-refresh")) {
+        return await refreshResponse;
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const refresh = container.refreshBrowserVaultReplica({
+      runtime: {},
+      sourceStateHash: "refresh-preempted-by-destroy",
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => expect(containerFetch).toHaveBeenCalledWith(
+      "http://container/internal/browser-vault-refresh",
+      expect.any(Object),
+      expect.any(Number),
+    ));
+    destroy.mockClear();
+
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledOnce();
+
+    resolveRefresh(new Response(JSON.stringify({
+      sourceStateHash: "refresh-preempted-by-destroy",
+      status: "already_fresh",
+      userId: "member_123",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(refresh).resolves.toMatchObject({
+      status: "already_fresh",
+    });
+  });
+
   it("accepts explicit destroy races when the shell is already stopping and still settles", async () => {
     vi.useFakeTimers();
 
