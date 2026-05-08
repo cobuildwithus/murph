@@ -37,7 +37,9 @@ The next meaningful scientific step is external validation, not more NHANES-only
 
 ReviewGPT R99 froze the NHANES candidate-lock stage and recommended external-validation/source planning. ReviewGPT R118 then selected ARIC/MESA admin/access work as the next strategic lane by 3/3 consensus.
 
-ARIC/MESA remain inactive. R119/R120/R121 created and validated the local admin docket, evidence-intake rules, and source-activation precheck, but the current evidence state is still `not_ready_missing_admin_evidence`. Until non-identifying source-access/admin evidence exists, the workflow must not activate sources, inspect dictionaries/codebooks, parse rows, score external validation, mutate the model, continue same-benchmark tuning, or make product claims.
+ARIC/MESA remain inactive. R119/R120/R121 created and validated the local admin docket, evidence-intake rules, and source-activation precheck. R122 added the BioLINCC request action brief, R123 added a reusable label-only evidence-intake template and validator, R124 added a fail-closed source-activation packet builder, and R125 proved only a synthetic ready-path check. The real evidence state is still `not_ready_missing_admin_evidence`; R124 remains `blocked_no_ready_admin_evidence_no_prompt_emitted`.
+
+R125 is not access evidence. It is only a synthetic proof that the future packet shape works in principle once real non-identifying admin/access labels exist. Until that real evidence exists, the workflow must not activate sources, inspect dictionaries/codebooks, parse rows, score external validation, mutate the model, continue same-benchmark tuning, or make product claims.
 
 ## Admin Handoff For External Validation
 
@@ -69,7 +71,15 @@ Minimum non-identifying evidence needed before source activation review:
 - retention/storage boundary approves ignored local cache and deletion controls
 - source-governance reviewer says the package is ready for activation review
 
-Until those labels are present and R120/R121 pass, do not download source packages, inspect dictionaries or codebooks, parse rows, send source material to ReviewGPT, score external validation, or use the result for product copy.
+Local handoff artifacts:
+
+- R122 action brief: `output-packages/research/murph-age/autoresearch/admin-handoff/biolincc-request-action-brief-r122.md`
+- R123 evidence intake template: `output-packages/research/murph-age/autoresearch/admin-handoff/aric-mesa-evidence-intake-form-r123.template.json`
+- R123 runner notes: `output-packages/research/murph-age/autoresearch/admin-handoff/aric-mesa-evidence-intake-runner-r123.md`
+- R124 blocked source-activation receipt: `output-packages/research/murph-age/autoresearch/admin-handoff/aric-mesa-source-activation-blocked-r124.md`
+- R125 synthetic ready-path check: `output-packages/research/murph-age/autoresearch/admin-handoff/synthetic-ready-activation-path-check-r125.md`
+
+Until those labels are present and R120/R121/R123/R124 pass against real evidence, do not download source packages, inspect dictionaries or codebooks, parse rows, send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
 
