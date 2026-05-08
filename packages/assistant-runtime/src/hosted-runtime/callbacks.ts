@@ -950,7 +950,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     sessionId: intent.sessionId,
     threadId: intent.threadId ?? null,
     threadIsDirect: intent.threadIsDirect ?? null,
-    transportIdempotent: intent.deliveryTransportIdempotent || intent.channel === "linq",
+    transportIdempotent: intent.deliveryTransportIdempotent,
     turnId: intent.turnId,
   };
 

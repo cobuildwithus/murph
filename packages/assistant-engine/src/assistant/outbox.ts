@@ -187,14 +187,31 @@ export async function createAssistantOutboxIntent(input: {
       turnId: input.turnId,
       ...rawTargetIdentity,
     })
+    const deliveryIdempotencyKey = normalizeNullableString(input.deliveryIdempotencyKey)
+    const deliveryTransportIdempotent =
+      resolveAssistantOutboxDeliveryTransportIdempotentForCreation({
+        channel: input.channel ?? null,
+        deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      })
     const existing = await findAssistantOutboxIntentByDedupeKey(input.vault, dedupeKey)
     if (existing) {
-      await repairAssistantOutboxReceiptForIntent({
-        at: existing.updatedAt,
+      const upgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
+        deliveryIdempotencyKey,
+        deliveryTransportIdempotent,
         intent: existing,
+      })
+      if (upgradedExisting !== existing) {
+        await writeJsonFileAtomic(
+          resolveAssistantOutboxIntentPath(paths.outboxDirectory, upgradedExisting.intentId),
+          upgradedExisting,
+        )
+      }
+      await repairAssistantOutboxReceiptForIntent({
+        at: upgradedExisting.updatedAt,
+        intent: upgradedExisting,
         vault: input.vault,
       })
-      return existing
+      return upgradedExisting
     }
 
     const intent = assistantOutboxIntentSchema.parse({
@@ -216,11 +233,8 @@ export async function createAssistantOutboxIntent(input: {
       ...buildAssistantOutboxPersistedTarget(input),
       delivery: null,
       deliveryConfirmationPending: false,
-      deliveryIdempotencyKey: normalizeNullableString(input.deliveryIdempotencyKey),
-      deliveryTransportIdempotent: inferAssistantOutboxDeliveryTransportIdempotent({
-        channel: input.channel ?? null,
-        deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? false,
-      }),
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent,
       lastError: null,
     })
     const persistedIntent = assistantOutboxIntentSchema.parse(
@@ -618,7 +632,7 @@ export async function deliverAssistantOutboxMessage(input: {
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
-    deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? false,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     message: input.message,
@@ -1104,4 +1118,41 @@ function inferAssistantOutboxDeliveryTransportIdempotent(input: Pick<
   }
 
   return getAssistantChannelAdapter(channel)?.supportsIdempotencyKey === true
+}
+
+function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {
+  channel?: string | null
+  deliveryTransportIdempotent?: boolean
+}): boolean {
+  return input.deliveryTransportIdempotent ??
+    inferAssistantOutboxDeliveryTransportIdempotent({
+      channel: input.channel ?? null,
+      deliveryTransportIdempotent: false,
+    })
+}
+
+function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
+  deliveryIdempotencyKey: string | null
+  deliveryTransportIdempotent: boolean
+  intent: AssistantOutboxIntent
+}): AssistantOutboxIntent {
+  const deliveryIdempotencyKey =
+    input.intent.deliveryIdempotencyKey ?? input.deliveryIdempotencyKey
+  const deliveryTransportIdempotent =
+    input.intent.deliveryTransportIdempotent || input.deliveryTransportIdempotent
+
+  if (
+    deliveryIdempotencyKey === input.intent.deliveryIdempotencyKey &&
+    deliveryTransportIdempotent === input.intent.deliveryTransportIdempotent
+  ) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent,
+    }),
+  )
 }

@@ -216,6 +216,37 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("trusts the persisted transport idempotency flag for Linq effects", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "linq",
+        dedupeKey: "dedupe_linq",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: false,
+        explicitTarget: "linq-thread",
+        identityId: "identity_1",
+        intentId: "intent_linq",
+        message: "hello linq",
+        replyToMessageId: null,
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_linq",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.payload).toMatchObject({
+      channel: "linq",
+      idempotencyKey: "assistant-outbox:intent_linq",
+      transportIdempotent: false,
+    });
+  });
+
   it("prefers fresh pending deliveries over stale retryable deliveries at the hosted effect cap", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {

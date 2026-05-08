@@ -12,13 +12,13 @@ import type {
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
 
-export function inferHostedAssistantDeliveryTransportIdempotent(input: {
+export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input: {
   channel?: string | null
   deliveryIdempotencyKey?: string | null
   executionContext?: AssistantMessageInput['executionContext']
-}): boolean {
+}): boolean | undefined {
   if (!input.executionContext?.hosted) {
-    return false
+    return undefined
   }
   if (!input.deliveryIdempotencyKey?.trim()) {
     return false
@@ -53,7 +53,7 @@ export async function deliverAssistantReply(input: {
     channel: deliveryChannel,
     deliveryIdempotencyKey,
     deliverySource: input.input.deliverySource ?? null,
-    deliveryTransportIdempotent: inferHostedAssistantDeliveryTransportIdempotent({
+    deliveryTransportIdempotent: resolveHostedAssistantDeliveryTransportIdempotentOverride({
       channel: deliveryChannel,
       deliveryIdempotencyKey,
       executionContext: input.input.executionContext,
