@@ -45,8 +45,26 @@ import {
 import { describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   ensureHostedInboxSidecarReady: vi.fn(),
+  snapshotHostedExecutionContext: vi.fn(),
+  snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
+
+vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/runtime-state/node")>();
+
+  return {
+    ...actual,
+    snapshotHostedExecutionContext: mocks.snapshotHostedExecutionContext.mockImplementation(
+      actual.snapshotHostedExecutionContext,
+    ),
+    snapshotHostedPortableWorkspaceDelta:
+      mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(
+        actual.snapshotHostedPortableWorkspaceDelta,
+      ),
+  };
+});
 
 vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/hosted-runtime/context.ts")>();
@@ -56,6 +74,18 @@ vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
     ensureHostedInboxSidecarReady: mocks.ensureHostedInboxSidecarReady.mockImplementation(
       actual.ensureHostedInboxSidecarReady,
     ),
+  };
+});
+
+vi.mock("../src/hosted-runtime/workspace-runner.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/hosted-runtime/workspace-runner.ts")>();
+
+  return {
+    ...actual,
+    createHostedWorkspaceSnapshotCheckpointRequestBuilder:
+      mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(
+        actual.createHostedWorkspaceSnapshotCheckpointRequestBuilder,
+      ),
   };
 });
 
@@ -1435,6 +1465,212 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ).rejects.toThrow(/workspace port must support read/u);
     assert.equal(livenessTouches, 0);
+  });
+
+  test("normal foreground turns complete without checkpointing the workspace", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const createCheckpointSnapshot = vi.fn(async () => {
+      throw new Error("Foreground test should not build checkpoint snapshots.");
+    });
+    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockClear();
+    mocks.snapshotHostedExecutionContext.mockClear();
+    mocks.snapshotHostedPortableWorkspaceDelta.mockClear();
+
+    const workspacePort = {
+      async read(): Promise<HostedWorkspaceReadResponse> {
+        events.push("workspace.read");
+        return {
+          fetchedAt: TEST_NOW,
+          workspace: createWorkspaceState({ version: "0" }),
+        };
+      },
+      async checkpoint(request: HostedWorkspaceCheckpointRequest): Promise<HostedWorkspaceCheckpointResponse> {
+        events.push("workspace.checkpoint");
+        checkpointRequests.push(request);
+        return await new Promise<HostedWorkspaceCheckpointResponse>(() => undefined);
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await expect(
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+          createCheckpointSnapshot,
+          async importItem() {
+            throw new Error("Import should not run without mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort,
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        status: "idle",
+      });
+
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+      ]);
+      assert.deepEqual(checkpointRequests, []);
+      expect(mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder).not.toHaveBeenCalled();
+      expect(createCheckpointSnapshot).not.toHaveBeenCalled();
+      expect(mocks.snapshotHostedExecutionContext).not.toHaveBeenCalled();
+      expect(mocks.snapshotHostedPortableWorkspaceDelta).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("normal foreground turns fail closed if code calls the workspace checkpoint port", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await expect(
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+          async createCheckpointSnapshot() {
+            throw new Error("Foreground test should not build checkpoint snapshots.");
+          },
+          async importItem() {
+            throw new Error("Import should not run without mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            await input.platform.workspacePort!.checkpoint({
+              attemptId: "attempt_foreground_tripwire",
+              expectedWorkspaceVersion: "0",
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              reason: "assistant_runtime_commit",
+              redactedStatus: null,
+              snapshotRef: null,
+            });
+            return {};
+          },
+          vaultRoot,
+        }),
+      ).rejects.toThrow("Foreground hosted runner must not checkpoint workspace.");
+
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("normal foreground active-turn refresh does not build a checkpoint request", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const createCheckpointSnapshot = vi.fn(async () => {
+      throw new Error("Foreground active-turn refresh should not build checkpoint snapshots.");
+    });
+    let fetchCount = 0;
+
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(request): Promise<HostedMailboxFetchResponse> {
+        fetchCount += 1;
+        events.push(`mailbox.fetch:${fetchCount}`);
+        const lateItem = createMailboxItem({
+          id: "mailbox_item_entrypoint_late_active_turn",
+          laneSeq: "1",
+        });
+        return {
+          fetchedAt: TEST_NOW,
+          items: fetchCount === 1 ? [] : [lateItem],
+          maxSeqByLane: request.lanes.map((lane) => ({
+            lane: lane.lane,
+            maxSeq: fetchCount === 1 ? lane.importedSeq : "1",
+          })),
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(
+        request: HostedMailboxPayloadFetchRequest,
+      ): Promise<HostedMailboxPayloadFetchResponse> {
+        return {
+          fetchedAt: TEST_NOW,
+          payload: {
+            createdAt: TEST_NOW,
+            mailboxItemId: request.mailboxItemId,
+            payloadCiphertext: "ciphertext_synthetic_sidecar",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            userId: TEST_USER_ID,
+          },
+        };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await expect(
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+          createCheckpointSnapshot,
+          async importItem(item) {
+            events.push(`import:${item.item.laneSeq}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
+            if (typeof refreshMailbox !== "function") {
+              throw new Error("Expected hosted mailbox refresh to be installed.");
+            }
+            const refresh = await refreshMailbox({
+              requestId: "request_synthetic_entrypoint_active_turn_refresh",
+            });
+            assert.deepEqual(refresh, {
+              progressed: true,
+              reason: "ingested_input",
+            });
+            return {};
+          },
+          vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        status: "idle",
+      });
+
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch:1",
+        "mailbox.fetch:2",
+        "import:1",
+      ]);
+      assert.deepEqual(checkpointRequests, []);
+      expect(createCheckpointSnapshot).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   test("fails closed when workspace read returns a stale version before mailbox fetch", async () => {
