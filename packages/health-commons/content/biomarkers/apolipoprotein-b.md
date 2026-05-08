@@ -6,6 +6,7 @@ slug: "biomarkers/apolipoprotein-b"
 title: "Apolipoprotein B"
 summary: "A blood marker reflecting the number of apoB-containing atherogenic lipoprotein particles; an optional higher-resolution secondary endpoint."
 status: "field-testing"
+hidden: true
 quality: "usable"
 aliases:
   - "ApoB"
