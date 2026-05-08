@@ -20,6 +20,9 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import { buildHostedExecutionRuntimePlatform } from "../src/runtime-platform.ts";
+import {
+  RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER,
+} from "../src/runner-outbound/browser-vault-refresh-authority.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
@@ -177,6 +180,92 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         message: "Hosted runtime control-plane response returned non-OK.",
         phase: "outbox",
         userId: "member_123",
+      }),
+    );
+  });
+
+  it("accepts missing workspace browser-vault publish responses as stale work", async () => {
+    const sourceBundleHash = "b".repeat(64);
+    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      published: false,
+      workspace: null,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 404,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    const result = await platform.browserVaultReplicaPort!.publishRef!({
+      expectedSourceStateHash: sourceBundleHash,
+      replicaRef,
+    });
+
+    expect(result).toEqual({
+      published: false,
+      workspace: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runtime control-plane response returned non-OK.",
+      }),
+    );
+  });
+
+  it("accepts conflicted workspace browser-vault publish responses as stale work", async () => {
+    const sourceBundleHash = "b".repeat(64);
+    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      published: false,
+      workspace: null,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 409,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    const result = await platform.browserVaultReplicaPort!.publishRef!({
+      expectedSourceStateHash: sourceBundleHash,
+      replicaRef,
+    });
+
+    expect(result).toEqual({
+      published: false,
+      workspace: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runtime control-plane response returned non-OK.",
       }),
     );
   });
@@ -1228,6 +1317,48 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+    await expect(request.json()).resolves.toEqual({ replica });
+  });
+
+  it("writes detached browser-vault refresh replicas with refresh authority headers", async () => {
+    const sourceBundleHash = "c".repeat(64);
+    const replica = {
+      generatedAt: "2026-04-26T00:00:00.000Z",
+      schema: "murph.browser-vault-replica",
+      source: {
+        dataVersion: "runner-platform-refresh-test",
+        sourceBundleHash,
+      },
+    };
+    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      browserVaultRefreshSourceStateHash: sourceBundleHash,
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: null,
+    });
+
+    const result = await platform.browserVaultReplicaPort!.write({ replica });
+
+    expect(result).toEqual(replicaRef);
+    expect(platform.runtimeLivenessPort).toBeUndefined();
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault replica write");
+    expect(request.url).toBe("http://browser-vault.worker/replicas");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect(request.headers.get(RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER)).toBe(
+      sourceBundleHash,
+    );
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBeNull();
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBeNull();
     await expect(request.json()).resolves.toEqual({ replica });
   });
 

@@ -11,6 +11,12 @@ import {
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/contracts";
+import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "./internal-hosts.ts";
 import { methodNotAllowed } from "./json.ts";
@@ -19,6 +25,10 @@ import {
 } from "./local-internal-proxy-route.ts";
 import { buildHostedRunnerSupervisorEnv } from "./runner-env.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
+import {
+  buildRunnerBrowserVaultRefreshAttemptId,
+  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+} from "./runner-outbound/browser-vault-refresh-authority.ts";
 import {
   assertHostedExecutionRunnerJobResult,
   parseHostedExecutionRunnerJobInput,
@@ -85,15 +95,17 @@ interface HostedExecutionContainerBrowserVaultRefreshRequest {
 
 type HostedExecutionContainerBrowserVaultRefreshResult =
   | {
-      replica: unknown;
-      sourceStateHash: string;
-      status: "generated";
-      userId: string;
+      byteLength: number;
+      replicaRef: HostedBrowserVaultReplicaRef;
+      status: "written";
     }
   | {
-      sourceStateHash: string;
+      byteLength: number;
+      maxBytes: number;
+      status: "refresh_failed_too_large";
+    }
+  | {
       status: "already_fresh" | "stale_source" | "workspace_missing";
-      userId: string;
     };
 
 interface HostedExecutionContainerRunnerInput {
@@ -124,7 +136,9 @@ export interface HostedExecutionContainerNamespaceLike {
 }
 
 type RunnerOutboundHandlerContext = OutboundHandlerContext<{
+  attemptId?: unknown;
   internalWorkerProxyToken?: unknown;
+  leaseGeneration?: unknown;
   userId?: unknown;
 } | undefined>;
 
@@ -518,8 +532,8 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     };
     const outboundProxyState: RunnerOutboundProxyState = {
-      attemptId: `browser-vault-refresh:${input.sourceStateHash}`,
-      leaseGeneration: "0",
+      attemptId: buildRunnerBrowserVaultRefreshAttemptId(input.sourceStateHash),
+      leaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
       token: createRunnerOutboundProxyToken(),
       userId: input.userId,
     };
@@ -784,7 +798,9 @@ export class RunnerContainer extends Container {
         {
           method: RUNNER_OUTBOUND_HANDLER_METHOD,
           params: {
+            attemptId: state.attemptId,
             internalWorkerProxyToken: state.token,
+            leaseGeneration: state.leaseGeneration,
             userId: state.userId,
           },
         },
@@ -1347,6 +1363,13 @@ function createRunnerOutboundHandler() {
         ctx.params?.internalWorkerProxyToken,
         "ctx.params.internalWorkerProxyToken",
       ),
+      {
+        proxyAttemptId: requireString(ctx.params?.attemptId, "ctx.params.attemptId"),
+        proxyLeaseGeneration: requireString(
+          ctx.params?.leaseGeneration,
+          "ctx.params.leaseGeneration",
+        ),
+      },
     );
   };
 }
@@ -1526,35 +1549,48 @@ function parseHostedBrowserVaultRefreshContainerResult(
 ): HostedExecutionContainerBrowserVaultRefreshResult {
   const record = requireRecord(value, "Hosted browser-vault refresh container result");
   const status = requireString(record.status, "Hosted browser-vault refresh container result.status");
-  const sourceStateHash = requireString(
-    record.sourceStateHash,
-    "Hosted browser-vault refresh container result.sourceStateHash",
-  );
-  const userId = requireString(record.userId, "Hosted browser-vault refresh container result.userId");
 
-  if (status === "generated") {
-    if (!Object.hasOwn(record, "replica")) {
-      throw new TypeError("Hosted browser-vault refresh container result.replica is required.");
+  if (status === "written") {
+    const replicaRef = parseHostedBrowserVaultReplicaRef(
+      record.replicaRef,
+      "Hosted browser-vault refresh container result.replicaRef",
+    );
+    if (!replicaRef) {
+      throw new TypeError("Hosted browser-vault refresh container result.replicaRef must not be null.");
     }
 
     return {
-      replica: record.replica,
-      sourceStateHash,
+      byteLength: requireNonNegativeNumber(
+        record.byteLength,
+        "Hosted browser-vault refresh container result.byteLength",
+      ),
+      replicaRef,
       status,
-      userId,
+    };
+  }
+
+  if (status === "refresh_failed_too_large") {
+    return {
+      byteLength: requireNonNegativeNumber(
+        record.byteLength,
+        "Hosted browser-vault refresh container result.byteLength",
+      ),
+      maxBytes: requireNonNegativeNumber(
+        record.maxBytes,
+        "Hosted browser-vault refresh container result.maxBytes",
+      ),
+      status,
     };
   }
 
   if (status === "already_fresh" || status === "stale_source" || status === "workspace_missing") {
     return {
-      sourceStateHash,
       status,
-      userId,
     };
   }
 
   throw new TypeError(
-    "Hosted browser-vault refresh container result.status must be generated, already_fresh, stale_source, or workspace_missing.",
+    "Hosted browser-vault refresh container result.status must be written, refresh_failed_too_large, already_fresh, stale_source, or workspace_missing.",
   );
 }
 
@@ -1569,6 +1605,14 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function requireNonNegativeNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${label} must be a non-negative number.`);
   }
 
   return value;

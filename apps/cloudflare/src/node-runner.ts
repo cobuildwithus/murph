@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   createHostedBrowserVaultReplicaForSourceState,
+  readHostedBrowserVaultWarmSourceStateHash,
   restoreHostedWorkspaceRuntimeJobWorkspace,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedAssistantRuntimeConfig,
@@ -24,6 +25,7 @@ import {
 } from "./runner-native-parser-toolchain.ts";
 import {
   runHostedWorkspaceInvocationIsolatedDetailed,
+  resolveHostedRunnerWarmWorkspaceVaultRoot,
   type HostedExecutionIsolatedRunnerInput,
 } from "./node-runner-isolated.ts";
 import {
@@ -53,6 +55,13 @@ import {
 import {
   readHostedBrowserVaultSourceStateHash,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+  measureHostedBrowserVaultReplicaBytes,
+} from "./browser-vault-limits.ts";
 
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
@@ -95,15 +104,17 @@ export interface HostedBrowserVaultReplicaRefreshInput {
 
 export type HostedBrowserVaultReplicaRefreshResult =
   | {
-      replica: unknown;
-      sourceStateHash: string;
-      status: "generated";
-      userId: string;
+      byteLength: number;
+      replicaRef: HostedBrowserVaultReplicaRef;
+      status: "written";
     }
   | {
-      sourceStateHash: string;
+      byteLength: number;
+      maxBytes: number;
+      status: "refresh_failed_too_large";
+    }
+  | {
       status: "already_fresh" | "stale_source" | "workspace_missing";
-      userId: string;
     };
 
 export function buildHostedExecutionJobRuntime(
@@ -260,38 +271,45 @@ export async function refreshHostedBrowserVaultReplica(
     commitTimeoutMs: runtime.commitTimeoutMs,
     internalWorkerProxyToken,
     localInternalProxyBaseUrl,
+    browserVaultRefreshSourceStateHash: input.sourceStateHash,
     workspaceCheckpointBridge: null,
   });
   const workspacePort = platform.workspacePort;
   if (!workspacePort?.read) {
     throw new TypeError("Hosted browser-vault refresh requires a workspace read port.");
   }
+  if (!platform.browserVaultReplicaPort?.write) {
+    throw new TypeError("Hosted browser-vault refresh requires a browser-vault replica write port.");
+  }
 
   const workspaceRead = await workspacePort.read();
   const workspace = workspaceRead.workspace;
   if (!workspace) {
     return {
-      sourceStateHash: input.sourceStateHash,
       status: "workspace_missing",
-      userId: input.userId,
     };
   }
 
   const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(workspace.snapshotRef);
   if (currentSourceStateHash !== input.sourceStateHash) {
     return {
-      sourceStateHash: input.sourceStateHash,
       status: "stale_source",
-      userId: input.userId,
     };
   }
 
   if (workspace.browserVaultReplicaRef?.sourceBundleHash === input.sourceStateHash) {
     return {
-      sourceStateHash: input.sourceStateHash,
       status: "already_fresh",
-      userId: input.userId,
     };
+  }
+
+  const warmResult = await tryRefreshHostedBrowserVaultReplicaFromWarmRoot({
+    platform,
+    sourceStateHash: input.sourceStateHash,
+    userId: input.userId,
+  });
+  if (warmResult) {
+    return warmResult;
   }
 
   const refreshRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
@@ -301,24 +319,71 @@ export async function refreshHostedBrowserVaultReplica(
       vaultRoot: refreshRoot,
       workspace,
     });
-    const replica = await createHostedBrowserVaultReplicaForSourceState({
-      generatedAt: new Date().toISOString(),
-      sourceBundleHash: input.sourceStateHash,
+    return await createAndWriteHostedBrowserVaultReplica({
+      platform,
+      sourceStateHash: input.sourceStateHash,
+      userId: input.userId,
       vaultRoot: restored.vaultRoot,
     });
-
-    return {
-      replica,
-      sourceStateHash: input.sourceStateHash,
-      status: "generated",
-      userId: input.userId,
-    };
   } finally {
     await rm(refreshRoot, {
       force: true,
       recursive: true,
     });
   }
+}
+
+async function tryRefreshHostedBrowserVaultReplicaFromWarmRoot(input: {
+  platform: ReturnType<typeof buildHostedExecutionRuntimePlatform>;
+  sourceStateHash: string;
+  userId: string;
+}): Promise<HostedBrowserVaultReplicaRefreshResult | null> {
+  const warmVaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(input.userId);
+  const warmSourceStateHash = await readHostedBrowserVaultWarmSourceStateHash({
+    vaultRoot: warmVaultRoot,
+  });
+  if (warmSourceStateHash !== input.sourceStateHash) {
+    return null;
+  }
+
+  try {
+    return await createAndWriteHostedBrowserVaultReplica({
+      platform: input.platform,
+      sourceStateHash: input.sourceStateHash,
+      userId: input.userId,
+      vaultRoot: warmVaultRoot,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function createAndWriteHostedBrowserVaultReplica(input: {
+  platform: ReturnType<typeof buildHostedExecutionRuntimePlatform>;
+  sourceStateHash: string;
+  userId: string;
+  vaultRoot: string;
+}): Promise<Extract<HostedBrowserVaultReplicaRefreshResult, { status: "written" | "refresh_failed_too_large" }>> {
+  const replica = await createHostedBrowserVaultReplicaForSourceState({
+    generatedAt: new Date().toISOString(),
+    sourceStateHash: input.sourceStateHash,
+    vaultRoot: input.vaultRoot,
+  });
+  const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
+  if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
+    return {
+      byteLength,
+      maxBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+      status: "refresh_failed_too_large",
+    };
+  }
+
+  const replicaRef = await input.platform.browserVaultReplicaPort!.write({ replica });
+  return {
+    byteLength: replicaRef.byteLength,
+    replicaRef,
+    status: "written",
+  };
 }
 
 function resolveHostedWorkspaceInProcessVaultRoot(): string {

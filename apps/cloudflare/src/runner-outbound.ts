@@ -1,5 +1,8 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { createHostedBrowserVaultReplicaStore } from "./browser-vault-store.ts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+} from "./browser-vault-limits.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import {
   buildHostedExecutionSafeErrorDetails,
@@ -8,6 +11,9 @@ import {
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_WORKSPACE_PATH,
+} from "@murphai/hosted-execution/routes";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
@@ -16,6 +22,11 @@ import {
   requireRunnerActiveInvocationLeaseWriteHeaders,
   RunnerActiveInvocationLeaseError,
 } from "./runner-outbound/active-lease.ts";
+import {
+  buildRunnerBrowserVaultRefreshAttemptId,
+  readRunnerBrowserVaultRefreshSourceStateHash,
+  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+} from "./runner-outbound/browser-vault-refresh-authority.ts";
 import { handleRunnerHeartbeatRequest } from "./runner-outbound/heartbeat.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
@@ -27,11 +38,17 @@ import {
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
+export interface RunnerOutboundProxyContext {
+  proxyAttemptId?: string | null;
+  proxyLeaseGeneration?: string | null;
+}
+
 export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   userId: string,
   internalWorkerProxyToken: string | null = null,
+  proxyContext: RunnerOutboundProxyContext = {},
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -45,6 +62,15 @@ export async function handleRunnerOutboundRequest(
     }
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+    if (
+      isRunnerBrowserVaultRefreshProxyContext(proxyContext)
+      && !isAllowedBrowserVaultRefreshOutboundRequest({
+        method: request.method,
+        url,
+      })
+    ) {
+      return unauthorized();
+    }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
       return handleRunnerResultsRequest({
@@ -89,6 +115,7 @@ export async function handleRunnerOutboundRequest(
         bucket: env.BUNDLES,
         env,
         environment,
+        proxyContext,
         request,
         userId,
       });
@@ -213,19 +240,28 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  proxyContext: RunnerOutboundProxyContext;
   request: Request;
   userId: string;
 }): Promise<Response> {
-  const ownsActiveLease = await writeRequestOwnsActiveInvocationLease({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!ownsActiveLease) {
+  const refreshSourceStateHash = readRunnerBrowserVaultRefreshSourceStateHash(input.request);
+  const authorized = refreshSourceStateHash
+    ? writeRequestOwnsBrowserVaultRefreshAuthority({
+        proxyContext: input.proxyContext,
+        sourceStateHash: refreshSourceStateHash,
+      })
+    : await writeRequestOwnsActiveInvocationLease({
+        env: input.env,
+        request: input.request,
+        userId: input.userId,
+      });
+  if (!authorized) {
     return unauthorized();
   }
 
-  const body = await readJsonObject(input.request);
+  const body = await readJsonObject(input.request, {
+    limitBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 1024 * 1024,
+  });
   if (!Object.hasOwn(body, "replica")) {
     throw new TypeError("Hosted browser-vault replica write request.replica is required.");
   }
@@ -246,11 +282,46 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     userId: input.userId,
   });
   const replicaRef = await replicaStore.writeBrowserVaultReplica({
+    expectedSourceStateHash: refreshSourceStateHash,
     replica: body.replica,
     userId: input.userId,
   });
 
   return json({ replicaRef });
+}
+
+function writeRequestOwnsBrowserVaultRefreshAuthority(input: {
+  proxyContext: RunnerOutboundProxyContext;
+  sourceStateHash: string;
+}): boolean {
+  return input.proxyContext.proxyAttemptId === buildRunnerBrowserVaultRefreshAttemptId(input.sourceStateHash)
+    && input.proxyContext.proxyLeaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION;
+}
+
+function isRunnerBrowserVaultRefreshProxyContext(
+  proxyContext: RunnerOutboundProxyContext,
+): boolean {
+  return proxyContext.proxyLeaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION
+    && (
+      proxyContext.proxyAttemptId === undefined
+      || proxyContext.proxyAttemptId === null
+      || proxyContext.proxyAttemptId.startsWith("browser-vault-refresh:")
+    );
+}
+
+function isAllowedBrowserVaultRefreshOutboundRequest(input: {
+  method: string;
+  url: URL;
+}): boolean {
+  return (
+    input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
+    && input.method === "GET"
+    && input.url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH
+  ) || (
+    input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore
+    && input.method === "POST"
+    && input.url.pathname === "/replicas"
+  );
 }
 
 async function writeRequestOwnsActiveInvocationLease(input: {

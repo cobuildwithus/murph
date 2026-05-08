@@ -7,6 +7,9 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  readHostedBrowserVaultSourceStateHash,
+} from "@murphai/hosted-execution/parsers";
+import {
   notifyAssistantActiveTurnInputsAvailableForVault,
 } from "@murphai/assistant-engine";
 import {
@@ -85,13 +88,18 @@ import {
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
+import {
+  writeHostedBrowserVaultWarmSourceStateHashBestEffort,
+} from "./hosted-runtime/browser-vault-replica.ts";
 export {
   formatHostedRuntimeChildResult,
   parseHostedRuntimeChildResult,
 } from "./hosted-runtime/child-result.ts";
 export {
-  createHostedBrowserVaultReplicaForSnapshot,
   createHostedBrowserVaultReplicaForSourceState,
+  clearHostedBrowserVaultWarmSourceStateHash,
+  readHostedBrowserVaultWarmSourceStateHash,
+  writeHostedBrowserVaultWarmSourceStateHashBestEffort,
 } from "./hosted-runtime/browser-vault-replica.ts";
 
 export type {
@@ -490,8 +498,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
     }
 
-    if (restored.restoredLegacyWorkingSnapshot) {
-      const bootstrapCheckpoint = await checkpointRestoredLegacyWorkingSnapshot({
+    if (restored.appliedWorkingDelta) {
+      const bootstrapCheckpoint = await checkpointRestoredAppliedWorkingDelta({
         assertRuntimeLiveness,
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
@@ -603,6 +611,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
+    await writeHostedBrowserVaultWarmSourceStateHashBestEffort({
+      sourceStateHash: readHostedBrowserVaultSourceStateHash(committedWorkspace?.snapshotRef ?? null),
+      vaultRoot: restored.vaultRoot,
+    });
     if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
       await recordHotRestoreCacheForSnapshotRef(committedWorkspace?.snapshotRef ?? null);
     }
@@ -713,7 +725,7 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
   };
 }
 
-async function checkpointRestoredLegacyWorkingSnapshot(input: {
+async function checkpointRestoredAppliedWorkingDelta(input: {
   assertRuntimeLiveness: () => void;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
@@ -723,7 +735,7 @@ async function checkpointRestoredLegacyWorkingSnapshot(input: {
   workspacePort: HostedRuntimePlatform["workspacePort"];
 }): Promise<HostedWorkspaceCheckpointResponse> {
   if (!input.workspacePort) {
-    throw new TypeError("Hosted legacy working snapshot bootstrap requires workspace port support.");
+    throw new TypeError("Hosted working delta bootstrap requires workspace port support.");
   }
 
   input.assertRuntimeLiveness();
