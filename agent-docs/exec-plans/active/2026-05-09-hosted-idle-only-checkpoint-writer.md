@@ -1,7 +1,7 @@
 # Hosted Idle-Only Checkpoint Writer
 
 Status: active
-Last updated: 2026-05-08T18:42:12Z
+Last updated: 2026-05-08T19:00:13Z
 
 ## Goal
 
@@ -27,7 +27,16 @@ Success criteria:
 - Prefer deletion over compatibility shims.
 - Keep runtime-state working-delta primitives intact because restore/tests outside the Cloudflare writer may still exercise legacy refs.
 - Use focused Cloudflare verification first; escalate according to repo verification rules.
+- Production bridge snapshot construction is idle-shutdown only. Legacy working `{base, delta}` construction remains only in an explicit test fixture helper for restore/compaction coverage.
 
 ## Verification
 
-Pending.
+- PASS: `vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/runtime-bridge-workspace.test.ts --no-coverage` (15 tests).
+- PASS: `vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts --no-coverage` (1 test).
+- PASS: `pnpm --dir apps/cloudflare typecheck`.
+- PASS: `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runtime-bridge-workspace.ts apps/cloudflare/test/runtime-bridge-workspace.test.ts apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts agent-docs/references/hosted-runtime-protocol.md agent-docs/operations/verification-and-runtime.md agent-docs/index.md` (apps/cloudflare verify: 70 files, 901 tests).
+- PASS: `pnpm docs:drift`.
+- PASS: `git diff --check`.
+- AUDIT: simplify review found two low-severity cleanup leftovers; both were applied.
+- AUDIT: security/privacy review found no scoped findings.
+- AUDIT: coverage review pending.
