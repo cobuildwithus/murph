@@ -15,6 +15,14 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
 const CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 
+function resolveContainerRolloutStepPercentage(maxInstances: number): number[] {
+  if (maxInstances >= CONTAINER_ROLLOUT_STEP_PERCENTAGE.length) {
+    return [...CONTAINER_ROLLOUT_STEP_PERCENTAGE];
+  }
+
+  return CONTAINER_ROLLOUT_STEP_PERCENTAGE.slice(-maxInstances);
+}
+
 export function buildHostedWranglerDeployConfig(
   environment: HostedDeployAutomationEnvironment,
 ): Record<string, unknown> {
@@ -46,7 +54,7 @@ export function buildHostedWranglerDeployConfig(
     instance_type: environment.containerInstanceType,
     max_instances: input.maxInstances,
     rollout_active_grace_period: CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
-    rollout_step_percentage: [...CONTAINER_ROLLOUT_STEP_PERCENTAGE],
+    rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances),
   });
 
   return {
