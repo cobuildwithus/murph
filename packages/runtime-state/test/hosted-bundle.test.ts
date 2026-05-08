@@ -2674,6 +2674,145 @@ test("hosted assistant hot-state snapshots include only exact Codex rollout cont
   }
 });
 
+test("hosted assistant hot-state snapshots retry when Codex sessions move during capture", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-drift-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-drift-restore-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const firstThreadId = "00000000-0000-4000-8000-000000000040";
+    const nextThreadId = "00000000-0000-4000-8000-000000000041";
+    const firstRolloutRelativePath =
+      `sessions/2026/05/05/rollout-2026-05-05T01-02-03-${firstThreadId}.jsonl`;
+    const nextRolloutRelativePath =
+      `sessions/2026/05/05/rollout-2026-05-05T04-05-06-${nextThreadId}.jsonl`;
+    const artifacts = new Map<string, Uint8Array>();
+
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: firstRolloutRelativePath,
+          providerSessionId: firstThreadId,
+          resumeRouteId: "route-first",
+        },
+      }) + "\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", firstRolloutRelativePath),
+      "{\"type\":\"first\"}\n",
+      "utf8",
+    );
+
+    let mutated = false;
+    const snapshot = await snapshotHostedAssistantRuntimeHotState({
+      assertSnapshotLive: async () => {
+        if (mutated) {
+          return;
+        }
+        mutated = true;
+        await writeFile(
+          path.join(assistantRoot, "sessions", "session.json"),
+          JSON.stringify({
+            resumeState: {
+              codexRolloutRelativePath: nextRolloutRelativePath,
+              providerSessionId: nextThreadId,
+              resumeRouteId: "route-next",
+            },
+          }) + "\n",
+          "utf8",
+        );
+        await writeFile(
+          path.join(operatorHomeRoot, ".codex-hosted", nextRolloutRelativePath),
+          "{\"type\":\"next\"}\n",
+          "utf8",
+        );
+      },
+      codexContinuityArtifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(mutated, true);
+    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: snapshot.bundle,
+    }), true);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/sessions/session.json",
+        root: "vault",
+      }),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: nextRolloutRelativePath,
+          providerSessionId: nextThreadId,
+          resumeRouteId: "route-next",
+        },
+      }) + "\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${nextRolloutRelativePath}`,
+        root: "operator-home",
+      }),
+      null,
+    );
+    const rolloutArtifact = listHostedBundleArtifacts({
+      bytes: snapshot.bundle,
+      expectedKind: "vault",
+    }).find((artifact) =>
+      artifact.root === "operator-home"
+      && artifact.path === `.codex-hosted/${nextRolloutRelativePath}`
+    );
+    assert.ok(rolloutArtifact);
+    assert.equal(artifacts.has(rolloutArtifact.ref.sha256), true);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${firstRolloutRelativePath}`,
+        root: "operator-home",
+      }),
+      null,
+    );
+
+    const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error("Missing test Codex continuity artifact.");
+        }
+        return bytes;
+      },
+      bundle: snapshot.bundle,
+      workspaceRoot: restoreRoot,
+    });
+    await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
+      assistantStateRoot: restored.assistantStateRoot,
+    });
+    assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".codex-hosted", nextRolloutRelativePath), "utf8"),
+      "{\"type\":\"next\"}\n",
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted assistant hot-state snapshots can externalize exact Codex rollout continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-artifact-"));
 
