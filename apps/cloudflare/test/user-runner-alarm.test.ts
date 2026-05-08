@@ -2517,6 +2517,123 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    }]);
 	  });
 
+	  it("drains a pending browser-vault refresh after an active invocation completes", async () => {
+	    vi.useFakeTimers();
+	    vi.setSystemTime(new Date(FIXED_NOW));
+	    const workspace = createWorkspaceState({
+	      snapshotRef: createLayeredSnapshotRef("refresh-after-invocation"),
+	      version: "4",
+	    });
+	    const activeInvocation = createDeferred<Awaited<ReturnType<HostedExecutionContainerStubLike["invoke"]>>>();
+	    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
+	      async () => await activeInvocation.promise,
+	    );
+	    const refreshBrowserVaultReplica = vi.fn<
+	      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+	    >(async (input) => ({
+	      sourceStateHash: input.sourceStateHash,
+	      status: "already_fresh",
+	      userId: input.userId,
+	    }));
+	    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
+	      invoke,
+	      refreshBrowserVaultReplica,
+	    });
+	    await runner.bindUser("member_123");
+
+	    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+	    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+	    vi.setSystemTime(new Date(FIXED_NOW));
+
+	    await expect(runner.scheduleBrowserVaultRefreshForUser({
+	      sourceStateHash: "refresh-after-invocation-base_hash",
+	      userId: "member_123",
+	    })).resolves.toMatchObject({
+	      immediateRefreshStarted: false,
+	    });
+	    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
+	    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+	    activeInvocation.resolve({
+	      nextWakeAt: null,
+	      status: "idle",
+	    });
+	    await expect(activeRun).resolves.toMatchObject({
+	      status: "idle",
+	    });
+
+	    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        sourceStateHash: "refresh-after-invocation-base_hash",
+	        userId: "member_123",
+	      }),
+	    ));
+	  });
+
+	  it("drains the latest pending browser-vault refresh after an active refresh completes", async () => {
+	    vi.useFakeTimers();
+	    vi.setSystemTime(new Date(FIXED_NOW));
+	    const workspace = createWorkspaceState({
+	      snapshotRef: createLayeredSnapshotRef("refresh-a"),
+	      version: "4",
+	    });
+	    const activeRefresh = createDeferred<Awaited<ReturnType<
+	      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+	    >>>();
+	    const refreshBrowserVaultReplica = vi.fn<
+	      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+	    >(async (input) => {
+	      if (input.sourceStateHash === "refresh-a-base_hash") {
+	        return await activeRefresh.promise;
+	      }
+
+	      return {
+	        sourceStateHash: input.sourceStateHash,
+	        status: "already_fresh",
+	        userId: input.userId,
+	      };
+	    });
+	    const { runner } = createRunnerCryptoContextHarness(workspace, {
+	      refreshBrowserVaultReplica,
+	    });
+	    await runner.bindUser("member_123");
+
+	    await expect(runner.scheduleBrowserVaultRefreshForUser({
+	      sourceStateHash: "refresh-a-base_hash",
+	      userId: "member_123",
+	    })).resolves.toMatchObject({
+	      immediateRefreshStarted: true,
+	    });
+	    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        sourceStateHash: "refresh-a-base_hash",
+	        userId: "member_123",
+	      }),
+	    ));
+
+	    workspace.snapshotRef = createLayeredSnapshotRef("refresh-b");
+	    workspace.version = "5";
+	    await expect(runner.scheduleBrowserVaultRefreshForUser({
+	      sourceStateHash: "refresh-b-base_hash",
+	      userId: "member_123",
+	    })).resolves.toMatchObject({
+	      immediateRefreshStarted: false,
+	    });
+
+	    activeRefresh.resolve({
+	      sourceStateHash: "refresh-a-base_hash",
+	      status: "already_fresh",
+	      userId: "member_123",
+	    });
+
+	    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        sourceStateHash: "refresh-b-base_hash",
+	        userId: "member_123",
+	      }),
+	    ));
+	  });
+
 	  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
 	    vi.useFakeTimers();
 	    vi.setSystemTime(new Date(FIXED_NOW));
@@ -2771,6 +2888,7 @@ function createRunnerCryptoContextHarness(
 	    onDeleteAlarm?(input: { alarmCount: number }): Promise<void> | void;
 	    onSetAlarm?(input: { alarmCount: number; scheduledTimeIso: string }): Promise<void> | void;
 	    onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
+	    refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
 	    usageGateResponse?: Record<string, unknown>;
 	    usageGateStatus?: number;
 	    waitUntil?(promise: Promise<unknown>): void;
@@ -2874,6 +2992,7 @@ function createRunnerCryptoContextHarness(
           async ownsInternalWorkerProxyToken() {
             return true;
           },
+          refreshBrowserVaultReplica: options.refreshBrowserVaultReplica,
           async smokeHealth() {
             return {
               ok: true,
