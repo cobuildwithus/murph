@@ -456,14 +456,16 @@ export class HostedUserRunner {
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
     let runningRecord = await this.stateStore.readState();
-    this.browserVaultRefreshCoordinator.abortForForegroundWork({
+    const abortedBrowserVaultRefresh = this.browserVaultRefreshCoordinator.abortForForegroundWork({
       reason: "pending_nudge",
       userId: runningRecord.userId,
     });
-    this.destroyBrowserVaultRefreshContainerBestEffort({
-      reason: "pending_nudge",
-      userId: runningRecord.userId,
-    });
+    if (abortedBrowserVaultRefresh) {
+      this.destroyBrowserVaultRefreshContainerBestEffort({
+        reason: "pending_nudge",
+        userId: runningRecord.userId,
+      });
+    }
     if (!activeInThisIsolate && runningRecord.inFlight) {
       const recovery = await this.stateStore.clearStaleInvocationIfExpired({
         nowMs: Date.now(),
@@ -735,14 +737,16 @@ export class HostedUserRunner {
       };
     }
 
-    this.browserVaultRefreshCoordinator.abortForForegroundWork({
+    const abortedBrowserVaultRefresh = this.browserVaultRefreshCoordinator.abortForForegroundWork({
       reason: "foreground_invocation",
       userId: initialRecord.userId,
     });
-    this.destroyBrowserVaultRefreshContainerBestEffort({
-      reason: "foreground_invocation",
-      userId: initialRecord.userId,
-    });
+    if (abortedBrowserVaultRefresh) {
+      this.destroyBrowserVaultRefreshContainerBestEffort({
+        reason: "foreground_invocation",
+        userId: initialRecord.userId,
+      });
+    }
     let lease = await this.stateStore.beginInvocation({
       consumePendingNudge: input.reason === "idle_shutdown_checkpoint" ? false : undefined,
       reason: input.reason,
