@@ -86,6 +86,7 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
+const ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS = 1_000;
 const PENDING_DASHBOARD_REPLICA_REFRESH_CONTINUATION_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
@@ -619,7 +620,9 @@ export class HostedUserRunner {
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
       const runningRecord = await this.stateStore.readState();
-      const record = await this.syncInvocationRecoveryAlarm(runningRecord);
+      const record = await this.syncInvocationRecoveryAlarm(runningRecord, {
+        minimumDelayMs: ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
+      });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -995,16 +998,27 @@ export class HostedUserRunner {
   }
 
   private async syncInvocationRecoveryAlarm(
-    record: RunnerStateRecord,
+    inputRecord: RunnerStateRecord,
+    input: {
+      minimumDelayMs?: number;
+    } = {},
   ): Promise<RunnerStateRecord> {
+    const record = inputRecord.idleShutdownCheckpointDueAt
+      ? await this.stateStore.clearIdleShutdownCheckpoint()
+      : inputRecord;
     const nowMs = Date.now();
+    const preferredWakeAt = (record.pendingNudge
+      ? resolvePendingNudgeDrainContinuationWakeAt
+      : resolvePendingNudgeWakeAt)({
+      nowMs,
+      record,
+      runnerTimeoutMs: this.env.runnerTimeoutMs,
+    });
     return await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: (record.pendingNudge
-        ? resolvePendingNudgeDrainContinuationWakeAt
-        : resolvePendingNudgeWakeAt)({
+      preferredWakeAt: applyMinimumFutureWakeAt({
+        minimumDelayMs: input.minimumDelayMs ?? 0,
         nowMs,
-        record,
-        runnerTimeoutMs: this.env.runnerTimeoutMs,
+        wakeAt: preferredWakeAt,
       }),
     });
   }
@@ -2293,6 +2307,25 @@ function resolvePendingNudgeDrainContinuationWakeAt(input: {
     input.nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
   ).toISOString();
   return earliestIsoDate(recoveryWakeAt, continuationWakeAt) ?? continuationWakeAt;
+}
+
+function applyMinimumFutureWakeAt(input: {
+  minimumDelayMs: number;
+  nowMs: number;
+  wakeAt: string;
+}): string {
+  const minimumDelayMs = Math.max(0, Math.floor(input.minimumDelayMs));
+  if (minimumDelayMs === 0) {
+    return input.wakeAt;
+  }
+
+  const wakeAtMs = Date.parse(input.wakeAt);
+  const minimumWakeAtMs = input.nowMs + minimumDelayMs;
+  if (Number.isFinite(wakeAtMs) && wakeAtMs >= minimumWakeAtMs) {
+    return input.wakeAt;
+  }
+
+  return new Date(minimumWakeAtMs).toISOString();
 }
 
 function resolveHostedRunnerFailureRetryDelayMs(input: {

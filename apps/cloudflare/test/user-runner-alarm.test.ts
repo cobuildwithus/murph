@@ -993,6 +993,59 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("backs off duplicate recovery alarms while the active invocation remains locked after timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+      runnerTimeoutMs: 1_000,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = ?,
+           idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual(["2026-04-27T00:00:03.100Z"]);
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+    }]);
+
+    invocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+  });
+
   it("syncs only a recovery alarm when runUntilIdleOrBudget is called during an active invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -3225,6 +3278,7 @@ function createRunnerCryptoContextHarness(
 	    onSetAlarm?(input: { alarmCount: number; scheduledTimeIso: string }): Promise<void> | void;
 	    onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
 	    refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
+	    runnerTimeoutMs?: number;
 	    usageGateResponse?: Record<string, unknown>;
 	    usageGateStatus?: number;
 	    waitUntil?(promise: Promise<unknown>): void;
@@ -3322,6 +3376,9 @@ function createRunnerCryptoContextHarness(
         ...(options.maxEventAttempts === undefined
           ? {}
           : { HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: String(options.maxEventAttempts) }),
+        ...(options.runnerTimeoutMs === undefined
+          ? {}
+          : { HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: String(options.runnerTimeoutMs) }),
       })),
       idleShutdownCheckpointsEnabled: true,
     },
