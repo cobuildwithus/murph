@@ -14,6 +14,7 @@ import {
   parseRetryAfterHeaderMs,
   waitForRetryDelay,
 } from '../src/http-retry.ts'
+import { resolveExternalUrlBrowserCommands } from '../src/device-sync-browser-opener.ts'
 import { createDeviceSyncClient } from '../src/device-sync-client.ts'
 import {
   createLinqChat,
@@ -971,11 +972,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
   assert.equal(browserResult.openedBrowser, true)
   assert.equal(
     successfulSpawn.mock.calls[0]?.[0],
-    process.platform === 'darwin'
-      ? 'open'
-      : process.platform === 'win32'
-        ? 'cmd'
-        : 'xdg-open',
+    resolveExternalUrlBrowserCommands('https://example.test/oauth')[0]?.[0],
   )
 
   const failingSpawn = vi.fn((_command: string, _args: string[]) => {
@@ -997,6 +994,25 @@ test('device sync client covers list, begin, and browser open paths', async () =
     provider: 'oura',
   })
   assert.equal(failedBrowserResult.openedBrowser, false)
+})
+
+test('device sync client resolves Windows authorization URLs without cmd shell parsing', () => {
+  const authorizationUrl = 'https://example.test/oauth?next=alpha&redirect=one|two<input>%SAFE%'
+
+  assert.deepEqual(resolveExternalUrlBrowserCommands(authorizationUrl, 'win32'), [
+    ['C:\\Windows\\System32\\rundll32.exe', ['url.dll,FileProtocolHandler', authorizationUrl]],
+  ])
+  assert.deepEqual(
+    resolveExternalUrlBrowserCommands(authorizationUrl, 'win32', {
+      SystemRoot: 'D:/Windows/',
+    }),
+    [['D:\\Windows\\System32\\rundll32.exe', ['url.dll,FileProtocolHandler', authorizationUrl]]],
+  )
+  assert.deepEqual(resolveExternalUrlBrowserCommands(authorizationUrl, 'win32', {
+    SystemRoot: 'C:\\unsafe-tools',
+  }), [
+    ['C:\\Windows\\System32\\rundll32.exe', ['url.dll,FileProtocolHandler', authorizationUrl]],
+  ])
 })
 
 test('device sync client wraps transport and http failures with control-plane context', async () => {

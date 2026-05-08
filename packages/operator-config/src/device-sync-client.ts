@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { z } from 'zod'
 import {
   createDeviceSyncJsonRequester as createSharedDeviceSyncJsonRequester,
@@ -15,6 +14,7 @@ import {
 } from '@murphai/device-syncd/client'
 
 import { httpUrlSchema } from './command-helpers.js'
+import { openExternalUrlInBrowser } from './device-sync-browser-opener.js'
 import { isoTimestampSchema } from './vault-cli-contracts.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -237,47 +237,4 @@ function resolveDeviceSyncControlPlane(
 
     throw error
   }
-}
-
-async function openExternalUrlInBrowser(url: string): Promise<boolean> {
-  const commands: Array<[string, string[]]> =
-    process.platform === 'darwin'
-      ? [['open', [url]]]
-      : process.platform === 'win32'
-        ? [['cmd', ['/c', 'start', '', url]]]
-        : [['xdg-open', [url]]]
-
-  for (const [command, args] of commands) {
-    if (await trySpawn(command, args)) {
-      return true
-    }
-  }
-
-  return false
-}
-
-function trySpawn(command: string, args: string[]): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(command, args, {
-        detached: true,
-        env: sanitizeChildProcessEnv(),
-        stdio: 'ignore',
-      })
-
-      child.once('error', () => resolve(false))
-      child.once('spawn', () => {
-        child.unref()
-        resolve(true)
-      })
-    } catch {
-      resolve(false)
-    }
-  })
-}
-
-function sanitizeChildProcessEnv(): NodeJS.ProcessEnv {
-  const nextEnv = { ...process.env }
-  delete nextEnv.NODE_V8_COVERAGE
-  return nextEnv
 }
