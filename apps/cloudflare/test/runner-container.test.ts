@@ -951,7 +951,7 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("does not probe or invoke a surviving shell after losing the in-memory control token", async () => {
+  it("does not probe or invoke a surviving shell when no control token can be recovered", async () => {
     let status: "running" | "stopped" = "running";
     let freshShellStarted = false;
     let freshControlToken: string | null = null;
@@ -1013,6 +1013,86 @@ describe("RunnerContainer", () => {
       containerFetch.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(containerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses a surviving shell after recovering the durable control token", async () => {
+    const storage = createContainerStorageDouble();
+    const initial = createContainerDouble({
+      state: {
+        storage,
+      },
+    });
+
+    await initial.container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_persist_control_token"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    const supervisorEnv = initial.startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
+    const recoveredControlToken = supervisorEnv?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
+    expect(recoveredControlToken).toMatch(/^[0-9a-f-]{36}$/u);
+    if (!recoveredControlToken) {
+      throw new Error("Expected persisted runner control token.");
+    }
+
+    let controlHealthChecks = 0;
+    const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/control-health")) {
+        controlHealthChecks += 1;
+        expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      expect(url).toBe("http://container/internal/workspace-invocation");
+      expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const rehydrated = createContainerDouble({
+      containerFetch: rehydratedContainerFetch,
+      initialStatus: "running",
+      state: {
+        storage,
+      },
+    });
+
+    await expect(rehydrated.container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_recovered_control_token"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(controlHealthChecks).toBe(1);
+    expect(rehydrated.destroy).not.toHaveBeenCalled();
+    expect(rehydrated.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(rehydratedContainerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toBe(true);
   });
 
   it("uses the remaining caller timeout budget when a warm-shell health check fails", async () => {
