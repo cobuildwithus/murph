@@ -511,53 +511,108 @@ describe('assistant outbox runtime', () => {
 
   it('persists caller-provided transport idempotency when queueing delivery intents', async () => {
     const { vaultRoot } = await createAssistantVault(
-      'assistant-outbox-hosted-linq-idempotent-',
+      'assistant-outbox-caller-idempotent-',
     )
 
     const queued = await deliverAssistantOutboxMessage({
-      channel: 'linq',
-      deliveryIdempotencyKey: 'sha256:hosted-linq-delivery',
+      channel: 'telegram',
+      deliveryIdempotencyKey: 'sha256:caller-delivery',
       deliveryTransportIdempotent: true,
       dispatchMode: 'queue-only',
-      explicitTarget: 'linq-thread',
-      identityId: 'hosted-linq-identity',
-      message: 'queue hosted linq',
-      sessionId: 'session-hosted-linq',
-      threadId: null,
+      explicitTarget: 'telegram-chat',
+      identityId: 'caller-identity',
+      message: 'queue caller idempotent delivery',
+      sessionId: 'session-caller-idempotent',
+      threadId: 'telegram-chat',
       threadIsDirect: true,
-      turnId: 'turn-hosted-linq',
+      turnId: 'turn-caller-idempotent',
       vault: vaultRoot,
     })
 
     expect(queued.kind).toBe('queued')
     expect(queued.intent).toMatchObject({
-      channel: 'linq',
-      deliveryIdempotencyKey: 'sha256:hosted-linq-delivery',
+      channel: 'telegram',
+      deliveryIdempotencyKey: 'sha256:caller-delivery',
       deliveryTransportIdempotent: true,
       status: 'pending',
     })
     await expect(
       readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
     ).resolves.toMatchObject({
-      deliveryIdempotencyKey: 'sha256:hosted-linq-delivery',
+      deliveryIdempotencyKey: 'sha256:caller-delivery',
       deliveryTransportIdempotent: true,
       status: 'pending',
     })
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
+  it('monotonically upgrades idempotency metadata on dedupe hits', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-idempotent-upgrade-',
+    )
+
+    const first = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'hosted-delivery-dedupe',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      identityId: 'caller-identity',
+      message: 'queue before hosted key is known',
+      sessionId: 'session-dedupe-idempotent',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-dedupe-idempotent',
+      vault: vaultRoot,
+    })
+    expect(first.kind).toBe('queued')
+    expect(first.intent).toMatchObject({
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: false,
+    })
+
+    const upgraded = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'hosted-delivery-dedupe',
+      deliveryIdempotencyKey: 'sha256:dedupe-upgrade',
+      deliveryTransportIdempotent: true,
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      identityId: 'caller-identity',
+      message: 'retry with hosted key',
+      sessionId: 'session-dedupe-idempotent',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-dedupe-idempotent',
+      vault: vaultRoot,
+    })
+
+    expect(upgraded.kind).toBe('queued')
+    expect(upgraded.intent.intentId).toBe(first.intent.intentId)
+    expect(upgraded.intent).toMatchObject({
+      deliveryIdempotencyKey: 'sha256:dedupe-upgrade',
+      deliveryTransportIdempotent: true,
+    })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, first.intent.intentId),
+    ).resolves.toMatchObject({
+      deliveryIdempotencyKey: 'sha256:dedupe-upgrade',
+      deliveryTransportIdempotent: true,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
   it('preserves caller-provided transport idempotency after a successful dispatch', async () => {
     const { vaultRoot } = await createAssistantVault(
-      'assistant-outbox-hosted-linq-idempotent-dispatch-',
+      'assistant-outbox-caller-idempotent-dispatch-',
     )
 
     mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
       delivery: createDelivery({
-        channel: 'linq',
-        idempotencyKey: 'sha256:hosted-linq-dispatch',
-        providerMessageId: 'provider-linq-dispatch',
+        channel: 'telegram',
+        idempotencyKey: 'sha256:caller-dispatch',
+        providerMessageId: 'provider-caller-dispatch',
         sentAt: '2026-04-08T03:02:00.000Z',
-        target: 'linq-thread',
+        target: 'telegram-chat',
         targetKind: 'thread',
       }),
       deliveryDeduplicated: false,
@@ -567,22 +622,22 @@ describe('assistant outbox runtime', () => {
     })
 
     const sent = await deliverAssistantOutboxMessage({
-      channel: 'linq',
-      deliveryIdempotencyKey: 'sha256:hosted-linq-dispatch',
+      channel: 'telegram',
+      deliveryIdempotencyKey: 'sha256:caller-dispatch',
       deliveryTransportIdempotent: true,
-      explicitTarget: 'linq-thread',
-      identityId: 'hosted-linq-identity',
-      message: 'send hosted linq',
-      sessionId: 'session-hosted-linq-dispatch',
-      threadId: null,
+      explicitTarget: 'telegram-chat',
+      identityId: 'caller-identity',
+      message: 'send caller idempotent delivery',
+      sessionId: 'session-caller-idempotent-dispatch',
+      threadId: 'telegram-chat',
       threadIsDirect: true,
-      turnId: 'turn-hosted-linq-dispatch',
+      turnId: 'turn-caller-idempotent-dispatch',
       vault: vaultRoot,
     })
 
     expect(sent.kind).toBe('sent')
     expect(sent.intent).toMatchObject({
-      deliveryIdempotencyKey: 'sha256:hosted-linq-dispatch',
+      deliveryIdempotencyKey: 'sha256:caller-dispatch',
       deliveryTransportIdempotent: true,
       status: 'sent',
     })

@@ -29,7 +29,7 @@ import type {
 } from './service-contracts.js'
 import {
   finalizeAssistantTurnFromDeliveryOutcome,
-  inferHostedAssistantDeliveryTransportIdempotent,
+  resolveHostedAssistantDeliveryTransportIdempotentOverride,
 } from './delivery-service.js'
 import {
   hasAssistantSeenFirstContact,
@@ -573,7 +573,7 @@ async function deliverAssistantNotificationMessage(input: {
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey,
     deliverySource: input.input.deliverySource ?? null,
-    deliveryTransportIdempotent: inferHostedAssistantDeliveryTransportIdempotent({
+    deliveryTransportIdempotent: resolveHostedAssistantDeliveryTransportIdempotentOverride({
       channel: deliveryChannel,
       deliveryIdempotencyKey,
       executionContext: input.input.executionContext,
