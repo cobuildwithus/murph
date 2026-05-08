@@ -357,7 +357,7 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
     );
   }
 
-  const current = await input.tx.hostedWorkspace.findUnique({
+  let current = await input.tx.hostedWorkspace.findUnique({
     where: {
       userId,
     },
@@ -370,36 +370,87 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
     };
   }
 
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const publish = await publishHostedBrowserVaultReplicaRefAgainstCurrentWorkspace({
+      current,
+      expectedSourceStateHash,
+      replicaRef,
+      tx: input.tx,
+      userId,
+    });
+
+    if (publish.status === "stale_source") {
+      return publish;
+    }
+
+    const row = await input.tx.hostedWorkspace.findUnique({
+      where: {
+        userId,
+      },
+    });
+
+    if (!row) {
+      return {
+        status: "missing",
+        workspace: null,
+      };
+    }
+
+    if (publish.status === "published") {
+      return {
+        status: "published",
+        workspace: projectHostedWorkspace(row),
+      };
+    }
+
+    if (attempt === 0) {
+      current = row;
+      continue;
+    }
+
+    return {
+      status: "conflict",
+      workspace: projectHostedWorkspace(row),
+    };
+  }
+
+  throw new Error("Unreachable browser-vault replica publish retry state.");
+}
+
+async function publishHostedBrowserVaultReplicaRefAgainstCurrentWorkspace(input: {
+  current: HostedWorkspaceRow;
+  expectedSourceStateHash: string;
+  replicaRef: HostedBrowserVaultReplicaRef;
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<
+  | { status: "conflict" | "published" }
+  | { status: "stale_source"; workspace: HostedWorkspaceRecord }
+> {
   const snapshotRef = parseHostedExecutionSnapshotRef(
-    current.snapshotRef,
+    input.current.snapshotRef,
     "Hosted browser-vault replica publish current snapshotRef",
   );
   const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(snapshotRef);
-  if (currentSourceStateHash !== expectedSourceStateHash) {
+  if (currentSourceStateHash !== input.expectedSourceStateHash) {
     return {
       status: "stale_source",
-      workspace: projectHostedWorkspace(current),
+      workspace: projectHostedWorkspace(input.current),
     };
   }
 
   const updated = await input.tx.hostedWorkspace.updateMany({
     data: {
-      browserVaultReplicaRef: toNullablePrismaJson(replicaRef),
+      browserVaultReplicaRef: toNullablePrismaJson(input.replicaRef),
     },
     where: {
-      userId,
-      version: current.version,
-    },
-  });
-  const row = await input.tx.hostedWorkspace.findUnique({
-    where: {
-      userId,
+      userId: input.userId,
+      version: input.current.version,
     },
   });
 
   return {
     status: updated.count === 1 ? "published" : "conflict",
-    workspace: row ? projectHostedWorkspace(row) : null,
   };
 }
 
