@@ -110,6 +110,7 @@ export async function packWorkspacePackageArtifacts(
   packageNames: string[],
   tarballsDir: string,
   input: {
+    dependencySpecRoot?: string;
     repoRoot: string;
     skipPreflights?: boolean;
   },
@@ -118,20 +119,35 @@ export async function packWorkspacePackageArtifacts(
     await runWorkspacePackagePackPreflights(packageNames, input);
   }
 
+  const workspacePackageVersions = await readWorkspacePackageVersions(
+    input.repoRoot,
+  );
+  const workspacePackageTarballSpecifiers =
+    buildWorkspacePackageTarballSpecifiers({
+      dependencySpecRoot: input.dependencySpecRoot ?? tarballsDir,
+      packageNames,
+      tarballsDir,
+      workspacePackageVersions,
+    });
   const packedEntries = await mapWithConcurrency(
     packageNames,
     resolveHostedRunnerPackConcurrency(),
     async (packageName, index) => {
-      const packageTarballsDir = path.join(
+      const packageTarballsDir = resolvePackageTarballsDir(
         tarballsDir,
-        `${String(index + 1).padStart(2, "0")}-${toPackageTarballDirectoryName(packageName)}`,
+        packageName,
+        index,
       );
 
       await mkdir(packageTarballsDir, { recursive: true });
 
       return [
         packageName,
-        await packWorkspacePackage(packageName, packageTarballsDir, input),
+        await packWorkspacePackage(packageName, packageTarballsDir, {
+          ...input,
+          workspacePackageTarballSpecifiers,
+          workspacePackageVersions,
+        }),
       ] as const;
     },
   );
@@ -175,6 +191,8 @@ async function packWorkspacePackage(
   tarballsDir: string,
   input: {
     repoRoot: string;
+    workspacePackageTarballSpecifiers: ReadonlyMap<string, string>;
+    workspacePackageVersions: ReadonlyMap<string, string>;
   },
 ): Promise<string> {
   const before = new Set(await readdir(tarballsDir));
@@ -183,6 +201,7 @@ async function packWorkspacePackage(
     packageName,
     sourcePackageDir,
     tarballsDir,
+    input.workspacePackageTarballSpecifiers,
   );
   const packageDir = packRoot ?? sourcePackageDir;
 
@@ -221,27 +240,47 @@ async function prepareRunnerPackagePackRoot(
   packageName: string,
   sourcePackageDir: string,
   tarballsDir: string,
+  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
 ): Promise<string | null> {
   if (packageName === CLI_PACKAGE_NAME) {
-    return await prepareRunnerCliPackagePackRoot(sourcePackageDir, tarballsDir);
+    return await prepareRunnerCliPackagePackRoot(
+      sourcePackageDir,
+      tarballsDir,
+      workspacePackageTarballSpecifiers,
+    );
   }
 
   if (packageName === HEALTH_COMMONS_PACKAGE_NAME) {
-    return await prepareRunnerHealthCommonsPackagePackRoot(sourcePackageDir, tarballsDir);
+    return await prepareRunnerHealthCommonsPackagePackRoot(
+      sourcePackageDir,
+      tarballsDir,
+      workspacePackageTarballSpecifiers,
+    );
   }
 
-  return null;
+  return await prepareRunnerWorkspacePackagePackRoot(
+    packageName,
+    sourcePackageDir,
+    tarballsDir,
+    workspacePackageTarballSpecifiers,
+  );
 }
 
 async function prepareRunnerCliPackagePackRoot(
   sourcePackageDir: string,
   tarballsDir: string,
+  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
 ): Promise<string> {
   const packRoot = await mkdtemp(path.join(tarballsDir, ".runner-cli-pack-"));
   const packageJson = await readWorkspacePackageManifest(sourcePackageDir);
 
   delete packageJson.bundleDependencies;
   delete packageJson.bundledDependencies;
+  rewritePackedWorkspaceDependencySpecs(
+    packageJson,
+    packageJson.name ?? CLI_PACKAGE_NAME,
+    workspacePackageTarballSpecifiers,
+  );
 
   await copyPackageEntries(sourcePackageDir, packRoot, [
     "dist",
@@ -262,6 +301,7 @@ async function prepareRunnerCliPackagePackRoot(
 async function prepareRunnerHealthCommonsPackagePackRoot(
   sourcePackageDir: string,
   tarballsDir: string,
+  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
 ): Promise<string> {
   const packRoot = await mkdtemp(path.join(tarballsDir, ".runner-health-commons-pack-"));
   const packageJson = await readWorkspacePackageManifest(sourcePackageDir);
@@ -272,6 +312,11 @@ async function prepareRunnerHealthCommonsPackagePackRoot(
     "README.md",
     "LICENSE",
   ];
+  rewritePackedWorkspaceDependencySpecs(
+    packageJson,
+    packageJson.name ?? HEALTH_COMMONS_PACKAGE_NAME,
+    workspacePackageTarballSpecifiers,
+  );
 
   await copyPackageEntries(sourcePackageDir, packRoot, [
     "dist",
@@ -288,12 +333,159 @@ async function prepareRunnerHealthCommonsPackagePackRoot(
   return packRoot;
 }
 
+async function prepareRunnerWorkspacePackagePackRoot(
+  packageName: string,
+  sourcePackageDir: string,
+  tarballsDir: string,
+  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
+): Promise<string | null> {
+  const packageJson = await readWorkspacePackageManifest(sourcePackageDir);
+  const didRewrite = rewritePackedWorkspaceDependencySpecs(
+    packageJson,
+    packageName,
+    workspacePackageTarballSpecifiers,
+  );
+
+  if (!didRewrite) {
+    return null;
+  }
+
+  if (
+    !Array.isArray(packageJson.files) ||
+    packageJson.files.some((entry) => typeof entry !== "string" || entry.length === 0)
+  ) {
+    throw new Error(
+      `${packageName} must declare string-only files before runner package packing can rewrite workspace dependency specs.`,
+    );
+  }
+
+  const packRoot = await mkdtemp(path.join(tarballsDir, ".runner-workspace-pack-"));
+  await copyPackageEntries(sourcePackageDir, packRoot, packageJson.files);
+  await writeFile(
+    path.join(packRoot, "package.json"),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    "utf8",
+  );
+
+  return packRoot;
+}
+
 async function readWorkspacePackageManifest(
   packageDir: string,
 ): Promise<WorkspacePackageManifest> {
   return JSON.parse(
     await readFile(path.join(packageDir, "package.json"), "utf8"),
   ) as WorkspacePackageManifest;
+}
+
+async function readWorkspacePackageVersions(
+  repoRoot: string,
+): Promise<ReadonlyMap<string, string>> {
+  const versions = new Map<string, string>();
+
+  for (const memberType of ["apps", "packages"]) {
+    const membersDir = path.join(repoRoot, memberType);
+    for (const entry of await readdir(membersDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const packageJsonPath = path.join(membersDir, entry.name, "package.json");
+      try {
+        const packageJson = JSON.parse(
+          await readFile(packageJsonPath, "utf8"),
+        ) as WorkspacePackageManifest;
+
+        if (
+          typeof packageJson.name === "string" &&
+          typeof packageJson.version === "string"
+        ) {
+          versions.set(packageJson.name, packageJson.version);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return versions;
+}
+
+function buildWorkspacePackageTarballSpecifiers(input: {
+  dependencySpecRoot: string;
+  packageNames: readonly string[];
+  tarballsDir: string;
+  workspacePackageVersions: ReadonlyMap<string, string>;
+}): ReadonlyMap<string, string> {
+  return new Map(
+    input.packageNames.flatMap((packageName, index) => {
+      const packageVersion = input.workspacePackageVersions.get(packageName);
+      if (!packageVersion) {
+        return [];
+      }
+
+      const tarballPath = path.join(
+        resolvePackageTarballsDir(input.tarballsDir, packageName, index),
+        toNpmPackTarballName(packageName, packageVersion),
+      );
+
+      return [
+        [
+          packageName,
+          `file:${toPosixPath(path.relative(input.dependencySpecRoot, tarballPath))}`,
+        ],
+      ];
+    }),
+  );
+}
+
+function rewritePackedWorkspaceDependencySpecs(
+  packageJson: WorkspacePackageManifest,
+  packageName: string,
+  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
+): boolean {
+  const didRewriteDependencies = rewritePackedWorkspaceDependencyGroup(
+    packageJson.dependencies,
+    packageName,
+    workspacePackageTarballSpecifiers,
+  );
+  const didRewriteOptionalDependencies = rewritePackedWorkspaceDependencyGroup(
+    packageJson.optionalDependencies,
+    packageName,
+    workspacePackageTarballSpecifiers,
+  );
+
+  return didRewriteDependencies || didRewriteOptionalDependencies;
+}
+
+function rewritePackedWorkspaceDependencyGroup(
+  dependencyGroup: Record<string, string> | undefined,
+  packageName: string,
+  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
+): boolean {
+  if (!dependencyGroup) {
+    return false;
+  }
+
+  let didRewrite = false;
+  for (const [dependencyName, originalDependencySpec] of Object.entries(dependencyGroup)) {
+    if (!originalDependencySpec.startsWith("workspace:")) {
+      continue;
+    }
+
+    const rewrittenDependencySpec =
+      workspacePackageTarballSpecifiers.get(dependencyName);
+    if (!rewrittenDependencySpec) {
+      throw new Error(
+        `${packageName} depends on workspace package ${dependencyName}, but no sibling runner tarball was prepared for that dependency.`,
+      );
+    }
+
+    dependencyGroup[dependencyName] = rewrittenDependencySpec;
+    didRewrite = true;
+  }
+
+  return didRewrite;
 }
 
 async function copyPackageEntries(
@@ -575,4 +767,23 @@ export async function mapWithConcurrency<TItem, TResult>(
 
 function toPackageTarballDirectoryName(packageName: string): string {
   return packageName.replaceAll(/[^a-zA-Z0-9._-]+/g, "_");
+}
+
+function resolvePackageTarballsDir(
+  tarballsDir: string,
+  packageName: string,
+  index: number,
+): string {
+  return path.join(
+    tarballsDir,
+    `${String(index + 1).padStart(2, "0")}-${toPackageTarballDirectoryName(packageName)}`,
+  );
+}
+
+function toNpmPackTarballName(packageName: string, version: string): string {
+  return `${packageName.replace(/^@/u, "").replaceAll("/", "-")}-${version}.tgz`;
+}
+
+function toPosixPath(value: string): string {
+  return value.split(path.sep).join(path.posix.sep);
 }

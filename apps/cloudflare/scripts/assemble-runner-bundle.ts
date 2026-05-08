@@ -121,6 +121,7 @@ async function assembleRunnerBundle(): Promise<void> {
       packedWorkspacePackageNames,
       tarballsDir,
       {
+        dependencySpecRoot: stagingBundleDir,
         repoRoot,
         skipPreflights: shouldSkipPackPreflights || !shouldSkipBuild,
       },
