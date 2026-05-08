@@ -89,6 +89,8 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 
 import {
   ensureHostedInboxSidecarReady,
+  invalidateHostedInboxSidecarReady,
+  isHostedInboxSidecarReady,
   prepareHostedWakeContext,
   prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
@@ -702,6 +704,23 @@ describe("hosted runtime context coverage", () => {
         requestId: "req_projection_sidecar",
         vault: vaultRoot,
       });
+      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(true);
+      expect(isHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)))).toBe(true);
+      invalidateHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)));
+      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(false);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "hosted.inbox",
+          details: expect.objectContaining({
+            ready: true,
+            rebuild: true,
+            requestId: "req_startup_sidecar",
+            elapsedMs: expect.any(Number),
+          }),
+          level: "info",
+          message: "Hosted inbox sidecar bootstrap finished.",
+        }),
+      );
     } finally {
       await cleanup();
     }
@@ -746,6 +765,8 @@ describe("hosted runtime context coverage", () => {
           component: "hosted.inbox",
           details: expect.objectContaining({
             errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
+            elapsedMs: expect.any(Number),
+            ready: false,
             rebuild: true,
             requestId: "req_startup_sidecar_failed",
           }),

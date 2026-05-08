@@ -94,6 +94,9 @@ import {
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
+  ensureHostedInboxSidecarReady,
+} from "../src/hosted-runtime/context.ts";
+import {
   createEmptyHostedMailboxImportState,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
@@ -151,7 +154,7 @@ describe("hosted workspace runtime entrypoint", () => {
       mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
         events.push("sidecar.ready");
         assert.equal(input.bestEffort, true);
-        assert.equal(input.rebuild, true);
+        assert.equal(input.rebuild, false);
         assert.equal(input.requestId, "hosted-workspace-invocation:attempt_synthetic_workspace_entrypoint");
         assert.equal(input.vaultRoot, path.resolve(vaultRoot));
         return await ensureHostedInboxSidecarReadyImpl(input);
@@ -2069,6 +2072,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const restoredState = createEmptyHostedMailboxImportState();
     restoredState.watermarks.conversation = "3";
+    await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
     await mkdir(path.join(sourceVaultRoot, "raw"), { recursive: true });
     await writeFile(path.join(sourceVaultRoot, "raw", "artifact.txt"), "synthetic artifact", "utf8");
     const sourceBundle = await snapshotHostedBundleRoots({
@@ -2106,6 +2110,24 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: string[] = [];
 
     try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedInboxSidecarReady({
+        bestEffort: false,
+        rebuild: false,
+        requestId: "request_mark_sidecar_ready_before_cold_restore",
+        vaultRoot,
+      });
+      const ensureHostedInboxSidecarReadyImpl =
+        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
+      assert.ok(ensureHostedInboxSidecarReadyImpl);
+      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
+        events.push("sidecar.ready");
+        assert.equal(input.rebuild, true);
+        assert.equal(input.requestId, "hosted-workspace-invocation:attempt_synthetic_workspace_run");
+        assert.equal(input.vaultRoot, path.resolve(vaultRoot));
+        return await ensureHostedInboxSidecarReadyImpl(input);
+      });
+
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -2172,6 +2194,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
+        "sidecar.ready",
       ]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
