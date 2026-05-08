@@ -18,15 +18,19 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  createHostedPortableWorkspaceManifestFromBundle,
+  readHostedPortableWorkspaceManifestFromBundle,
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
+  restoreHostedWorkspaceWorkingDelta,
   type HostedBundleArtifactRestoreInput,
 } from "@murphai/runtime-state/node";
 
@@ -284,10 +288,14 @@ async function waitForIdleShutdownCheckpoint(): Promise<HostedRunnerStatusRespon
     const hotRef = status.workspace
       ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
       : null;
+    const deltaRef = status.workspace
+      ? readHostedExecutionSnapshotDeltaRef(status.workspace.snapshotRef)
+      : null;
 
     if (
       status.workspace
       && hotRef === null
+      && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
     ) {
@@ -411,11 +419,29 @@ async function restoreSnapshotForStatus(
   cleanupPaths.push(workspaceRoot);
   const artifactResolver = async (artifact: HostedBundleArtifactRestoreInput): Promise<Uint8Array> =>
     await fetchHostedArtifact(artifact.ref.sha256);
+  const baseBundle = await fetchHostedBundle(baseRef);
   const restored = await restoreHostedExecutionContext({
     artifactResolver,
-    bundle: await fetchHostedBundle(baseRef),
+    bundle: baseBundle,
     workspaceRoot,
   });
+  const baseManifest =
+    readHostedPortableWorkspaceManifestFromBundle(baseBundle)
+      ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+  const deltaRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
+  if (deltaRef) {
+    await restoreHostedWorkspaceWorkingDelta({
+      artifactResolver,
+      baseManifest,
+      baseSnapshotHash: baseRef.hash,
+      bundle: await fetchHostedBundle(deltaRef),
+      roots: {
+        "operator-home": restored.operatorHomeRoot,
+        vault: restored.vaultRoot,
+      },
+      shouldRestoreArtifact: () => true,
+    });
+  }
   const hotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
   if (hotRef) {
     await restoreHostedBundleRoots({

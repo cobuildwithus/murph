@@ -53,3 +53,6 @@ Working set (files/ids/commands):
 - `pnpm exec tsc -p tsconfig.tools.json --pretty false` passed after crypto-state isolation update.
 - `git diff --check -- scripts/dev-hosted-local/constants.ts scripts/dev-hosted-local/environment.ts scripts/dev-hosted-local/stack.ts scripts/dev-hosted-local/environment.test.ts scripts/dev-hosted-local/stack.test.ts agent-docs/exec-plans/active/2026-05-06-hosted-local-e2e-isolation.md` passed.
 - `pnpm typecheck` failed after crypto-state isolation update on unrelated `apps/cloudflare/src/runtime-bridge-workspace.ts` raw-payload logging guard.
+Status: completed
+Updated: 2026-05-08
+Completed: 2026-05-08

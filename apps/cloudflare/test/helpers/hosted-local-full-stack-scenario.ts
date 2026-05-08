@@ -57,6 +57,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const reuseExplicitDatabaseUrlEnv = "MURPH_HOSTED_LOCAL_E2E_REUSE_DATABASE_URL";
+const preparedRunnerBundleCacheKeys = new Set<string>();
 
 interface HostedActiveMemberSeedArgs {
   environment?: NodeJS.ProcessEnv;
@@ -183,7 +184,13 @@ export async function startHostedLocalFullStackScenario(input: {
         : {};
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
-    const usePreparedRunnerBundle = baseEnvironment.MURPH_DEV_SKIP_RUNNER_BUNDLE === "1";
+    const runnerBundleCacheKey = buildHostedLocalRunnerBundleCacheKey({
+      ...baseEnvironment,
+      ...(input.additionalEnv ?? {}),
+    });
+    const usePreparedRunnerBundle =
+      baseEnvironment.MURPH_DEV_SKIP_RUNNER_BUNDLE === "1"
+      || preparedRunnerBundleCacheKeys.has(runnerBundleCacheKey);
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...baseEnvironment,
       ...hostedAssistantDevEnv,
@@ -202,6 +209,9 @@ export async function startHostedLocalFullStackScenario(input: {
       HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: oidcFixture.jwksUrl,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
       HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
+      MURPH_DEV_REUSE_EXISTING_WORKER: "0",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      MURPH_HOSTED_LOCAL_PROFILE: assistantProviderMode === "live" ? "e2e:live" : "e2e:stub",
       MURPH_DEV_FORCE_RESET_LOCAL_DB: input.resetLocalDatabase === false ? "0" : "1",
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
       ...(usePreparedRunnerBundle ? { MURPH_DEV_SKIP_RUNNER_BUNDLE: "1" } : {}),
@@ -223,6 +233,7 @@ export async function startHostedLocalFullStackScenario(input: {
       statusPath: (userId: string) => `/internal/users/${encodeURIComponent(userId)}/status`,
       streamLogs: input.streamLogs,
     });
+    preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
     const scenarioRuntimeEnv = scenarioHarness.runtimeEnv;
     const seedEnvironment = input.seedEnvironment ?? scenarioRuntimeEnv;
@@ -377,6 +388,12 @@ async function resolveHostedLocalScenarioDatabase(input: {
 
 function shouldReuseExplicitHostedLocalScenarioDatabaseUrl(): boolean {
   return process.env.CI === "true" || process.env[reuseExplicitDatabaseUrlEnv] === "1";
+}
+
+function buildHostedLocalRunnerBundleCacheKey(env: NodeJS.ProcessEnv): string {
+  return env.HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN === "1"
+    ? "parser-toolchain"
+    : "default";
 }
 
 async function createEphemeralHostedLocalDatabase(

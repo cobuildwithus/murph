@@ -47,6 +47,7 @@ import {
 import {
   assertHostedWebDevServerAvailable,
   assertHostedWebPortAvailable,
+  cleanupHostedRunnerContainerLocalState,
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
   redactHostedLocalDiagnosticText,
@@ -59,6 +60,7 @@ import {
   terminateChildProcessAndWait,
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
+  type HostedRunnerContainerCleanupScope,
 } from "./runtime.ts";
 import {
   HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
@@ -434,6 +436,11 @@ export async function startHostedLocalDevStack(input: {
       await cleanupHostedRunnerContainers({
         cwd: repoRoot,
         env: workerProcessEnv ?? workerRuntimeEnv,
+        scope: resolvePreStartHostedRunnerContainerCleanupScope(initialEnv),
+      });
+      await cleanupHostedRunnerContainerLocalState({
+        env: workerProcessEnv ?? workerRuntimeEnv,
+        persistDir: config.workerPersistDir,
       });
     }
 
@@ -896,6 +903,9 @@ function assertHostedLocalE2eIsolation(
   if (config.workerPersistDir === DEFAULT_WORKER_PERSIST_DIR) {
     failures.push("MURPH_DEV_CF_PERSIST_DIR must not use the interactive default");
   }
+  if (env.MURPH_DEV_REUSE_EXISTING_WORKER === "1") {
+    failures.push("MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled");
+  }
   if (!config.skipWeb && env.NEXT_DIST_DIR_MODE !== "smoke") {
     failures.push("NEXT_DIST_DIR_MODE must be smoke");
   }
@@ -929,6 +939,12 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
   return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "e2e:stub"
     || profile === "e2e:live";
+}
+
+function resolvePreStartHostedRunnerContainerCleanupScope(
+  env: NodeJS.ProcessEnv,
+): HostedRunnerContainerCleanupScope {
+  return requiresHostedLocalE2eIsolation(env) ? "current-build" : "all-builds";
 }
 
 function shouldUseGlobalCloudflareDevVarsSymlink(env: NodeJS.ProcessEnv): boolean {
@@ -1336,45 +1352,65 @@ function tail(value: string, maxChars: number = 2_000): string {
 }
 
 function ensurePreparedRunnerContainerImageAlias(stdout: string): void {
-  const expectedRef = readLatestPreparedRunnerContainerImageRef(stdout);
-  if (!expectedRef) {
+  const artifacts = readPreparedRunnerContainerImageArtifacts(stdout);
+  if (artifacts.length === 0) {
     return;
   }
 
-  if (hasDockerImageRef(expectedRef)) {
-    return;
-  }
+  for (const artifact of artifacts) {
+    if (hasDockerImageRef(artifact.ref)) {
+      continue;
+    }
 
-  const expectedIdPrefix = readLatestPreparedRunnerContainerImageIdPrefix(stdout);
-  if (!expectedIdPrefix) {
-    throw new Error(
-      `Prepared runner container image ${expectedRef} is missing and no local image id was found in dev output.`,
-    );
-  }
+    if (!artifact.imageIdPrefix) {
+      throw new Error(
+        `Prepared runner container image ${artifact.ref} is missing and no local image id was found in dev output.`,
+      );
+    }
 
-  const existingRef = findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix);
-  if (!existingRef) {
-    throw new Error(
-      `Prepared runner container image ${expectedRef} is missing and no local image matches id prefix ${expectedIdPrefix}.`,
-    );
-  }
+    const existingRef = findPreparedRunnerContainerImageRefByIdPrefix(artifact.imageIdPrefix);
+    if (!existingRef) {
+      throw new Error(
+        `Prepared runner container image ${artifact.ref} is missing and no local image matches id prefix ${artifact.imageIdPrefix}.`,
+      );
+    }
 
-  spawnSync("docker", ["tag", existingRef, expectedRef], {
-    stdio: "pipe",
-  });
+    spawnSync("docker", ["tag", existingRef, artifact.ref], {
+      stdio: "pipe",
+    });
+  }
 }
 
-function readLatestPreparedRunnerContainerImageRef(stdout: string): string | null {
-  const matches = Array.from(
-    stdout.matchAll(/naming to docker\.io\/(cloudflare-dev\/runnercontainer:[a-f0-9]+)\s+done/g),
-  );
-  return matches.at(-1)?.[1] ?? null;
-}
+type PreparedRunnerContainerImageArtifact = {
+  imageIdPrefix: string | null;
+  ref: string;
+};
 
-function readLatestPreparedRunnerContainerImageIdPrefix(stdout: string): string | null {
-  const matches = Array.from(stdout.matchAll(/exporting manifest sha256:([a-f0-9]{12,64})/g));
-  const manifestHash = matches.at(-1)?.[1] ?? null;
-  return manifestHash ? manifestHash.slice(0, 12) : null;
+function readPreparedRunnerContainerImageArtifacts(
+  stdout: string,
+): PreparedRunnerContainerImageArtifact[] {
+  const artifacts: PreparedRunnerContainerImageArtifact[] = [];
+  let latestImageIdPrefix: string | null = null;
+
+  for (const line of stdout.split("\n")) {
+    const manifestMatch = line.match(/exporting manifest sha256:([a-f0-9]{12,64})/);
+    if (manifestMatch?.[1]) {
+      latestImageIdPrefix = manifestMatch[1].slice(0, 12);
+      continue;
+    }
+
+    const refMatch = line.match(
+      /naming to docker\.io\/(cloudflare-dev\/(?:runnercontainer|deploysmokerunnercontainer):[a-f0-9]+)\s+done/,
+    );
+    if (refMatch?.[1]) {
+      artifacts.push({
+        imageIdPrefix: latestImageIdPrefix,
+        ref: refMatch[1],
+      });
+    }
+  }
+
+  return artifacts;
 }
 
 function hasDockerImageRef(imageRef: string): boolean {
@@ -1405,7 +1441,10 @@ function findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix: string)
 
   for (const line of lines) {
     const [imageRef, imageId] = line.split(/\s+/, 2);
-    if (!imageRef?.startsWith("cloudflare-dev/runnercontainer:")) {
+    if (
+      !imageRef?.startsWith("cloudflare-dev/runnercontainer:")
+      && !imageRef?.startsWith("cloudflare-dev/deploysmokerunnercontainer:")
+    ) {
       continue;
     }
 

@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -68,6 +71,7 @@ async function importRuntimeWithSpawnSequence(sequence: SpawnResult[]) {
   const runtime = await import("./runtime.ts");
 
   return {
+    cleanupHostedRunnerContainerLocalState: runtime.cleanupHostedRunnerContainerLocalState,
     cleanupHostedRunnerContainers: runtime.cleanupHostedRunnerContainers,
     spawn,
   };
@@ -117,12 +121,154 @@ describe("cleanupHostedRunnerContainers", () => {
       "ps",
       "-aq",
       "--filter",
-      "name=workerd-murph-hosted-RunnerContainer-",
+      "name=workerd-murph-hosted-",
       "--filter",
       expect.stringMatching(
         /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
       ),
     ]);
+  });
+
+  it("can sweep stale local runner containers from previous build ids", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "abc123\n" },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      env: {
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "fresh-build",
+      },
+      scope: "all-builds",
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "ps",
+      "-aq",
+      "--filter",
+      "name=workerd-murph-hosted-",
+    ]);
+    expect(spawn.mock.calls[1]?.[1]).toEqual(["rm", "-f", "abc123"]);
+  });
+
+  it("keeps all-builds scope while checking whether failed removals disappeared", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "abc123\n" },
+      {
+        exitCode: 1,
+        stderr: "Error response from daemon: removal failed",
+      },
+      { exitCode: 0, stdout: "abc123\n" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      env: {
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "fresh-build",
+      },
+      scope: "all-builds",
+      timeoutMs: 1,
+    })).rejects.toThrow("Failed to remove stale local Cloudflare runner containers.");
+
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
+      "ps",
+      "-aq",
+      "--filter",
+      "name=workerd-murph-hosted-",
+    ]);
+  });
+
+  it("uses the isolated E2E worker container namespace", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      env: {
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "e2e-suite-build",
+      },
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "ps",
+      "-aq",
+      "--filter",
+      expect.stringMatching(/^name=workerd-murph-hosted-e2e-[a-f0-9]{24}-$/u),
+      "--filter",
+      expect.stringMatching(
+        /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
+      ),
+    ]);
+  });
+
+  it("removes only persisted local container durable object state for the worker namespace", async () => {
+    const { cleanupHostedRunnerContainerLocalState } = await importRuntimeWithSpawnSequence([]);
+    const root = await mkdtemp(path.join(os.tmpdir(), "murph-runner-state-test-"));
+    const persistDir = path.join(root, "state");
+    const runnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-RunnerContainer");
+    const smokeStateDir = path.join(persistDir, "v3", "do", "murph-hosted-DeploySmokeRunnerContainer");
+    const userRunnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-UserRunnerDurableObject");
+
+    try {
+      await mkdir(runnerStateDir, { recursive: true });
+      await mkdir(smokeStateDir, { recursive: true });
+      await mkdir(userRunnerStateDir, { recursive: true });
+
+      await cleanupHostedRunnerContainerLocalState({
+        persistDir,
+      });
+
+      await expect(access(runnerStateDir)).rejects.toThrow();
+      await expect(access(smokeStateDir)).rejects.toThrow();
+      await expect(access(userRunnerStateDir)).resolves.toBeUndefined();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("uses the isolated E2E worker name when clearing local container durable object state", async () => {
+    const { cleanupHostedRunnerContainerLocalState } = await importRuntimeWithSpawnSequence([]);
+    const root = await mkdtemp(path.join(os.tmpdir(), "murph-runner-state-test-"));
+    const persistDir = path.join(root, "state");
+    const localBuildId = "e2e-suite-build";
+
+    try {
+      const { buildHostedRunnerLocalBuildId } = await import("./environment.ts");
+      const suffix = buildHostedRunnerLocalBuildId(localBuildId).replace(/^sha256-/u, "");
+      const e2eRunnerStateDir = path.join(
+        persistDir,
+        "v3",
+        "do",
+        `murph-hosted-e2e-${suffix}-RunnerContainer`,
+      );
+      const defaultRunnerStateDir = path.join(
+        persistDir,
+        "v3",
+        "do",
+        "murph-hosted-RunnerContainer",
+      );
+      await mkdir(e2eRunnerStateDir, { recursive: true });
+      await mkdir(defaultRunnerStateDir, { recursive: true });
+
+      await cleanupHostedRunnerContainerLocalState({
+        env: {
+          MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+          MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: localBuildId,
+        },
+        persistDir,
+      });
+
+      await expect(access(e2eRunnerStateDir)).rejects.toThrow();
+      await expect(access(defaultRunnerStateDir)).resolves.toBeUndefined();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("still fails when docker rm leaves matching runner containers behind", async () => {

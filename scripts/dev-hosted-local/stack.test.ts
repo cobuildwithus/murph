@@ -127,6 +127,14 @@ const cleanupHostedRunnerContainers = vi.fn<
     cwd: string;
     env: NodeJS.ProcessEnv;
     ignoreErrors?: boolean;
+    scope?: "all-builds" | "current-build";
+  }) => Promise<void>
+>(async () => {});
+const cleanupHostedRunnerContainerLocalState = vi.fn<
+  (input: {
+    env: NodeJS.ProcessEnv;
+    ignoreErrors?: boolean;
+    persistDir: string;
   }) => Promise<void>
 >(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
@@ -268,6 +276,7 @@ vi.mock("./linq-webhook-tunnel.ts", () => ({
 vi.mock("./runtime.ts", () => ({
   assertHostedWebDevServerAvailable: vi.fn(async () => {}),
   assertHostedWebPortAvailable: vi.fn(async () => {}),
+  cleanupHostedRunnerContainerLocalState,
   cleanupHostedRunnerContainers,
   collectDockerDevDiagnostics,
   redactHostedLocalDiagnosticText: (value: string) => value,
@@ -296,6 +305,8 @@ function createBufferedChild(input: {
   exitCode: number | null;
   name: HostedLocalChildProcessName;
   pid: number;
+  stderrText?: string;
+  stdoutText?: string;
 }): BufferedNamedChildProcess {
   const child: HostedLocalChildProcess = {
     exitCode: input.exitCode,
@@ -311,9 +322,9 @@ function createBufferedChild(input: {
     child,
     name: input.name,
     stderrTail: () => "",
-    stderrText: () => "",
+    stderrText: () => input.stderrText ?? "",
     stdoutTail: () => "",
-    stdoutText: () => "",
+    stdoutText: () => input.stdoutText ?? "",
   };
 }
 
@@ -465,6 +476,14 @@ describe("hosted local dev stack", () => {
       expect.stringContaining("apps/cloudflare/.dev.vars"),
     );
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(2);
+    expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      scope: "all-builds",
+    }));
+    expect(cleanupHostedRunnerContainerLocalState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        persistDir: ".wrangler/state/dev-root",
+      }),
+    );
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
@@ -494,6 +513,39 @@ describe("hosted local dev stack", () => {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       },
     })).rejects.toThrow(/MURPH_DEV_WEB_PORT must not use the interactive default/u);
+
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+  });
+
+  it("rejects E2E isolation when asked to reuse an interactive worker", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_REUSE_EXISTING_WORKER: "1",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    })).rejects.toThrow(/MURPH_DEV_REUSE_EXISTING_WORKER must not be enabled/u);
 
     expect(spawnChildProcess).not.toHaveBeenCalled();
   });
@@ -552,6 +604,9 @@ describe("hosted local dev stack", () => {
       expect.any(String),
       expect.any(Object),
     );
+    expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      scope: "current-build",
+    }));
   });
 
   it("signals all child processes during stop before waiting for the first one to exit", async () => {
@@ -1128,6 +1183,62 @@ describe("hosted local dev stack", () => {
       expect.any(Object),
     );
     platformSpy.mockRestore();
+  });
+
+  it("retags a split smoke container image when Wrangler omits the live runner tag", async () => {
+    const imageBuildOutput = [
+      "#8 exporting manifest sha256:e144c487891e1111111111111111111111111111111111111111111111111111 done",
+      "#8 naming to docker.io/cloudflare-dev/runnercontainer:4e19cead done",
+      "#9 exporting manifest sha256:e144c487891e2222222222222222222222222222222222222222222222222 done",
+      "#9 naming to docker.io/cloudflare-dev/deploysmokerunnercontainer:4e19cead done",
+    ].join("\n");
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({
+        exitCode: null,
+        name: "cloudflare",
+        pid: 153,
+        stderrText: imageBuildOutput,
+      }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 154 }));
+    spawnSync.mockImplementation((command, args) => {
+      if (command === "docker" && args[0] === "image" && args[1] === "inspect") {
+        return {
+          error: undefined,
+          status: args[2] === "cloudflare-dev/runnercontainer:4e19cead" ? 1 : 0,
+          stdout: "",
+        };
+      }
+      if (command === "docker" && args[0] === "images") {
+        return {
+          error: undefined,
+          status: 0,
+          stdout: "cloudflare-dev/deploysmokerunnercontainer:4e19cead e144c487891e\n",
+        };
+      }
+      return {
+        error: undefined,
+        status: 0,
+        stdout: "",
+      };
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(spawnSync).toHaveBeenCalledWith(
+      "docker",
+      [
+        "tag",
+        "cloudflare-dev/deploysmokerunnercontainer:4e19cead",
+        "cloudflare-dev/runnercontainer:4e19cead",
+      ],
+      { stdio: "pipe" },
+    );
   });
 
   it("fails closed on Linux when the worker bridge host cannot be resolved", async () => {

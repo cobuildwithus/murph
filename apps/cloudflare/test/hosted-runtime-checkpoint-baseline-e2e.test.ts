@@ -82,7 +82,7 @@ afterEach(async () => {
 });
 
 describe("hosted runtime checkpoint baseline", () => {
-  it("publishes a browser-vault replica for canonical device-sync checkpoint commits", async () => {
+  it("does not publish browser-vault replicas for live canonical checkpoint commits", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-device-base-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-device-working-"));
     cleanupPaths.push(baseVaultRoot, vaultRoot);
@@ -159,13 +159,17 @@ describe("hosted runtime checkpoint baseline", () => {
     );
 
     expect(checkpointRequests).toHaveLength(0);
-    expect(publishedReplicaSourceHashes).toHaveLength(1);
-    expect(result.browserVaultReplicaRef).toEqual(expect.objectContaining({
-      sourceBundleHash: publishedReplicaSourceHashes[0],
+    expect(publishedReplicaSourceHashes).toHaveLength(0);
+    expect(result.browserVaultReplicaRef).toBeUndefined();
+    expect(readHostedExecutionSnapshotBaseRef(result.snapshotRef)).toEqual(baseSnapshotRef);
+    expect(readHostedExecutionSnapshotHotRef(result.snapshotRef)).toEqual(expect.objectContaining({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
+      size: expect.any(Number),
     }));
   });
 
-  it("measures working mailbox checkpoint side effects for 100 artifacts and 300 assistant messages", async () => {
+  it("measures hot mailbox checkpoint side effects for 100 artifacts and 300 assistant messages", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-baseline-"));
     cleanupPaths.push(vaultRoot, `${vaultRoot}-operator-home`);
     await writeSyntheticVaultMetadata(vaultRoot);
@@ -250,8 +254,8 @@ describe("hosted runtime checkpoint baseline", () => {
 
     const snapshotRef = checkpointRequests[0]?.snapshotRef ?? null;
     const restoredBaseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
-    const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
-    const snapshotHash = deltaSnapshotRef?.hash ?? null;
+    const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
+    const snapshotHash = hotSnapshotRef?.hash ?? null;
     const snapshotBundleBytes = snapshotHash ? artifactPutBytesByHash.get(snapshotHash) ?? null : null;
     const bundledTranscriptText = readHostedBundleTextFile({
       bytes: snapshotBundleBytes,
@@ -311,9 +315,9 @@ describe("hosted runtime checkpoint baseline", () => {
     expect(bundledTranscriptText).not.toContain("Synthetic checkpoint baseline assistant message 200");
     expect(checkpointRequests[0]?.reason).toBe("import");
     expect(restoredBaseSnapshotRef).toEqual(existingBaseSnapshotRef);
-    expect(deltaSnapshotRef).toEqual(expect.objectContaining({
+    expect(hotSnapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      key: expect.stringMatching(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
       size: expect.any(Number),
     }));
     expect(checkpointRequests[0]).not.toHaveProperty("browserVaultReplicaRef");
@@ -323,7 +327,7 @@ describe("hosted runtime checkpoint baseline", () => {
     }
   });
 
-  it("keeps over-budget Codex home out of import working checkpoints", async () => {
+  it("keeps over-budget Codex home out of import hot checkpoints", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-codex-budget-"));
     const operatorHomeRoot = `${vaultRoot}-operator-home`;
     cleanupPaths.push(vaultRoot, operatorHomeRoot);
@@ -400,9 +404,9 @@ describe("hosted runtime checkpoint baseline", () => {
     });
 
     const snapshotRef = checkpointRequests[0]?.snapshotRef ?? null;
-    const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
-    const deltaBundleBytes = deltaSnapshotRef
-      ? artifactPutBytesByHash.get(deltaSnapshotRef.hash) ?? null
+    const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
+    const hotBundleBytes = hotSnapshotRef
+      ? artifactPutBytesByHash.get(hotSnapshotRef.hash) ?? null
       : null;
     const fallbackLog = findFirstRuntimeLogEntry(
       runtimeLogRequests,
@@ -419,31 +423,31 @@ describe("hosted runtime checkpoint baseline", () => {
 
     expect(result.status).toBe("idle");
     expect(checkpointRequests[0]?.reason).toBe("import");
-    expect(deltaSnapshotRef).toEqual(expect.objectContaining({
+    expect(hotSnapshotRef).toEqual(expect.objectContaining({
       hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      key: expect.stringMatching(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u),
+      key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
       size: expect.any(Number),
     }));
     expect(fallbackLog).toBeNull();
     expect(snapshotLog?.redactedJson).toMatchObject({
       checkpointReason: "import",
-      snapshotMode: "working",
+      snapshotMode: "hot",
     });
     expect(codexDiagnosticLog).toBeNull();
-    expect(deltaSnapshotRef).not.toBeNull();
+    expect(hotSnapshotRef).not.toBeNull();
     expect(artifactPutCalls).toHaveLength(1);
     expect(readHostedBundleTextFile({
-      bytes: deltaBundleBytes,
+      bytes: hotBundleBytes,
       expectedKind: "vault",
       path: ".codex-hosted/rollouts/over-budget-rollout.jsonl",
       root: "operator-home",
     })).toBeNull();
     expect(checkpointRequests[0]?.snapshotRef).toEqual(expect.objectContaining({
       base: existingBaseSnapshotRef,
-      delta: expect.objectContaining({
-        key: expect.stringMatching(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u),
+      hot: expect.objectContaining({
+        key: expect.stringMatching(/^cloudflare-workspace-hot-state\/[a-f0-9]{64}\.bundle$/u),
       }),
-      schema: "murph.hosted-execution-working-snapshot.v1",
+      schema: "murph.hosted-execution-layered-snapshot.v1",
     }));
     expect(checkpointRequests[0]).not.toHaveProperty("browserVaultReplicaRef");
     expect(snapshotLog?.redactedJson).not.toMatchObject({
@@ -478,6 +482,10 @@ describe("hosted runtime checkpoint baseline", () => {
     });
     const artifactPutCalls: BaselineArtifactPutCall[] = [];
     const artifactPutBytesByHash = new Map<string, Uint8Array>();
+    const baseSnapshotRef = await createBaselineFullSnapshotRef({
+      artifactPutBytesByHash,
+      vaultRoot: initialVaultRoot,
+    });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeLogRequests: HostedRuntimeLogRequest[] = [];
@@ -485,7 +493,7 @@ describe("hosted runtime checkpoint baseline", () => {
     let workspace = createWorkspaceState({
       checkpointedAt: null,
       createdAt: TEST_NOW,
-      snapshotRef: null,
+      snapshotRef: baseSnapshotRef,
       userId: CODEX_ROLLOUT_E2E_USER_ID,
       version: "0",
     });

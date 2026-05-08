@@ -37,6 +37,9 @@ import type {
 } from "../src/worker-routes/shared.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import {
+  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+} from "../src/runner-outbound/browser-vault-refresh-authority.ts";
+import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -448,8 +451,11 @@ describe("cloudflare worker routes", () => {
       async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
         throw new Error("Runner container should not be invoked by route tests.");
       },
-      async ownsInternalWorkerProxyToken(): Promise<boolean> {
-        return true;
+      async ownsInternalWorkerProxyToken(input: {
+        leaseGeneration?: string;
+        token: string;
+      }): Promise<boolean> {
+        return input.token === RUNNER_PROXY_TOKEN && input.leaseGeneration === undefined;
       },
       async smokeHealth() {
         return {
@@ -489,6 +495,57 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(404);
     expect(getByName).toHaveBeenCalledWith("member_123--v-version-123");
+  });
+
+  it("rejects browser-vault refresh proxy tokens on general local internal proxy routes", async () => {
+    installOidcJwksFetch();
+    const getByName = vi.fn((_name: string) => ({
+      async destroyInstance() {},
+      async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+        throw new Error("Runner container should not be invoked by route tests.");
+      },
+      async ownsInternalWorkerProxyToken(input: {
+        leaseGeneration?: string;
+        token: string;
+      }): Promise<boolean> {
+        return input.token === RUNNER_PROXY_TOKEN && (
+          input.leaseGeneration === undefined
+          || input.leaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION
+        );
+      },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+    const env = createWorkerEnv(undefined, {
+      ALLOW_LOCAL_INTERNAL_PROXY: "true",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
+        {
+          headers: {
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          },
+          method: "GET",
+        },
+      ),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(getByName).toHaveBeenCalledWith("member_123");
   });
 
   it("rejects local internal proxy requests when the proxy token is replayed against another user", async () => {

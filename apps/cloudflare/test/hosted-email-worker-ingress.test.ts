@@ -973,6 +973,11 @@ function createWorkerEnv(bucket: MemoryEncryptedR2Bucket): HostedEmailWorkerTest
         throw new Error("RUNNER_CONTAINER should not be used in hosted-email worker-ingress tests.");
       },
     },
+    RUNNER_CONTAINER_SMOKE: {
+      getByName() {
+        throw new Error("RUNNER_CONTAINER_SMOKE should not be used in hosted-email worker-ingress tests.");
+      },
+    },
     USER_RUNNER: {
       getByName() {
         throw new Error("USER_RUNNER.getByName should be mocked in hosted-email worker-ingress tests.");

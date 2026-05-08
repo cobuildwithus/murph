@@ -473,6 +473,8 @@ async function startLinqScenario(): Promise<void> {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: undefined,
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+        buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,

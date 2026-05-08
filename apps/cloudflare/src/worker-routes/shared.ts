@@ -73,6 +73,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
 export interface WorkerEnvironmentSource
   extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
+  RUNNER_CONTAINER_SMOKE: HostedExecutionContainerNamespaceLike;
 }
 
 export interface WorkerRouteContext {

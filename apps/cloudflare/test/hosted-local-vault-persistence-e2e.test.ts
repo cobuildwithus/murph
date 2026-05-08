@@ -58,8 +58,12 @@ let databaseUrl: string | null = null;
 let persistDir: string | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
+const describeVaultPersistence = isLiveCodexAppServerEnvironment() ? describe : describe.skip;
 
 beforeAll(async () => {
+  if (!isLiveCodexAppServerEnvironment()) {
+    return;
+  }
   requireLiveCodexAppServerEnvironment();
   databaseName = buildDatabaseName();
   databaseUrl = await createDatabase(databaseName);
@@ -86,7 +90,7 @@ afterAll(async () => {
   ));
 }, 180_000);
 
-describe("hosted local vault persistence e2e", () => {
+describeVaultPersistence("hosted local vault persistence e2e", () => {
   it("persists real Codex vault file changes across hosted-local runner restarts", async () => {
     scenario = await startVaultPersistenceScenario({
       resetLocalDatabase: true,
@@ -353,6 +357,14 @@ function buildActivationWake(memberId: string) {
     memberId,
     occurredAt: new Date().toISOString(),
   });
+}
+
+function isLiveCodexAppServerEnvironment(): boolean {
+  return (
+    process.env.MURPH_E2E_ASSISTANT_PROVIDER_MODE === "live"
+    && !process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]?.trim()
+    && Boolean(process.env.OPENAI_API_KEY?.trim())
+  );
 }
 
 function requireLiveCodexAppServerEnvironment(): void {

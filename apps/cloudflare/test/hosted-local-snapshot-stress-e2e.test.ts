@@ -149,7 +149,7 @@ describe("hosted local snapshot stress e2e", () => {
     });
     const importSnapshot = findLargestCheckpointLog(activationStatus.recentLogs, {
       eventCode: "checkpoint.snapshot_finished",
-      reason: "import",
+      reason: ["import", "system_mailbox_receipt"],
     });
 
     requireScenario().queueAssistantResponses([
@@ -223,20 +223,19 @@ describe("hosted local snapshot stress e2e", () => {
 
     const postReplySnapshot = findLargestCheckpointLog(finalStatus.recentLogs, {
       eventCode: "checkpoint.snapshot_finished",
-      reason: "outbox_sending",
+      reason: ["outbox_sending", "outbox_receipt", "canonical_runtime_commit"],
     });
-    const postReplyFallback = findLargestCheckpointLog(finalStatus.recentLogs, {
+    expect(hasCheckpointLog(finalStatus.recentLogs, {
       eventCode: "checkpoint.hot_state_fallback",
-      reason: "outbox_sending",
-    });
+      reason: ["outbox_sending", "outbox_receipt", "canonical_runtime_commit"],
+    })).toBe(false);
 
-    expect(readRedactedJsonString(importSnapshot, "snapshotMode")).toBe("full");
-    expect(readRedactedJsonString(postReplySnapshot, "snapshotMode")).toBe("full");
-    expect(readRedactedJsonString(postReplyFallback, "fallbackReason")).toBe("budget_exceeded");
+    expect(readRedactedJsonString(importSnapshot, "snapshotMode")).toBe("working");
+    expect(readRedactedJsonString(postReplySnapshot, "snapshotMode")).toBe("working");
     expect(readRedactedJsonNumber(importSnapshot, "bundlePutBytes"))
-      .toBeGreaterThan(16 * 1024 * 1024);
+      .toBeLessThan(16 * 1024 * 1024);
     expect(readRedactedJsonNumber(postReplySnapshot, "bundlePutBytes"))
-      .toBeGreaterThan(16 * 1024 * 1024);
+      .toBeLessThan(16 * 1024 * 1024);
     expect(readRedactedJsonNumber(importSnapshot, "snapshotElapsedMs"))
       .toBeGreaterThanOrEqual(0);
     expect(readRedactedJsonNumber(postReplySnapshot, "snapshotElapsedMs"))
@@ -534,6 +533,20 @@ function findLargestCheckpointLog(
     );
   }
   return match;
+}
+
+function hasCheckpointLog(
+  logs: readonly HostedRuntimeLogEntry[] | undefined,
+  input: {
+    eventCode: string;
+    reason: string | string[];
+  },
+): boolean {
+  const expectedReasons = Array.isArray(input.reason) ? input.reason : [input.reason];
+  return (logs ?? []).some((entry) =>
+    entry.eventCode === input.eventCode
+    && expectedReasons.includes(readRedactedJsonString(entry, "checkpointReason") ?? "")
+  );
 }
 
 function summarizeCheckpointLogs(

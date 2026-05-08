@@ -302,23 +302,47 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
     throw new Error("Generated Wrangler config is missing the runner container definition.");
   }
 
-  const runnerContainer = containers.find((entry) =>
-    Boolean(
-      entry &&
-        typeof entry === "object" &&
-        "class_name" in entry &&
-        entry.class_name === "RunnerContainer",
-    ),
+  const runnerContainer = findGeneratedContainerConfig(
+    containers,
+    "RunnerContainer",
+  );
+  const deploySmokeContainer = findGeneratedContainerConfig(
+    containers,
+    "DeploySmokeRunnerContainer",
   );
 
-  if (!runnerContainer || typeof runnerContainer !== "object") {
+  if (!runnerContainer) {
     throw new Error("Generated Wrangler config is missing the RunnerContainer entry.");
   }
 
-  const image = "image" in runnerContainer ? runnerContainer.image : undefined;
-  const imageBuildContext = "image_build_context" in runnerContainer
-    ? runnerContainer.image_build_context
-    : undefined;
+  if (!deploySmokeContainer) {
+    throw new Error("Generated Wrangler config is missing the DeploySmokeRunnerContainer entry.");
+  }
+
+  assertGeneratedContainerUsesPreparedImage(runnerContainer);
+  assertGeneratedContainerUsesPreparedImage(deploySmokeContainer);
+}
+
+function findGeneratedContainerConfig(
+  containers: unknown[],
+  className: string,
+): Record<string, unknown> | null {
+  const entry = containers.find((candidate) =>
+    Boolean(
+      candidate &&
+        typeof candidate === "object" &&
+        "class_name" in candidate &&
+        candidate.class_name === className,
+    ),
+  );
+  return entry && typeof entry === "object" ? entry as Record<string, unknown> : null;
+}
+
+function assertGeneratedContainerUsesPreparedImage(
+  container: Record<string, unknown>,
+): void {
+  const image = container.image;
+  const imageBuildContext = container.image_build_context;
 
   if (
     image !== expectedDeployContainerImage ||

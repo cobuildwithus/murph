@@ -114,6 +114,7 @@ function createUserRunnerDurableObject(
     ...createHostedExecutionTestEnv(),
     BUNDLES: bucket.api,
     RUNNER_CONTAINER: storage.runnerContainerNamespace,
+    RUNNER_CONTAINER_SMOKE: storage.runnerContainerNamespace,
     ...overrides,
   };
   const durableObject = new UserRunnerDurableObject(storage.state, baseEnv as never);

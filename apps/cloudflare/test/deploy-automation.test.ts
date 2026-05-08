@@ -263,6 +263,15 @@ describe("hosted deploy automation helpers", () => {
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
       },
+      {
+        class_name: "DeploySmokeRunnerContainer",
+        image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
+        instance_type: "standard-1",
+        max_instances: 1,
+        rollout_active_grace_period: 300,
+        rollout_step_percentage: [10, 25, 50, 100],
+      },
     ]);
     expect(config.durable_objects.bindings).toEqual([
       {
@@ -273,6 +282,10 @@ describe("hosted deploy automation helpers", () => {
         class_name: "RunnerContainer",
         name: "RUNNER_CONTAINER",
       },
+      {
+        class_name: "DeploySmokeRunnerContainer",
+        name: "RUNNER_CONTAINER_SMOKE",
+      },
     ]);
     expect(config.migrations).toEqual([
       {
@@ -282,6 +295,10 @@ describe("hosted deploy automation helpers", () => {
       {
         new_sqlite_classes: ["RunnerContainer"],
         tag: "v2",
+      },
+      {
+        new_sqlite_classes: ["DeploySmokeRunnerContainer"],
+        tag: "v3",
       },
     ]);
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
@@ -420,6 +437,8 @@ describe("hosted deploy automation helpers", () => {
           vcpu: number;
         };
         max_instances: number;
+        rollout_active_grace_period?: number;
+        rollout_step_percentage?: number[];
       }>;
       durable_objects: {
         bindings: Array<{
@@ -439,14 +458,16 @@ describe("hosted deploy automation helpers", () => {
       };
     };
 
-    expect(checkedInConfig.containers).toHaveLength(1);
-    expect(checkedInConfig.containers[0]).toMatchObject({
-      class_name: generatedConfig.containers[0]?.class_name,
-      instance_type: generatedConfig.containers[0]?.instance_type,
-      max_instances: generatedConfig.containers[0]?.max_instances,
-      rollout_active_grace_period: generatedConfig.containers[0]?.rollout_active_grace_period,
-      rollout_step_percentage: generatedConfig.containers[0]?.rollout_step_percentage,
-    });
+    expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
+    for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
+      expect(checkedInConfig.containers[index]).toMatchObject({
+        class_name: generatedContainer.class_name,
+        instance_type: generatedContainer.instance_type,
+        max_instances: generatedContainer.max_instances,
+        rollout_active_grace_period: generatedContainer.rollout_active_grace_period,
+        rollout_step_percentage: generatedContainer.rollout_step_percentage,
+      });
+    }
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
