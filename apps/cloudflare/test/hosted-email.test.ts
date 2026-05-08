@@ -644,7 +644,8 @@ describe("hosted email routing and transport", () => {
     })).rejects.toThrow(/sender identity is config-owned/u);
   });
 
-  it("surfaces the primary recipient when the native binding send fails", async () => {
+  it("redacts the primary recipient when the native binding send fails", async () => {
+    const primaryRecipient = ["owner", "example.com"].join("@");
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({ ok: true }),
       {
@@ -659,26 +660,28 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding: {
         send: vi.fn(async (_message: unknown) => {
-          throw new Error("binding unavailable");
+          throw new Error(`binding unavailable for ${primaryRecipient}`);
         }),
       },
       request: {
         identityId: null,
         message: "hello from murph",
-        target: "owner@example.com",
+        target: primaryRecipient,
         targetKind: "explicit",
       },
       userId: "user_123",
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
-    })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
+    })).rejects.toThrow(
+      /Hosted email send failed\. binding unavailable for \[redacted-email\]/u,
+    );
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "assistant-delivery",
         details: {
-          fromAddress: "assistant@mail.example.test",
-          recipient: "owner@example.com",
+          fromAddressPresent: true,
+          recipientPresent: true,
         },
         level: "warn",
         message: "Hosted email send failed.",
@@ -686,15 +689,19 @@ describe("hosted email routing and transport", () => {
         userId: null,
       }),
     );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
+      primaryRecipient,
+    );
   });
 
-  it("surfaces the collapsed primary recipient when a threaded binding send fails", async () => {
+  it("redacts the collapsed primary recipient when a threaded binding send fails", async () => {
+    const primaryRecipient = ["owner", "example.com"].join("@");
     const initialThreadTarget = createHostedEmailThreadTarget({
       cc: ["carol@example.com"],
       lastMessageId: "<prev@example.test>",
       references: ["<older@example.test>"],
       subject: "Murph update",
-      to: ["owner@example.com", "bob@example.com"],
+      to: [primaryRecipient, "bob@example.com"],
     });
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({ ok: true }),
@@ -722,20 +729,23 @@ describe("hosted email routing and transport", () => {
       userId: "user_123",
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
-    })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
+    })).rejects.toThrow(/Hosted email send failed\. binding unavailable/u);
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "assistant-delivery",
         details: {
-          fromAddress: "assistant@mail.example.test",
-          recipient: "owner@example.com",
+          fromAddressPresent: true,
+          recipientPresent: true,
         },
         level: "warn",
         message: "Hosted email send failed.",
         phase: "outbox",
         userId: null,
       }),
+    );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
+      primaryRecipient,
     );
   });
 });

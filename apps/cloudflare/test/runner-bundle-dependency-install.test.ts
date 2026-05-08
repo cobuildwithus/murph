@@ -47,7 +47,7 @@ describe("runner bundle dependency pinning", () => {
         runtimePackageRoot,
       ),
     ).toThrow(
-      `Could not resolve an installed version for direct dependency jose from ${runtimePackageRoot}.`,
+      "Could not resolve an installed version for direct dependency jose from the runner runtime package.",
     );
   });
 
@@ -67,7 +67,7 @@ describe("runner bundle dependency pinning", () => {
 });
 
 describe("runner bundle pnpm install config", () => {
-  it("mirrors root minimum-release-age policy into the isolated bundle install", async () => {
+  it("mirrors root dependency policy into the isolated bundle install", async () => {
     const repoRoot = await createRuntimePackageRoot();
     const installRoot = await createRuntimePackageRoot();
 
@@ -76,10 +76,21 @@ describe("runner bundle pnpm install config", () => {
       [
         "packages:",
         "  - packages/*",
+        "allowBuilds:",
+        "  '@prisma/client': true",
+        "  esbuild: true",
+        "blockExoticSubdeps: true",
+        "engineStrict: true",
+        "managePackageManagerVersions: true",
         "minimumReleaseAge: 1440",
         "minimumReleaseAgeExclude:",
         "  - incur@0.4.4",
         "  - '@next/env@16.2.2'",
+        "nodeVersion: 24.14.1",
+        "packageManagerStrictVersion: true",
+        "savePrefix: ''",
+        "trustPolicy: no-downgrade",
+        "trustPolicyIgnoreAfter: 259200",
         "",
       ].join("\n"),
       "utf8",
@@ -91,9 +102,19 @@ describe("runner bundle pnpm install config", () => {
       readFile(path.join(installRoot, ".npmrc"), "utf8"),
     ).resolves.toBe(
       [
+        "block-exotic-subdeps=true",
+        "engine-strict=true",
+        "manage-package-manager-versions=true",
         "minimum-release-age=1440",
         "minimum-release-age-exclude[]=incur@0.4.4",
         "minimum-release-age-exclude[]=@next/env@16.2.2",
+        "node-version=24.14.1",
+        "only-built-dependencies[]=@prisma/client",
+        "only-built-dependencies[]=esbuild",
+        "package-manager-strict-version=true",
+        "save-prefix=",
+        "trust-policy=no-downgrade",
+        "trust-policy-ignore-after=259200",
         "",
       ].join("\n"),
     );

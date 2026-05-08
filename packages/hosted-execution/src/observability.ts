@@ -56,7 +56,7 @@ const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
   /^Native hosted execution requires a RunnerContainer binding\.$/u,
 ];
 const HOSTED_EXECUTION_SENSITIVE_DETAIL_KEY_PATTERN =
-  /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie/iu;
+  /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie|^(?:bundleRefKey|refKey)$/iu;
 const HOSTED_EXECUTION_ERROR_CODE_PROPERTY_KEYS = ["code", "errorCode"] as const;
 const HOSTED_EXECUTION_ERROR_STATUS_PROPERTY_KEYS =
   ["status", "statusCode", "responseStatus"] as const;
@@ -68,7 +68,7 @@ const HOSTED_EXECUTION_SAFE_ERROR_OWN_DETAIL_KEYS = new Set([
   "attemptCount",
   "bundleArchiveOperation",
   "bundleRefHash",
-  "bundleRefKey",
+  "bundleRefKeyPresent",
   "bundleRefPresent",
   "bundleRefSize",
   "expectedKind",
@@ -79,7 +79,7 @@ const HOSTED_EXECUTION_SAFE_ERROR_OWN_DETAIL_KEYS = new Set([
   "phase",
   "reason",
   "refHash",
-  "refKey",
+  "refKeyPresent",
   "refSize",
   "retryable",
   "runElapsedMs",

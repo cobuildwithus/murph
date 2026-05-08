@@ -30,13 +30,13 @@ export class HostedBundleArchiveValidationError extends Error {
   readonly details: {
     bundleArchiveOperation: HostedBundleArchiveValidationOperation;
     bundleRefHash: string | null;
-    bundleRefKey: string | null;
+    bundleRefKeyPresent: boolean;
     bundleRefPresent: boolean;
     bundleRefSize: number | null;
   };
   readonly operation: HostedBundleArchiveValidationOperation;
   readonly refHash: string | null;
-  readonly refKey: string | null;
+  readonly refKeyPresent: boolean;
   readonly refSize: number | null;
 
   constructor(input: {
@@ -50,12 +50,13 @@ export class HostedBundleArchiveValidationError extends Error {
     this.name = "HostedBundleArchiveValidationError";
     this.operation = input.operation;
     this.refHash = input.ref?.hash ?? null;
-    this.refKey = input.ref?.key ?? null;
+    this.refKeyPresent =
+      typeof input.ref?.key === "string" && input.ref.key.length > 0;
     this.refSize = input.ref?.size ?? null;
     this.details = {
       bundleArchiveOperation: input.operation,
       bundleRefHash: this.refHash,
-      bundleRefKey: this.refKey,
+      bundleRefKeyPresent: this.refKeyPresent,
       bundleRefPresent: input.ref !== null && input.ref !== undefined,
       bundleRefSize: this.refSize,
     };
@@ -65,7 +66,7 @@ export class HostedBundleArchiveValidationError extends Error {
 export interface HostedBundleArchiveValidationErrorDetails {
   operation: HostedBundleArchiveValidationOperation;
   refHash: string | null;
-  refKey: string | null;
+  refKeyPresent: boolean;
   refSize: number | null;
 }
 
@@ -209,7 +210,7 @@ export function readHostedBundleArchiveValidationErrorDetails(
     return {
       operation: error.operation,
       refHash: error.refHash,
-      refKey: error.refKey,
+      refKeyPresent: error.refKeyPresent,
       refSize: error.refSize,
     };
   }
@@ -230,9 +231,13 @@ export function readHostedBundleArchiveValidationErrorDetails(
 
   return {
     operation,
-    refHash: readHostedBundleValidationString(details?.bundleRefHash ?? details?.refHash),
-    refKey: readHostedBundleValidationString(details?.bundleRefKey ?? details?.refKey),
-    refSize: readHostedBundleValidationNumber(details?.bundleRefSize ?? details?.refSize),
+    refHash: readHostedBundleValidationString(
+      details?.bundleRefHash ?? details?.refHash,
+    ),
+    refKeyPresent: readHostedBundleValidationRefKeyPresent(details),
+    refSize: readHostedBundleValidationNumber(
+      details?.bundleRefSize ?? details?.refSize,
+    ),
   };
 }
 
@@ -300,6 +305,23 @@ function readHostedBundleValidationString(value: unknown): string | null {
 
 function readHostedBundleValidationNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readHostedBundleValidationRefKeyPresent(
+  details: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!details) {
+    return false;
+  }
+
+  if (
+    details.bundleRefKeyPresent === true ||
+    details.refKeyPresent === true
+  ) {
+    return true;
+  }
+
+  return readHostedBundleValidationString(details.bundleRefKey ?? details.refKey) !== null;
 }
 
 function readHostedBundleValidationMessage(cause: unknown): string {

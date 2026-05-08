@@ -49,6 +49,9 @@ importers:
       '@murphai/cloudflare-hosted-control':
         specifier: workspace:*
         version: link:../../packages/cloudflare-hosted-control
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../../packages/device-syncd

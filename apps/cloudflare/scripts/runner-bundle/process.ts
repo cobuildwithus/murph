@@ -1,6 +1,30 @@
 import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { resolvePnpmCommand } from "../wrangler-runner.js";
+
+const PACKAGE_MANAGER_ENV_KEYS = new Set([
+  "CI",
+  "COMSPEC",
+  "GITHUB_ACTIONS",
+  "NODE_EXTRA_CA_CERTS",
+  "PATH",
+  "PATHEXT",
+  "RUNNER_ARCH",
+  "RUNNER_OS",
+  "RUNNER_TEMP",
+  "RUNNER_TOOL_CACHE",
+  "SHELL",
+  "SSL_CERT_FILE",
+  "SYSTEMROOT",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "WINDIR",
+]);
 
 function resolveNpmCommand(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -34,13 +58,12 @@ async function runProcess(
     env?: NodeJS.ProcessEnv;
   },
 ): Promise<void> {
+  const processEnv = await createPackageManagerProcessEnv(options.env);
+
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: {
-        ...process.env,
-        ...options.env,
-      },
+      env: processEnv.env,
       stdio: "inherit",
     });
 
@@ -53,9 +76,100 @@ async function runProcess(
 
       reject(
         new Error(
-          `${command} ${args.join(" ")} exited with code ${code ?? "unknown"}.`,
+          `${command} exited with code ${code ?? "unknown"}.`,
         ),
       );
     });
-  });
+  }).finally(processEnv.cleanup);
+}
+
+export async function createPackageManagerProcessEnv(
+  explicitEnv: NodeJS.ProcessEnv | undefined,
+  source: NodeJS.ProcessEnv = process.env,
+): Promise<{
+  cleanup: () => Promise<void>;
+  env: NodeJS.ProcessEnv;
+}> {
+  const homeDir = await mkdtemp(
+    path.join(tmpdir(), "murph-package-manager-env-"),
+  );
+  const isolatedEnv = await createIsolatedPackageManagerHomeEnv(homeDir);
+
+  return {
+    cleanup: async () => {
+      await rm(homeDir, { force: true, recursive: true });
+    },
+    env: buildPackageManagerProcessEnv({
+      ...isolatedEnv,
+      ...explicitEnv,
+    }, source),
+  };
+}
+
+async function createIsolatedPackageManagerHomeEnv(
+  homeDir: string,
+): Promise<NodeJS.ProcessEnv> {
+  const configDir = path.join(homeDir, "config");
+  const dataDir = path.join(homeDir, "data");
+  const cacheDir = path.join(homeDir, "cache");
+  const appDataDir = path.join(configDir, "appdata");
+  const corepackDir = path.join(cacheDir, "corepack");
+  const localAppDataDir = path.join(dataDir, "localappdata");
+  const npmCacheDir = path.join(cacheDir, "npm");
+  const pnpmHomeDir = path.join(dataDir, "pnpm-home");
+  const pnpmStoreDir = path.join(dataDir, "pnpm-store");
+  const userConfigPath = path.join(homeDir, ".npmrc");
+
+  await Promise.all([
+    mkdir(appDataDir, { recursive: true }),
+    mkdir(corepackDir, { recursive: true }),
+    mkdir(localAppDataDir, { recursive: true }),
+    mkdir(npmCacheDir, { recursive: true }),
+    mkdir(pnpmHomeDir, { recursive: true }),
+    mkdir(pnpmStoreDir, { recursive: true }),
+  ]);
+  await writeFile(userConfigPath, "", "utf8");
+
+  return {
+    APPDATA: appDataDir,
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+    COREPACK_HOME: corepackDir,
+    HOME: homeDir,
+    LOCALAPPDATA: localAppDataDir,
+    NPM_CONFIG_CACHE: npmCacheDir,
+    NPM_CONFIG_USERCONFIG: userConfigPath,
+    PNPM_HOME: pnpmHomeDir,
+    PNPM_STORE_DIR: pnpmStoreDir,
+    USERPROFILE: homeDir,
+    XDG_CACHE_HOME: cacheDir,
+    XDG_CONFIG_HOME: configDir,
+    XDG_DATA_HOME: dataDir,
+    npm_config_cache: npmCacheDir,
+    npm_config_store_dir: pnpmStoreDir,
+    npm_config_userconfig: userConfigPath,
+  };
+}
+
+export function buildPackageManagerProcessEnv(
+  explicitEnv: NodeJS.ProcessEnv | undefined,
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+
+  for (const key of PACKAGE_MANAGER_ENV_KEYS) {
+    const value = source[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+
+  if (explicitEnv) {
+    for (const [key, value] of Object.entries(explicitEnv)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+  }
+
+  return env;
 }
