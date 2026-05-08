@@ -56,6 +56,17 @@ Updated: 2026-05-09
 
 ## Verification
 
-- Commands to run: focused Cloudflare tests for runner lifecycle, `pnpm --dir apps/cloudflare verify` or truthful scoped equivalent.
-- Expected outcomes: focused tests pass; broader verification either passes or reports unrelated blockers precisely.
+- Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/env.test.ts` (87 tests).
+- Passed: focused lifecycle regression selection over `runner-container.test.ts`, `user-runner-alarm.test.ts`, and `env.test.ts` (8 tests).
+- Passed: `pnpm --dir apps/cloudflare typecheck` before later overlapping Cloudflare edits landed.
+- Passed: `pnpm exec vitest run packages/hosted-execution/test/hosted-runtime-control.test.ts` after allowing checkpointed results to preserve `nextWakeAt`.
+- Passed: `pnpm --dir packages/hosted-execution test:coverage` (18 files, 111 tests).
+- Passed: `git diff --check` on touched paths.
+- Failed after unrelated overlapping edits landed: `pnpm typecheck` now fails in `apps/cloudflare/src/index.ts`, `apps/cloudflare/src/user-runner.ts`, and `apps/cloudflare/test/index.test.ts` with duplicate implementation/property errors outside this task's scoped changes.
+
+## Audit notes
+
+- `coverage-write`: no edits; existing tests were sufficient for the idle-checkpoint ownership chain.
+- `security-privacy-review`: found a parser contract mismatch for `idleShutdownCheckpointed: true` plus later `nextWakeAt`; fixed in `packages/hosted-execution`.
+- `task-finish-review`: flagged an overlapping dashboard/browser-vault refresh lifecycle issue from a different active row. Left out of scope for this task.
 Completed: 2026-05-09
