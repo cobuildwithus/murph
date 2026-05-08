@@ -1001,11 +1001,14 @@ export class HostedUserRunner {
       return null;
     }
 
+    const activeRecord = record.idleShutdownCheckpointDueAt
+      ? await this.stateStore.clearIdleShutdownCheckpoint()
+      : record;
     const nowMs = Date.now();
     return await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: resolvePendingNudgeDrainContinuationWakeAt({
+      preferredWakeAt: resolvePendingNudgeWakeAt({
         nowMs,
-        record,
+        record: activeRecord,
         runnerTimeoutMs: this.env.runnerTimeoutMs,
       }),
     });
@@ -1021,9 +1024,7 @@ export class HostedUserRunner {
       ? await this.stateStore.clearIdleShutdownCheckpoint()
       : inputRecord;
     const nowMs = Date.now();
-    const preferredWakeAt = (record.pendingNudge
-      ? resolvePendingNudgeDrainContinuationWakeAt
-      : resolvePendingNudgeWakeAt)({
+    const preferredWakeAt = resolvePendingNudgeWakeAt({
       nowMs,
       record,
       runnerTimeoutMs: this.env.runnerTimeoutMs,

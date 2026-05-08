@@ -1539,17 +1539,14 @@ test("hosted workspace working deltas tombstone deleted materialized non-eager a
   }
 });
 
-test("hosted workspace working deltas carry forward unmaterialized non-eager artifacts", async () => {
+test("hosted workspace working deltas carry forward unmaterialized raw text artifacts", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-working-delta-unmaterialized-carry-"));
   const artifacts = new Map<string, Uint8Array>();
 
   try {
     const vaultRoot = path.join(workspaceRoot, "vault");
-    const rawAttachmentPath = path.join(vaultRoot, "raw", "captures", "report.pdf");
-    const rawAttachmentBytes = Buffer.concat([
-      Buffer.from("%PDF-unmaterialized-carry\n", "utf8"),
-      Buffer.alloc(300 * 1024, "c"),
-    ]);
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "integrations", "provider", "snapshot.json");
+    const rawAttachmentBytes = Buffer.from("{\"kind\":\"snapshot\",\"count\":1}\n", "utf8");
 
     await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
     await writeFile(path.join(vaultRoot, "note.md"), "base\n");
@@ -1568,7 +1565,7 @@ test("hosted workspace working deltas carry forward unmaterialized non-eager art
       expectedKind: "vault",
     });
     assert.equal(baseArtifactRefs.some((artifact) =>
-      artifact.root === "vault" && artifact.path === "raw/captures/report.pdf"
+      artifact.root === "vault" && artifact.path === "raw/integrations/provider/snapshot.json"
     ), true);
 
     await writeFile(path.join(vaultRoot, "note.md"), "changed\n");
@@ -1587,11 +1584,11 @@ test("hosted workspace working deltas carry forward unmaterialized non-eager art
     const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(delta.bundle);
     assert.ok(deltaManifest);
     assert.equal(
-      deltaManifest.tombstones.some((file) => file.root === "vault" && file.path === "raw/captures/report.pdf"),
+      deltaManifest.tombstones.some((file) => file.root === "vault" && file.path === "raw/integrations/provider/snapshot.json"),
       false,
     );
     assert.equal(
-      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "raw/captures/report.pdf"),
+      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "raw/integrations/provider/snapshot.json"),
       false,
     );
 
@@ -1606,7 +1603,7 @@ test("hosted workspace working deltas carry forward unmaterialized non-eager art
       shouldRestoreArtifact: () => false,
       workspaceRoot: restoreRoot,
     });
-    await assert.rejects(readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"));
+    await assert.rejects(readFile(path.join(restored.vaultRoot, "raw", "integrations", "provider", "snapshot.json"), "utf8"));
 
     await restoreHostedWorkspaceWorkingDelta({
       artifactResolver: async ({ ref }) => {
@@ -1622,7 +1619,7 @@ test("hosted workspace working deltas carry forward unmaterialized non-eager art
       },
       shouldRestoreArtifact: () => false,
     });
-    await assert.rejects(readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"));
+    await assert.rejects(readFile(path.join(restored.vaultRoot, "raw", "integrations", "provider", "snapshot.json"), "utf8"));
 
     await materializeHostedExecutionArtifacts({
       artifactResolver: async ({ ref }) => {
@@ -1632,12 +1629,12 @@ test("hosted workspace working deltas carry forward unmaterialized non-eager art
       },
       bundle: baseSnapshot.bundle,
       shouldRestoreArtifact: ({ path: artifactPath, root }) => (
-        root === "vault" && artifactPath === "raw/captures/report.pdf"
+        root === "vault" && artifactPath === "raw/integrations/provider/snapshot.json"
       ),
       workspaceRoot: restoreRoot,
     });
     assert.equal(
-      await readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"),
+      await readFile(path.join(restored.vaultRoot, "raw", "integrations", "provider", "snapshot.json"), "utf8"),
       rawAttachmentBytes.toString("utf8"),
     );
   } finally {
@@ -2337,6 +2334,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       artifactRefs.map((artifact) => artifact.path).sort(),
       [
         "raw/inbox/2026-03-28/capture_123/attachments/report.pdf",
+        "raw/notes.json",
         `.codex-hosted/${activeCodexRolloutRelativePath}`,
       ].sort(),
     );
@@ -4535,7 +4533,7 @@ test("hosted execution can defer artifact materialization until a targeted resto
   }
 });
 
-test("hosted execution snapshots externalize large non-text raw files but keep large UTF-8 text inline", async () => {
+test("hosted execution snapshots externalize raw files including small text payloads", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-raw-heuristics-"));
   const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-raw-heuristics-restore-"));
   const artifacts = new Map<string, Uint8Array>();
@@ -4544,15 +4542,19 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
     const vaultRoot = path.join(workspaceRoot, "vault");
     const operatorHomeRoot = path.join(workspaceRoot, "home");
     const binaryRawPath = path.join(vaultRoot, "raw", "captures", "payload");
+    const smallTextRawPath = path.join(vaultRoot, "raw", "integrations", "provider", "snapshot.json");
     const textRawPath = path.join(vaultRoot, "raw", "captures", "notes.txt");
     const binaryBytes = Uint8Array.from({ length: 256 * 1024 + 16 }, (_, index) => index % 251);
     binaryBytes[0] = 0;
     binaryBytes[17] = 255;
+    const smallTextBytes = Buffer.from("{\"kind\":\"snapshot\",\"count\":1}\n", "utf8");
     const textBytes = Buffer.from("notes-line\n".repeat(30_000), "utf8");
 
     await mkdir(path.dirname(binaryRawPath), { recursive: true });
+    await mkdir(path.dirname(smallTextRawPath), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph"), { recursive: true });
     await writeFile(binaryRawPath, binaryBytes);
+    await writeFile(smallTextRawPath, smallTextBytes);
     await writeFile(textRawPath, textBytes);
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
 
@@ -4569,8 +4571,12 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
       expectedKind: "vault",
     });
     assert.deepEqual(
-      artifactRefs.map((artifact) => artifact.path),
-      ["raw/captures/payload"],
+      artifactRefs.map((artifact) => artifact.path).sort(),
+      [
+        "raw/captures/notes.txt",
+        "raw/captures/payload",
+        "raw/integrations/provider/snapshot.json",
+      ],
     );
     assert.equal(
       readHostedBundleTextFile({
@@ -4585,10 +4591,19 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
       readHostedBundleTextFile({
         bytes: snapshot.bundle,
         expectedKind: "vault",
+        path: "raw/integrations/provider/snapshot.json",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
         path: "raw/captures/notes.txt",
         root: "vault",
       }),
-      textBytes.toString("utf8"),
+      null,
     );
 
     const restored = await restoreHostedExecutionContext({
@@ -4606,6 +4621,9 @@ test("hosted execution snapshots externalize large non-text raw files but keep l
 
     await expect(readFile(path.join(restored.vaultRoot, "raw", "captures", "payload"))).resolves.toEqual(
       Buffer.from(binaryBytes),
+    );
+    await expect(readFile(path.join(restored.vaultRoot, "raw", "integrations", "provider", "snapshot.json"))).resolves.toEqual(
+      smallTextBytes,
     );
     await expect(readFile(path.join(restored.vaultRoot, "raw", "captures", "notes.txt"))).resolves.toEqual(
       textBytes,
