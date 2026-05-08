@@ -2570,6 +2570,110 @@ test('active-turn controller retries boundary admission after non-fatal input-av
   }
 })
 
+test('active-turn controller can rely on input-available notifications instead of boundary polling', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    notifyAssistantActiveTurnInputAvailable,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const steer = vi.fn(async () => undefined)
+  const admissions: string[] = []
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async (input) => {
+      admissions.push(input.phase)
+      return {
+        acceptedInputs: [
+          {
+            id: 'hook-1',
+            promptFallbackReason: 'missing-content-ref',
+            promptFallbackText: 'Notification hook input',
+            source: 'assistant-input',
+          },
+        ],
+        kind: 'accepted',
+        prompt: 'Notification hook input',
+        transcriptText: 'Notification hook transcript',
+        userMessageContent: [
+          {
+            text: 'Notification hook input',
+            type: 'text',
+          },
+        ],
+      }
+    },
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    pollAvailableInput: false,
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    providerSessionId: 'provider-session',
+    providerTurnId: 'provider-turn',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    assert.equal(await controller.admit({
+      phase: 'request_boundary',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), undefined)
+    assert.deepEqual(admissions, [])
+
+    await notifyAssistantActiveTurnInputAvailable({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      vault: '/vaults/test',
+    })
+
+    assert.deepEqual(admissions, ['input_available'])
+    expect(steer).toHaveBeenCalledWith({
+      prompt: 'Notification hook input',
+      userMessageContent: [
+        {
+          text: 'Notification hook input',
+          type: 'text',
+        },
+      ],
+    })
+    assert.deepEqual(await controller.admit({
+      phase: 'commit_barrier',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Notification hook input',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Notification hook input',
+      providerAlreadySteered: true,
+      transcriptText: 'Notification hook transcript',
+      userMessageContent: [
+        {
+          text: 'Notification hook input',
+          type: 'text',
+        },
+      ],
+    })
+  } finally {
+    releaseLiveTurn()
+    controller.close()
+  }
+})
+
 test('sendAssistantMessageLocal closes steering at commit barrier without empty checkpoint', async () => {
   const session = createAssistantSession({
     binding: {
@@ -2681,6 +2785,38 @@ test('sendAssistantMessageLocal closes steering at commit barrier without empty 
   assert.equal(firstResult.response, 'first response')
   assert.equal(activeTurnInput.mock.calls.length, 2)
   assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
+})
+
+test('sendAssistantMessageLocal skips blind active-turn polling for hosted queue-only auto-replies', async () => {
+  const activeTurnInput = vi.fn(async () => ({
+    kind: 'no-new-input' as const,
+  }))
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  const result = await sendAssistantMessageLocal({
+    activeTurnInput,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only auto-reply',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, 'assistant response')
+  assert.equal(activeTurnInput.mock.calls.length, 0)
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {

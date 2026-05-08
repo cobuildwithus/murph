@@ -71,6 +71,7 @@ class AssistantActiveTurnInputController {
       acceptedInputValidator?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       }) => Promise<void>
+      pollAvailableInput?: boolean
       sessionId: string
       turnId: string
       vault: string
@@ -157,6 +158,10 @@ class AssistantActiveTurnInputController {
     const inputAvailableAdmission = await this.admitPending()
     if (inputAvailableAdmission?.kind === 'accepted') {
       return inputAvailableAdmission
+    }
+
+    if (this.input.pollAvailableInput === false) {
+      return undefined
     }
 
     const hookAdmission = await this.admitHookInput(input)
@@ -389,7 +394,11 @@ class AssistantActiveTurnInputController {
   }
 
   private startLiveInputPump(): void {
-    if (this.livePump || !this.input.admissionHook) {
+    if (
+      this.livePump ||
+      !this.input.admissionHook ||
+      this.input.pollAvailableInput === false
+    ) {
       return
     }
 
@@ -431,6 +440,7 @@ export function createAssistantActiveTurnInputController(input: {
   }) => Promise<void>
   admissionHook?: AssistantActiveTurnInputAdmissionHook | null
   conversationKeys?: readonly string[] | null
+  pollAvailableInput?: boolean
   sessionId: string
   turnId: string
   vault: string
@@ -450,6 +460,7 @@ export function createAssistantActiveTurnInputController(input: {
   const controller = new AssistantActiveTurnInputController({
     acceptedInputValidator: input.acceptedInputValidator,
     admissionHook: input.admissionHook,
+    pollAvailableInput: input.pollAvailableInput,
     sessionId: input.sessionId,
     turnId: input.turnId,
     vault: input.vault,
