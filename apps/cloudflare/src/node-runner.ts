@@ -246,7 +246,7 @@ export async function refreshHostedBrowserVaultReplica(
     commitTimeoutMs: runtime.commitTimeoutMs,
     internalWorkerProxyToken,
     localInternalProxyBaseUrl,
-    browserVaultRefreshSourceStateHash: input.sourceStateHash,
+    dashboardReplicaSourceStateHash: input.sourceStateHash,
     workspaceCheckpointBridge: null,
   });
   return await refreshDashboardReplicaFromCommittedWorkspace({

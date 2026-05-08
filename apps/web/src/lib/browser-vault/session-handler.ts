@@ -8,9 +8,6 @@ import {
 } from "@murphai/hosted-execution/dashboard-replica";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 
-import {
-  scheduleDashboardReplicaRefreshBestEffort,
-} from "@/src/lib/dashboard-replica/refresh-client";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
   requireActiveHostedAppSessionFromRequest,
@@ -161,4 +158,27 @@ function emptyBrowserVaultSession(input: {
     state: "empty" as const,
     workspaceVersion: input.workspaceVersion ?? null,
   });
+}
+
+async function scheduleDashboardReplicaRefreshBestEffort(input: {
+  sourceStateHash: string | null;
+  userId: string;
+}): Promise<void> {
+  try {
+    if (!input.sourceStateHash) {
+      return;
+    }
+
+    const client = readHostedExecutionControlClientIfConfigured();
+    if (!client) {
+      return;
+    }
+
+    await client.scheduleBrowserVaultRefresh({
+      sourceStateHash: input.sourceStateHash,
+      userId: input.userId,
+    });
+  } catch {
+    // Dashboard freshness is a best-effort derived read-model refresh.
+  }
 }
