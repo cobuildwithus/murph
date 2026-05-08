@@ -217,9 +217,7 @@ export class RunnerContainer extends Container {
   }
 
   async destroyInstance(): Promise<void> {
-    await this.withLifecycleLock(async () => {
-      await this.stopWarmContainer();
-    });
+    await this.stopWarmContainer();
   }
 
   async refreshBrowserVaultReplica(
