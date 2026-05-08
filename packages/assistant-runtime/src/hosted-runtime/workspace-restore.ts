@@ -227,7 +227,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
             vaultRoot: restored.vaultRoot,
           }),
         });
-        await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
         materializerBundles.push(() => readHostedWorkspaceRuntimeBundle({
           platform: input.platform,
           ref: hotSnapshotRef,
@@ -240,6 +239,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
           input,
           restored,
         });
+        await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+          snapshotRef: input.workspace?.snapshotRef ?? null,
+          vaultRoot: restored.vaultRoot,
+        });
         materializerBundles.push(async () => restoredHotBundle);
       }
     } else {
@@ -249,6 +252,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         hotSnapshotRef,
         input,
         restored,
+      });
+      await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
+        snapshotRef: input.workspace?.snapshotRef ?? null,
+        vaultRoot: restored.vaultRoot,
       });
       materializerBundles.push(async () => restoredHotBundle);
     }
