@@ -25,6 +25,10 @@ describe("@murphai/messaging-ingress package boundary", () => {
         default: "./dist/telegram-webhook-payload.js",
         types: "./dist/telegram-webhook-payload.d.ts",
       },
+      "./whatsapp-webhook": {
+        default: "./dist/whatsapp-webhook.js",
+        types: "./dist/whatsapp-webhook.d.ts",
+      },
     });
     expect(packageJson).not.toHaveProperty("main");
     expect(packageJson).not.toHaveProperty("types");
@@ -46,6 +50,11 @@ describe("@murphai/messaging-ingress package boundary", () => {
       minimizeTelegramUpdate: expect.any(Function),
       parseTelegramWebhookUpdate: expect.any(Function),
       verifyAndParseTelegramWebhookRequest: expect.any(Function),
+    });
+    await expect(importBySpecifier("@murphai/messaging-ingress/whatsapp-webhook")).resolves.toMatchObject({
+      buildWhatsAppWebhookEventId: expect.any(Function),
+      parseWhatsAppInboundTexts: expect.any(Function),
+      verifyAndParseWhatsAppWebhookRequest: expect.any(Function),
     });
   });
 });

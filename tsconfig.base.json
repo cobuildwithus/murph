@@ -73,6 +73,9 @@
       "@murphai/hosted-execution/hosted-email": [
         "packages/hosted-execution/src/hosted-email.ts"
       ],
+      "@murphai/hosted-execution/legacy-dashboard-replica": [
+        "packages/hosted-execution/src/legacy-dashboard-replica.ts"
+      ],
       "@murphai/hosted-execution/parsers": [
         "packages/hosted-execution/src/parsers.ts"
       ],

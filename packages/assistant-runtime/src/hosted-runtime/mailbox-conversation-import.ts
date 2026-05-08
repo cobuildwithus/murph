@@ -7,6 +7,7 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
+  isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageContact,
 } from "@murphai/hosted-execution";
 import {
@@ -753,6 +754,12 @@ function createHostedConversationAssistantInputText(
       : "Received a Telegram message.";
   }
 
+  if (isHostedWhatsAppConversationMessageWake(wake)) {
+    return sanitizeHostedAssistantInputText(
+      wake.message.whatsappMessage.text,
+    ) ?? "Received a WhatsApp message.";
+  }
+
   if (isHostedEmailConversationMessageWake(wake)) {
     return createHostedEmailConversationAssistantInputText(wake);
   }
@@ -880,6 +887,26 @@ function createHostedConversationAssistantInputConversation(
     };
   }
 
+  if (isHostedWhatsAppConversationMessageWake(wake)) {
+    return {
+      accountId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        wake.message.whatsappMessage.phoneNumberId ?? "whatsapp",
+      ),
+      actorId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        wake.message.whatsappMessage.fromWaId,
+      ),
+      actorIsSelf: false,
+      source: "whatsapp",
+      threadId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        wake.message.whatsappMessage.threadId,
+      ),
+      threadIsDirect: true,
+    };
+  }
+
   return null;
 }
 
@@ -902,6 +929,10 @@ function readHostedConversationAssistantIdentifierSecret(
       ?? wake.message.threadTarget
       ?? wake.message.rawMessageKey
     );
+  }
+
+  if (isHostedWhatsAppConversationMessageWake(wake)) {
+    return wake.message.whatsappMessage.threadId || wake.message.whatsappMessage.fromWaId;
   }
 
   return wake.eventId;
@@ -942,6 +973,18 @@ function createHostedConversationAssistantInputReplyTarget(
       ),
       threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
         wake.message.threadTarget,
+      ),
+    };
+  }
+
+  if (isHostedWhatsAppConversationMessageWake(wake)) {
+    return {
+      channel: "whatsapp",
+      messageId: normalizeHostedAssistantInputReplyTargetIdentifier(
+        wake.message.whatsappMessage.messageId,
+      ),
+      threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
+        wake.message.whatsappMessage.threadId,
       ),
     };
   }

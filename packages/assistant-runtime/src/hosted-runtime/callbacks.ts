@@ -7,9 +7,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
-  parseHostedAssistantDeliveryEffects,
   type HostedAssistantDeliveryPayload,
   type HostedAssistantDeliveryEffect,
+  type HostedAssistantDeliveryPhase,
 } from "@murphai/hosted-execution/side-effects";
 import {
   beginAssistantOutboxIntentMirrorDispatch,
@@ -38,7 +38,7 @@ import type {
 } from "./platform.ts";
 import { buildHostedTelegramChannelEnv } from "./channel-activity.ts";
 
-const HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS = 1;
+const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
@@ -113,20 +113,31 @@ export async function collectHostedAssistantDeliverySideEffects(
     0,
     Math.max(
       0,
-      HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS - foregroundCandidates.length,
+      HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
     ),
   );
   const effects = [
-    ...foregroundCandidates,
-    ...cappedBackgroundCandidates,
-  ]
-    .map((intent) => buildHostedAssistantDeliveryEffect({
-      dedupeKey: intent.dedupeKey,
-      effectId: intent.intentId,
-      payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
-    }));
+    ...foregroundCandidates.map((intent) =>
+      buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")
+    ),
+    ...cappedBackgroundCandidates.map((intent) =>
+      buildHostedAssistantDeliveryEffectFromIntent(intent, "background_retry")
+    ),
+  ];
 
   return effects;
+}
+
+function buildHostedAssistantDeliveryEffectFromIntent(
+  intent: AssistantOutboxIntent,
+  deliveryPhase: HostedAssistantDeliveryPhase,
+): HostedAssistantDeliveryEffect {
+  return buildHostedAssistantDeliveryEffect({
+    dedupeKey: intent.dedupeKey,
+    deliveryPhase,
+    effectId: intent.intentId,
+    payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
+  });
 }
 
 function readPreferredHostedAssistantDeliveryIntentOrder(
@@ -237,7 +248,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
   }
 }
 
-export async function prepareHostedAssistantDeliverySideEffectsForCheckpoint(input: {
+export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   now?: () => string;
   vaultRoot: string;
@@ -254,7 +265,7 @@ export async function prepareHostedAssistantDeliverySideEffectsForCheckpoint(inp
   }
 }
 
-export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: {
+export async function drainHostedPreparedAssistantDeliveries(input: {
   allowPreparedSending?: boolean;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
@@ -277,14 +288,22 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
       details: buildHostedAssistantDeliveryDetails({
         effectFingerprint: assistantDeliveryEffect.fingerprint,
         effectId: assistantDeliveryEffect.effectId,
+        extra: {
+          deliveryPhase: assistantDeliveryEffect.deliveryPhase,
+          eventType: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+            ? "assistant.delivery.foreground_started"
+            : "assistant.delivery.background_started",
+        },
         userId: input.wake.userId,
       }),
       wake: input.wake,
-      message: "Hosted assistant delivery starting.",
+      message: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+        ? "Hosted assistant foreground delivery starting."
+        : "Hosted assistant background delivery starting.",
       phase: "outbox",
       userId: input.wake.userId,
     });
-    outcomes.push(await deliverHostedCommittedAssistantDelivery({
+    outcomes.push(await deliverHostedPreparedAssistantDelivery({
       wake: input.wake,
       effectsPort: input.effectsPort,
       allowPreparedSending: input.allowPreparedSending === true,
@@ -301,7 +320,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
   return outcomes;
 }
 
-async function deliverHostedCommittedAssistantDelivery(input: {
+async function deliverHostedPreparedAssistantDelivery(input: {
   allowPreparedSending: boolean;
   wake: HostedRuntimeEvent;
   effectsPort: HostedRuntimeEffectsPort;
@@ -736,7 +755,9 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
       effectId: input.effect.effectId,
       extra: {
         deliveryChannel: input.delivery.channel,
+        deliveryPhase: input.effect.deliveryPhase,
         deliveryStatus: "sent",
+        eventType: "assistant.delivery.sent",
         failureDomain: "delivery",
         retryable: false,
         targetKind: input.delivery.targetKind,
@@ -744,7 +765,7 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
       userId: input.userId,
     }),
     wake: input.wake,
-    message: "Hosted assistant delivery sent successfully.",
+    message: "Hosted assistant delivery sent.",
     phase: "outbox",
     userId: input.userId,
   });
@@ -771,6 +792,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
       extra: {
         deliveryErrorCode: input.deliveryError?.code ?? null,
         deliveryErrorMessage: input.deliveryError?.message ?? null,
+        deliveryPhase: input.effect.deliveryPhase,
         deliveryStatus: input.deliveryStatus,
         failureDomain: "delivery",
         retryable: input.retryable,

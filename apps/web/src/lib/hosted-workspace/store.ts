@@ -334,6 +334,9 @@ export async function publishHostedBrowserVaultReplicaRef(input: {
   replicaRef: unknown;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
+  // Compatibility-only wrapper for older hosted browser-vault publish callers.
+  // Deletion target: 2026-05-23. Active callers should use
+  // `publishLatestBrowserVaultReplicaRef`.
   if (input.expectedSourceStateHash === undefined || input.expectedSourceStateHash === null) {
     return await publishLatestBrowserVaultReplicaRef(input);
   }
@@ -352,6 +355,9 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
+  // Compatibility-only wrapper for older hosted browser-vault publish callers.
+  // Deletion target: 2026-05-23. Active callers should use
+  // `publishLatestBrowserVaultReplicaRefTx`.
   if (input.expectedSourceStateHash === undefined || input.expectedSourceStateHash === null) {
     return publishLatestBrowserVaultReplicaRefTx(input);
   }
@@ -364,7 +370,7 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
   });
 }
 
-export async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
+async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
   expectedSourceStateHash: string;
   prisma?: HostedWorkspaceTransactionRunner;
   replicaRef: unknown;
@@ -380,7 +386,7 @@ export async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
   );
 }
 
-export async function publishLegacySourceHashBrowserVaultReplicaRefTx(input: {
+async function publishLegacySourceHashBrowserVaultReplicaRefTx(input: {
   expectedSourceStateHash: string;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;

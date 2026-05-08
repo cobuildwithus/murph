@@ -180,7 +180,12 @@ type AssistantAutoReplyOutcomeEvent =
       failureContext?: Record<string, boolean | number | string | null>
       safeDetails?: string
       safeErrorMessage?: string
-      type: 'input.reply-failed' | 'input.reply-skipped' | 'input.replied'
+      type:
+        | 'assistant.reply.intent_created'
+        | 'assistant.delivery.sent'
+        | 'input.reply-failed'
+        | 'input.reply-skipped'
+        | 'input.replied'
     }
   | null
 
@@ -757,10 +762,10 @@ function createDeferredDeliveryGroupOutcome(
     },
     event: {
       details: result.deliveryIntentId
-        ? `delivery queued for retry as ${result.deliveryIntentId}`
-        : 'delivery queued for retry',
-      safeDetails: 'delivery queued for retry',
-      type: 'input.replied',
+        ? `assistant reply intent created as ${result.deliveryIntentId}`
+        : 'assistant reply intent created',
+      safeDetails: 'reply intent created',
+      type: 'assistant.reply.intent_created',
     },
     kind: 'deferred',
     nextWakeAt: null,
@@ -789,9 +794,9 @@ function createSuccessfulReplyGroupOutcome(
       result,
     },
     event: {
-      details: 'delivery confirmed',
-      safeDetails: 'delivery confirmed',
-      type: 'input.replied',
+      details: 'delivery sent',
+      safeDetails: 'delivery sent',
+      type: 'assistant.delivery.sent',
     },
     kind: 'replied',
     nextWakeAt: null,
@@ -2164,15 +2169,6 @@ function resolveAssistantAutoReplySendResult(input: {
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
 }): Awaited<ReturnType<typeof sendAssistantMessage>> {
   if (input.result.deliveryDeferred) {
-    input.onEvent?.({
-      type: 'input.reply-progress',
-      inputId: input.replyInputId,
-      details: input.result.deliveryIntentId
-        ? `assistant queued outbound delivery for retry as ${input.result.deliveryIntentId}`
-        : 'assistant queued outbound delivery for retry',
-      providerKind: 'status',
-      providerState: 'completed',
-    })
     return input.result
   }
 

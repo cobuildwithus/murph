@@ -32,7 +32,6 @@ import type {
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
 import type {
-  HostedRuntimeActiveTurnInputCheckpointInput,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
   HostedRuntimeWorkspacePort,
@@ -413,12 +412,12 @@ function withActiveTurnInputWorkspacePorts(input: {
   return {
     ...input.platform,
     checkpointActiveTurnInput: async (checkpointInput) => {
-      await checkpointHostedWorkspaceActiveTurnInputAcceptance({
-        checkpointInput,
-        checkpointRequestBuilder: input.checkpointRequestBuilder,
-        initialMailboxImport: input.initialMailboxImport,
+      void checkpointInput;
+      await writeHostedForegroundCheckpointDeferredLog({
+        checkpointPhase: "active_turn_input",
         now: input.input.now,
         platform: input.input.platform,
+        reason: "active_turn_acceptance",
         runtimeLogContext: input.input.runtimeLogContext,
       });
     },
@@ -597,7 +596,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
 }): HostedCanonicalWritePort {
   return {
     async persistCanonicalWrite() {
-      writeHostedForegroundCheckpointDeferredLog({
+      await writeHostedForegroundCheckpointDeferredLog({
         checkpointPhase: "canonical_write",
         now: input.input.now,
         platform: input.input.platform,
@@ -618,7 +617,7 @@ async function checkpointHostedWorkspacePostAssistantPhase(input: {
 }): Promise<{ deferred: boolean }> {
   void input.checkpointRequestBuilder;
   void input.initialMailboxImport;
-  writeHostedForegroundCheckpointDeferredLog({
+  await writeHostedForegroundCheckpointDeferredLog({
     checkpointPhase: "post_assistant",
     now: input.now,
     platform: input.platform,
@@ -913,31 +912,11 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
   );
   void input.checkpointRequestBuilder;
   void input.initialMailboxImport;
-  writeHostedForegroundCheckpointDeferredLog({
+  await writeHostedForegroundCheckpointDeferredLog({
     checkpointPhase: "assistant",
     now: input.now,
     platform: input.platform,
     reason: checkpointReason,
-    runtimeLogContext: input.runtimeLogContext,
-  });
-}
-
-async function checkpointHostedWorkspaceActiveTurnInputAcceptance(input: {
-  checkpointInput: HostedRuntimeActiveTurnInputCheckpointInput;
-  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
-  now?: () => string;
-  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
-  runtimeLogContext?: HostedRuntimeLogContext | null;
-}): Promise<void> {
-  void input.checkpointInput;
-  void input.checkpointRequestBuilder;
-  void input.initialMailboxImport;
-  writeHostedForegroundCheckpointDeferredLog({
-    checkpointPhase: "active_turn_acceptance",
-    now: input.now,
-    platform: input.platform,
-    reason: "active_turn_acceptance",
     runtimeLogContext: input.runtimeLogContext,
   });
 }
@@ -991,14 +970,14 @@ function earliestHostedWorkspaceRunnerWakeAt(
   return rightMs < leftMs ? right : left;
 }
 
-function writeHostedForegroundCheckpointDeferredLog(input: {
-  checkpointPhase: "active_turn_acceptance" | "assistant" | "canonical_write" | "post_assistant";
+async function writeHostedForegroundCheckpointDeferredLog(input: {
+  checkpointPhase: "active_turn_input" | "assistant" | "canonical_write" | "post_assistant";
   now?: () => string;
   platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
   reason: HostedWorkspaceCheckpointReason;
   runtimeLogContext?: HostedRuntimeLogContext | null;
-}): void {
-  void writeHostedRuntimeLogBestEffort({
+}): Promise<void> {
+  await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields(input.runtimeLogContext),
       component: "workspace",

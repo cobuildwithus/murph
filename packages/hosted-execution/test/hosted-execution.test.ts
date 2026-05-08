@@ -398,6 +398,7 @@ describe("hosted execution coverage gaps", () => {
       "./dashboard-replica",
       "./env",
       "./hosted-email",
+      "./legacy-dashboard-replica",
       "./parsers",
       "./routes",
       "./runtime-control",
@@ -415,6 +416,8 @@ describe("hosted execution coverage gaps", () => {
     const browserVaultModule =
       await import("@murphai/hosted-execution/browser-vault") as Record<string, unknown>;
     const legacyDashboardReplicaModule =
+      await import("@murphai/hosted-execution/legacy-dashboard-replica");
+    const legacyDashboardReplicaCompatibilityModule =
       await import("@murphai/hosted-execution/dashboard-replica");
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
@@ -446,8 +449,10 @@ describe("hosted execution coverage gaps", () => {
       currentReplicaRef: null,
       currentSnapshotRef: null,
     })).toBeNull();
-    expect(typeof rootModule.getDashboardReplicaFreshness).toBe("function");
-    expect(typeof rootModule.shouldScheduleDashboardReplicaRefresh).toBe("function");
+    expect(typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness)
+      .toBe("function");
+    expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
+    expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);

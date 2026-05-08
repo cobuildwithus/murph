@@ -1289,7 +1289,7 @@ describe("cloudflare worker routes", () => {
         userId: string;
       }) => ({
         accepted: true,
-        immediateRefreshStarted: false,
+        scheduled: true as const,
         userId: input.userId,
       })),
     });
@@ -1309,7 +1309,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       accepted: true,
-      immediateRefreshStarted: false,
+      scheduled: true as const,
       userId: "member_123",
     });
     expect(stub.bindUser).not.toHaveBeenCalled();
@@ -1320,14 +1320,45 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
-  it("falls back to the legacy dashboard refresh Durable Object method during rollout", async () => {
-    const scheduleDashboardReplicaRefreshForUser = vi.fn(async (input: {
+  it("normalizes legacy direct browser-vault refresh responses during rollout", async () => {
+    const scheduleBrowserVaultRefreshForUser = vi.fn(async (input: {
       userId: string;
     }) => ({
       accepted: true as const,
       immediateRefreshStarted: false,
       userId: input.userId,
     }));
+    const stub = createUserRunnerStub({
+      scheduleBrowserVaultRefreshForUser,
+    });
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      scheduled: true as const,
+      userId: "member_123",
+    });
+    expect(scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+  });
+
+  it("falls back to the legacy dashboard refresh Durable Object method during rollout", async () => {
+    const scheduleDashboardReplicaRefreshForUser = vi.fn(async (_input: {
+      userId: string;
+    }) => undefined);
     const stub = createUserRunnerStub({
       scheduleBrowserVaultRefreshForUser: undefined,
       scheduleDashboardReplicaRefreshForUser,
@@ -1348,7 +1379,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       accepted: true,
-      immediateRefreshStarted: false,
+      scheduled: true as const,
       userId: "member_123",
     });
     expect(scheduleDashboardReplicaRefreshForUser).toHaveBeenCalledWith({
@@ -2219,7 +2250,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       userId: string;
     }) => ({
       accepted: true as const,
-      immediateRefreshStarted: false,
+      scheduled: true as const,
       userId: input.userId,
     })),
     ...overrides,

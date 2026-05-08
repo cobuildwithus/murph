@@ -550,7 +550,7 @@ describe("createCloudflareHostedControlClient", () => {
     let observedRequest: ObservedRequest | null = null;
     const result = {
       accepted: true,
-      immediateRefreshStarted: false,
+      scheduled: true,
       userId: "user_123",
     };
     const client = createCloudflareHostedControlClient({
@@ -573,6 +573,31 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.body).toBe("{}");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+  });
+
+  it("rejects browser vault refresh responses without a true scheduled flag", async () => {
+    for (const result of [
+      {
+        accepted: true,
+        userId: "user_123",
+      },
+      {
+        accepted: true,
+        scheduled: false,
+        userId: "user_123",
+      },
+    ]) {
+      const client = createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test/root/",
+        fetchImpl: vi.fn(async () => createJsonResponse(result)) as typeof fetch,
+        getBearerToken: async () => "Bearer token-123",
+        timeoutMs: 2_500,
+      });
+
+      await expect(client.scheduleBrowserVaultRefresh({
+        userId: "user_123",
+      })).rejects.toThrow("Cloudflare browser-vault refresh result scheduled must be true.");
+    }
   });
 
   it("posts user data deletion requests and validates the bound user in the response", async () => {

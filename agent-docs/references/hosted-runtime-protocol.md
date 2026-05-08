@@ -234,18 +234,14 @@ checkpoint.
 The hosted workspace checkpoint ref may be a full/base workspace bundle, a
 working `{base, delta}` ref, or a legacy layered `{base, hot}` ref. Full/base
 bundles carry a portable workspace manifest generated from the same hosted
-snapshot inclusion/exclusion policy used to write the bundle. Live correctness
-barriers scan the effective portable workspace and write a replacement working
-delta against the current base: mailbox import, active-turn acceptance,
-`canonical_runtime_commit`, assistant-runtime commits, provider cleanup,
-system-mailbox receipts, and pre-delivery outbox state all commit the effective
-portable workspace rather than an assistant-only subset. `canonical_runtime_commit`
-stores exact hosted canonical write receipts in supervisor-owned artifacts and
-checkpoints the authoritative receipt-log ref on the workspace state; restore
-does not replay assistant-local receipt files. Bootstrap without a base writes a
-full seed, and `idle_shutdown` is the full/base compaction producer. Live
-checkpoints fail closed when the current workspace pointer cannot be read; they
-must not fall back to broad foreground full snapshots or legacy hot producers.
+snapshot inclusion/exclusion policy used to write the bundle. The bridge no
+longer writes foreground working commits. Mailbox import, active-turn
+acceptance, `canonical_runtime_commit`, assistant-runtime commits, provider
+cleanup, system-mailbox receipts, and pre-delivery outbox state must not enter
+workspace snapshot construction; the foreground caller tripwire fails those
+paths before the bridge. Bootstrap or live foreground paths must not fall back
+to broad foreground full snapshots, path-scoped working deltas, or legacy hot
+producers. `idle_shutdown` is the only new checkpoint snapshot producer.
 `idle_shutdown` is the compaction boundary for warm-runner wind-down: it maps to
 a full/base snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
@@ -260,16 +256,27 @@ active rollout JSONL referenced by live assistant session resume state, not the
 whole `.codex-hosted` tree. Restore applies the base bundle when present, then
 applies either the working delta or the legacy hot bundle according to the
 snapshot ref shape, and treats any local restore cache as a performance cache
-only. Legacy layered `{base, hot}` refs remain restorable during migration, but
-new correctness-barrier producers emit working refs instead.
+only. Legacy working `{base, delta}` and layered `{base, hot}` refs remain
+restorable during migration, but new bridge snapshots are idle-shutdown
+full/base bundles only.
+
+Tiny Codex continuity is a separate foreground-adjacent path. After a
+foreground assistant pass, the runtime may schedule a best-effort background
+Codex continuity snapshot that reads only known assistant session resume
+requirements plus their referenced hosted Codex rollout JSONL files, then writes
+one small hosted bundle containing those rollout files and the continuity
+manifest. That tiny artifact must not call the workspace checkpoint builder,
+must not write a portable workspace manifest, and must not scan `vault/raw/**`,
+`vault/derived/**`, projections, caches, temp roots, or the whole Codex home.
+The next `idle_shutdown` full/base checkpoint can include or supersede the same
+continuity state, but idle compaction is not the only continuity path.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
-state. Foreground working commits do not generate or publish browser-vault
-replicas inline. They may leave an existing `browserVaultReplicaRef` in place as
-stale derived data, then schedule an async refresh from the live warm workspace.
-Idle/full checkpoints write only the workspace snapshot ref; they do not publish
-browser-vault replicas. The detached browser-vault refresh publishes the latest
-replica ref separately, without changing the workspace checkpoint version.
+state. Foreground work does not generate or publish browser-vault replicas
+inline. Idle/full checkpoints write only the workspace snapshot ref; they do not
+publish browser-vault replicas. The detached browser-vault refresh publishes the
+latest replica ref separately, without changing the workspace checkpoint
+version.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint
@@ -334,8 +341,8 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - provider delivery and receipt/reconciliation policy
 - runtime timers and next wake projection
 - checkpoint timing
-- checkpoint snapshot policy and metrics (`full` vs `hot`, external artifact
-  PUT count, bundle PUT count, and hot-state bundle size)
+- checkpoint snapshot policy and metrics (`full`, external artifact PUT count,
+  and bundle PUT count)
 
 ### Cloudflare Owns
 

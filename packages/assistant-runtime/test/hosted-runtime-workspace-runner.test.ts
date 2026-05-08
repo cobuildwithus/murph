@@ -48,8 +48,8 @@ import {
 } from "../src/hosted-runtime.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
-  drainHostedCommittedAssistantDeliveriesAfterCommit,
-  prepareHostedAssistantDeliverySideEffectsForCheckpoint,
+  drainHostedPreparedAssistantDeliveries,
+  prepareHostedAssistantDeliveryEffectsForDispatch,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   createHostedConversationMailboxImportItem,
@@ -3270,12 +3270,12 @@ async function runFastDispatchCrashWindowAttempt(input: {
         effectId: effect?.effectId ?? "",
         idempotencyKey: effect?.payload.idempotencyKey ?? null,
       });
-      await prepareHostedAssistantDeliverySideEffectsForCheckpoint({
+      await prepareHostedAssistantDeliveryEffectsForDispatch({
         assistantDeliveryEffects: effects,
         now: () => TEST_NOW,
         vaultRoot: input.vaultRoot,
       });
-      const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
         allowPreparedSending: true,
         assistantDeliveryEffects: effects,
         effectsPort: phaseInput.platform.effectsPort,

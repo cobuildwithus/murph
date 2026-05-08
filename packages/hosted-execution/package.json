@@ -58,6 +58,10 @@
       "types": "./dist/hosted-email.d.ts",
       "default": "./dist/hosted-email.js"
     },
+    "./legacy-dashboard-replica": {
+      "types": "./dist/legacy-dashboard-replica.d.ts",
+      "default": "./dist/legacy-dashboard-replica.js"
+    },
     "./parsers": {
       "types": "./dist/parsers.d.ts",
       "default": "./dist/parsers.js"

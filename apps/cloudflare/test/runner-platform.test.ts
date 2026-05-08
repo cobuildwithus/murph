@@ -304,6 +304,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.url).toBe(
       "http://web-control.worker/api/internal/hosted-workspace/browser-vault-replica",
     );
+    await expect(request.json()).resolves.toEqual({
+      replicaRef,
+    });
   });
 
   it("logs non-OK internal upstream responses with response metadata", async () => {

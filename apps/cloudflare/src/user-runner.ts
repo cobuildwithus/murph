@@ -158,30 +158,12 @@ export class HostedUserRunner {
     this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(this.stateStore, state);
     this.browserVaultRefreshCoordinator = new BrowserVaultRefreshCoordinator({
       continuationDelayMs: PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS,
-      destroyActiveRefreshContainer: ({ userId }) => {
-        const runnerContainerNamespace = this.runnerContainerNamespace;
-        if (!runnerContainerNamespace) {
-          return null;
-        }
-
-        return destroyHostedExecutionContainer({
-          runnerContainerName: resolveHostedExecutionRunnerContainerName({
-            source: this.runnerRuntimeEnvSource,
-            userId,
-          }),
-          runnerContainerNamespace,
-          userId,
-        }).then(() => undefined);
-      },
       hasForegroundWork: () => this.invocationLock !== null,
       readStateForRetryScheduling: async () => await this.tryReadStateForRetryScheduling(),
       retryDelayMs: this.env.retryDelayMs,
       runPendingRefresh: async (input) => await this.runPendingBrowserVaultRefresh(input),
       state,
       stateStore: this.stateStore,
-      syncStoredRunnerAlarm: async () => {
-        await this.runtimeAlarmScheduler.syncStoredAlarm();
-      },
     });
   }
 

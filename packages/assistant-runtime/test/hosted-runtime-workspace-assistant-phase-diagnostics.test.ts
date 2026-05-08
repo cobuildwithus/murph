@@ -6,12 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
-  drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
+  drainHostedPreparedAssistantDeliveries: vi.fn(),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
-  prepareHostedAssistantDeliverySideEffectsForCheckpoint: vi.fn(),
+  prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
@@ -31,10 +31,10 @@ vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,
-  drainHostedCommittedAssistantDeliveriesAfterCommit:
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit,
-  prepareHostedAssistantDeliverySideEffectsForCheckpoint:
-    mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint,
+  drainHostedPreparedAssistantDeliveries:
+    mocks.drainHostedPreparedAssistantDeliveries,
+  prepareHostedAssistantDeliveryEffectsForDispatch:
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
@@ -77,7 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
   mocks.createHostedAssistantChannelTypingDependencies.mockReturnValue({});
-  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([]);
+  mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([]);
   mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValue({
     attemptedLinqMessageCount: 0,
     deletedLinqMessageCount: 0,
@@ -90,7 +90,7 @@ beforeEach(() => {
     linqMessageIds: [],
   });
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
-  mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint.mockResolvedValue(undefined);
+  mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,

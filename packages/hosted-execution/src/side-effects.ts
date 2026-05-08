@@ -21,12 +21,21 @@ export const hostedAssistantDeliveryRecordStateValues = [
   "failed_ambiguous",
 ] as const;
 
+export const hostedAssistantDeliveryPhaseValues = [
+  "foreground_current_turn",
+  "background_retry",
+] as const;
+
 export const HOSTED_ASSISTANT_DELIVERY_RECORD_STATES =
   hostedAssistantDeliveryRecordStateValues;
+export const HOSTED_ASSISTANT_DELIVERY_PHASES =
+  hostedAssistantDeliveryPhaseValues;
 
 export type HostedAssistantDeliveryKind = typeof HOSTED_ASSISTANT_DELIVERY_KIND;
 export type HostedAssistantDeliveryTargetKind = GatewayDeliveryTargetKind;
 export type HostedAssistantBindingDeliveryKind = GatewayReplyRouteKind;
+export type HostedAssistantDeliveryPhase =
+  (typeof hostedAssistantDeliveryPhaseValues)[number];
 
 export type HostedAssistantDeliveryRecordState =
   (typeof hostedAssistantDeliveryRecordStateValues)[number];
@@ -52,6 +61,7 @@ export interface HostedAssistantDeliveryPayload {
 }
 
 export interface HostedAssistantDeliverySideEffect {
+  deliveryPhase: HostedAssistantDeliveryPhase;
   effectId: string;
   fingerprint: string;
   kind: HostedAssistantDeliveryKind;
@@ -151,11 +161,16 @@ function buildHostedAssistantDeliveryIdentity(input: {
 
 export function buildHostedAssistantDeliverySideEffect(input: {
   dedupeKey: string;
+  deliveryPhase?: HostedAssistantDeliveryPhase;
   effectId: string;
   payload: HostedAssistantDeliveryPayload;
 }): HostedAssistantDeliverySideEffect {
   return {
     ...buildHostedAssistantDeliveryIdentity(input),
+    deliveryPhase: parseHostedAssistantDeliveryPhase(
+      input.deliveryPhase ?? "background_retry",
+      "Hosted assistant delivery side effect deliveryPhase",
+    ),
     payload: parseHostedAssistantDeliveryPayload(
       input.payload,
       "Hosted assistant delivery side effect payload",
@@ -245,6 +260,10 @@ export function parseHostedAssistantDeliverySideEffect(
   const record = requireObject(value, "Hosted assistant delivery side effect");
 
   return {
+    deliveryPhase: parseHostedAssistantDeliveryPhase(
+      record.deliveryPhase ?? "background_retry",
+      "Hosted assistant delivery side effect deliveryPhase",
+    ),
     effectId: requireHostedAssistantDeliveryEffectId(
       record,
       "Hosted assistant delivery side effect",
@@ -458,6 +477,19 @@ function requireHostedAssistantDeliveryRecordState(
   }
 
   throw new TypeError(`Unsupported hosted assistant delivery record state: ${state}`);
+}
+
+function parseHostedAssistantDeliveryPhase(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryPhase {
+  const phase = requireString(value, label);
+
+  if ((hostedAssistantDeliveryPhaseValues as readonly string[]).includes(phase)) {
+    return phase as HostedAssistantDeliveryPhase;
+  }
+
+  throw new TypeError(`Unsupported hosted assistant delivery phase: ${phase}`);
 }
 
 export function isHostedAssistantDeliveryKind(

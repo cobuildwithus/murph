@@ -711,6 +711,179 @@ describe("RunnerContainer", () => {
     );
   });
 
+  it("keeps the warm shell after optional browser-vault refresh failure when proxy cleanup succeeds", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/browser-vault-refresh")) {
+        throw new Error("refresh aborted");
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy, setOutboundByHosts, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch,
+      });
+
+    await expect(container.refreshBrowserVaultReplica({
+      attemptId: "browser-vault-refresh:test-failure",
+      runtime: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("refresh aborted");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_refresh_failure"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+  });
+
+  it("aborts active browser-vault refresh requests and expires proxy authority without destroying warm state", async () => {
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/browser-vault-refresh")) {
+        return await new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(init.signal?.reason ?? new Error("refresh aborted"));
+          }, { once: true });
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy, setOutboundByHosts, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch,
+      });
+
+    const attemptId = "browser-vault-refresh:test-abort";
+    const refresh = container.refreshBrowserVaultReplica({
+      attemptId,
+      runtime: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => expect(containerFetch).toHaveBeenCalledWith(
+      "http://container/internal/browser-vault-refresh",
+      expect.any(Object),
+      expect.any(Number),
+    ));
+
+    await container.abortBrowserVaultRefresh({ attemptId, userId: "member_123" });
+    await expect(refresh).rejects.toThrow("browser-vault refresh preempted");
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+  });
+
+  it("honors browser-vault refresh aborts recorded before the refresh lifecycle starts", async () => {
+    let resolveInvocation!: () => void;
+    const activeInvocation = new Promise<void>((resolve) => {
+      resolveInvocation = resolve;
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation")) {
+        await activeInvocation;
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/browser-vault-refresh")) {
+        throw new Error("queued refresh should not reach the container child");
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+      containerFetch,
+    });
+    const invoke = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_blocks_refresh"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => expect(containerFetch).toHaveBeenCalledWith(
+      "http://container/internal/workspace-invocation",
+      expect.any(Object),
+      expect.any(Number),
+    ));
+
+    const attemptId = "browser-vault-refresh:test-queued-abort";
+    const refresh = container.refreshBrowserVaultReplica({
+      attemptId,
+      runtime: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await container.abortBrowserVaultRefresh({ attemptId, userId: "member_123" });
+
+    resolveInvocation();
+    await expect(invoke).resolves.toEqual(createRunnerResult());
+    await expect(refresh).rejects.toThrow("browser-vault refresh preempted");
+
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/browser-vault-refresh")
+    )).toBe(false);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+  });
+
   it("keeps activity-expiry cleanup best-effort when destroy fails", async () => {
     const destroy = vi.fn(async () => {
       throw new Error("destroy failed");
@@ -1402,6 +1575,7 @@ describe("RunnerContainer", () => {
     });
 
     const refresh = container.refreshBrowserVaultReplica({
+      attemptId: "browser-vault-refresh:test-destroy-race",
       runtime: {},
       timeoutMs: 30_000,
       userId: "member_123",
@@ -1893,8 +2067,10 @@ describe("RunnerContainer", () => {
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async () => ({ status: "already_fresh" }));
+    const abortBrowserVaultRefresh = vi.fn(async () => undefined);
     const signal = AbortSignal.timeout(45_000);
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      abortBrowserVaultRefresh,
       async destroyInstance() {},
       async invoke() {
         return createRunnerResult();
@@ -1924,6 +2100,45 @@ describe("RunnerContainer", () => {
     expect(getByName).toHaveBeenCalledWith("member_123");
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
     expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).not.toHaveProperty("signal");
+    expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).toHaveProperty("attemptId");
+    expect(abortBrowserVaultRefresh).not.toHaveBeenCalled();
+  });
+
+  it("does not start browser-vault refresh RPC when the local wait is already aborted", async () => {
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({ status: "already_fresh" }));
+    const controller = new AbortController();
+    controller.abort(new Error("refresh preempted"));
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      async destroyInstance() {},
+      async invoke() {
+        return createRunnerResult();
+      },
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      refreshBrowserVaultReplica,
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    await expect(refreshHostedExecutionContainerBrowserVaultReplica({
+      runnerContainerNamespace: { getByName },
+      runtime: {},
+      signal: controller.signal,
+      timeoutMs: 45_000,
+      userId: "member_123",
+    })).rejects.toThrow("refresh preempted");
+
+    expect(getByName).toHaveBeenCalledWith("member_123");
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
   });
 
   it("rejects local browser-vault refresh waits when the caller aborts", async () => {
@@ -1934,8 +2149,13 @@ describe("RunnerContainer", () => {
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async () => await activeRefresh);
+    const abortBrowserVaultRefresh = vi.fn(async () => {
+      resolveRefresh({ status: "already_fresh" });
+      await activeRefresh;
+    });
     const controller = new AbortController();
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      abortBrowserVaultRefresh,
       async destroyInstance() {},
       async invoke() {
         return createRunnerResult();
@@ -1964,11 +2184,12 @@ describe("RunnerContainer", () => {
     controller.abort(new Error("refresh preempted"));
 
     await expect(refresh).rejects.toThrow("refresh preempted");
+    expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
+      attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
+      userId: "member_123",
+    });
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
     expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).not.toHaveProperty("signal");
-
-    resolveRefresh({ status: "already_fresh" });
-    await activeRefresh;
   });
 
   it("resolves runner container names from worker version metadata", () => {

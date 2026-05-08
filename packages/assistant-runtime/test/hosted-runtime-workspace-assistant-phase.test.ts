@@ -1,6 +1,7 @@
 import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
+import { readFile } from "node:fs/promises";
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
@@ -16,12 +17,12 @@ const mocks = vi.hoisted(() => ({
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
-  drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
+  drainHostedPreparedAssistantDeliveries: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listAssistantInputEvents: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
-  prepareHostedAssistantDeliverySideEffectsForCheckpoint: vi.fn(),
+  prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
@@ -48,10 +49,10 @@ vi.mock("@murphai/assistant-engine/assistant-store", () => ({
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,
-  drainHostedCommittedAssistantDeliveriesAfterCommit:
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit,
-  prepareHostedAssistantDeliverySideEffectsForCheckpoint:
-    mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint,
+  drainHostedPreparedAssistantDeliveries:
+    mocks.drainHostedPreparedAssistantDeliveries,
+  prepareHostedAssistantDeliveryEffectsForDispatch:
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
@@ -112,6 +113,33 @@ type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
 
+function extractTopLevelFunctionBody(source: string, functionName: string): string {
+  const declarationIndex = source.indexOf(`function ${functionName}`);
+  if (declarationIndex < 0) {
+    throw new Error(`Missing function ${functionName}.`);
+  }
+  const signatureEnd = source.indexOf("): Promise", declarationIndex);
+  const bodyStart = source.indexOf("{", signatureEnd >= 0 ? signatureEnd : declarationIndex);
+  if (bodyStart < 0) {
+    throw new Error(`Missing function body for ${functionName}.`);
+  }
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(bodyStart + 1, index);
+      }
+    }
+  }
+
+  throw new Error(`Unclosed function body for ${functionName}.`);
+}
+
 function createNoDirtyRuntimeDeviceSyncPortMethods(): Pick<
   RuntimeDeviceSyncPort,
   "ackDirtyStateProcessed" | "fetchDirtyStates"
@@ -160,14 +188,14 @@ beforeEach(() => {
     failedLinqMessageCount: 0,
     nextWakeAt: null,
   });
-  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([]);
+  mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([]);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
     captureIds: [],
     linqMessageIds: [],
   });
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
-  mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint.mockResolvedValue(undefined);
+  mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.readAssistantAutomationState.mockResolvedValue({
     autoReply: [],
@@ -213,6 +241,20 @@ beforeEach(() => {
 });
 
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
+  it("keeps foreground reply orchestration separate from background maintenance", async () => {
+    const source = await readFile(
+      new URL("../src/hosted-runtime/workspace-assistant-phase.ts", import.meta.url),
+      "utf8",
+    );
+    const body = extractTopLevelFunctionBody(source, "runForegroundAssistantReplyPhase");
+
+    expect(body).toContain("collectForegroundDeliveryEffects");
+    expect(body).not.toContain("prepareHostedSystemMailboxItemForCheckpoint");
+    expect(body).not.toContain("runHostedDeviceSyncWakeLane");
+    expect(body).not.toContain("readHostedProviderCleanupCheckpoint");
+    expect(body).not.toContain("includeBackgroundDueIntents: true");
+  });
+
   it("hydrates the hosted default assistant target before running automation", async () => {
     const hostedDefaultTarget = {
       adapter: "codex-cli" as const,
@@ -897,7 +939,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -957,7 +999,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -989,7 +1031,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       hostedOutboxDeliverySent: 1,
       hostedOutboxPendingDeliveryEffects: 1,
     }));
-    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit)
+    expect(mocks.drainHostedPreparedAssistantDeliveries)
       .toHaveBeenCalledTimes(1);
   });
 
@@ -1011,7 +1053,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1077,7 +1119,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1125,7 +1167,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1153,7 +1195,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.afterCheckpoint).toBeUndefined();
     expect(result.checkpointReason).toBe("outbox_receipt");
-    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit)
+    expect(mocks.drainHostedPreparedAssistantDeliveries)
       .toHaveBeenCalledTimes(1);
   });
 
@@ -1171,7 +1213,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1199,7 +1241,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.afterCheckpoint).toBeUndefined();
     expect(result.checkpointReason).toBe("outbox_receipt");
-    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit)
+    expect(mocks.drainHostedPreparedAssistantDeliveries)
       .toHaveBeenCalledTimes(1);
   });
 
@@ -1208,7 +1250,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1421,9 +1463,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:12:00.000Z",
     );
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: null,
-    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
@@ -1433,7 +1472,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeBackgroundDueIntents: true,
+      }),
+    );
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
         preferredInputIds: ["ain_00000000000000000000000000000001"],
@@ -1442,12 +1492,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         skipInitialMailboxRefresh: true,
       }),
     );
-    expect(
-      mocks.runHostedAssistantRuntimeTimerLane.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.readHostedProviderCleanupCheckpoint.mock.invocationCallOrder[0] ?? 0);
-    expect(result.nextWakeAt).toBe("2026-04-27T00:09:00.000Z");
+    expect(result.nextWakeAt).toBe("2026-04-27T00:12:00.000Z");
     expect(result.redactedStatus).toEqual(expect.objectContaining({
-      hostedAssistantNextWakeAt: "2026-04-27T00:09:00.000Z",
+      hostedAssistantNextWakeAt: "2026-04-27T00:12:00.000Z",
       hostedSystemMailboxPrepared: 0,
     }));
 
@@ -1579,7 +1626,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1644,7 +1691,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1869,7 +1916,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantDeliveryOutcomes: [],
@@ -1912,7 +1959,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.resolveHostedAssistantOutboxNextWakeAt
       .mockResolvedValueOnce("2026-04-27T00:20:00.000Z")
       .mockResolvedValueOnce(null);
-    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
@@ -1949,7 +1996,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       hostedOutboxPendingDeliveryEffects: 1,
       hostedSystemMailboxPrepared: 1,
     }));
-    expect(mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint)
+    expect(mocks.prepareHostedAssistantDeliveryEffectsForDispatch)
       .toHaveBeenCalledWith(expect.objectContaining({
         assistantDeliveryEffects: [expect.objectContaining({
           effectId: "effect_synthetic",
@@ -1982,7 +2029,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot: "/tmp/murph-vault",
       }),
     );
-    const deliveryDrainInput = mocks.drainHostedCommittedAssistantDeliveriesAfterCommit
+    const deliveryDrainInput = mocks.drainHostedPreparedAssistantDeliveries
       .mock.calls[0]?.[0];
     const cleanupDrainInput = mocks.drainHostedProviderCleanupAfterCommit.mock.calls[0]?.[0];
     await deliveryDrainInput.assertLiveness();
@@ -2010,7 +2057,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.checkpointReason).toBe("provider_cleanup");
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantDeliveryOutcomes: [],
@@ -2395,6 +2442,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
 
 function createDeliveryEffect(): HostedAssistantDeliverySideEffect {
   return {
+    deliveryPhase: "foreground_current_turn",
     effectId: "effect_synthetic",
     fingerprint: "fingerprint_synthetic",
     kind: "assistant.delivery",

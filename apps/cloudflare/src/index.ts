@@ -349,6 +349,9 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
+    // Legacy Durable Object method for deploy skew. Deletion target:
+    // 2026-05-23, after deployed web callers have switched to
+    // `scheduleBrowserVaultRefreshForUser`.
     return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
@@ -982,10 +985,23 @@ async function handleBrowserVaultRefreshRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId);
   if (stub.scheduleBrowserVaultRefreshForUser) {
-    return json(await stub.scheduleBrowserVaultRefreshForUser({ userId }));
+    await stub.scheduleBrowserVaultRefreshForUser({ userId });
+    return json({
+      accepted: true,
+      scheduled: true,
+      userId,
+    });
   }
   if (stub.scheduleDashboardReplicaRefreshForUser) {
-    return json(await stub.scheduleDashboardReplicaRefreshForUser({ userId }));
+    // Legacy Durable Object fallback for deploy skew. Deletion target:
+    // 2026-05-23, after deployed Durable Objects expose
+    // `scheduleBrowserVaultRefreshForUser`.
+    await stub.scheduleDashboardReplicaRefreshForUser({ userId });
+    return json({
+      accepted: true,
+      scheduled: true,
+      userId,
+    });
   }
   throw new Error("Hosted user runner does not support browser-vault refresh scheduling.");
 }

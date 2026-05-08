@@ -17,7 +17,7 @@ export type BrowserVaultRefreshCoordinatorStateStore = Pick<
 
 export interface HostedBrowserVaultRefreshScheduleResult {
   accepted: true;
-  immediateRefreshStarted: boolean;
+  scheduled: true;
   userId: string;
 }
 
@@ -29,24 +29,22 @@ export class BrowserVaultRefreshCoordinator {
   constructor(
     private readonly deps: {
       continuationDelayMs: number;
-      destroyActiveRefreshContainer: (input: { userId: string }) => Promise<void> | null;
       hasForegroundWork: () => boolean;
       readStateForRetryScheduling: () => Promise<RunnerStateRecord | null>;
       retryDelayMs: number;
       runPendingRefresh: (input: { signal: AbortSignal; userId: string }) => Promise<void>;
       state: DurableObjectStateLike;
       stateStore: BrowserVaultRefreshCoordinatorStateStore;
-      syncStoredRunnerAlarm: () => Promise<void>;
     },
   ) {}
 
   async schedule(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
-    const immediateRefreshStarted = await this.schedulePending(input);
+    await this.schedulePending(input);
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
-        immediateRefreshStarted,
+        scheduled: true,
       },
       message: "Hosted runner accepted browser-vault refresh schedule.",
       phase: "scheduled",
@@ -55,7 +53,7 @@ export class BrowserVaultRefreshCoordinator {
 
     return {
       accepted: true,
-      immediateRefreshStarted,
+      scheduled: true,
       userId: input.userId,
     };
   }
@@ -142,28 +140,6 @@ export class BrowserVaultRefreshCoordinator {
 
     abortController.abort(new Error(input.reason));
     this.refreshPreemptedByForeground = true;
-    const destroy = this.deps.destroyActiveRefreshContainer({
-      userId: input.userId,
-    });
-    if (destroy) {
-      this.registerWaitUntil(
-        destroy.catch((error) => {
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            error,
-            level: "warn",
-            message: "Hosted runner could not stop optional browser-vault refresh container.",
-            phase: "scheduled",
-            userId: input.userId,
-          });
-        }),
-        {
-          failureMessage: "Hosted runner browser-vault refresh cleanup could not be registered with Durable Object waitUntil.",
-          phase: "scheduled",
-          userId: input.userId,
-        },
-      );
-    }
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {

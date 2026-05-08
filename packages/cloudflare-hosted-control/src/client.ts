@@ -69,7 +69,7 @@ export interface CloudflareHostedControlUserDataDeletionResult {
 
 export interface CloudflareHostedControlBrowserVaultRefreshResult {
   accepted: true;
-  immediateRefreshStarted: boolean;
+  scheduled: true;
   userId: string;
 }
 
@@ -423,10 +423,7 @@ function parseCloudflareHostedControlBrowserVaultRefreshResult(
 
   return {
     accepted: true,
-    immediateRefreshStarted: requireBoolean(
-      record.immediateRefreshStarted,
-      "Cloudflare browser-vault refresh result immediateRefreshStarted",
-    ),
+    scheduled: requireTrue(record.scheduled, "Cloudflare browser-vault refresh result scheduled"),
     userId,
   };
 }
@@ -813,6 +810,14 @@ function requireBoolean(value: unknown, label: string): boolean {
   }
 
   return value;
+}
+
+function requireTrue(value: unknown, label: string): true {
+  if (value !== true) {
+    throw new TypeError(`${label} must be true.`);
+  }
+
+  return true;
 }
 
 function requireNumber(value: unknown, label: string): number {

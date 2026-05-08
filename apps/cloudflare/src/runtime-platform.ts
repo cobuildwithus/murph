@@ -8,6 +8,10 @@ import {
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  sha256HostedBundleHex,
+  snapshotHostedCodexContinuityArtifact,
+} from "@murphai/runtime-state/node";
+import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -252,6 +256,26 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
+    ...(input.workspaceCheckpointBridge
+      ? {
+          codexContinuityPort: {
+            scheduleSnapshot: async ({ operatorHomeRoot, vaultRoot }) => {
+              const snapshot = await snapshotHostedCodexContinuityArtifact({
+                operatorHomeRoot,
+                vaultRoot,
+              });
+              if (snapshot.threadCount === 0) {
+                return;
+              }
+              const sha256 = sha256HostedBundleHex(snapshot.bundle);
+              await putArtifactOnce({
+                bytes: snapshot.bundle,
+                sha256,
+              });
+            },
+          },
+        }
+      : {}),
     ...(input.internalWorkerProxyToken && (
       input.workspaceCheckpointBridge
       || input.browserVaultRefreshSourceStateHash

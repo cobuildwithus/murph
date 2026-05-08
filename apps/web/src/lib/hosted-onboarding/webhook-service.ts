@@ -18,6 +18,14 @@ import {
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
 import {
+  planHostedOnboardingWhatsAppWebhook,
+  type HostedOnboardingWhatsAppWebhookResponse,
+} from "./webhook-provider-whatsapp";
+import {
+  parseHostedWhatsAppInboundTexts,
+  verifyAndParseHostedWhatsAppWebhookRequest,
+} from "./whatsapp";
+import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
@@ -187,6 +195,88 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     userId: plan.wakeUserId,
   });
   return plan.response;
+}
+
+export async function handleHostedOnboardingWhatsAppWebhook(input: {
+  rawBody: string;
+  prisma?: PrismaClient;
+  signature: string | null;
+  signal?: AbortSignal;
+}): Promise<HostedOnboardingWhatsAppWebhookResponse> {
+  const timing = startHostedOnboardingTiming("hosted-onboarding.webhook.whatsapp", {
+    rawBodyBytes: new TextEncoder().encode(input.rawBody).byteLength,
+    signalAbortedAtStart: input.signal?.aborted ?? false,
+    signaturePresent: Boolean(input.signature),
+  });
+  let responseReason: string | null = null;
+
+  try {
+    const body = verifyAndParseHostedWhatsAppWebhookRequest({
+      rawBody: input.rawBody,
+      signature: input.signature,
+    });
+    const inboundTextCount = parseHostedWhatsAppInboundTexts(body).length;
+    if (inboundTextCount === 0) {
+      const plan = await planHostedOnboardingWhatsAppWebhook({
+        body,
+      });
+      responseReason = plan.response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        commandHandledCount: plan.response.commandHandledCount,
+        inboundTextCount: plan.response.inboundTextCount,
+        responseReason,
+        routedTextCount: plan.response.routedTextCount,
+        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+        wakeHandoffCount: 0,
+      });
+      return plan.response;
+    }
+
+    const prisma = input.prisma ?? getPrisma();
+    const plan = await runHostedOnboardingWebhookTransaction(
+      prisma,
+      (transaction) =>
+        planHostedOnboardingWhatsAppWebhook({
+          body,
+          prisma: transaction,
+        }),
+    );
+
+    if (plan.desiredSideEffects.length > 0 || plan.wakeMailboxItemId || plan.wakeUserId) {
+      throw new Error(
+        "Hosted WhatsApp webhook planning unexpectedly requested legacy runtime side effects.",
+      );
+    }
+
+    const wakeHandoffs = plan.wakeHandoffs ?? [];
+    for (const wakeHandoff of wakeHandoffs) {
+      await maybeHandoffHostedExecutionWebhookWake({
+        eventId: wakeHandoff.eventId,
+        mailboxItemId: wakeHandoff.mailboxItemId,
+        response: plan.response,
+        source: "whatsapp",
+        userId: wakeHandoff.userId,
+      });
+    }
+
+    responseReason = plan.response.reason ?? null;
+    finishHostedOnboardingTiming(timing, "completed", {
+      commandHandledCount: plan.response.commandHandledCount,
+      inboundTextCount: plan.response.inboundTextCount,
+      responseReason,
+      routedTextCount: plan.response.routedTextCount,
+      signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+      wakeHandoffCount: wakeHandoffs.length,
+    });
+    return plan.response;
+  } catch (error) {
+    finishHostedOnboardingTiming(timing, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      responseReason,
+      signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+    });
+    throw error;
+  }
 }
 
 async function runHostedOnboardingWebhookTransaction<TResult>(

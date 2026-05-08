@@ -131,6 +131,13 @@ export interface HostedAssistantRuntimeHotStateSnapshot {
   inlineBytes: number;
 }
 
+export interface HostedCodexContinuityArtifactSnapshot {
+  bundle: Uint8Array;
+  bundleBytes: number;
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  threadCount: number;
+}
+
 export interface HostedWorkspaceSnapshotProviderContinuityAnalysis {
   hasCodexProviderContinuity: boolean;
   hasProviderResumeState: boolean;
@@ -1411,6 +1418,85 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
   throw new Error("Hosted assistant runtime hot-state snapshot retry loop did not return.");
 }
 
+export async function snapshotHostedCodexContinuityArtifact(input: {
+  assertSnapshotLive?: () => Promise<void> | void;
+  codexHomeSnapshotHashSecret?: string | null;
+  operatorHomeRoot?: string | null;
+  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
+  vaultRoot: string;
+}): Promise<HostedCodexContinuityArtifactSnapshot> {
+  for (let attempt = 1; attempt <= HOSTED_CODEX_CONTINUITY_SNAPSHOT_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await snapshotHostedCodexContinuityArtifactOnce(input);
+    } catch (error) {
+      if (
+        attempt < HOSTED_CODEX_CONTINUITY_SNAPSHOT_MAX_ATTEMPTS
+        && error instanceof HostedCodexContinuitySnapshotDriftError
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("Hosted Codex continuity artifact snapshot retry loop did not return.");
+}
+
+async function snapshotHostedCodexContinuityArtifactOnce(input: {
+  assertSnapshotLive?: () => Promise<void> | void;
+  codexHomeSnapshotHashSecret?: string | null;
+  operatorHomeRoot?: string | null;
+  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
+  vaultRoot: string;
+}): Promise<HostedCodexContinuityArtifactSnapshot> {
+  const vaultRoot = path.resolve(input.vaultRoot);
+  const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
+  const workspaceSnapshotHashSecret =
+    normalizeHostedCodexHomeSnapshotHashSecret(input.codexHomeSnapshotHashSecret);
+  await input.assertSnapshotLive?.();
+  const preparedCodexContinuity = await prepareHostedCodexContinuitySnapshot({
+    assistantStateRoot,
+    prepareCodexContinuitySnapshot: input.prepareCodexContinuitySnapshot,
+  });
+  const hostedCodexContinuity = operatorHomeRoot
+    ? await collectHostedCodexContinuity({
+        assistantStateRoot,
+        hashSecret: workspaceSnapshotHashSecret,
+        operatorHomeRoot,
+        preparedThreads: preparedCodexContinuity.preparedThreads,
+      })
+    : await collectMissingHostedCodexContinuity(assistantStateRoot);
+  hostedCodexContinuity.flushFailed ||= preparedCodexContinuity.flushFailed;
+  const codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
+    collection: hostedCodexContinuity,
+    hashSecret: workspaceSnapshotHashSecret,
+  });
+  assertHostedCodexContinuityComplete(
+    hostedCodexContinuity,
+    codexHomeSnapshotDiagnostics,
+  );
+
+  await input.assertSnapshotLive?.();
+  const files = await createHostedCodexContinuityArtifactArchiveFiles(
+    hostedCodexContinuity,
+    codexHomeSnapshotDiagnostics,
+  );
+  await input.assertSnapshotLive?.();
+  const bundle = serializeHostedBundleArchive({
+    files,
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
+  });
+
+  return {
+    bundle,
+    bundleBytes: bundle.byteLength,
+    codexHomeSnapshotDiagnostics,
+    threadCount: hostedCodexContinuity.entries.length,
+  };
+}
+
 async function snapshotHostedAssistantRuntimeHotStateOnce(input: {
   assertSnapshotLive?: () => Promise<void> | void;
   codexHomeSnapshotHashSecret?: string | null;
@@ -1543,6 +1629,44 @@ async function snapshotHostedAssistantRuntimeHotStateOnce(input: {
     fileCount: metrics.fileCount,
     inlineBytes: metrics.inlineBytes,
   };
+}
+
+async function createHostedCodexContinuityArtifactArchiveFiles(
+  collection: HostedCodexContinuityCollection,
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null,
+): Promise<HostedBundleArchiveFile[]> {
+  if (collection.entries.length === 0) {
+    return [];
+  }
+
+  const files: HostedBundleArchiveFile[] = [];
+  const verifiedEntries: HostedCodexContinuityEntry[] = [];
+  for (const entry of collection.entries) {
+    const bytes = new Uint8Array(await readFile(entry.absolutePath));
+    const sha256 = sha256BytesHex(bytes);
+    if (sha256 !== entry.sha256 || bytes.byteLength !== entry.byteSize) {
+      throw new HostedCodexContinuitySnapshotDriftError(codexHomeSnapshotDiagnostics);
+    }
+    verifiedEntries.push(entry);
+    files.push({
+      contentsBase64: Buffer.from(bytes).toString("base64"),
+      path: `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`,
+      root: WORKSPACE_OPERATOR_HOME_ROOT,
+    });
+  }
+
+  files.push({
+    contentsBase64: Buffer.from(
+      JSON.stringify(createHostedCodexContinuityManifest(verifiedEntries)) + "\n",
+      "utf8",
+    ).toString("base64"),
+    path: HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
+    root: WORKSPACE_OPERATOR_HOME_ROOT,
+  });
+
+  return files.sort((left, right) =>
+    hostedPortableWorkspaceArchiveFileKey(left)
+      .localeCompare(hostedPortableWorkspaceArchiveFileKey(right)));
 }
 
 export async function clearHostedAssistantRuntimeHotState(input: {

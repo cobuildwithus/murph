@@ -10,6 +10,9 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   publishLegacySourceHashBrowserVaultReplicaRef,
+  readLegacyExpectedSourceStateHash,
+} from "@/src/lib/hosted-workspace/legacy-source-hash-browser-vault";
+import {
   publishLatestBrowserVaultReplicaRef,
 } from "@/src/lib/hosted-workspace/store";
 
@@ -53,17 +56,3 @@ export const POST = withJsonError(async (request: Request) => {
     },
   }));
 });
-
-function readLegacyExpectedSourceStateHash(
-  body: Record<string, unknown>,
-): string | null {
-  if (!Object.hasOwn(body, "expectedSourceStateHash")) {
-    return null;
-  }
-  if (typeof body.expectedSourceStateHash !== "string" || !body.expectedSourceStateHash.trim()) {
-    throw new TypeError(
-      "Legacy hosted browser-vault replica publish expectedSourceStateHash must be a non-empty string.",
-    );
-  }
-  return body.expectedSourceStateHash;
-}

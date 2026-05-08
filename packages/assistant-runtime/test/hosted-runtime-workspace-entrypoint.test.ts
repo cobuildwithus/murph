@@ -610,17 +610,13 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("treats idle-shutdown checkpoint as committed when liveness reports input while checkpoint is in flight", async () => {
+  test("returns scheduled promptly when liveness reports input while checkpoint RPC never resolves", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     let checkpointStarted!: () => void;
-    let releaseCheckpoint!: () => void;
     const checkpointStartedPromise = new Promise<void>((resolve) => {
       checkpointStarted = resolve;
-    });
-    const releaseCheckpointPromise = new Promise<void>((resolve) => {
-      releaseCheckpoint = resolve;
     });
     let checkpointInFlight = false;
     let pendingReported = false;
@@ -684,15 +680,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 checkpointRequests.push(request);
                 checkpointInFlight = true;
                 checkpointStarted();
-                await releaseCheckpointPromise;
-                events.push("workspace.checkpoint.finish");
-                return {
-                  checkpointed: true,
-                  workspace: createWorkspaceState({
-                    snapshotRef: request.snapshotRef,
-                    version: "5",
-                  }),
-                };
+                return await new Promise<HostedWorkspaceCheckpointResponse>(() => undefined);
               },
             },
           }),
@@ -702,15 +690,24 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await checkpointStartedPromise;
       await vi.waitFor(() => expect(pendingReported).toBe(true));
-      releaseCheckpoint();
-      await expect(resultPromise).resolves.toEqual({
-        idleShutdownCheckpointed: true,
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      const result = await Promise.race([
+        resultPromise,
+        new Promise<"timeout">((resolve) => {
+          timeout = setTimeout(() => resolve("timeout"), 100);
+          timeout.unref?.();
+        }),
+      ]);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      assert.deepEqual(result, {
         nextWakeAt: "2026-04-27T00:00:45.000Z",
-        status: "idle",
+        status: "scheduled",
       });
       assert.equal(checkpointRequests.length, 1);
       assert.ok(events.includes("heartbeat:pending"));
-      assert.ok(events.includes("workspace.checkpoint.finish"));
+      assert.equal(events.includes("workspace.checkpoint.finish"), false);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -808,21 +805,123 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await checkpointStartedPromise;
       await vi.waitFor(() => expect(pendingReported).toBe(true));
-      releaseCheckpoint();
       await expect(resultPromise).resolves.toEqual({
         nextWakeAt: "2026-04-27T00:00:45.000Z",
         status: "scheduled",
       });
       assert.equal(checkpointRequests.length, 1);
       assert.ok(events.includes("heartbeat:pending"));
-      assert.ok(events.includes("workspace.checkpoint.finish"));
+      assert.equal(events.includes("workspace.checkpoint.finish"), false);
+      releaseCheckpoint();
+      await vi.waitFor(() => expect(events).toContain("workspace.checkpoint.finish"));
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
-  test("fails closed when an in-flight idle-shutdown checkpoint commits for another user after liveness reports input", async () => {
+  test("returns scheduled when an in-flight idle-shutdown checkpoint later rejects after liveness reports input", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let checkpointStarted!: () => void;
+    let releaseCheckpoint!: () => void;
+    const checkpointStartedPromise = new Promise<void>((resolve) => {
+      checkpointStarted = resolve;
+    });
+    const releaseCheckpointPromise = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    let checkpointInFlight = false;
+    let pendingReported = false;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        if (checkpointInFlight && !pendingReported) {
+          pendingReported = true;
+          events.push("heartbeat:pending");
+          return {
+            inputAvailable: true,
+            nextAlarmAt: "2026-04-27T00:00:45.000Z",
+            ok: true,
+            pendingNudge: true,
+          };
+        }
+        events.push("heartbeat:ok");
+        return { ok: true };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_checkpoint_race_reject",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown-race-reject.bundle.json",
+                size: 256,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessPort,
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push("workspace.checkpoint.start");
+                checkpointRequests.push(request);
+                checkpointInFlight = true;
+                checkpointStarted();
+                await releaseCheckpointPromise;
+                events.push("workspace.checkpoint.reject");
+                throw new Error("Synthetic checkpoint RPC failure.");
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      await checkpointStartedPromise;
+      await vi.waitFor(() => expect(pendingReported).toBe(true));
+      await expect(resultPromise).resolves.toEqual({
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      });
+      assert.equal(checkpointRequests.length, 1);
+      releaseCheckpoint();
+      await vi.waitFor(() => expect(events).toContain("workspace.checkpoint.reject"));
+      assert.ok(events.includes("heartbeat:pending"));
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("returns scheduled when an in-flight idle-shutdown checkpoint commits for another user after liveness reports input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-parent-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const events: string[] = [];
     let checkpointStarted!: () => void;
     let releaseCheckpoint!: () => void;
     const checkpointStartedPromise = new Promise<void>((resolve) => {
@@ -863,10 +962,17 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
-                hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/idle-shutdown-wrong-user.bundle.json",
-                size: 256,
+              snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+                base: createBundleRef({
+                  hash: "f".repeat(64),
+                  key: "users/bundles/member-synthetic/idle-shutdown-wrong-user-base.bundle.json",
+                  size: 256,
+                }),
+                hot: createBundleRef({
+                  hash: "a".repeat(64),
+                  key: "users/bundles/member-synthetic/idle-shutdown-wrong-user-hot.bundle.json",
+                  size: 128,
+                }),
               }),
             };
           },
@@ -888,6 +994,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 checkpointInFlight = true;
                 checkpointStarted();
                 await releaseCheckpointPromise;
+                events.push("workspace.checkpoint.finish");
                 return {
                   checkpointed: true,
                   workspace: createWorkspaceState({
@@ -905,8 +1012,75 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await checkpointStartedPromise;
       await vi.waitFor(() => expect(pendingReported).toBe(true));
+      await expect(resultPromise).resolves.toEqual({
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      });
       releaseCheckpoint();
-      await expect(resultPromise).rejects.toThrow(
+      await vi.waitFor(() => expect(events).toContain("workspace.checkpoint.finish"));
+      await assert.rejects(readFile(
+        path.join(
+          path.dirname(path.resolve(vaultRoot)),
+          ".hosted-workspace-hot-restore-cache.json",
+        ),
+        "utf8",
+      ));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fails closed when an in-flight idle-shutdown checkpoint commits for another user without liveness interruption", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await expect(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_checkpoint_wrong_user_no_liveness",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown-wrong-user.bundle.json",
+                size: 256,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            workspacePort: {
+              async read() {
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    userId: "member_synthetic_other",
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      )).rejects.toThrow(
         "Hosted mailbox import checkpoint returned an unexpected user.",
       );
     } finally {
@@ -1259,6 +1433,73 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("schedules tiny Codex continuity after a foreground assistant pass without checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const codexContinuitySnapshots: Array<{
+      operatorHomeRoot: string;
+      requestId: string;
+      vaultRoot: string;
+    }> = [];
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            reason: "alarm",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Foreground run should not build workspace checkpoint snapshots.");
+          },
+          async importItem() {
+            throw new Error("Mailbox import should not run without mailbox items.");
+          },
+          platform: createPlatform({
+            codexContinuitySnapshots,
+            events,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            events.push("assistant");
+            await writeFile(path.join(input.restored.vaultRoot, "turn.txt"), "reply\n", "utf8");
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "assistant",
+        "codex-continuity.snapshot",
+      ]);
+      assert.equal(codexContinuitySnapshots.length, 1);
+      assert.equal(codexContinuitySnapshots[0]?.vaultRoot, vaultRoot);
+      assert.match(path.basename(codexContinuitySnapshots[0]?.operatorHomeRoot ?? ""), /operator-home$/);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("keeps exact hosted canonical writes local without foreground workspace checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -1467,6 +1708,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const createCheckpointSnapshot = vi.fn(async () => {
       throw new Error("Foreground test should not build checkpoint snapshots.");
     });
@@ -1512,17 +1754,31 @@ describe("hosted workspace runtime entrypoint", () => {
         createCheckpointSnapshot,
         async importItem() {
           throw new Error("Import should not run without mailbox items.");
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({ events, items: [] }),
-            workspacePort,
-          }),
-          async runAssistantPhase() {
-            events.push("assistant.phase");
-            return {
-              checkpointReason: "assistant_runtime_commit",
-              progressed: true,
-            };
+        },
+        platform: createPlatform({
+          events,
+          mailboxPort: createMailboxPort({ events, items: [] }),
+          logRequests,
+          workspacePort,
+        }),
+        async runAssistantPhase(input) {
+          events.push("assistant.phase");
+          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
+          if (typeof checkpointActiveTurnInput !== "function") {
+            throw new Error("Expected hosted active-turn checkpoint to be installed.");
+          }
+          await checkpointActiveTurnInput({
+            acceptedInputIds: ["input_synthetic_foreground_active_turn"],
+            providerRequestOrdinal: 0,
+            requestId: "request_synthetic_foreground_active_turn",
+            sessionId: "session_synthetic_foreground_active_turn",
+            turnId: "turn_synthetic_foreground_active_turn",
+            vault: vaultRoot,
+          });
+          return {
+            checkpointReason: "assistant_runtime_commit",
+            progressed: true,
+          };
         },
         vaultRoot,
       });
@@ -1539,9 +1795,24 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
+        "runtime.log:mailbox.imported",
         "assistant.phase",
+        "runtime.log:checkpoint.runtime_residue_deferred",
+        "runtime.log:checkpoint.runtime_residue_deferred",
       ]);
       assert.deepEqual(checkpointRequests, []);
+      const deferredLogs = logRequests.flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred");
+      assert.deepEqual(deferredLogs.map((entry) => entry.redactedJson), [
+        {
+          checkpointPhase: "active_turn_input",
+          checkpointReason: "active_turn_acceptance",
+        },
+        {
+          checkpointPhase: "assistant",
+          checkpointReason: "assistant_runtime_commit",
+        },
+      ]);
       expect(mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder).not.toHaveBeenCalled();
       expect(createRequest).not.toHaveBeenCalled();
       expect(mocks.snapshotHostedPortableWorkspaceDelta).not.toHaveBeenCalled();
@@ -3574,6 +3845,11 @@ function createPlatform(input: {
   artifactGetCalls?: string[];
   artifactLabelsByHash?: ReadonlyMap<string, string>;
   artifactPutCalls?: Array<{ byteLength: number; sha256: string }>;
+  codexContinuitySnapshots?: Array<{
+    operatorHomeRoot: string;
+    requestId: string;
+    vaultRoot: string;
+  }>;
   events?: string[];
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort | null;
@@ -3628,6 +3904,16 @@ function createPlatform(input: {
         }
       : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
+    ...(input.codexContinuitySnapshots
+      ? {
+          codexContinuityPort: {
+            async scheduleSnapshot(snapshotInput) {
+              input.codexContinuitySnapshots?.push(snapshotInput);
+              input.events?.push("codex-continuity.snapshot");
+            },
+          },
+        }
+      : {}),
     ...(input.runtimeLivenessIntervalMs
       ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
       : {}),
