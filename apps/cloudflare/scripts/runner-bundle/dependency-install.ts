@@ -201,6 +201,7 @@ async function installPinnedProductionDependencies(
   };
 
   await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, input.policy);
+  await seedRunnerBundleLockfileFromRoot(installRoot, input.repoRoot);
   await runPnpmCommand(["install", "--prod", "--lockfile-only"], {
     cwd: installRoot,
     env: installEnv,
@@ -213,6 +214,17 @@ async function installPinnedProductionDependencies(
     cwd: installRoot,
     env: installEnv,
   });
+}
+
+async function seedRunnerBundleLockfileFromRoot(
+  installRoot: string,
+  repoRoot: string,
+): Promise<void> {
+  await writeFile(
+    path.join(installRoot, "pnpm-lock.yaml"),
+    await readFile(path.join(repoRoot, "pnpm-lock.yaml"), "utf8"),
+    "utf8",
+  );
 }
 
 export async function assertRunnerBundleLockfileUsesCommittedResolutions(input: {
@@ -257,7 +269,7 @@ function extractPnpmLockPackageResolutions(lockfile: string): Map<string, string
       continue;
     }
 
-    const match = /^  (.+):\s*$/u.exec(line);
+    const match = /^  (\S.*):\s*$/u.exec(line);
     if (match) {
       currentPackageKey = stripYamlStringQuotes(match[1]!.trim());
       packages.set(currentPackageKey, null);
@@ -278,7 +290,13 @@ function extractPnpmLockPackageResolutions(lockfile: string): Map<string, string
 }
 
 function isLocalRunnerBundlePackageKey(key: string): boolean {
-  return key.startsWith("file:") || key.startsWith("link:");
+  const baseKey = key.split("(", 1)[0]!;
+
+  return (
+    baseKey.startsWith("file:") ||
+    baseKey.startsWith("link:") ||
+    /^(?:@[^/]+\/[^@]+|[^@]+)@(file:|link:)/u.test(baseKey)
+  );
 }
 
 export async function writeRunnerBundlePnpmInstallConfig(
