@@ -362,7 +362,7 @@ function parseBrowserVaultReplicaStorageInput(value: unknown): {
   const source = requireRecord(record.source, "Browser vault replica source");
 
   return {
-    generatedAt: requireString(record.generatedAt, "Browser vault replica generatedAt"),
+    generatedAt: requireIsoTimestampString(record.generatedAt, "Browser vault replica generatedAt"),
     source: {
       dataVersion: requireString(source.dataVersion, "Browser vault replica dataVersion"),
       sourceBundleHash: requireString(source.sourceBundleHash, "Browser vault replica sourceBundleHash"),
@@ -384,4 +384,14 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requireIsoTimestampString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+  const timestamp = Date.parse(text);
+  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
+    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+  }
+
+  return text;
 }

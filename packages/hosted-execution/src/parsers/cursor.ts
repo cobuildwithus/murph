@@ -217,7 +217,7 @@ function requireIsoTimestampString(value: unknown, label: string): string {
   const text = requireString(value, label);
   const timestamp = Date.parse(text);
   if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new TypeError(`${label} must be a valid ISO-8601 timestamp in canonical UTC form.`);
   }
 
   return text;

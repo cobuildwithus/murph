@@ -1161,12 +1161,43 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
     throw new Error("Hosted runner container does not support browser-vault refresh.");
   }
 
-  return container.refreshBrowserVaultReplica({
+  const refresh = container.refreshBrowserVaultReplica({
     runtime: input.runtime,
-    signal: input.signal,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
+  return input.signal
+    ? await raceRunnerContainerOperationAbort(refresh, input.signal)
+    : await refresh;
+}
+
+async function raceRunnerContainerOperationAbort<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  throwIfRunnerContainerOperationAborted(signal);
+
+  let removeAbortListener: () => void = () => undefined;
+  const abort = new Promise<never>((_, reject) => {
+    const onAbort = () => {
+      reject(signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException("The operation was aborted.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+  });
+
+  try {
+    return await Promise.race([operation, abort]);
+  } catch (error) {
+    if (signal.aborted) {
+      void operation.catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    removeAbortListener();
+  }
 }
 
 function throwIfRunnerContainerOperationAborted(signal: AbortSignal | undefined): void {

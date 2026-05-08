@@ -12,7 +12,6 @@ export {
 } from "./contracts.ts";
 export {
   parseHostedBrowserVaultReplicaRef,
-  readHostedBrowserVaultSourceStateHash,
 } from "./parsers/cursor.ts";
 
 export type BrowserVaultReplicaFreshness = "fresh" | "stale";

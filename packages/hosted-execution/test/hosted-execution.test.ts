@@ -34,7 +34,6 @@ import {
 } from "../src/bundles.ts";
 import {
   getBrowserVaultReplicaFreshness,
-  readHostedBrowserVaultSourceStateHash,
   shouldScheduleBrowserVaultRefresh,
 } from "../src/browser-vault.ts";
 import {
@@ -49,6 +48,7 @@ import {
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "../src/parsers.ts";
+import { readHostedBrowserVaultSourceStateHash } from "../src/parsers/cursor.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
   return new TextDecoder().decode(buffer);
@@ -412,9 +412,10 @@ describe("hosted execution coverage gaps", () => {
     const rootModule = await import("@murphai/hosted-execution");
     const assistantUsageModule =
       await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
-    const browserVaultModule = await import("../src/browser-vault.ts") as Record<string, unknown>;
+    const browserVaultModule =
+      await import("@murphai/hosted-execution/browser-vault") as Record<string, unknown>;
     const legacyDashboardReplicaModule =
-      await import("../src/dashboard-replica.ts");
+      await import("@murphai/hosted-execution/dashboard-replica");
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
       string,

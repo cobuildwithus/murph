@@ -8,10 +8,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
-  publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuardTx,
+  publishLatestBrowserVaultReplicaRef,
+  publishLegacySourceHashBrowserVaultReplicaRefTx,
   publishLatestBrowserVaultReplicaRefTx,
   recordHostedRuntimeLogTx,
   type HostedRuntimeLogRow,
+  type HostedWorkspaceTransactionRunner,
   type HostedWorkspaceRow,
 } from "@/src/lib/hosted-workspace/store";
 
@@ -467,9 +469,13 @@ describe("hosted workspace store", () => {
   });
 
   it("publishes latest browser-vault refs as derived state without incrementing workspace version", async () => {
-    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
+    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash", {
+      generatedAt: "2026-04-26T00:05:00.000Z",
+    });
     const current = buildHostedWorkspaceRow({
-      browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_1_hash"),
+      browserVaultReplicaRef: createBrowserVaultReplicaRef("snapshot_1_hash", {
+        generatedAt: "2026-04-26T00:01:00.000Z",
+      }),
       snapshotRef: createBundleRef("snapshot_2"),
       version: 5n,
     });
@@ -502,6 +508,9 @@ describe("hosted workspace store", () => {
         browserVaultReplicaRef: replicaRef,
       },
       where: {
+        browserVaultReplicaRef: {
+          equals: current.browserVaultReplicaRef,
+        },
         userId: "member_workspace_1",
         version: 5n,
       },
@@ -565,6 +574,9 @@ describe("hosted workspace store", () => {
         browserVaultReplicaRef: replicaRef,
       },
       where: {
+        browserVaultReplicaRef: {
+          equals: Prisma.DbNull,
+        },
         userId: "member_workspace_1",
         version: 6n,
       },
@@ -574,6 +586,9 @@ describe("hosted workspace store", () => {
         browserVaultReplicaRef: replicaRef,
       },
       where: {
+        browserVaultReplicaRef: {
+          equals: Prisma.DbNull,
+        },
         userId: "member_workspace_1",
         version: 7n,
       },
@@ -585,6 +600,64 @@ describe("hosted workspace store", () => {
         nextWakeReason: "metadata-only-race",
         snapshotRef,
         version: "7",
+      },
+    });
+  });
+
+  it("rejects older browser-vault refs that race with a newer publish at the same workspace version", async () => {
+    const olderRef = createBrowserVaultReplicaRef("live_old_hash", {
+      generatedAt: "2026-04-26T00:01:00.000Z",
+    });
+    const newerRef = createBrowserVaultReplicaRef("live_new_hash", {
+      generatedAt: "2026-04-26T00:05:00.000Z",
+    });
+    const firstRead = buildHostedWorkspaceRow({
+      browserVaultReplicaRef: null,
+      snapshotRef: createWorkingSnapshotRef({
+        base: createBundleRef("snapshot_2"),
+        delta: createBundleRef("delta_3"),
+      }),
+      version: 6n,
+    });
+    const racedRead = buildHostedWorkspaceRow({
+      ...firstRead,
+      browserVaultReplicaRef: newerRef,
+    });
+    const findUniqueRows = [firstRead, racedRead, racedRead];
+    const findUnique = vi.fn<HostedWorkspaceFindUnique>(async () => findUniqueRows.shift() ?? racedRead);
+    const updateMany = vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 0 }));
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique,
+      updateMany,
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    const result = await publishLatestBrowserVaultReplicaRefTx({
+      replicaRef: olderRef,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        browserVaultReplicaRef: olderRef,
+      },
+      where: {
+        browserVaultReplicaRef: {
+          equals: Prisma.DbNull,
+        },
+        userId: "member_workspace_1",
+        version: 6n,
+      },
+    });
+    expect(result).toMatchObject({
+      status: "conflict",
+      workspace: {
+        browserVaultReplicaRef: newerRef,
+        version: "6",
       },
     });
   });
@@ -625,6 +698,88 @@ describe("hosted workspace store", () => {
       },
     });
     expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not let a different same-timestamp latest browser-vault ref replace the stored ref", async () => {
+    const currentRef = createBrowserVaultReplicaRef("live_a_hash", {
+      generatedAt: "2026-04-26T00:05:00.000Z",
+    });
+    const sameTimestampDifferentRef = createBrowserVaultReplicaRef("live_b_hash", {
+      generatedAt: "2026-04-26T00:05:00.000Z",
+    });
+    const current = buildHostedWorkspaceRow({
+      browserVaultReplicaRef: currentRef,
+      snapshotRef: createWorkingSnapshotRef({
+        base: createBundleRef("snapshot_2"),
+        delta: createBundleRef("delta_3"),
+      }),
+      version: 6n,
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    const result = await publishLatestBrowserVaultReplicaRefTx({
+      replicaRef: sameTimestampDifferentRef,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(result).toMatchObject({
+      status: "conflict",
+      workspace: {
+        browserVaultReplicaRef: currentRef,
+        version: "6",
+      },
+    });
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("allows idempotent same-timestamp latest browser-vault ref publishes", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("live_same_hash", {
+      generatedAt: "2026-04-26T00:05:00.000Z",
+    });
+    const current = buildHostedWorkspaceRow({
+      browserVaultReplicaRef: replicaRef,
+      snapshotRef: createWorkingSnapshotRef({
+        base: createBundleRef("snapshot_2"),
+        delta: createBundleRef("delta_3"),
+      }),
+      version: 6n,
+    });
+    const updated = buildHostedWorkspaceRow({
+      ...current,
+      browserVaultReplicaRef: replicaRef,
+    });
+    let findUniqueCallCount = 0;
+    const findUnique = vi.fn<HostedWorkspaceFindUnique>(async () => {
+      findUniqueCallCount += 1;
+      return findUniqueCallCount === 1 ? current : updated;
+    });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique,
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    const result = await publishLatestBrowserVaultReplicaRefTx({
+      replicaRef,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(result).toMatchObject({
+      status: "published",
+      workspace: {
+        browserVaultReplicaRef: replicaRef,
+        version: "6",
+      },
+    });
   });
 
   it("returns missing when a latest browser-vault ref publish conflict reread finds no workspace", async () => {
@@ -729,7 +884,7 @@ describe("hosted workspace store", () => {
       hostedWorkspace,
     });
 
-    await publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuardTx({
+    await publishLegacySourceHashBrowserVaultReplicaRefTx({
       expectedSourceStateHash: "delta_2_hash",
       replicaRef,
       tx,
@@ -741,6 +896,9 @@ describe("hosted workspace store", () => {
         browserVaultReplicaRef: replicaRef,
       },
       where: {
+        browserVaultReplicaRef: {
+          equals: Prisma.DbNull,
+        },
         userId: "member_workspace_1",
         version: 5n,
       },
@@ -753,7 +911,7 @@ describe("hosted workspace store", () => {
       hostedWorkspace,
     });
 
-    await expect(publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuardTx({
+    await expect(publishLegacySourceHashBrowserVaultReplicaRefTx({
       expectedSourceStateHash: "snapshot_2_hash",
       replicaRef: createBrowserVaultReplicaRef("delta_2_hash"),
       tx,
@@ -780,7 +938,7 @@ describe("hosted workspace store", () => {
       hostedWorkspace,
     });
 
-    const result = await publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuardTx({
+    const result = await publishLegacySourceHashBrowserVaultReplicaRefTx({
       expectedSourceStateHash: "delta_2_hash",
       replicaRef,
       tx,
@@ -817,7 +975,7 @@ describe("hosted workspace store", () => {
       hostedWorkspace,
     });
 
-    const result = await publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuardTx({
+    const result = await publishLegacySourceHashBrowserVaultReplicaRefTx({
       expectedSourceStateHash: "delta_2_hash",
       replicaRef: createBrowserVaultReplicaRef("delta_2_hash", {
         generatedAt: "2026-04-26T00:01:00.000Z",
@@ -874,6 +1032,45 @@ describe("hosted workspace store", () => {
     });
     expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
   });
+
+  it("keeps the old hosted browser-vault publish name as a latest-ref compatibility wrapper", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
+    const current = buildHostedWorkspaceRow({
+      snapshotRef: createWorkingSnapshotRef({
+        base: createBundleRef("snapshot_2"),
+        delta: createBundleRef("delta_3"),
+      }),
+      version: 6n,
+    });
+    const updated = buildHostedWorkspaceRow({
+      browserVaultReplicaRef: replicaRef,
+      snapshotRef: current.snapshotRef,
+      version: 6n,
+    });
+    const findUniqueRows = [current, updated];
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => findUniqueRows.shift() ?? updated),
+    });
+    const prisma = createHostedWorkspaceClient({
+      hostedWorkspace,
+    });
+
+    const result = await publishLatestBrowserVaultReplicaRef({
+      prisma,
+      replicaRef,
+      userId: "member_workspace_1",
+    });
+
+    expect(result).toMatchObject({
+      status: "published",
+      workspace: {
+        browserVaultReplicaRef: replicaRef,
+        version: "6",
+      },
+    });
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
+  });
+
 });
 
 describe("hosted runtime log store", () => {
@@ -1127,6 +1324,7 @@ describe("hosted runtime log store", () => {
 interface HostedWorkspaceUpdateManyArgs {
   data: Prisma.HostedWorkspaceUpdateManyMutationInput;
   where: {
+    browserVaultReplicaRef?: Prisma.HostedWorkspaceWhereInput["browserVaultReplicaRef"];
     userId: string;
     version: bigint;
   };
@@ -1317,8 +1515,13 @@ function createHostedWorkspaceTx(input: {
 
 function createHostedWorkspaceClient(input: {
   hostedWorkspace: ReturnType<typeof createHostedWorkspaceDelegate>;
-}) {
+}): NonNullable<Parameters<typeof ensureHostedWorkspace>[0]["prisma"]> & HostedWorkspaceTransactionRunner {
   return Object.assign(Object.create(null), {
     hostedWorkspace: input.hostedWorkspace,
-  }) as Parameters<typeof ensureHostedWorkspace>[0]["prisma"];
+    $transaction: async <T>(
+      run: (tx: Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"]) => Promise<T>,
+    ) => await run(createHostedWorkspaceTx({
+      hostedWorkspace: input.hostedWorkspace,
+    })),
+  }) as NonNullable<Parameters<typeof ensureHostedWorkspace>[0]["prisma"]> & HostedWorkspaceTransactionRunner;
 }
