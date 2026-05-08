@@ -2252,80 +2252,85 @@ describe("hosted workspace runtime entrypoint", () => {
         [deltaHash, delta.bundle],
       ]);
 
-      await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            reason: "manual",
-            workspaceVersion: "9",
-          },
+      const platform = createPlatform({
+        artifactBytesByHash,
+        artifactGetCalls,
+        mailboxPort: createMailboxPort({
+          events,
+          fetchRequests,
+          items: [
+            createMailboxItem({
+              id: "mailbox_item_entrypoint_legacy_current",
+              laneSeq: "3",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_entrypoint_legacy_next",
+              laneSeq: "4",
+            }),
+          ],
         }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(
-              `snapshot:${snapshotInput.reason}:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`,
-            );
-            return {
-              snapshotRef: createBundleRef({
-                hash: snapshotInput.reason === "activation_bootstrap"
-                  ? "b".repeat(64)
-                  : "c".repeat(64),
-                key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
-                size: 512,
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({
+            redactedStatus: {
+              hostedMailboxConversationImportedSeq: "3",
+            },
+            snapshotRef: buildHostedExecutionWorkingSnapshotRef({
+              base: createBundleRef({
+                hash: baseHash,
+                key: "users/bundles/member-synthetic/base.bundle.json",
+                size: baseBundle.byteLength,
               }),
-            };
-          },
-          async importItem(item) {
-            imported.push(item.item.laneSeq);
-            events.push(`import:${item.item.laneSeq}`);
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            artifactBytesByHash,
-            artifactGetCalls,
-            mailboxPort: createMailboxPort({
-              events,
-              fetchRequests,
-              items: [
-                createMailboxItem({
-                  id: "mailbox_item_entrypoint_legacy_current",
-                  laneSeq: "3",
-                }),
-                createMailboxItem({
-                  id: "mailbox_item_entrypoint_legacy_next",
-                  laneSeq: "4",
-                }),
-              ],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                redactedStatus: {
-                  hostedMailboxConversationImportedSeq: "3",
-                },
-                snapshotRef: buildHostedExecutionWorkingSnapshotRef({
-                  base: createBundleRef({
-                    hash: baseHash,
-                    key: "users/bundles/member-synthetic/base.bundle.json",
-                    size: baseBundle.byteLength,
-                  }),
-                  delta: createBundleRef({
-                    hash: deltaHash,
-                    key: "users/bundles/member-synthetic/delta.bundle.json",
-                    size: delta.bundle.byteLength,
-                  }),
-                }),
-                version: "9",
+              delta: createBundleRef({
+                hash: deltaHash,
+                key: "users/bundles/member-synthetic/delta.bundle.json",
+                size: delta.bundle.byteLength,
               }),
             }),
+            version: "9",
           }),
-          async runAssistantPhase() {
-            events.push("assistant");
-            return { progressed: false };
+        }),
+      });
+      const runOnce = async (attempt: number) =>
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_working_snapshot_restore_${attempt}`,
+              reason: "manual",
+              workspaceVersion: "9",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(
+                `snapshot:${snapshotInput.reason}:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`,
+              );
+              return {
+                snapshotRef: createBundleRef({
+                  hash: snapshotInput.reason === "activation_bootstrap"
+                    ? "b".repeat(64)
+                    : "c".repeat(64),
+                  key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              imported.push(item.item.laneSeq);
+              events.push(`import:${item.item.laneSeq}`);
+              return { status: "imported" };
+            },
+            platform,
+            async runAssistantPhase() {
+              events.push("assistant");
+              return { progressed: false };
+            },
+            vaultRoot,
           },
-          vaultRoot,
-        },
-      );
+        );
+
+      await runOnce(1);
 
       assert.deepEqual(artifactGetCalls, [baseHash, baseHash, deltaHash]);
       assert.deepEqual(imported, ["4"]);
@@ -2346,6 +2351,22 @@ describe("hosted workspace runtime entrypoint", () => {
         await readFile(path.join(vaultRoot, "note.md"), "utf8"),
         "current note\n",
       );
+      assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
+
+      artifactGetCalls.length = 0;
+      events.length = 0;
+      await runOnce(2);
+
+      assert.deepEqual(artifactGetCalls, []);
+      assert.deepEqual(imported, ["4"]);
+      assert.equal(fetchRequests.length, 2);
+      assert.equal(readConversationImportedSeq(fetchRequests[1]), "4");
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "assistant",
+      ]);
+      assert.deepEqual(checkpointRequests, []);
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

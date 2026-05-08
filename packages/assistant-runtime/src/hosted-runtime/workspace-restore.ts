@@ -65,6 +65,8 @@ const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-base-
 const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-restore-cache.json";
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-hot-restore-cache.v2";
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
+const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-working-restore-cache.v1";
+const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
 
 export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 
@@ -103,6 +105,15 @@ interface HostedWorkspaceHotRestoreCache {
   vaultRootName: string;
 }
 
+interface HostedWorkspaceWorkingRestoreCache {
+  baseSnapshotHash: string;
+  baseSnapshotSize: number;
+  deltaSnapshotHash: string;
+  deltaSnapshotSize: number;
+  schema: typeof HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA;
+  vaultRootName: string;
+}
+
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   logContext?: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
@@ -132,6 +143,54 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       mode: "null-bootstrap",
       restoreWasCold: false,
     };
+  }
+
+  if (baseSnapshotRef && deltaSnapshotRef && !hotSnapshotRef) {
+    const cachedWorkingRestore = await readHostedWorkspaceWorkingRestoreCache(restored.vaultRoot);
+    if (
+      cachedWorkingRestore
+      && isHostedWorkspaceWorkingRestoreCacheHit({
+        baseRef: baseSnapshotRef,
+        cache: cachedWorkingRestore,
+        deltaRef: deltaSnapshotRef,
+        vaultRoot: restored.vaultRoot,
+      })
+    ) {
+      try {
+        await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
+          assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
+        });
+        materializerBundles.push(
+          () => readHostedWorkspaceRuntimeBundle({
+            platform: input.platform,
+            ref: baseSnapshotRef,
+          }),
+          () => readHostedWorkspaceRuntimeBundle({
+            platform: input.platform,
+            ref: deltaSnapshotRef,
+          }),
+        );
+        await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+          platform: input.platform,
+          status: input.workspace?.redactedStatus ?? null,
+          vaultRoot: restored.vaultRoot,
+        });
+        return {
+          ...restored,
+          materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+            materializedArtifactPaths,
+            platform: input.platform,
+            restored,
+            readBundles: materializerBundles,
+          }),
+          materializedArtifactPaths,
+          mode: "snapshot",
+          restoreWasCold: false,
+        };
+      } catch {
+        await clearHostedWorkspaceWorkingRestoreCacheBestEffort(restored.vaultRoot);
+      }
+    }
   }
 
   let baseRestoreCacheHit = false;
@@ -305,6 +364,13 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
       assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
     });
+    if (!hotSnapshotRef) {
+      await writeHostedWorkspaceWorkingRestoreCacheBestEffort({
+        baseRef: baseSnapshotRef,
+        deltaRef: deltaSnapshotRef,
+        vaultRoot: restored.vaultRoot,
+      });
+    }
   }
 
   await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
@@ -729,6 +795,52 @@ async function clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot: string):
   }
 }
 
+async function readHostedWorkspaceWorkingRestoreCache(
+  vaultRoot: string,
+): Promise<HostedWorkspaceWorkingRestoreCache | null> {
+  try {
+    const contents = await readFile(resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot), "utf8");
+    const parsed: unknown = JSON.parse(contents);
+    return parseHostedWorkspaceWorkingRestoreCache(parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function writeHostedWorkspaceWorkingRestoreCacheBestEffort(input: {
+  baseRef: HostedExecutionBundleRef;
+  deltaRef: HostedExecutionBundleRef;
+  vaultRoot: string;
+}): Promise<void> {
+  try {
+    await writeFile(
+      resolveHostedWorkspaceWorkingRestoreCachePath(input.vaultRoot),
+      JSON.stringify({
+        baseSnapshotHash: input.baseRef.hash,
+        baseSnapshotSize: input.baseRef.size,
+        deltaSnapshotHash: input.deltaRef.hash,
+        deltaSnapshotSize: input.deltaRef.size,
+        schema: HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA,
+        vaultRootName: readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot),
+      } satisfies HostedWorkspaceWorkingRestoreCache) + "\n",
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+  } catch {
+    // Restore remains correct without the local working marker; the next run will cold-restore the delta.
+  }
+}
+
+async function clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
+  try {
+    await rm(resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot), { force: true });
+  } catch {
+    // A stale or missing cache marker only affects performance, not correctness.
+  }
+}
+
 function isHostedWorkspaceBaseRestoreCacheHit(input: {
   cache: HostedWorkspaceBaseRestoreCache;
   ref: HostedExecutionBundleRef;
@@ -752,6 +864,21 @@ function isHostedWorkspaceHotRestoreCacheHit(input: {
     && input.cache.baseSnapshotSize === input.baseRef.size
     && input.cache.hotSnapshotHash === input.hotRef.hash
     && input.cache.hotSnapshotSize === input.hotRef.size
+    && input.cache.vaultRootName === readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot)
+  );
+}
+
+function isHostedWorkspaceWorkingRestoreCacheHit(input: {
+  baseRef: HostedExecutionBundleRef;
+  cache: HostedWorkspaceWorkingRestoreCache;
+  deltaRef: HostedExecutionBundleRef;
+  vaultRoot: string;
+}): boolean {
+  return (
+    input.cache.baseSnapshotHash === input.baseRef.hash
+    && input.cache.baseSnapshotSize === input.baseRef.size
+    && input.cache.deltaSnapshotHash === input.deltaRef.hash
+    && input.cache.deltaSnapshotSize === input.deltaRef.size
     && input.cache.vaultRootName === readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot)
   );
 }
@@ -822,6 +949,41 @@ function parseHostedWorkspaceHotRestoreCache(
   };
 }
 
+function parseHostedWorkspaceWorkingRestoreCache(
+  value: unknown,
+): HostedWorkspaceWorkingRestoreCache | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (value.schema !== HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA) {
+    return null;
+  }
+  if (typeof value.baseSnapshotHash !== "string") {
+    return null;
+  }
+  if (typeof value.baseSnapshotSize !== "number") {
+    return null;
+  }
+  if (typeof value.deltaSnapshotHash !== "string") {
+    return null;
+  }
+  if (typeof value.deltaSnapshotSize !== "number") {
+    return null;
+  }
+  if (typeof value.vaultRootName !== "string") {
+    return null;
+  }
+
+  return {
+    baseSnapshotHash: value.baseSnapshotHash,
+    baseSnapshotSize: value.baseSnapshotSize,
+    deltaSnapshotHash: value.deltaSnapshotHash,
+    deltaSnapshotSize: value.deltaSnapshotSize,
+    schema: HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA,
+    vaultRootName: value.vaultRootName,
+  };
+}
+
 function readHostedWorkspaceRestoreCacheVaultRootName(vaultRoot: string): string {
   return path.basename(path.resolve(vaultRoot));
 }
@@ -837,6 +999,13 @@ function resolveHostedWorkspaceHotRestoreCachePath(vaultRoot: string): string {
   return path.join(
     path.dirname(path.resolve(vaultRoot)),
     HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME,
+  );
+}
+
+function resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot: string): string {
+  return path.join(
+    path.dirname(path.resolve(vaultRoot)),
+    HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME,
   );
 }
 
