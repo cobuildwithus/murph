@@ -30,7 +30,11 @@ export function getAssistantChannelAdapter(
     return null
   }
 
-  return ASSISTANT_CHANNEL_ADAPTERS[channel as AssistantChannelName] ?? null
+  if (!Object.hasOwn(ASSISTANT_CHANNEL_ADAPTERS, channel)) {
+    return null
+  }
+
+  return ASSISTANT_CHANNEL_ADAPTERS[channel as AssistantChannelName]
 }
 
 export {

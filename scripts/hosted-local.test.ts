@@ -152,6 +152,8 @@ describe("hosted-local harness", () => {
         "hosted-local",
         "run",
         "--api-key=sk_test_fixture",
+        "--token",
+        "split-token-fixture",
         `${process.cwd()}/local-command-path`,
       ],
       env: {
@@ -170,6 +172,7 @@ describe("hosted-local harness", () => {
       expect(text).not.toContain("chat-123");
       expect(text).not.toContain("hello from fixture");
       expect(text).not.toContain("sk_test_fixture");
+      expect(text).not.toContain("split-token-fixture");
       expect(text).not.toContain(process.cwd());
       expect(text).toContain('"HOSTED_MEMBER_ID": "[redacted]"');
       expect(text).toContain('"MURPH_DEV_SKIP_WEB": "1"');

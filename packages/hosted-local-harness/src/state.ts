@@ -179,10 +179,32 @@ function shouldRedactHostedLocalEnvValue(key: string): boolean {
 }
 
 function redactHostedLocalCommand(command: readonly string[]): readonly string[] {
-  return command.map((entry) => {
+  const redactedCommand: string[] = [];
+  let redactNext = false;
+
+  for (const entry of command) {
     const redacted = redactHostedLocalStateValue(entry);
-    return commandSensitiveKeyPattern.test(redacted) ? "[redacted]" : redacted;
-  });
+    if (redactNext) {
+      redactedCommand.push("[redacted]");
+      redactNext = false;
+      continue;
+    }
+
+    if (commandSensitiveKeyPattern.test(redacted)) {
+      redactedCommand.push("[redacted]");
+      redactNext = isSplitSensitiveCommandFlag(redacted);
+      continue;
+    }
+
+    redactedCommand.push(redacted);
+  }
+
+  return redactedCommand;
+}
+
+function isSplitSensitiveCommandFlag(value: string): boolean {
+  const normalized = value.trim();
+  return normalized.startsWith("-") && !normalized.includes("=");
 }
 
 function resolveHostedLocalRepoPath(value: string): string {

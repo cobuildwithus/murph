@@ -1043,6 +1043,56 @@ describe("@murphai/health-commons catalog coverage", () => {
     expect(() => buildHealthCommonsSourceIndex(catalogWithSensitiveUrl)).toThrow(
       "must not contain sensitive query parameter token",
     );
+    expect(() => buildHealthCommonsSourceIndex(catalogWithSensitiveUrl)).not.toThrow(
+      "secret",
+    );
+
+    const sourceWithCredentialUrl = {
+      ...sourcePage("source_artifact:example/credential-url", "credential-url"),
+      frontmatter: {
+        ...sourcePage("source_artifact:example/credential-url", "credential-url").frontmatter,
+        source: {
+          kind: "web_page",
+          url: "https://user:secret@example.com/credential-url",
+        },
+      },
+    } satisfies HealthCommonsSourcePage;
+    const catalogWithCredentialUrl = buildHealthCommonsCatalogFromContent({
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [sourceWithCredentialUrl],
+    });
+    expect(() => buildHealthCommonsSourceIndex(catalogWithCredentialUrl)).toThrow(
+      "Source index URL must not contain username or password.",
+    );
+    expect(() => buildHealthCommonsSourceIndex(catalogWithCredentialUrl)).not.toThrow(
+      "secret",
+    );
+
+    const catalogWithInvalidSensitiveUrl = {
+      ...catalogWithSensitiveUrl,
+      entities: catalogWithSensitiveUrl.entities.map((entity) => (
+        entity.key === "source_artifact:example/sensitive-url"
+          ? {
+              ...entity,
+              source: entity.source
+                ? {
+                    ...entity.source,
+                    url: "https://[secret",
+                  }
+                : entity.source,
+            }
+          : entity
+      )),
+    };
+    expect(() => buildHealthCommonsSourceIndex(catalogWithInvalidSensitiveUrl)).toThrow(
+      "Source index URL must be a valid URL.",
+    );
+    expect(() => buildHealthCommonsSourceIndex(catalogWithInvalidSensitiveUrl)).not.toThrow(
+      "secret",
+    );
   });
 
   it("allows source finding references to missing extracted artifacts", () => {

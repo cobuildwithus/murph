@@ -940,9 +940,9 @@ function sanitizeSourceIndexUrl(value: string | null | undefined): string | null
     }
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("must not contain")) {
-      throw new Error(`Source index URL ${value} ${error.message}.`);
+      throw new Error(`Source index URL ${error.message}.`);
     }
-    throw new Error(`Source index URL ${value} must be a valid URL.`);
+    throw new Error("Source index URL must be a valid URL.");
   }
 
   return normalizeUrl(value);
