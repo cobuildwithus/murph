@@ -544,7 +544,7 @@ describe("hosted deploy automation helpers", () => {
       "--publish 5432:5432",
       "docker exec \"${postgres_container}\" pg_isready -U postgres -d murph_test",
       "name: Stop Postgres",
-      "runs-on: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}",
+      "runs-on: ubuntu-24.04",
       "uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6",
       "uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5",
       "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
@@ -694,9 +694,7 @@ describe("hosted deploy automation helpers", () => {
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
     ]).toHaveLength(5);
     expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(1);
-    expect(workflow).not.toContain(
-      "inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && 'blacksmith-4vcpu-ubuntu-2404'",
-    );
+    expect(workflow).not.toMatch(/inputs\.deploy_worker.{0,160}blacksmith-4vcpu-ubuntu-2404/u);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
     ]).toHaveLength(3);

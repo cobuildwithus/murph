@@ -5,21 +5,21 @@ Updated: 2026-05-09
 
 ## Goal
 
-Reduce `pnpm cf:deploy:immediate` wall clock by moving the explicit break-glass deploy workflow back to protected-main Blacksmith runners.
+Reduce `pnpm cf:deploy:immediate` wall clock by moving explicit break-glass no-secret build prep back to protected-main Blacksmith runners.
 
 Success criteria:
 
 - Immediate Worker deploys run Blacksmith build-prep even when the normal predeploy E2E gates are skipped.
 - The build-prep job does not attach the production environment or read production secrets.
-- The immediate deploy job consumes build artifacts from the Blacksmith build-prep job, then renders/validates secrets/config and runs Wrangler deploy/smoke on Blacksmith only for the explicit protected-main break-glass input shape.
+- The immediate deploy job consumes build artifacts from the Blacksmith build-prep job, validates them before secret-bearing deploy preflight, then renders/validates secrets/config and runs Wrangler deploy/smoke on GitHub-hosted Ubuntu.
 - Normal non-immediate deploys keep the deploy job on GitHub-hosted Ubuntu.
-- Workflow-shape tests and deploy docs describe the Blacksmith production-secret trust boundary.
+- Workflow-shape tests and deploy docs describe the Blacksmith no-secret artifact-integrity trust boundary.
 
 ## Constraints
 
 - Preserve unrelated active worktree edits and active ledger rows.
 - Do not expose secrets, local account names, home paths, or direct personal identifiers in workflow output, docs, tests, or commits.
-- Keep the Blacksmith build-prep handoff free of production secrets; the immediate deploy job may trust Blacksmith for production secrets only for the protected-main break-glass input shape.
+- Keep Blacksmith jobs free of production secrets; the immediate handoff may trust Blacksmith only for protected-main no-secret artifact integrity.
 - Keep the normal non-immediate `cf:deploy` gate shape intact.
 
 ## Scope
@@ -40,32 +40,31 @@ Success criteria:
 
 ## State
 
-- Implementation and verification complete; final audit re-check is running.
+- Implementation and focused verification complete; scoped workspace verification is blocked by unrelated dirty assistant-engine TypeScript errors.
 
 ## Done
 
 - Read required routing, verification, completion, security, reliability, deploy, and CI docs.
 - Inspected current immediate path and confirmed it currently runs only the GitHub-hosted `deploy` job.
 - Added an immediate-only Blacksmith build-prep job with a runner-bundle/base-image artifact handoff.
-- Moved immediate production env/secrets, Wrangler dry-run/deploy, and deployed smoke onto Blacksmith only for the explicit protected-main break-glass input shape.
+- Kept immediate production env/secrets, Wrangler dry-run/deploy, and deployed smoke on the GitHub-hosted deploy job.
 - Added a runner-bundle manifest refresh script for downloaded immediate handoffs.
 - Updated workflow-shape tests and deploy docs.
 - Switched runner-bundle handoff to a tarball so artifact download preserves executable file modes.
 - Added deploy-artifact coverage for refreshing a downloaded bundle manifest after env-specific config render.
 - Addressed security review findings by documenting the intentional Blacksmith production artifact-integrity trust expansion and removing absolute path logging from the manifest refresh script.
-- Kept normal non-immediate secret-bearing deploy/smoke jobs on GitHub-hosted Ubuntu.
+- Kept all secret-bearing deploy/smoke jobs on GitHub-hosted Ubuntu.
 - Hardened immediate runner-bundle restore to reject unsupported archive entry types and symlink targets that escape the restored bundle root.
 - PASS: focused Cloudflare deploy/container/deploy-artifact Vitest.
 - PASS: `pnpm --dir apps/cloudflare typecheck`.
-- PASS: scoped `bash scripts/workspace-verify.sh test:diff ...` on the current task working set, including `apps/cloudflare verify`.
+- BLOCKED: scoped `bash scripts/workspace-verify.sh test:diff ...` on the current task working set now fails in unrelated dirty `packages/assistant-engine/src/assistant/automation/reply.ts` TypeScript errors.
 - PASS: `git diff --check` on the working set.
 - PASS: privacy identifier scan on the working set.
-- PASS: `pnpm docs:drift`.
-- 2026-05-09 security correction: immediate handoff manifest validation now runs before manifest refresh, so stale source or bundle fingerprints fail before the secret-bearing deploy job blesses downloaded Blacksmith artifacts.
+- 2026-05-09 security correction: immediate handoff manifest validation now runs directly after artifact restore and before secret-bearing deploy preflight.
 
 ## Now
 
-- Await final audit re-check and close/commit if the worktree allows a safe scoped commit.
+- Plan archived; scoped commit is blocked by unrelated overlapping dirty work in this checkout.
 
 ## Next
 
