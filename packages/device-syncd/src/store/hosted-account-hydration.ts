@@ -362,6 +362,7 @@ function buildClearedCredentialColumnsFromExisting(
 }
 
 function resolveHydratedHostedAccountCredential(input: {
+  acceptNonTokenCredential: boolean;
   connectionAccepted: boolean;
   existing: StoredDeviceSyncAccount | null;
   hydration: HostedAccountHydrationInput;
@@ -390,6 +391,7 @@ function resolveHydratedHostedAccountCredential(input: {
 
   if (
     input.connectionAccepted
+    && input.acceptNonTokenCredential
     && input.hydration.credential
     && input.hydration.credential.kind !== "oauth_tokens"
   ) {
@@ -454,24 +456,35 @@ export function resolveHostedAccountHydrationPlan(input: {
   tokenStateStale: boolean;
 }): {
   advanceTokenObservation: boolean;
+  acceptNonTokenCredential: boolean;
   connectionAccepted: boolean;
   tokenPayloadAction: HostedHydratedTokenPayloadAction;
 } {
   const connectionAccepted = input.existing === null || (!input.connectionStateStale && !input.connectionStateReplayed);
-  const tokenAccepted = !input.tokenStateStale && !input.tokenStateReplayed;
   const inputTokens = getHostedHydrationTokenInput(input.hydration);
-  const tokenClearRequested = input.hydration.clearTokens === true
-    || (
-      input.hydration.connection.status === "disconnected"
-      && inputTokens === undefined
-      && input.hydration.credential === undefined
-    );
+  const tokenBundleReplaysClearedCredential = inputTokens !== undefined
+    && input.existing?.credential.kind !== "oauth_tokens"
+    && typeof input.existing?.hostedObservedTokenVersion === "number"
+    && input.existing.hostedObservedTokenVersion === input.hydration.hostedObservedTokenVersion;
+  const tokenAccepted = !input.tokenStateStale
+    && !input.tokenStateReplayed
+    && !tokenBundleReplaysClearedCredential;
+  const disconnectedHostedClearRequested = input.hydration.connection.status === "disconnected"
+    && inputTokens === undefined
+    && input.hydration.credential === undefined;
+  const tokenClearRequested = input.hydration.clearTokens === true || disconnectedHostedClearRequested;
+  const tokenClearAccepted = !input.tokenStateStale
+    && connectionAccepted
+    && (disconnectedHostedClearRequested || !input.tokenStateReplayed);
+  const nonTokenCredentialReplacesOauthTokens = input.hydration.credential !== undefined
+    && input.hydration.credential.kind !== "oauth_tokens"
+    && input.existing?.credential.kind === "oauth_tokens";
 
   let tokenPayloadAction: HostedHydratedTokenPayloadAction = "keep";
 
   if (inputTokens !== undefined && tokenAccepted) {
     tokenPayloadAction = "apply_bundle";
-  } else if (tokenClearRequested && inputTokens === undefined && connectionAccepted && tokenAccepted) {
+  } else if (tokenClearRequested && inputTokens === undefined && tokenClearAccepted) {
     tokenPayloadAction = "clear";
   }
 
@@ -479,6 +492,8 @@ export function resolveHostedAccountHydrationPlan(input: {
     advanceTokenObservation: tokenAccepted
       && input.hydration.hostedObservedTokenVersion !== null
       && tokenPayloadAction !== "clear",
+    acceptNonTokenCredential: connectionAccepted
+      && (!nonTokenCredentialReplacesOauthTokens || tokenPayloadAction === "clear"),
     connectionAccepted,
     tokenPayloadAction,
   };
@@ -611,6 +626,7 @@ export function hydrateHostedAccount(
       ?? connectionUpdatedAt;
     const inputTokens = getHostedHydrationTokenInput(input);
     const credentialColumns = resolveHydratedHostedAccountCredential({
+      acceptNonTokenCredential: hydrationPlan.acceptNonTokenCredential,
       connectionAccepted: hydrationPlan.connectionAccepted,
       shouldClearTokens,
       existing,
@@ -624,7 +640,7 @@ export function hydrateHostedAccount(
       ? existing?.localConnectionRevision ?? 0
       : existing?.hostedObservedConnectionRevision ?? 0;
     const hostedObservedTokenVersion = shouldClearTokens
-      ? null
+      ? input.hostedObservedTokenVersion
       : hydrationPlan.advanceTokenObservation
         ? input.hostedObservedTokenVersion
         : existing?.hostedObservedTokenVersion ?? null;

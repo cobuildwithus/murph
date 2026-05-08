@@ -118,12 +118,12 @@ test("automation previews normalize each schedule shape and route selector field
         instructions: "Ping the assistant.\n",
         schedule: {
           kind: "every",
-          everyMs: 15_000,
+          everyMs: 60_000,
         },
       }),
       schedule: {
         kind: "every",
-        everyMs: 15_000,
+        everyMs: 60_000,
       },
       route: {
         channel: "telegram",
@@ -279,6 +279,13 @@ test("automation schedule normalization rejects malformed schedule shapes", asyn
         everyMs: 0,
       },
       message: "schedule.everyMs must be a positive integer.",
+    },
+    {
+      schedule: {
+        kind: "every",
+        everyMs: 59_999,
+      },
+      message: "schedule.everyMs must be at least 60000 ms.",
     },
     {
       schedule: {

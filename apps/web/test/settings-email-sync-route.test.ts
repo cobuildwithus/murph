@@ -5,11 +5,13 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
+  lockHostedMemberRow: vi.fn(),
   nudgeHostedRunnerBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
   },
+  readHostedMemberEmailAuthorization: vi.fn(),
   requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   sendHostedSignupWelcomeEmailForRecentMember: vi.fn(),
@@ -21,6 +23,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
   upsertHostedMemberEmailAuthorization: mocks.upsertHostedMemberEmailAuthorization,
 }));
 
@@ -45,6 +48,17 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
   return {
     ...actual,
     sendHostedSignupWelcomeEmailForRecentMember: mocks.sendHostedSignupWelcomeEmailForRecentMember,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/shared")>(
+    "@/src/lib/hosted-onboarding/shared",
+  );
+
+  return {
+    ...actual,
+    lockHostedMemberRow: mocks.lockHostedMemberRow,
   };
 });
 
@@ -102,9 +116,11 @@ describe("settings email sync route", () => {
         id: "did:privy:user_123",
       },
     });
+    mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.upsertHostedMemberEmailAuthorization.mockResolvedValue({});
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
-      eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
+      eventId: "member.channels.updated:settings.email.sync:member_123:2025-03-27T08:30:00.000Z",
     });
     mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
     mocks.sendHostedSignupWelcomeEmailForRecentMember.mockResolvedValue({
@@ -128,6 +144,11 @@ describe("settings email sync route", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireFreshActivePrivyMemberAuthForHostedAppSession).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(mocks.prismaClient, "member_123");
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
     expect(mocks.upsertHostedMemberEmailAuthorization).toHaveBeenCalledWith({
       directPublicSender: {
         address: "user@example.com",
@@ -143,7 +164,7 @@ describe("settings email sync route", () => {
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
       emailLinked: true,
       memberId: "member_123",
-      occurredAt: expect.any(String),
+      occurredAt: "2025-03-27T08:30:00.000Z",
       prisma: mocks.prismaClient,
       sourceType: "settings.email.sync",
     });
@@ -159,6 +180,46 @@ describe("settings email sync route", () => {
       emailAddress: "user@example.com",
       ok: true,
       runTriggered: true,
+      verifiedAt: "2025-03-27T08:30:00.000Z",
+    });
+  });
+
+  it("does not rewrite or nudge when the verified email facts are already synced", async () => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValueOnce({
+      directPublicSender: {
+        address: "USER@example.com",
+        authorizedAt: new Date("2025-03-27T08:30:00.000Z"),
+        lookupKey: "lk_direct",
+      },
+      memberId: "member_123",
+      stripeCheckoutEmail: null,
+      verifiedEmail: {
+        address: "user@example.com",
+        lookupKey: "lk_verified",
+        verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
+      },
+    });
+
+    const response = await settingsEmailSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/email/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(mocks.prismaClient, "member_123");
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      emailAddress: "user@example.com",
+      ok: true,
+      runTriggered: false,
       verifiedAt: "2025-03-27T08:30:00.000Z",
     });
   });

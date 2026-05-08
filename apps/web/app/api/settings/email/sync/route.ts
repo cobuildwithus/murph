@@ -2,14 +2,20 @@ import { getPrisma } from "@/src/lib/prisma";
 import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
+  readHostedMemberEmailAuthorization,
+  upsertHostedMemberEmailAuthorization,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requireFreshActivePrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "@/src/lib/hosted-onboarding/shared";
 import {
   HostedSignupWelcomeEmailError,
   sendHostedSignupWelcomeEmailForRecentMember,
@@ -35,44 +41,60 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const now = new Date().toISOString();
   const verifiedAt = new Date(verifiedEmail.verifiedAt * 1000).toISOString();
   const prisma = getPrisma();
-  await prisma.$transaction((tx) => {
-    return upsertHostedMemberEmailAuthorization({
+  const verifiedAtDate = new Date(verifiedAt);
+  const channelsUpdated = await prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, auth.member.id);
+    const currentAuthorization = await readHostedMemberEmailAuthorization({
+      memberId: auth.member.id,
+      prisma: tx,
+    });
+
+    if (hostedEmailAuthorizationMatchesVerifiedEmail({
+      address: verifiedEmail.address,
+      currentAuthorization,
+      verifiedAt: verifiedAtDate,
+    })) {
+      return false;
+    }
+
+    await upsertHostedMemberEmailAuthorization({
       directPublicSender: {
         address: verifiedEmail.address,
-        authorizedAt: new Date(verifiedAt),
+        authorizedAt: verifiedAtDate,
       },
       memberId: auth.member.id,
       prisma: tx,
       verifiedEmail: {
         address: verifiedEmail.address,
-        verifiedAt: new Date(verifiedAt),
+        verifiedAt: verifiedAtDate,
       },
-    }).then(() =>
-      enqueueHostedMemberChannelsUpdatedTx({
-        emailLinked: true,
-        memberId: auth.member.id,
-        occurredAt: now,
-        prisma: tx,
-        sourceType: "settings.email.sync",
-      })
-    );
+    });
+    await enqueueHostedMemberChannelsUpdatedTx({
+      emailLinked: true,
+      memberId: auth.member.id,
+      occurredAt: verifiedAt,
+      prisma: tx,
+      sourceType: "settings.email.sync",
+    });
+    return true;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   await sendSettingsEmailSyncWelcomeEmailBestEffort({
     memberId: auth.member.id,
     prisma,
   });
-  await nudgeHostedRunnerBestEffort({
-    context: "settings.email.sync",
-    userId: auth.member.id,
-  });
+  if (channelsUpdated) {
+    await nudgeHostedRunnerBestEffort({
+      context: "settings.email.sync",
+      userId: auth.member.id,
+    });
+  }
 
   return jsonOk({
     emailAddress: verifiedEmail.address,
     ok: true,
-    runTriggered: true,
+    runTriggered: channelsUpdated,
     verifiedAt,
   });
 });
@@ -107,4 +129,22 @@ function normalizeComparableEmail(value: string | null | undefined): string | nu
 
   const normalized = value.trim();
   return normalized ? normalized.toLowerCase() : null;
+}
+
+function hostedEmailAuthorizationMatchesVerifiedEmail(input: {
+  address: string;
+  currentAuthorization: Awaited<ReturnType<typeof readHostedMemberEmailAuthorization>>;
+  verifiedAt: Date;
+}): boolean {
+  const verifiedAddress = normalizeComparableEmail(input.address);
+  const currentVerifiedEmail = input.currentAuthorization?.verifiedEmail;
+  const currentDirectPublicSender = input.currentAuthorization?.directPublicSender;
+
+  return (
+    verifiedAddress !== null
+    && normalizeComparableEmail(currentVerifiedEmail?.address) === verifiedAddress
+    && currentVerifiedEmail?.verifiedAt.getTime() === input.verifiedAt.getTime()
+    && normalizeComparableEmail(currentDirectPublicSender?.address) === verifiedAddress
+    && currentDirectPublicSender?.authorizedAt.getTime() === input.verifiedAt.getTime()
+  );
 }
