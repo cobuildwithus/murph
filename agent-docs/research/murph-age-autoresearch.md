@@ -1,6 +1,6 @@
 # Murph Age Autoresearch
 
-Last verified: 2026-05-08
+Last verified: 2026-05-09
 
 ## Purpose
 
@@ -93,10 +93,12 @@ Local handoff artifacts:
 - R136 controlled-source landing-zone receipt: `output-packages/research/murph-age/autoresearch/admin-handoff/controlled-source-landing-zone-receipt-r136.md`
 - R137 source-activation ReviewGPT queue builder: `output-packages/research/murph-age/autoresearch/reviewgpt/r137-aric-mesa-source-activation-review-draft-summary.md`
 - R138 next-action status readout: `output-packages/research/murph-age/autoresearch/admin-handoff/aric-mesa-next-action-status-r138.md`
+- R139 frozen external adapter input schema: `output-packages/research/murph-age/autoresearch/loop/contracts/frozen-external-adapter-input-schema-r139.v0.json`
+- R139 adapter schema reviewer packet: `output-packages/research/murph-age/autoresearch/reviewer-packets/frozen-external-adapter-input-schema-r139.reviewer.md`
 
 If a human/admin owner can legally download ARIC/MESA materials under the relevant source terms, that can unblock the external-validation lane, but it does not by itself authorize Codex to inspect the files. Stage any controlled files only in an ignored local cache such as `.runtime/murph-age/controlled-sources/`, never in repo-tracked paths, `output-packages/`, chat, ReviewGPT packets, logs, or embeddings.
 
-R135 is the practical short-form bridge for access facts. It accepts checkbox-style fields such as source, download access, local analysis, aggregate metrics, product boundary, cache boundary, and reviewer readiness, then maps them into the existing R128/R123 label-only templates. R136 can check whether the ignored runtime landing zones contain entries without reporting file names, sizes, hashes, paths, or contents. R137 is fail-closed and creates ReviewGPT source-activation prompts only after R124 has prepared a metadata-only packet from ready real labels. R138 is the one-command no-content status readout for the current ARIC/MESA next safe action. Until R135/R123/R124 pass against real evidence, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
+R135 is the practical short-form bridge for access facts. It accepts checkbox-style fields such as source, download access, local analysis, aggregate metrics, product boundary, cache boundary, and reviewer readiness, then maps them into the existing R128/R123 label-only templates. R136 can check whether the ignored runtime landing zones contain entries without reporting file names, sizes, hashes, paths, or contents. R137 is fail-closed and creates ReviewGPT source-activation prompts only after R124 has prepared a metadata-only packet from ready real labels. R138 is the one-command no-content status readout for the current ARIC/MESA next safe action. R139 freezes the source-agnostic adapter input schema for the current NHANES Bench-0 anchor so future external-validation work has a stable target before any source-specific mapping begins. Until R135/R123/R124 pass against real evidence, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
 
