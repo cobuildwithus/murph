@@ -2958,13 +2958,130 @@ describe("hosted workspace runtime entrypoint", () => {
       artifactGetCalls.length = 0;
 
       await runOnce();
-      assert.deepEqual(artifactGetCalls, [initialHotHash]);
+      assert.deepEqual(artifactGetCalls, []);
       assert.equal(checkpointRequests.length, 0);
       artifactGetCalls.length = 0;
 
       await runOnce();
       assert.deepEqual(artifactGetCalls, []);
       assert.equal(checkpointRequests.length, 0);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
+      await rm(sourceHotVaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("preserves deferred mailbox watermarks across warm foreground restores", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
+    const sourceHotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-hot-"));
+    const events: string[] = [];
+    const artifactGetCalls: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const importedSeqs: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceBaseVaultRoot });
+      await writeFile(path.join(sourceBaseVaultRoot, "base-note.md"), "base\n", "utf8");
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const baseRef = createBundleRef({
+        hash: baseHash,
+        key: "users/bundles/member-synthetic/warm-mailbox-base.bundle.json",
+        size: baseBundle.byteLength,
+      });
+      artifactBytesByHash.set(baseHash, baseBundle);
+
+      const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+        vaultRoot: sourceHotVaultRoot,
+      });
+      const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+      const hotRef = createBundleRef({
+        hash: hotHash,
+        key: "users/bundles/member-synthetic/warm-mailbox-hot.bundle.json",
+        size: hotSnapshot.bundle.byteLength,
+      });
+      artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+
+      const workspace = createWorkspaceState({
+        snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+          base: baseRef,
+          hot: hotRef,
+        }),
+        version: "9",
+      });
+      const mailboxItem = createMailboxItem({
+        id: "mailbox_item_warm_restore_001",
+        laneSeq: "1",
+      });
+      const platform = createPlatform({
+        artifactBytesByHash,
+        artifactGetCalls,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          fetchRequests,
+          items: [mailboxItem],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace,
+        }),
+      });
+
+      const runOnce = async (attempt: number) =>
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_warm_mailbox_restore_${attempt}`,
+              workspaceVersion: workspace.version,
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              throw new Error("Foreground mailbox import should not checkpoint.");
+            },
+            async importItem(item) {
+              importedSeqs.push(item.item.laneSeq);
+              return { status: "imported" };
+            },
+            platform,
+            async runAssistantPhase() {
+              return { progressed: false };
+            },
+            vaultRoot,
+          },
+        );
+
+      await runOnce(1);
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(artifactGetCalls, [baseHash, hotHash]);
+      artifactGetCalls.length = 0;
+
+      await runOnce(2);
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(artifactGetCalls, []);
+      const secondFetch = fetchRequests.at(-1);
+      assert.ok(secondFetch);
+      assert.equal(
+        secondFetch.lanes.find((lane) => lane.lane === "conversation")?.importedSeq,
+        "1",
+      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
       await rm(sourceBaseVaultRoot, { force: true, recursive: true });
