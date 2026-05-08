@@ -6,7 +6,6 @@ export {
 
 import { createHostedWebSmokeEnvironment } from "../next-artifacts";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
@@ -24,6 +23,24 @@ const hostedWorkspaceStoreModuleSpecifier = new URL(
 interface HostedMailboxAppendForTestPrismaClient {
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+}
+
+type HostedTestPrismaClient =
+  & HostedMailboxAppendForTestPrismaClient
+  & HostedWorkspaceSeedForTestPrismaClient;
+
+interface HostedTestPrismaClientConstructor {
+  new (options: {
+    adapter: PrismaPg;
+    transactionOptions: {
+      maxWait: number;
+      timeout: number;
+    };
+  }): HostedTestPrismaClient;
+}
+
+interface HostedTestPrismaClientModule {
+  PrismaClient: HostedTestPrismaClientConstructor;
 }
 
 interface HostedMailboxAppendForTestStoreModule {
@@ -97,7 +114,7 @@ export async function appendHostedExecutionWakeForTest(input: {
   const modules = await loadHostedMailboxAppendForTestModules(
     applyHostedMailboxAppendForTestEnvironment(input.environment),
   );
-  const prisma = createHostedTestPrisma(modules.environment);
+  const prisma = await createHostedTestPrisma(modules.environment);
 
   try {
     const append = await prisma.$transaction(async (tx) =>
@@ -134,7 +151,7 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
   const modules = await loadHostedWorkspaceSeedForTestModules(
     applyHostedMailboxAppendForTestEnvironment(input.environment),
   );
-  const prisma = createHostedTestPrisma(modules.environment);
+  const prisma = await createHostedTestPrisma(modules.environment);
 
   try {
     const workspace = await modules.ensureHostedWorkspace({
@@ -215,12 +232,21 @@ async function loadHostedWorkspaceSeedForTestModules(
   };
 }
 
-function createHostedTestPrisma(environment: NodeJS.ProcessEnv): PrismaClient {
+async function createHostedTestPrisma(
+  environment: NodeJS.ProcessEnv,
+): Promise<HostedTestPrismaClient> {
   if (!environment.DATABASE_URL) {
     throw new Error("Hosted test helpers require DATABASE_URL.");
   }
 
-  return new PrismaClient({
+  const prismaClientPackageName = "@prisma/client";
+  const prismaClientModule: unknown = await import(prismaClientPackageName);
+
+  if (!isHostedTestPrismaClientModule(prismaClientModule)) {
+    throw new TypeError("Hosted test helpers could not load PrismaClient.");
+  }
+
+  return new prismaClientModule.PrismaClient({
     adapter: new PrismaPg({
       connectionString: normalizeTestPrismaConnectionString(environment.DATABASE_URL),
       connectionTimeoutMillis: 5_000,
@@ -232,6 +258,16 @@ function createHostedTestPrisma(environment: NodeJS.ProcessEnv): PrismaClient {
       timeout: 15_000,
     },
   });
+}
+
+function isHostedTestPrismaClientModule(
+  value: unknown,
+): value is HostedTestPrismaClientModule {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  return typeof Reflect.get(value, "PrismaClient") === "function";
 }
 
 function normalizeTestPrismaConnectionString(databaseUrl: string): string {
