@@ -1,4 +1,4 @@
-# Browser vault refresh preemption
+# Browser-vault refresh scheduling and preemption cleanup
 
 Status: completed
 Created: 2026-05-09
@@ -6,54 +6,86 @@ Updated: 2026-05-09
 
 ## Goal
 
-- Prevent optional dashboard/browser-vault refresh preemption from destroying the warm hosted runner container.
+- Preserve uncheckpointed warm hosted runner state when optional detached browser-vault refresh work is preempted by foreground work or aborts/fails.
+- Keep the browser-vault refresh schedule result truthful now that scheduling only queues a continuation and never starts immediately.
 
 ## Success criteria
 
-- Foreground nudge/manual work aborts the optional refresh coordinator signal and logs the preemption.
-- Foreground preemption does not call `destroyHostedExecutionContainer` through the browser-vault refresh coordinator.
-- Existing explicit cleanup/destroy paths for failed, stale, or idle-shutdown lifecycle cases remain unchanged.
-- Focused tests prove active refresh preemption does not destroy the runner container.
+- Foreground preemption aborts the optional browser-vault refresh without destroying/stopping the warm runner container.
+- Browser-vault refresh abort/failure clears refresh authority/proxy state but does not stop the warm runner unless fail-closed outbound proxy expiry fails.
+- Browser-vault refresh schedule responses expose `scheduled: true` instead of the misleading `immediateRefreshStarted`.
+- The coordinator no longer accepts unused alarm-sync dependencies.
+- Focused Cloudflare runner tests cover both coordinator preemption and container refresh abort behavior.
 
 ## Scope
 
 - In scope:
-- `apps/cloudflare/src/browser-vault-refresh/coordinator.ts`
-- `apps/cloudflare/src/user-runner.ts`
-- focused `apps/cloudflare/test/user-runner-alarm.test.ts` coverage
+- `apps/cloudflare` browser-vault refresh coordinator, runner container refresh lifecycle, worker route response shape, hosted-control client parser, and focused tests.
 - Out of scope:
-- broader hosted runner lifecycle, idle checkpoint cleanup, browser-vault publish authority, and unrelated dirty worktree edits.
+- Browser-vault replica schema, web session APIs, workspace checkpoint format, and unrelated hosted-local or hosted-web work already dirty in the checkout.
 
 ## Constraints
 
-- Preserve the current lifecycle lock behavior where foreground work may wait for an in-flight container request.
-- Keep the fix small and architectural: cooperative abort and scheduling only, no new control plane or compatibility shim.
-- Preserve unrelated dirty worktree edits.
+- Technical constraints:
+- Optional browser-vault refresh must never intentionally destroy live warm state.
+- Foreground invocation and pending nudge preemption must still abort the detached refresh promptly.
+- Fail closed only when outbound proxy authority cannot be expired.
+- The container RPC payload for browser-vault refresh must stay JSON-serializable: no `AbortSignal` or other live process objects cross the Cloudflare Container boundary.
+- Product/process constraints:
+- Preserve unrelated working-tree edits and active ledger rows.
+- Do not expose sensitive identifiers in logs, tests, or handoff.
 
 ## Risks and mitigations
 
-1. Risk: overlapping active Cloudflare runner edits block a scoped commit.
-   Mitigation: keep the diff narrow and report the exact blocker if commit automation cannot isolate this task safely.
-2. Risk: optional refresh that ignores abort runs late.
-   Mitigation: rely on existing lifecycle serialization and pending-refresh continuation instead of destroying live warm state.
+1. Risk:
+   Refresh authority remains valid after an aborted optional refresh.
+   Mitigation:
+   Keep explicit outbound proxy expiry in the refresh finally path and stop warm state only if expiry fails.
+2. Risk:
+   Foreground work races with refresh cleanup.
+   Mitigation:
+   Coordinator abort remains synchronous and foreground drain still waits on the tracked refresh promise.
 
 ## Tasks
 
-1. Remove `destroyActiveRefreshContainer` from the browser-vault refresh coordinator.
-2. Remove the `HostedUserRunner` wiring that maps refresh preemption to container destruction.
-3. Update focused foreground-preemption tests to assert no destroy occurs.
-4. Run focused Cloudflare verification and required audits.
-5. Commit through `scripts/finish-task` or report scoped-commit blockers.
+1. Inspect current coordinator/container lifecycle and existing regression tests.
+2. Remove active-container destroy from browser-vault refresh foreground preemption.
+3. Change browser-vault refresh finally behavior to keep warm state after abort/failure when proxy expiry succeeds.
+4. Update focused tests to assert preemption aborts without destruction and abort/failure does not stop warm runner.
+5. Rename the browser-vault refresh schedule result from `immediateRefreshStarted` to `scheduled` and remove unused coordinator dependency injection.
+6. Run focused verification, required audits, typecheck, and close the plan.
 
 ## Decisions
 
-- Choose cooperative refresh preemption only. The optional refresh must not own authority to destroy the warm runner container.
+- Browser-vault refresh follows a "never kill live state" rule except when fail-closed outbound proxy cleanup fails.
+- Browser-vault refresh cancellation is a DO/wrapper concern: the wrapper may race the local wait on an `AbortSignal`, but `HostedExecutionContainerBrowserVaultRefreshRequest` and the container-side invocation path do not accept or consume `signal`.
+- Browser-vault refresh scheduling returns `scheduled: true`; immediate-start reporting is intentionally not part of the new contract.
 
 ## Verification
 
-- Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/browser-vault-refresh-coordinator.test.ts apps/cloudflare/test/user-runner-alarm.test.ts --testNamePattern "browser-vault refresh|BrowserVaultRefreshCoordinator"` (2 files, 14 passed, 72 skipped).
-- Passed: `pnpm --dir apps/cloudflare typecheck`.
-- Passed: `git diff --check -- apps/cloudflare/src/browser-vault-refresh/coordinator.ts apps/cloudflare/src/user-runner.ts apps/cloudflare/test/browser-vault-refresh-coordinator.test.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/completed/2026-05-09-browser-vault-refresh-preemption.md`.
-- Earlier focused checks used the old dashboard-replica names before the active checkout moved the coordinator to `browser-vault-refresh`; the current proof above is the relevant one.
-- Blocked: `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/browser-vault-refresh/coordinator.ts apps/cloudflare/src/user-runner.ts apps/cloudflare/test/browser-vault-refresh-coordinator.test.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/completed/2026-05-09-browser-vault-refresh-preemption.md` reaches `apps/cloudflare verify` but fails in unrelated active `apps/cloudflare/test/user-runner-alarm.test.ts` alarm/idle-checkpoint expectation work outside the browser-vault preemption cases.
+- Commands to run:
+- `pnpm --dir apps/cloudflare test -- browser-vault-refresh-coordinator runner-container user-runner-alarm`
+- `pnpm test:diff apps/cloudflare/src/browser-vault-refresh/coordinator.ts apps/cloudflare/src/user-runner.ts apps/cloudflare/src/worker-routes/shared.ts apps/cloudflare/src/index.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/browser-vault-refresh-coordinator.test.ts apps/cloudflare/test/index.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/user-runner-alarm.test.ts packages/cloudflare-hosted-control/src/client.ts packages/cloudflare-hosted-control/test/client.test.ts apps/web/test/browser-vault-session-route.test.ts`
+- `pnpm typecheck`
+- Expected outcomes:
+- Focused and diff-aware Cloudflare tests pass.
+- Typecheck passes or any unrelated pre-existing blocker is identified with evidence.
+
+## Results
+
+- Implemented:
+  - Coordinator foreground preemption aborts optional refresh without destroying the runner container.
+  - HostedUserRunner no longer wires browser-vault refresh preemption to container destruction.
+  - RunnerContainer keeps warm state after browser-vault refresh abort/failure when outbound proxy cleanup succeeds.
+  - RunnerContainer supports attempt-id targeted browser-vault refresh aborts so preemption cancels active or queued refresh work and clears proxy authority before the caller treats it as aborted.
+- Verification:
+  - Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts` (83 tests).
+  - Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/browser-vault-refresh-coordinator.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/user-runner-alarm.test.ts` (3 files, 153 tests).
+  - Passed: `git diff --check -- apps/cloudflare/src/browser-vault-refresh/coordinator.ts apps/cloudflare/src/user-runner.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/browser-vault-refresh-coordinator.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-09-browser-vault-refresh-preemption.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`.
+  - Failed outside this task: `bash scripts/workspace-verify.sh test:diff ...` reached `apps/cloudflare verify` and failed on existing assistant-runtime type errors in `packages/assistant-runtime/src/hosted-runtime/callbacks.ts` and `packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts`.
+  - Failed outside this task: `pnpm typecheck` failed in `packages/cloudflare-hosted-control/src/client.ts` on missing `requireTrue`.
+- Audits:
+  - `coverage-write`: no additional proof needed; focused tests already cover abort-only preemption, no destroy, warm-shell reuse, and cleanup behavior.
+  - `security-privacy-review`: initial medium finding about caller abort not cancelling underlying refresh authority was fixed with attempt-id targeted abort.
+  - `task-finish-review`: initial medium findings about queued abort and optional abort support were fixed with pending attempt aborts and fail-closed abort support requirements.
 Completed: 2026-05-09

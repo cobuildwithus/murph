@@ -268,11 +268,21 @@ export class HostedUserRunner {
       return;
     }
 
-    if (
-      dueAlarm.kind === "none"
-      && await this.browserVaultRefreshCoordinator.tryStart({
+    const debugStarted = dueAlarm.kind === "none"
+      ? await this.browserVaultRefreshCoordinator.tryStart({
         userId: record.userId,
       })
+      : false;
+    console.error("debug alarm browser refresh", {
+      dueKind: dueAlarm.kind,
+      debugStarted,
+      inFlight: record.inFlight,
+      pendingNudge: record.pendingNudge,
+      userId: record.userId,
+    });
+    if (
+      dueAlarm.kind === "none"
+      && debugStarted
     ) {
       await this.runtimeAlarmScheduler.syncStoredAlarm();
       emitHostedExecutionStructuredLog({

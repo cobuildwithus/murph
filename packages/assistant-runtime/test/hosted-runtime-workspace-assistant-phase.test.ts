@@ -1723,6 +1723,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeBackgroundDueIntents: true,
+      }),
+    );
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
