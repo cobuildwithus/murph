@@ -66,6 +66,7 @@ export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 export interface HostedWorkspaceRuntimeRestoreResult
   extends HostedRestoredExecutionContext {
   mode: HostedWorkspaceRuntimeRestoreMode;
+  restoreWasCold: boolean;
 }
 
 export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
@@ -111,10 +112,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     return {
       ...restored,
       mode: "null-bootstrap",
+      restoreWasCold: false,
     };
   }
 
   let baseRestoreCacheHit = false;
+  let restoreWasCold = false;
   if (baseSnapshotRef) {
     const cachedBaseRestore = await readHostedWorkspaceBaseRestoreCache(restored.vaultRoot);
     let useCachedBaseRestore = false;
@@ -142,6 +145,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     if (useCachedBaseRestore) {
       baseRestoreCacheHit = true;
     } else {
+      restoreWasCold = true;
       const baseBundle = await readHostedWorkspaceRuntimeBundle({
         platform: input.platform,
         ref: baseSnapshotRef,
@@ -203,6 +207,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
       } catch {
         await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
+        restoreWasCold = true;
         await restoreHostedWorkspaceRuntimeHotLayer({
           hotSnapshotRef,
           input,
@@ -211,6 +216,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       }
     } else {
       await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
+      restoreWasCold = true;
       await restoreHostedWorkspaceRuntimeHotLayer({
         hotSnapshotRef,
         input,
@@ -220,6 +226,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   }
 
   if (deltaSnapshotRef) {
+    restoreWasCold = true;
     if (!baseSnapshotRef) {
       throw new HostedWorkspaceRuntimeSnapshotRestoreError(deltaSnapshotRef.hash);
     }
@@ -272,6 +279,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   return {
     ...restored,
     mode: "snapshot",
+    restoreWasCold,
   };
 }
 

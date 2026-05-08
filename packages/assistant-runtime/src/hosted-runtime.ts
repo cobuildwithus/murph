@@ -76,6 +76,8 @@ import {
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
   ensureHostedInboxSidecarReady,
+  invalidateHostedInboxSidecarReady,
+  isHostedInboxSidecarReady,
 } from "./hosted-runtime/context.ts";
 import {
   enqueueHostedSystemMailboxItem,
@@ -524,10 +526,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     assertRuntimeLiveness();
+    if (restored.restoreWasCold) {
+      invalidateHostedInboxSidecarReady(restored.vaultRoot);
+    }
+    const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
     await raceHostedRuntimeLiveness(
       ensureHostedInboxSidecarReady({
         bestEffort: true,
-        rebuild: true,
+        rebuild: !inboxReady && restored.restoreWasCold,
         requestId,
         vaultRoot: restored.vaultRoot,
       }),

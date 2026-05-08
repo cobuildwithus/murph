@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
@@ -74,6 +75,14 @@ const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelStat
 };
 const DEFAULT_HOSTED_MEMBER_TIME_ZONE = "America/New_York";
 const hostedInboxSidecarReadyByVaultRoot = new Map<string, boolean>();
+
+export function isHostedInboxSidecarReady(vaultRoot: string): boolean {
+  return hostedInboxSidecarReadyByVaultRoot.get(path.resolve(vaultRoot)) === true;
+}
+
+export function invalidateHostedInboxSidecarReady(vaultRoot: string): void {
+  hostedInboxSidecarReadyByVaultRoot.set(path.resolve(vaultRoot), false);
+}
 
 export async function prepareHostedWakeContext(
   vaultRoot: string,
@@ -575,17 +584,31 @@ export async function ensureHostedInboxSidecarReady(input: {
   requestId: string;
   vaultRoot: string;
 }): Promise<boolean> {
+  const startedAt = performance.now();
+  const vaultRoot = path.resolve(input.vaultRoot);
   const inboxServices = createIntegratedInboxServices();
   try {
     await inboxServices.init({
       rebuild: input.rebuild,
       requestId: input.requestId,
-      vault: input.vaultRoot,
+      vault: vaultRoot,
     });
-    hostedInboxSidecarReadyByVaultRoot.set(input.vaultRoot, true);
+    hostedInboxSidecarReadyByVaultRoot.set(vaultRoot, true);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.inbox",
+      details: {
+        elapsedMs: readHostedInboxSidecarElapsedMs(startedAt),
+        ready: true,
+        rebuild: input.rebuild,
+        requestId: input.requestId,
+      },
+      level: "info",
+      message: "Hosted inbox sidecar bootstrap finished.",
+      phase: "wake.running",
+    });
     return true;
   } catch (error) {
-    hostedInboxSidecarReadyByVaultRoot.set(input.vaultRoot, false);
+    hostedInboxSidecarReadyByVaultRoot.set(vaultRoot, false);
     if (!input.bestEffort) {
       throw error;
     }
@@ -593,8 +616,9 @@ export async function ensureHostedInboxSidecarReady(input: {
     emitHostedExecutionStructuredLog({
       component: "hosted.inbox",
       details: {
+        elapsedMs: readHostedInboxSidecarElapsedMs(startedAt),
         errorMessage: "hosted_inbox_sidecar_bootstrap_failed",
-        errorName: error instanceof Error ? error.name : typeof error,
+        ready: false,
         rebuild: input.rebuild,
         requestId: input.requestId,
       },
@@ -606,14 +630,19 @@ export async function ensureHostedInboxSidecarReady(input: {
   }
 }
 
+function readHostedInboxSidecarElapsedMs(startedAt: number): number {
+  return Math.max(0, Math.round(performance.now() - startedAt));
+}
+
 export async function prepareHostedInboxProjectionRuntime(
   vaultRoot: string,
   requestId: string,
 ): Promise<void> {
+  const normalizedVaultRoot = path.resolve(vaultRoot);
   await ensureHostedInboxSidecarReady({
     bestEffort: false,
-    rebuild: hostedInboxSidecarReadyByVaultRoot.get(vaultRoot) !== true,
+    rebuild: !isHostedInboxSidecarReady(normalizedVaultRoot),
     requestId,
-    vaultRoot,
+    vaultRoot: normalizedVaultRoot,
   });
 }
