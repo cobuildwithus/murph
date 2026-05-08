@@ -2678,6 +2678,49 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(latestAlarmMs).toBeLessThan(Date.parse("2026-04-27T00:00:02.000Z"));
   });
 
+  it("aborts an active dashboard replica refresh before foreground manual work starts", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("refresh-preempted-by-manual"),
+      version: "4",
+    });
+    const activeRefresh = createDeferred<Awaited<ReturnType<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >>>();
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => await activeRefresh.promise);
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle",
+    }));
+    const { runner } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+      refreshBrowserVaultReplica,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleDashboardReplicaRefreshForUser({
+      sourceStateHash: "refresh-preempted-by-manual-base_hash",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      immediateRefreshStarted: true,
+    });
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledOnce();
+    activeRefresh.resolve({
+      status: "already_fresh",
+    });
+    await flushDetachedRunnerDrive();
+  });
+
   it("does not publish dashboard replica refresh output when a nudge arrives during the final workspace check", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("refresh-publish-preempted-by-nudge"),
@@ -2866,9 +2909,9 @@ describe("HostedUserRunner runtime crypto context", () => {
 	        userId: input.userId,
 	      };
 	    });
-	    const { runner } = createRunnerCryptoContextHarness(workspace, {
-	      refreshBrowserVaultReplica,
-	    });
+		    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
+		      refreshBrowserVaultReplica,
+		    });
 	    await runner.bindUser("member_123");
 
 	    await expect(runner.scheduleDashboardReplicaRefreshForUser({
@@ -2877,12 +2920,13 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    })).resolves.toMatchObject({
 	      immediateRefreshStarted: true,
 	    });
-	    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
-	      expect.objectContaining({
-	        sourceStateHash: "refresh-a-base_hash",
-	        userId: "member_123",
-	      }),
-	    ));
+		    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
+		      expect.objectContaining({
+		        sourceStateHash: "refresh-a-base_hash",
+		        userId: "member_123",
+		      }),
+		    ));
+		    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
 
 	    workspace.snapshotRef = createLayeredSnapshotRef("refresh-b");
 	    workspace.version = "5";
@@ -2984,6 +3028,8 @@ describe("HostedUserRunner runtime crypto context", () => {
   });
 
   it("clears pending dashboard replica refresh when the generated replica is too large", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("refresh-too-large"),
       version: "4",
@@ -3019,7 +3065,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await flushDetachedRunnerDrive();
     expect(browserVaultPublish).not.toHaveBeenCalled();
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
-    expect(alarms).toEqual([]);
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
   });
 
 	  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {

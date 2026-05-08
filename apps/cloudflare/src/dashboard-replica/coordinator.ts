@@ -26,7 +26,7 @@ export class DashboardReplicaCoordinator {
     private readonly deps: {
       continuationDelayMs: number;
       destroyActiveRefreshContainer: (input: { userId: string }) => Promise<void> | null;
-      getForegroundLock: () => Promise<void> | null;
+      hasForegroundWork: () => boolean;
       readStateForRetryScheduling: () => Promise<RunnerStateRecord | null>;
       retryDelayMs: number;
       runPendingRefresh: (input: { signal: AbortSignal; userId: string }) => Promise<void>;
@@ -69,18 +69,16 @@ export class DashboardReplicaCoordinator {
     const immediateRefreshStarted = await this.startDetachedRefresh({
       userId: input.userId,
     });
-    if (!immediateRefreshStarted) {
-      await this.scheduleContinuation({
-        userId: input.userId,
-      });
-    }
+    await this.scheduleContinuation({
+      userId: input.userId,
+    });
     return immediateRefreshStarted;
   }
 
   async tryStart(input: {
     userId?: string | null;
   } = {}): Promise<boolean> {
-    if (this.refreshLock !== null || this.deps.getForegroundLock() !== null) {
+    if (this.refreshLock !== null || this.deps.hasForegroundWork()) {
       return false;
     }
 
@@ -103,7 +101,7 @@ export class DashboardReplicaCoordinator {
     });
   }
 
-  async scheduleContinuation(input: {
+  private async scheduleContinuation(input: {
     delayMs?: number;
     userId: string;
   }): Promise<boolean> {
@@ -142,17 +140,16 @@ export class DashboardReplicaCoordinator {
   }
 
   abortForForegroundWork(input: {
-    reason: string;
+    reason: "foreground_invocation" | "pending_nudge";
     userId: string;
   }): void {
-    if (!this.refreshAbortController) {
+    const abortController = this.refreshAbortController;
+    if (!abortController || abortController.signal.aborted) {
       return;
     }
 
-    this.refreshAbortController.abort(new Error(input.reason));
-    if (input.reason === "pending_nudge") {
-      this.refreshPreemptedByForeground = true;
-    }
+    abortController.abort(new Error(input.reason));
+    this.refreshPreemptedByForeground = true;
     const destroy = this.deps.destroyActiveRefreshContainer({
       userId: input.userId,
     });
@@ -212,7 +209,7 @@ export class DashboardReplicaCoordinator {
   private async startDetachedRefresh(input: {
     userId: string;
   }): Promise<boolean> {
-    if (this.refreshLock !== null || this.deps.getForegroundLock() !== null) {
+    if (this.refreshLock !== null || this.deps.hasForegroundWork()) {
       return false;
     }
 
@@ -221,7 +218,7 @@ export class DashboardReplicaCoordinator {
       record.pendingNudge
       || record.inFlight
       || this.refreshLock !== null
-      || this.deps.getForegroundLock() !== null
+      || this.deps.hasForegroundWork()
     ) {
       return false;
     }

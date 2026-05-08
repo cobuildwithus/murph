@@ -1325,6 +1325,49 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
+  it("falls back to the old browser-vault refresh Durable Object method during deploy skew", async () => {
+    const sourceStateHash = "b".repeat(64);
+    const scheduleBrowserVaultRefreshForUser = vi.fn(async (input: {
+      sourceStateHash: string;
+      userId: string;
+    }) => ({
+      accepted: true as const,
+      immediateRefreshStarted: false,
+      sourceStateHash: input.sourceStateHash,
+      userId: input.userId,
+    }));
+    const stub = createUserRunnerStub({
+      scheduleBrowserVaultRefreshForUser,
+      scheduleDashboardReplicaRefreshForUser: undefined,
+    });
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
+        body: JSON.stringify({ sourceStateHash }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      immediateRefreshStarted: false,
+      sourceStateHash,
+      userId: "member_123",
+    });
+    expect(scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
+      sourceStateHash,
+      userId: "member_123",
+    });
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+  });
+
   it("deletes hosted runner user data without queuing a new invocation", async () => {
     const stub = createUserRunnerStub({
       deleteHostedUserData: vi.fn(async (userId: string) => ({
@@ -2183,6 +2226,15 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       workspace: null,
     })),
     scheduleDashboardReplicaRefreshForUser: vi.fn(async (input: {
+      sourceStateHash: string;
+      userId: string;
+    }) => ({
+      accepted: true as const,
+      immediateRefreshStarted: false,
+      sourceStateHash: input.sourceStateHash,
+      userId: input.userId,
+    })),
+    scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
       sourceStateHash: string;
       userId: string;
     }) => ({

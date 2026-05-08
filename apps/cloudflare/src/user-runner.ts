@@ -183,7 +183,7 @@ export class HostedUserRunner {
           userId,
         }).then(() => undefined);
       },
-      getForegroundLock: () => this.invocationLock,
+      hasForegroundWork: () => this.invocationLock !== null,
       readStateForRetryScheduling: async () => await this.tryReadStateForRetryScheduling(),
       retryDelayMs: this.env.retryDelayMs,
       runPendingRefresh: async (input) => await this.runPendingDashboardReplicaRefresh(input),
@@ -553,6 +553,13 @@ export class HostedUserRunner {
     return await this.dashboardReplicaCoordinator.schedule(input);
   }
 
+  async scheduleBrowserVaultRefreshForUser(input: {
+    sourceStateHash: string;
+    userId: string;
+  }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
+    return await this.scheduleDashboardReplicaRefreshForUser(input);
+  }
+
   async ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -749,6 +756,10 @@ export class HostedUserRunner {
       };
     }
 
+    this.dashboardReplicaCoordinator.abortForForegroundWork({
+      reason: "foreground_invocation",
+      userId: initialRecord.userId,
+    });
     let lease = await this.stateStore.beginInvocation({
       consumePendingNudge: input.reason === "idle_shutdown_checkpoint" ? false : undefined,
       reason: input.reason,

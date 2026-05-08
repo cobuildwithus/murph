@@ -1339,7 +1339,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
-      browserVaultRefreshSourceStateHash: sourceBundleHash,
+      dashboardReplicaSourceStateHash: sourceBundleHash,
       fetchImpl: fetchMock as typeof fetch,
       internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: null,

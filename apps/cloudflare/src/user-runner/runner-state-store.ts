@@ -134,15 +134,6 @@ export class RunnerStateStore {
     return { deleted: true };
   }
 
-  async scheduleBrowserVaultRefresh(input: {
-    sourceStateHash: string;
-  }): Promise<{
-    deduped: boolean;
-    sourceStateHash: string;
-  }> {
-    return this.scheduleDashboardReplicaRefresh(input);
-  }
-
   async scheduleDashboardReplicaRefresh(input: {
     sourceStateHash: string;
   }): Promise<{
@@ -176,12 +167,6 @@ export class RunnerStateStore {
     };
   }
 
-  async readPendingBrowserVaultRefresh(): Promise<{
-    sourceStateHash: string;
-  } | null> {
-    return this.readPendingDashboardReplicaRefresh();
-  }
-
   async readPendingDashboardReplicaRefresh(): Promise<{
     sourceStateHash: string;
   } | null> {
@@ -199,12 +184,6 @@ export class RunnerStateStore {
       && record.sourceStateHash.length > 0
       ? { sourceStateHash: record.sourceStateHash }
       : null;
-  }
-
-  async clearPendingBrowserVaultRefresh(input: {
-    sourceStateHash: string;
-  }): Promise<boolean> {
-    return this.clearPendingDashboardReplicaRefresh(input);
   }
 
   async clearPendingDashboardReplicaRefresh(input: {
