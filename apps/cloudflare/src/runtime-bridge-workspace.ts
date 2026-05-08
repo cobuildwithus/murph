@@ -13,6 +13,7 @@ import {
   buildHostedExecutionLayeredSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
+  readHostedExecutionSnapshotHotRef,
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -34,6 +35,7 @@ import {
   HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
   HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
   createHostedPortableWorkspaceManifestFromBundle,
+  listHostedBundleArtifacts,
   readHostedPortableWorkspaceDeltaManifestFromBundle,
   readHostedPortableWorkspaceManifestFromBundle,
   sha256HostedBundleHex,
@@ -497,8 +499,15 @@ async function createHostedWorkspaceBridgeHotStateCheckpointSnapshot(input: {
   }
 
   const startedAt = Date.now();
+  let externalArtifactPutBytes = 0;
+  let externalArtifactPutCount = 0;
   let bundlePutBytes = 0;
   let leaseCheckCount = 0;
+  const codexContinuityArtifactRefProvider =
+    await createCurrentHotStateCodexContinuityArtifactRefProvider({
+      platform: input.platform,
+      snapshotRef: currentRefs.snapshotRef,
+    });
   const hotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle({
     readCurrentLease: async () => {
       leaseCheckCount += 1;
@@ -510,6 +519,15 @@ async function createHostedWorkspaceBridgeHotStateCheckpointSnapshot(input: {
       try {
         snapshot = await snapshotHostedAssistantRuntimeHotState({
           codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
+          codexContinuityArtifactRefProvider,
+          codexContinuityArtifactSink: async (artifact) => {
+            externalArtifactPutCount += 1;
+            externalArtifactPutBytes += artifact.bytes.byteLength;
+            await input.platform.artifactStore.put({
+              bytes: artifact.bytes,
+              sha256: artifact.ref.sha256,
+            });
+          },
           operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
           vaultRoot: input.vaultRoot,
         });
@@ -551,8 +569,8 @@ async function createHostedWorkspaceBridgeHotStateCheckpointSnapshot(input: {
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
     bundlePutCount: 1,
-    externalArtifactPutBytes: 0,
-    externalArtifactPutCount: 0,
+    externalArtifactPutBytes,
+    externalArtifactPutCount,
     leaseCheckCount,
     mode: "hot",
     platform: input.platform,
@@ -568,6 +586,48 @@ async function createHostedWorkspaceBridgeHotStateCheckpointSnapshot(input: {
 
   return {
     snapshotRef,
+  };
+}
+
+async function createCurrentHotStateCodexContinuityArtifactRefProvider(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  snapshotRef: HostedExecutionSnapshotRef | null;
+}): Promise<(artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null> {
+  const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
+  if (!hotSnapshotRef) {
+    return () => null;
+  }
+
+  let hotBundle: Uint8Array | null;
+  try {
+    hotBundle = await input.platform.artifactStore.get(hotSnapshotRef.hash);
+  } catch {
+    return () => null;
+  }
+  if (!hotBundle) {
+    return () => null;
+  }
+
+  let artifactRefsByPath: Map<string, HostedBundleArtifactRef>;
+  try {
+    artifactRefsByPath = new Map(
+      listHostedBundleArtifacts({
+        bytes: hotBundle,
+        expectedKind: "vault",
+      }).map((artifact) => [`${artifact.root}:${artifact.path}`, artifact.ref] as const),
+    );
+  } catch {
+    return () => null;
+  }
+
+  return (artifact) => {
+    const ref = artifactRefsByPath.get(`${artifact.root}:${artifact.path}`);
+    if (!ref || ref.byteSize !== artifact.bytes.byteLength) {
+      return null;
+    }
+
+    const liveHash = sha256HostedBundleHex(artifact.bytes);
+    return ref.sha256 === liveHash ? ref : null;
   };
 }
 

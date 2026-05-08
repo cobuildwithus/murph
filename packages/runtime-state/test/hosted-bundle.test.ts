@@ -2674,6 +2674,98 @@ test("hosted assistant hot-state snapshots include only exact Codex rollout cont
   }
 });
 
+test("hosted assistant hot-state snapshots can externalize exact Codex rollout continuity", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-artifact-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000012";
+    const rolloutRelativePath =
+      `sessions/2026/05/05/rollout-2026-05-05T01-02-03-${threadId}.jsonl`;
+    const rolloutText = `${"{\"type\":\"provider-owned\"}\n".repeat(16 * 1024)}`;
+    const artifacts = new Map<string, Uint8Array>();
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "05"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }) + "\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      rolloutText,
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedAssistantRuntimeHotState({
+      codexContinuityArtifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot,
+      vaultRoot,
+    });
+    const artifactRefs = listHostedBundleArtifacts({
+      bytes: snapshot.bundle,
+      expectedKind: "vault",
+    });
+    const rolloutArtifact = artifactRefs.find((artifact) =>
+      artifact.root === "operator-home"
+      && artifact.path === `.codex-hosted/${rolloutRelativePath}`
+    );
+
+    assert.equal(hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: snapshot.bundle,
+    }), true);
+    assert.ok(rolloutArtifact);
+    assert.equal(rolloutArtifact.ref.byteSize, Buffer.byteLength(rolloutText));
+    assert.equal(rolloutArtifact.ref.sha256, sha256HostedBundleHex(Buffer.from(rolloutText)));
+    assert.equal(artifacts.has(rolloutArtifact.ref.sha256), true);
+    assert.equal(snapshot.inlineBytes < Buffer.byteLength(rolloutText), true);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${rolloutRelativePath}`,
+        root: "operator-home",
+      }),
+      null,
+    );
+
+    const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error("Missing test Codex continuity artifact.");
+        }
+        return bytes;
+      },
+      bundle: snapshot.bundle,
+      workspaceRoot: restoreRoot,
+    });
+
+    assert.equal(
+      await readFile(
+        path.join(restored.operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+        "utf8",
+      ),
+      rolloutText,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted assistant hot-state snapshots do not recursively scan Codex rollout directories", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-direct-"));
   let hardenedDayDirectory: string | null = null;
