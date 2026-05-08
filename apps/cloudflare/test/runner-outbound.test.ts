@@ -32,6 +32,11 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import {
+  buildRunnerBrowserVaultRefreshAttemptId,
+  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+  RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER,
+} from "../src/runner-outbound/browser-vault-refresh-authority.ts";
+import {
   resolveRunnerOutboundUserCryptoContext,
   resolveRunnerOutboundUserRunnerStub,
   resetRunnerOutboundSharedCachesForTest,
@@ -2324,6 +2329,109 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("writes detached browser-vault refresh replicas with refresh proxy authority", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const sourceBundleHash = "d".repeat(64);
+
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaRefreshWriteRequest({
+        replica: createBrowserVaultReplica(sourceBundleHash),
+        sourceStateHash: sourceBundleHash,
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId(sourceBundleHash),
+        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      replicaRef: expect.objectContaining({
+        replicaSchema: "murph.browser-vault-replica",
+        schema: "murph.hosted-browser-vault-replica-ref.v1",
+        sourceBundleHash,
+      }),
+    });
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects detached browser-vault refresh replicas with mismatched refresh authority", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const sourceBundleHash = "e".repeat(64);
+
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaRefreshWriteRequest({
+        replica: createBrowserVaultReplica(sourceBundleHash),
+        sourceStateHash: sourceBundleHash,
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId("f".repeat(64)),
+        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects detached browser-vault refresh authority on general web-control routes", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const sourceBundleHash = "a".repeat(64);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-runtime/log", {
+        body: JSON.stringify({
+          entries: [],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId(sourceBundleHash),
+        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects browser-vault replica writes when the live invocation lease is stale", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
@@ -3024,6 +3132,22 @@ function createBrowserVaultReplicaWriteRequest(input: {
       "x-hosted-runtime-attempt-id": "attempt_1",
       "x-hosted-runtime-lease-generation": "9",
       "x-hosted-runtime-workspace-version": input.workspaceVersion,
+    }),
+    method: "POST",
+  });
+}
+
+function createBrowserVaultReplicaRefreshWriteRequest(input: {
+  replica: unknown;
+  sourceStateHash: string;
+}): Request {
+  return new Request("http://browser-vault.worker/replicas", {
+    body: JSON.stringify({
+      replica: input.replica,
+    }),
+    headers: createRunnerProxyHeaders({
+      "content-type": "application/json; charset=utf-8",
+      [RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER]: input.sourceStateHash,
     }),
     method: "POST",
   });

@@ -83,6 +83,11 @@ import {
 } from "./user-runner.ts";
 import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
 import {
+  buildRunnerBrowserVaultRefreshAttemptId,
+  readRunnerBrowserVaultRefreshSourceStateHash,
+  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+} from "./runner-outbound/browser-vault-refresh-authority.ts";
+import {
   asWorkerStringEnvironment,
   type WorkerQueueMessageBatchLike,
 } from "./worker-contracts.ts";
@@ -1241,11 +1246,59 @@ async function maybeHandleLocalInternalProxyRoute(
       return unauthorized();
     }
   }
+  const refreshSourceStateHash =
+    targetHost === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore
+      && internalUrl.pathname === "/replicas"
+      && request.method === "POST"
+      ? readRunnerBrowserVaultRefreshSourceStateHash(request)
+      : null;
+  const tokenOwnsRefreshLease = refreshSourceStateHash
+    ? false
+    : await ownsLocalInternalProxyTokenForUser({
+        env,
+        leaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+        token: runnerProxyToken,
+        userId: boundUserId,
+      });
+  const refreshProxyContext = refreshSourceStateHash
+    ? {
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId(refreshSourceStateHash),
+        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+      }
+    : tokenOwnsRefreshLease
+      ? {
+          proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+        }
+    : null;
+  if (refreshSourceStateHash && refreshProxyContext) {
+    const validRefreshLease = await ownsLocalInternalProxyTokenForUser({
+      attemptId: refreshProxyContext.proxyAttemptId,
+      env,
+      leaseGeneration: refreshProxyContext.proxyLeaseGeneration,
+      token: runnerProxyToken,
+      userId: boundUserId,
+    });
+    if (!validRefreshLease) {
+      emitHostedExecutionStructuredLog({
+        component: "worker",
+        details: buildWorkerRouteLogDetails({
+          reason: "runner-proxy-token-refresh-verification-failed",
+          routeName: "local-internal-proxy",
+        }, request, boundUserId),
+        level: "warn",
+        message: "Hosted worker rejected a local browser-vault refresh after proxy-token verification failed.",
+        phase: "failed",
+        userId: boundUserId,
+      });
+      return unauthorized();
+    }
+  }
   return await handleRunnerOutboundRequest(
     createLocalInternalProxyRequest(request, internalUrl),
     env,
     boundUserId,
     runnerProxyToken,
+    refreshProxyContext ?? undefined,
   );
 }
 

@@ -218,11 +218,13 @@ warm path:
 cold path:
   restore committed snapshotRef to temp root
   generate browser-vault replica
-  write encrypted replica
+  write encrypted replica inside the runtime boundary
+  return only replicaRef, byteLength, and status across the container boundary
   publish ref if sourceStateHash still matches
 ```
 
 Warm path gives effectively immediate dashboard updates when the container is still alive. Cold path gives recovery when the warm refresh was missed.
+Browser-vault replica writes are capped at 50 MiB; oversized detached refreshes degrade with `refresh_failed_too_large`, clear the pending refresh, and must not hot-loop or block foreground work.
 
 ### Scheduling
 
@@ -799,6 +801,10 @@ async function refreshBrowserVaultReplica(input: {
     sourceStateHash: input.sourceStateHash,
     vaultRoot,
   });
+
+  if (measureReplicaBytes(replica) > 50 MiB) {
+    return { status: "refresh_failed_too_large" };
+  }
 
   const replicaRef = await browserVaultReplicaPort.write({ replica });
 

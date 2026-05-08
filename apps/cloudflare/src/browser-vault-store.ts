@@ -16,10 +16,12 @@ import {
   hostedBrowserVaultReplicaObjectKey,
   hostedBrowserVaultReplicaUserPrefix,
 } from "./storage-paths.js";
+import {
+  encodeHostedBrowserVaultReplicaJson,
+} from "./browser-vault-limits.ts";
 
 const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica";
 const utf8Decoder = new TextDecoder();
-const utf8Encoder = new TextEncoder();
 
 type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike & {
   delete?(key: string): Promise<void>;
@@ -41,7 +43,11 @@ export interface HostedBrowserVaultReplicaStore {
   deleteBrowserVaultReplica(ref: HostedBrowserVaultReplicaRef | null): Promise<void>;
   deriveBrowserVaultReplicaKey(ref: HostedBrowserVaultReplicaRef): Promise<Uint8Array>;
   readBrowserVaultReplicaEnvelope(ref: HostedBrowserVaultReplicaRef): Promise<HostedCipherEnvelope | null>;
-  writeBrowserVaultReplica(input: { replica: unknown; userId: string }): Promise<HostedBrowserVaultReplicaRef>;
+  writeBrowserVaultReplica(input: {
+    expectedSourceStateHash?: string | null;
+    replica: unknown;
+    userId: string;
+  }): Promise<HostedBrowserVaultReplicaRef>;
 }
 
 export class HostedBrowserVaultReplicaOwnershipError extends Error {
@@ -125,14 +131,22 @@ export function createHostedBrowserVaultReplicaStore(input: {
       );
     },
 
-    async writeBrowserVaultReplica({ replica, userId }) {
+    async writeBrowserVaultReplica({ expectedSourceStateHash = null, replica, userId }) {
       const parsed = parseBrowserVaultReplicaStorageInput(replica);
+      if (
+        expectedSourceStateHash
+        && parsed.source.sourceBundleHash !== expectedSourceStateHash
+      ) {
+        throw new TypeError("Hosted browser-vault replica source state hash does not match the refresh request.");
+      }
+
+      const encodedReplica = encodeHostedBrowserVaultReplicaJson({ replica });
       const objectKey = await hostedBrowserVaultReplicaObjectKey({
         dataVersion: parsed.source.dataVersion,
         userId,
       });
       const ref: HostedBrowserVaultReplicaRef = {
-        byteLength: utf8Encoder.encode(JSON.stringify(replica)).byteLength,
+        byteLength: encodedReplica.byteLength,
         dataVersion: parsed.source.dataVersion,
         generatedAt: parsed.generatedAt,
         keyId: createBrowserVaultReplicaKeyId(parsed.source.dataVersion),
@@ -177,7 +191,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
         cryptoKey: dataKey,
         key: objectKey,
         keyId: dataKeyEnvelope.dataKeyId,
-        plaintext: utf8Encoder.encode(JSON.stringify(replica)),
+        plaintext: encodedReplica.bytes,
         scope: "browser-vault-replica",
       });
 

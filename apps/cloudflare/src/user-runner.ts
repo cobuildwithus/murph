@@ -74,9 +74,8 @@ import {
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
 import {
-  createHostedBrowserVaultReplicaStore,
-} from "./browser-vault-store.ts";
-
+  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+} from "./browser-vault-limits.ts";
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
@@ -145,6 +144,7 @@ export class HostedUserRunner {
   private runtimeCryptoContextLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
   private browserVaultRefreshAbortController: AbortController | null = null;
+  private browserVaultRefreshPreemptedByNudge = false;
   private browserVaultRefreshLock: Promise<void> | null = null;
   private pendingRunnerDriveAfterInvocation: {
     reason: HostedWorkspaceInvocationReason;
@@ -449,7 +449,7 @@ export class HostedUserRunner {
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
     let runningRecord = await this.stateStore.readState();
-    await this.abortBrowserVaultRefreshIfRunning({
+    this.abortBrowserVaultRefreshIfRunning({
       reason: "pending_nudge",
       userId: runningRecord.userId,
     });
@@ -528,7 +528,7 @@ export class HostedUserRunner {
     await this.stateStore.scheduleBrowserVaultRefresh({
       sourceStateHash: input.sourceStateHash,
     });
-    const immediateRefreshStarted = this.startDetachedBrowserVaultRefresh({
+    const immediateRefreshStarted = await this.startDetachedBrowserVaultRefresh({
       userId: input.userId,
     });
     if (!immediateRefreshStarted) {
@@ -1236,14 +1236,18 @@ export class HostedUserRunner {
     const nextSourceStateHash = readHostedBrowserVaultSourceStateHash(
       workspaceRead.workspace?.snapshotRef ?? null,
     );
-    if (!nextSourceStateHash || nextSourceStateHash === previousSourceStateHash) {
+    if (
+      !nextSourceStateHash
+      || nextSourceStateHash === previousSourceStateHash
+      || workspaceRead.workspace?.browserVaultReplicaRef?.sourceBundleHash === nextSourceStateHash
+    ) {
       return;
     }
 
     await this.stateStore.scheduleBrowserVaultRefresh({
       sourceStateHash: nextSourceStateHash,
     });
-    const immediateRefreshStarted = this.startDetachedBrowserVaultRefresh({
+    const immediateRefreshStarted = await this.startDetachedBrowserVaultRefresh({
       userId: input.userId,
     });
     if (!immediateRefreshStarted) {
@@ -1719,10 +1723,20 @@ export class HostedUserRunner {
     return true;
   }
 
-  private startDetachedBrowserVaultRefresh(input: {
+  private async startDetachedBrowserVaultRefresh(input: {
     userId: string;
-  }): boolean {
+  }): Promise<boolean> {
     if (this.browserVaultRefreshLock !== null || this.invocationLock !== null) {
+      return false;
+    }
+
+    const record = await this.stateStore.readState();
+    if (
+      record.pendingNudge
+      || record.inFlight
+      || this.browserVaultRefreshLock !== null
+      || this.invocationLock !== null
+    ) {
       return false;
     }
 
@@ -1808,7 +1822,7 @@ export class HostedUserRunner {
       return false;
     }
 
-    return this.startDetachedBrowserVaultRefresh({
+    return await this.startDetachedBrowserVaultRefresh({
       userId,
     });
   }
@@ -1851,31 +1865,47 @@ export class HostedUserRunner {
     return true;
   }
 
-  private async abortBrowserVaultRefreshIfRunning(input: {
+  private abortBrowserVaultRefreshIfRunning(input: {
     reason: string;
     userId: string;
-  }): Promise<void> {
+  }): void {
     if (!this.browserVaultRefreshAbortController) {
       return;
     }
 
     this.browserVaultRefreshAbortController.abort(new Error(input.reason));
-    if (this.runnerContainerNamespace) {
-      try {
+    if (input.reason === "pending_nudge") {
+      this.browserVaultRefreshPreemptedByNudge = true;
+    }
+    const runnerContainerNamespace = this.runnerContainerNamespace;
+    if (runnerContainerNamespace) {
+      const destroy = (async () => {
         await destroyHostedExecutionContainer({
           runnerContainerName: resolveHostedExecutionRunnerContainerName({
             source: this.runnerRuntimeEnvSource,
             userId: input.userId,
           }),
-          runnerContainerNamespace: this.runnerContainerNamespace,
+          runnerContainerNamespace,
           userId: input.userId,
         });
-      } catch (error) {
+      })().catch((error) => {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           error,
           level: "warn",
           message: "Hosted runner could not stop optional browser-vault refresh container.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+      });
+      try {
+        this.state.waitUntil?.(destroy);
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          error,
+          level: "warn",
+          message: "Hosted runner browser-vault refresh cleanup could not be registered with Durable Object waitUntil.",
           phase: "scheduled",
           userId: input.userId,
         });
@@ -1908,6 +1938,16 @@ export class HostedUserRunner {
 
     let workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
     this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
+    record = await this.stateStore.readState();
+    if (
+      record.pendingNudge
+      || record.inFlight
+      || this.invocationLock !== null
+      || input.signal.aborted
+    ) {
+      return;
+    }
+
     let workspace = workspaceRead.workspace;
     const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(
       workspace?.snapshotRef ?? null,
@@ -1926,11 +1966,16 @@ export class HostedUserRunner {
       return;
     }
 
+    record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
+      return;
+    }
+
     if (!this.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
-    const { crypto, runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(input.userId);
+    const { runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(input.userId);
     const runnerSecrets = await runnerSecretsService.readRunnerSecrets(input.userId);
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.runnerRuntimeEnvSource,
@@ -1946,6 +1991,11 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
+    record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
+      return;
+    }
+
     const generated = await refreshHostedExecutionContainerBrowserVaultReplica({
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
@@ -1959,12 +2009,36 @@ export class HostedUserRunner {
       return;
     }
 
-    if (generated.status !== "generated") {
+    if (generated.status === "refresh_failed_too_large") {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          browserVaultReplicaByteLength: generated.byteLength,
+          browserVaultReplicaMaxBytes: generated.maxBytes,
+          sourceStateHash: pending.sourceStateHash,
+        },
+        level: "warn",
+        message: "Hosted runner skipped browser-vault refresh because the generated replica exceeded the size limit.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
       await this.stateStore.clearPendingBrowserVaultRefresh({
         sourceStateHash: pending.sourceStateHash,
       });
       return;
     }
+
+    if (generated.status !== "written") {
+      await this.stateStore.clearPendingBrowserVaultRefresh({
+        sourceStateHash: pending.sourceStateHash,
+      });
+      return;
+    }
+    assertHostedBrowserVaultRefreshWriteResult({
+      byteLength: generated.byteLength,
+      expectedSourceStateHash: pending.sourceStateHash,
+      replicaRef: generated.replicaRef,
+    });
 
     record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight || input.signal.aborted) {
@@ -1990,26 +2064,20 @@ export class HostedUserRunner {
       return;
     }
 
-    const replicaStore = createHostedBrowserVaultReplicaStore({
-      bucket: this.bucket,
-      keysById: crypto.keysById,
-      resolveRootKeyById: crypto.resolveKeyById,
-      rootKey: crypto.rootKey,
-      rootKeyId: crypto.rootKeyId,
-      userId: input.userId,
-    });
-    const replicaRef = await replicaStore.writeBrowserVaultReplica({
-      replica: generated.replica,
-      userId: input.userId,
-    });
+    record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
+      return;
+    }
+
     const publish = await this.publishBrowserVaultReplicaRef({
       expectedSourceStateHash: pending.sourceStateHash,
-      replicaRef,
+      replicaRef: generated.replicaRef,
       userId: input.userId,
     });
 
     if (
       publish.published
+      || !publish.workspace
       || readHostedBrowserVaultSourceStateHash(publish.workspace.snapshotRef) !== pending.sourceStateHash
     ) {
       await this.stateStore.clearPendingBrowserVaultRefresh({
@@ -2039,7 +2107,7 @@ export class HostedUserRunner {
       timeoutMs: this.env.webControlTimeoutMs,
     });
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 404 && response.status !== 409) {
       throw new Error(`Hosted browser-vault replica publish failed with HTTP ${response.status}.`);
     }
 
@@ -2210,7 +2278,19 @@ export class HostedUserRunner {
         }
       }
 
-      if (!this.pendingRunnerDriveAfterInvocation && this.invocationLock === null) {
+      if (
+        !this.pendingRunnerDriveAfterInvocation
+        && this.invocationLock === null
+        && this.browserVaultRefreshPreemptedByNudge
+      ) {
+        this.browserVaultRefreshPreemptedByNudge = false;
+        const record = await this.tryReadStateForRetryScheduling();
+        if (record) {
+          await this.schedulePendingBrowserVaultRefreshContinuation({
+            userId: record.userId,
+          });
+        }
+      } else if (!this.pendingRunnerDriveAfterInvocation && this.invocationLock === null) {
         const started = await this.tryStartPendingBrowserVaultRefresh();
         if (!started) {
           const record = await this.tryReadStateForRetryScheduling();
@@ -2224,6 +2304,23 @@ export class HostedUserRunner {
     }
   }
 
+}
+
+function assertHostedBrowserVaultRefreshWriteResult(input: {
+  byteLength: number;
+  expectedSourceStateHash: string;
+  replicaRef: NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]>;
+}): void {
+  if (input.replicaRef.sourceBundleHash !== input.expectedSourceStateHash) {
+    throw new Error("Hosted browser-vault refresh returned a stale replica ref.");
+  }
+
+  if (
+    input.byteLength !== input.replicaRef.byteLength
+    || input.byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES
+  ) {
+    throw new Error("Hosted browser-vault refresh returned invalid replica size metadata.");
+  }
 }
 
 function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecision {

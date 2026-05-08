@@ -57,6 +57,9 @@ import {
   writeRunnerActiveInvocationLeaseHeaders,
 } from "./runner-outbound/active-lease.ts";
 import {
+  writeRunnerBrowserVaultRefreshHeaders,
+} from "./runner-outbound/browser-vault-refresh-authority.ts";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
@@ -125,6 +128,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   localInternalProxyBaseUrl?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
+  browserVaultRefreshSourceStateHash?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
@@ -247,20 +251,25 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
-    ...(input.internalWorkerProxyToken && input.workspaceCheckpointBridge
+    ...(input.internalWorkerProxyToken && (input.workspaceCheckpointBridge || input.browserVaultRefreshSourceStateHash)
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
             boundUserId: input.boundUserId,
+            browserVaultRefreshSourceStateHash: input.browserVaultRefreshSourceStateHash ?? null,
             fetchImpl,
             timeoutMs,
             transport: hostedWebControlTransport,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
-          runtimeLivenessPort: createCloudflareRuntimeLivenessPort({
-            fetchImpl,
-            timeoutMs,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-          }),
+          ...(input.workspaceCheckpointBridge
+            ? {
+                runtimeLivenessPort: createCloudflareRuntimeLivenessPort({
+                  fetchImpl,
+                  timeoutMs,
+                  workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+                }),
+              }
+            : {}),
         }
       : {}),
     effectsPort: {
@@ -479,10 +488,11 @@ async function requireHostedRuntimeActiveLeaseHeaders(
 
 function createCloudflareBrowserVaultReplicaPort(input: {
   boundUserId: string;
+  browserVaultRefreshSourceStateHash: string | null;
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport | null;
-  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }) {
   return {
     ...(input.transport
@@ -499,6 +509,7 @@ function createCloudflareBrowserVaultReplicaPort(input: {
               path: HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
               timeoutMs: input.timeoutMs,
               transport: input.transport!,
+              acceptedStatuses: [404, 409],
             });
 
             return parseHostedBrowserVaultReplicaPublishResponse(payload);
@@ -514,7 +525,10 @@ function createCloudflareBrowserVaultReplicaPort(input: {
         },
         description: "Hosted browser-vault replica write",
         fetchImpl: input.fetchImpl,
-        headers: await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge),
+        headers: await createHostedBrowserVaultReplicaWriteHeaders({
+          browserVaultRefreshSourceStateHash: input.browserVaultRefreshSourceStateHash,
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+        }),
         method: "POST",
         timeoutMs: input.timeoutMs,
         url: new URL(
@@ -536,6 +550,25 @@ function createCloudflareBrowserVaultReplicaPort(input: {
       return replicaRef;
     },
   };
+}
+
+async function createHostedBrowserVaultReplicaWriteHeaders(input: {
+  browserVaultRefreshSourceStateHash: string | null;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
+}): Promise<Headers> {
+  if (input.workspaceCheckpointBridge) {
+    return await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge);
+  }
+
+  if (input.browserVaultRefreshSourceStateHash) {
+    const headers = new Headers();
+    writeRunnerBrowserVaultRefreshHeaders(headers, {
+      sourceStateHash: input.browserVaultRefreshSourceStateHash,
+    });
+    return headers;
+  }
+
+  throw new Error("Hosted browser-vault replica write requires an active lease or refresh source.");
 }
 
 function createCloudflareRuntimeLivenessPort(input: {
@@ -1057,6 +1090,7 @@ function assertReplaySafeHostedWebControlRetryPath(path: string): void {
 }
 
 async function fetchHostedWebControlPlaneJson(input: {
+  acceptedStatuses?: readonly number[];
   body?: unknown;
   boundUserId: string;
   description: string;
@@ -1101,7 +1135,8 @@ async function fetchHostedWebControlPlaneJson(input: {
       url: createHostedWebControlProxyUrl(route.pathAndSearch),
     });
 
-  if (!response.ok) {
+  const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
+  if (!response.ok && !acceptedStatus) {
     const detail = (await response.text()).trim();
     const error = new Error(
       detail.length > 0
