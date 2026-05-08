@@ -1,8 +1,10 @@
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
+import { createHostedDeliveryId } from './hosted-delivery-id.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
@@ -11,6 +13,7 @@ import type {
   AssistantTurnDeliveryFinalizationPlan,
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
+import { normalizeNullableString } from './shared.js'
 
 export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input: {
   channel?: string | null
@@ -26,6 +29,54 @@ export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input:
 
   const channel = input.channel?.trim().toLowerCase()
   return channel === 'linq'
+}
+
+export function resolveAssistantHostedDeliveryIdempotency(input: {
+  audience: AssistantTurnSharedPlan['conversationPolicy']['audience']
+  channel?: string | null
+  input: AssistantMessageInput
+  session: AssistantSession
+}): {
+  deliveryIdempotencyKey: string | null
+  deliveryTransportIdempotent: boolean | undefined
+} {
+  const explicitKey = normalizeNullableString(input.input.deliveryIdempotencyKey)
+  const hosted = input.input.executionContext?.hosted ?? null
+  const channel = normalizeNullableString(input.channel)?.toLowerCase() ?? null
+
+  if (!hosted) {
+    return {
+      deliveryIdempotencyKey: explicitKey,
+      deliveryTransportIdempotent: undefined,
+    }
+  }
+
+  const deliveryIdempotencyKey =
+    explicitKey ??
+    createHostedDeliveryIdempotencyKeyFromContext({
+      audience: input.audience,
+      channel,
+      input: input.input,
+      memberId: hosted.memberId,
+      session: input.session,
+    })
+
+  if (!deliveryIdempotencyKey && hostedDeliveryChannelRequiresIdempotencyKey(channel)) {
+    throw new VaultCliError(
+      'ASSISTANT_HOSTED_DELIVERY_IDEMPOTENCY_KEY_REQUIRED',
+      'Hosted outbound delivery requires a deterministic idempotency key.',
+    )
+  }
+
+  return {
+    deliveryIdempotencyKey,
+    deliveryTransportIdempotent:
+      resolveHostedAssistantDeliveryTransportIdempotentOverride({
+        channel,
+        deliveryIdempotencyKey,
+        executionContext: input.input.executionContext,
+      }),
+  }
 }
 
 export async function deliverAssistantReply(input: {
@@ -45,19 +96,20 @@ export async function deliverAssistantReply(input: {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
   const deliveryChannel = audience?.channel ?? input.session.binding.channel
-  const deliveryIdempotencyKey = input.input.deliveryIdempotencyKey ?? null
+  const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+    audience,
+    channel: deliveryChannel,
+    input: input.input,
+    session: input.session,
+  })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
     message: input.response,
     channel: deliveryChannel,
-    deliveryIdempotencyKey,
+    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliverySource: input.input.deliverySource ?? null,
-    deliveryTransportIdempotent: resolveHostedAssistantDeliveryTransportIdempotentOverride({
-      channel: deliveryChannel,
-      deliveryIdempotencyKey,
-      executionContext: input.input.executionContext,
-    }),
+    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     identityId: audience?.identityId ?? input.session.binding.identityId,
     actorId: audience?.actorId ?? input.session.binding.actorId,
     threadId: audience?.threadId ?? input.session.binding.threadId,
@@ -104,6 +156,67 @@ export async function deliverAssistantReply(input: {
         session,
       }
   }
+}
+
+function createHostedDeliveryIdempotencyKeyFromContext(input: {
+  audience: AssistantTurnSharedPlan['conversationPolicy']['audience']
+  channel: string | null
+  input: AssistantMessageInput
+  memberId: string
+  session: AssistantSession
+}): string | null {
+  const context = input.input.hostedDeliveryIdempotency
+  const channel = normalizeNullableString(input.channel)
+  const memberId = normalizeNullableString(input.memberId)
+  const inboundMailboxItemIds =
+    context?.inboundMailboxItemIds
+      ?.map((itemId) => normalizeNullableString(itemId))
+      .filter((itemId): itemId is string => itemId !== null) ?? []
+  const assistantTurnOrdinal =
+    typeof context?.assistantTurnOrdinal === 'number' ||
+    typeof context?.assistantTurnOrdinal === 'string'
+      ? context.assistantTurnOrdinal
+      : null
+
+  if (!channel || !memberId || inboundMailboxItemIds.length === 0 || assistantTurnOrdinal === null) {
+    return null
+  }
+
+  return createHostedDeliveryId({
+    assistantTurnOrdinal,
+    channel,
+    conversationId:
+      normalizeNullableString(context?.conversationId) ??
+      stringifyHostedDeliveryIdempotencyKeyParts([
+        channel,
+        input.audience?.identityId ?? input.session.binding.identityId,
+        input.audience?.actorId ?? input.session.binding.actorId,
+        input.audience?.threadId ?? input.session.binding.threadId,
+        input.audience?.threadIsDirect ?? input.session.binding.threadIsDirect,
+      ]),
+    inboundMailboxItemIds,
+    recipientKey:
+      normalizeNullableString(context?.recipientKey) ??
+      stringifyHostedDeliveryIdempotencyKeyParts([
+        channel,
+        input.audience?.explicitTarget ?? input.input.deliveryTarget ?? null,
+        input.audience?.bindingDelivery?.target ?? input.session.binding.delivery?.target,
+        input.audience?.identityId ?? input.session.binding.identityId,
+        input.audience?.actorId ?? input.session.binding.actorId,
+        input.audience?.threadId ?? input.session.binding.threadId,
+      ]),
+    userId: memberId,
+  })
+}
+
+function hostedDeliveryChannelRequiresIdempotencyKey(channel: string | null): boolean {
+  return channel === 'linq' || channel === 'email'
+}
+
+function stringifyHostedDeliveryIdempotencyKeyParts(
+  parts: readonly (boolean | null | string | undefined)[],
+): string {
+  return JSON.stringify(parts.map((part) => part ?? null))
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {

@@ -111,6 +111,7 @@ describe("hosted system mailbox notification execution context", () => {
             }),
           }),
           forceQueueOnlyAssistantNotification: true,
+          sourceMailboxItemId: "mailbox_item_system_notification",
           wake: expect.objectContaining({
             kind: "assistant.notification.requested",
           }),
