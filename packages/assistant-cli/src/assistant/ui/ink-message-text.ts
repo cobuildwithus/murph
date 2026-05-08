@@ -5,7 +5,10 @@ import { Box, Text, useStdout } from 'ink'
 
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
-import type { InkChatEntry } from './view-model.js'
+import {
+  sanitizeAssistantTerminalText,
+  type InkChatEntry,
+} from './view-model.js'
 import {
   WrappedTextBlock,
   resolveAssistantPlainTextWrapColumns,
@@ -186,7 +189,8 @@ export function renderAssistantMessageText(
   const theme = useAssistantInkTheme()
   const { stdout } = useStdout()
   const enableHyperlinks = supportsAssistantTerminalHyperlinks()
-  const segments = splitAssistantMarkdownLinks(input.text)
+  const sanitizedText = sanitizeAssistantTerminalText(input.text)
+  const segments = splitAssistantMarkdownLinks(sanitizedText)
   const plainTextOnly = segments.every((segment) => segment.kind === 'text')
 
   if (plainTextOnly) {
@@ -194,7 +198,7 @@ export function renderAssistantMessageText(
       WrappedTextBlock,
       {},
       wrapAssistantPlainText(
-        normalizeNullableString(input.text) ?? '',
+        normalizeNullableString(sanitizedText) ?? '',
         resolveAssistantPlainTextWrapColumns(stdout?.columns),
       ),
     )

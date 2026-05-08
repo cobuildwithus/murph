@@ -1,7 +1,10 @@
 import * as React from 'react'
 import { Box, Text, type BoxProps } from 'ink'
 
-import type { ChatMetadataBadge } from './view-model.js'
+import {
+  sanitizeAssistantTerminalText,
+  type ChatMetadataBadge,
+} from './view-model.js'
 import { LIGHT_ASSISTANT_INK_THEME, type AssistantInkTheme } from './theme.js'
 
 export const AssistantInkThemeContext =
@@ -104,7 +107,7 @@ export function renderWrappedTextBlock(input: {
 }
 
 export function wrapAssistantPlainText(input: string, columns: number): string {
-  return input
+  return sanitizeAssistantTerminalText(input)
     .replaceAll('\r\n', '\n')
     .split('\n')
     .map((line) => wrapAssistantPlainTextLine(line, columns))

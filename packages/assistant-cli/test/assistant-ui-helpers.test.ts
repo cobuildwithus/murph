@@ -25,6 +25,8 @@ import {
   applyInkChatTraceUpdates,
   applyProviderProgressEventToEntries,
   finalizePendingInkChatTraces,
+  seedChatEntries,
+  sanitizeAssistantTerminalText,
 } from '../src/assistant/ui/view-model.js'
 
 test('theme helpers prefer terminal color hints, capture launch baselines, and adapt open chat mode on macOS', () => {
@@ -317,6 +319,76 @@ test('trace update helpers replace and append stream content while ignoring empt
       {
         kind: 'status',
         text: 'Saved locally',
+      },
+    ],
+  )
+})
+
+test('terminal text sanitization strips control sequences from assistant UI entries', () => {
+  assert.equal(
+    sanitizeAssistantTerminalText(
+      'alpha\u001B[31m red\u001B[0m \u001B]8;;https://example.test\u0007link\u001B]8;;\u0007\u0000omega',
+    ),
+    'alpha red linkomega',
+  )
+
+  assert.deepEqual(
+    applyProviderProgressEventToEntries({
+      entries: [],
+      event: {
+        id: 'trace:sanitize',
+        kind: 'tool',
+        state: 'running',
+        text: '\u001B]0;owned\u0007  running\u001B[?25l  ',
+      },
+    }),
+    [
+      {
+        kind: 'trace',
+        pending: true,
+        text: 'running',
+        traceId: 'trace:sanitize',
+        traceKind: 'tool',
+      },
+    ],
+  )
+
+  assert.deepEqual(
+    seedChatEntries([
+      {
+        schema: 'murph.assistant-transcript-entry.v1',
+        kind: 'user',
+        text: 'alpha\u001B[31m red\u001B[0m \u001B]8;;https://example.test\u0007link\u001B]8;;\u0007\u0000omega',
+        createdAt: '2026-04-08T00:00:00.000Z',
+      },
+    ]),
+    [
+      {
+        kind: 'user',
+        text: 'alpha red linkomega',
+      },
+    ],
+  )
+
+  assert.deepEqual(
+    applyInkChatTraceUpdates([], [
+      {
+        kind: 'assistant',
+        streamKey: 'assistant:sanitize',
+        text: 'safe\u001B]8;;https://example.test\u0007link\u001B]8;;\u0007',
+      },
+      {
+        kind: 'assistant',
+        mode: 'append',
+        streamKey: 'assistant:sanitize',
+        text: '\u009B31m plain',
+      },
+    ]),
+    [
+      {
+        kind: 'assistant',
+        streamKey: 'assistant:sanitize',
+        text: 'safelink plain',
       },
     ],
   )
