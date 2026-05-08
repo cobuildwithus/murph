@@ -338,6 +338,29 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("rejects a duplicate invocation begin while a lease is active", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    const activeLease = await store.beginInvocation({
+      reason: "nudge",
+      userId: "user-existing",
+    });
+
+    await expect(store.beginInvocation({
+      reason: "alarm",
+      userId: "user-existing",
+    })).rejects.toMatchObject({
+      name: "RunnerInvocationAlreadyActiveError",
+      record: {
+        inFlight: true,
+        pendingNudge: false,
+        workspaceInvocation: {
+          attemptId: activeLease.attemptId,
+        },
+      },
+    });
+  });
+
   it("clears orphan observation when the active child proves it still owns the lease", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");

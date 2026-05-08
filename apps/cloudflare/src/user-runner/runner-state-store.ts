@@ -39,6 +39,16 @@ export interface RunnerInvocationLease {
   workspaceVersion: string | null;
 }
 
+export class RunnerInvocationAlreadyActiveError extends Error {
+  readonly record: RunnerStateRecord;
+
+  constructor(record: RunnerStateRecord) {
+    super("Hosted runner invocation is already active.");
+    this.name = "RunnerInvocationAlreadyActiveError";
+    this.record = record;
+  }
+}
+
 export interface RunnerInvocationLeaseOwnershipResult {
   clearedOrphanObservation: boolean;
   owns: boolean;
@@ -267,6 +277,10 @@ export class RunnerStateStore {
     await this.bindUser(input.userId);
 
     const meta = this.requireMetaRowSync();
+    if (meta.in_flight === 1) {
+      throw new RunnerInvocationAlreadyActiveError(this.readStateFromMetaSync(meta));
+    }
+
     const nextLeaseGeneration = normalizeLeaseGeneration(meta.lease_generation) + 1;
     const startedAt = new Date().toISOString();
     const attemptId = `workspace-invocation-${nextLeaseGeneration}`;
