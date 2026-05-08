@@ -294,9 +294,7 @@ export class RunnerStateStore {
     if (input.consumePendingNudge !== false) {
       meta.pending_nudge = 0;
     }
-    if (input.reason === "idle_shutdown_checkpoint") {
-      this.clearIdleShutdownCheckpointMetaSync(meta);
-    }
+    this.clearIdleShutdownCheckpointMetaSync(meta);
     this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
 
