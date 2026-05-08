@@ -27,7 +27,10 @@ import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
-import { finalizeAssistantTurnFromDeliveryOutcome } from './delivery-service.js'
+import {
+  finalizeAssistantTurnFromDeliveryOutcome,
+  inferHostedAssistantDeliveryTransportIdempotent,
+} from './delivery-service.js'
 import {
   hasAssistantSeenFirstContact,
   markAssistantFirstContactSeen,
@@ -561,14 +564,21 @@ async function deliverAssistantNotificationMessage(input: {
     explicitTarget,
     inputDeliverySubject: input.input.deliverySubject ?? null,
   })
+  const deliveryChannel = audience.channel ?? input.session.binding.channel
+  const deliveryIdempotencyKey = input.input.deliveryIdempotencyKey ?? null
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
     message: input.message,
     dedupeToken: input.dedupeToken,
-    deliveryIdempotencyKey: input.input.deliveryIdempotencyKey ?? null,
+    deliveryIdempotencyKey,
     deliverySource: input.input.deliverySource ?? null,
-    channel: audience.channel ?? input.session.binding.channel,
+    deliveryTransportIdempotent: inferHostedAssistantDeliveryTransportIdempotent({
+      channel: deliveryChannel,
+      deliveryIdempotencyKey,
+      executionContext: input.input.executionContext,
+    }),
+    channel: deliveryChannel,
     identityId: audience.identityId ?? input.session.binding.identityId,
     actorId: audience.actorId ?? input.session.binding.actorId,
     threadId: audience.threadId ?? input.session.binding.threadId,

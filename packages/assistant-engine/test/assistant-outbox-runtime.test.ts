@@ -509,6 +509,85 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
+  it('persists caller-provided transport idempotency when queueing delivery intents', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-hosted-linq-idempotent-',
+    )
+
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'linq',
+      deliveryIdempotencyKey: 'sha256:hosted-linq-delivery',
+      deliveryTransportIdempotent: true,
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-thread',
+      identityId: 'hosted-linq-identity',
+      message: 'queue hosted linq',
+      sessionId: 'session-hosted-linq',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-hosted-linq',
+      vault: vaultRoot,
+    })
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent).toMatchObject({
+      channel: 'linq',
+      deliveryIdempotencyKey: 'sha256:hosted-linq-delivery',
+      deliveryTransportIdempotent: true,
+      status: 'pending',
+    })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
+    ).resolves.toMatchObject({
+      deliveryIdempotencyKey: 'sha256:hosted-linq-delivery',
+      deliveryTransportIdempotent: true,
+      status: 'pending',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('preserves caller-provided transport idempotency after a successful dispatch', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-hosted-linq-idempotent-dispatch-',
+    )
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: 'sha256:hosted-linq-dispatch',
+        providerMessageId: 'provider-linq-dispatch',
+        sentAt: '2026-04-08T03:02:00.000Z',
+        target: 'linq-thread',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const sent = await deliverAssistantOutboxMessage({
+      channel: 'linq',
+      deliveryIdempotencyKey: 'sha256:hosted-linq-dispatch',
+      deliveryTransportIdempotent: true,
+      explicitTarget: 'linq-thread',
+      identityId: 'hosted-linq-identity',
+      message: 'send hosted linq',
+      sessionId: 'session-hosted-linq-dispatch',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-hosted-linq-dispatch',
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent).toMatchObject({
+      deliveryIdempotencyKey: 'sha256:hosted-linq-dispatch',
+      deliveryTransportIdempotent: true,
+      status: 'sent',
+    })
+  })
+
   it('rejects unsupported queue-only subjects before persisting an outbox intent', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-queue-subject-invalid-')
 

@@ -12,6 +12,22 @@ import type {
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
 
+export function inferHostedAssistantDeliveryTransportIdempotent(input: {
+  channel?: string | null
+  deliveryIdempotencyKey?: string | null
+  executionContext?: AssistantMessageInput['executionContext']
+}): boolean {
+  if (!input.executionContext?.hosted) {
+    return false
+  }
+  if (!input.deliveryIdempotencyKey?.trim()) {
+    return false
+  }
+
+  const channel = input.channel?.trim().toLowerCase()
+  return channel === 'linq'
+}
+
 export async function deliverAssistantReply(input: {
   input: AssistantMessageInput
   response: string
@@ -29,13 +45,19 @@ export async function deliverAssistantReply(input: {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
   const deliveryChannel = audience?.channel ?? input.session.binding.channel
+  const deliveryIdempotencyKey = input.input.deliveryIdempotencyKey ?? null
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
     message: input.response,
     channel: deliveryChannel,
-    deliveryIdempotencyKey: input.input.deliveryIdempotencyKey ?? null,
+    deliveryIdempotencyKey,
     deliverySource: input.input.deliverySource ?? null,
+    deliveryTransportIdempotent: inferHostedAssistantDeliveryTransportIdempotent({
+      channel: deliveryChannel,
+      deliveryIdempotencyKey,
+      executionContext: input.input.executionContext,
+    }),
     identityId: audience?.identityId ?? input.session.binding.identityId,
     actorId: audience?.actorId ?? input.session.binding.actorId,
     threadId: audience?.threadId ?? input.session.binding.threadId,

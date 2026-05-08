@@ -846,6 +846,7 @@ describe("assistant delivery orchestration seam", () => {
       channel: "telegram",
       deliveryIdempotencyKey: null,
       deliverySource: null,
+      deliveryTransportIdempotent: false,
       dependencies: undefined,
       dispatchMode: "immediate",
       explicitTarget: "explicit-audience-target",
@@ -858,6 +859,118 @@ describe("assistant delivery orchestration seam", () => {
       threadIsDirect: false,
       turnId: "turn-2",
     });
+  });
+
+  it("marks hosted Linq deliveries with deterministic keys idempotent before outbox dispatch", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "email",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "email",
+        idempotencyKey: "sha256:hosted-email",
+        messageLength: 10,
+        providerMessageId: "provider-email",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "binding-delivery",
+        targetKind: "participant",
+      },
+      intent: {
+        intentId: "intent-email",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "sha256:hosted-email",
+        executionContext: {
+          hosted: {
+            memberId: "member-hosted",
+            userEnvKeys: [],
+          },
+        },
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "reply body",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-hosted-email",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channel: "email",
+        deliveryIdempotencyKey: "sha256:hosted-email",
+        deliveryTransportIdempotent: false,
+      }),
+    );
+
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "sha256:hosted-linq",
+        messageLength: 10,
+        providerMessageId: "provider-linq",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:01:00.000Z",
+        target: "linq-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-linq",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "sha256:hosted-linq",
+        executionContext: {
+          hosted: {
+            memberId: "member-hosted",
+            userEnvKeys: [],
+          },
+        },
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "reply body",
+      session: {
+        ...session,
+        binding: {
+          ...session.binding,
+          channel: "linq",
+        },
+      },
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-hosted-linq",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channel: "linq",
+        deliveryIdempotencyKey: "sha256:hosted-linq",
+        deliveryTransportIdempotent: true,
+      }),
+    );
   });
 
   it("passes outbound delivery text through unchanged for user-facing channels", async () => {
@@ -882,6 +995,7 @@ describe("assistant delivery orchestration seam", () => {
     await deliverAssistantReply({
       input: {
         deliverResponse: true,
+        deliveryIdempotencyKey: "sha256:local-email",
         prompt: "hello",
         vault: "/vault",
       },
@@ -912,6 +1026,8 @@ describe("assistant delivery orchestration seam", () => {
 
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        deliveryIdempotencyKey: "sha256:local-email",
+        deliveryTransportIdempotent: false,
         message: "Visible reply\n\n[DEV] local note",
       }),
     );
