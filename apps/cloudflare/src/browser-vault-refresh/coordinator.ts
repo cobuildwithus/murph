@@ -131,10 +131,10 @@ export class BrowserVaultRefreshCoordinator {
   abortForForegroundWork(input: {
     reason: "foreground_invocation" | "pending_nudge";
     userId: string;
-  }): void {
+  }): boolean {
     const abortController = this.refreshAbortController;
     if (!abortController || abortController.signal.aborted) {
-      return;
+      return false;
     }
 
     abortController.abort(new Error(input.reason));
@@ -148,6 +148,7 @@ export class BrowserVaultRefreshCoordinator {
       phase: "scheduled",
       userId: input.userId,
     });
+    return true;
   }
 
   async drainAfterForegroundWork(): Promise<void> {
