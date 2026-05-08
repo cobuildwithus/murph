@@ -692,6 +692,49 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toContain("2026-04-27T00:00:30.100Z");
   });
 
+  it("preempts a lower-priority alarm invocation when a foreground nudge arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return activeInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const { runner } = createRunnerCryptoContextHarness(null, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: true,
+    });
+
+    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalledOnce());
+    await expect(activeRun).resolves.toMatchObject({
+      status: "scheduled",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+  });
+
   it("treats alarms during a live invocation as recovery-only while the pending nudge follows after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

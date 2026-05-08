@@ -155,6 +155,13 @@ interface RunnerDrainInput {
   reason: HostedWorkspaceInvocationReason;
 }
 
+class HostedRunnerInvocationPreemptedForNudgeError extends Error {
+  constructor() {
+    super("Hosted runner invocation preempted for a pending foreground nudge.");
+    this.name = "HostedRunnerInvocationPreemptedForNudgeError";
+  }
+}
+
 export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
@@ -171,6 +178,9 @@ export class HostedUserRunner {
   private pendingBrowserVaultRefreshAfterInvocation: {
     userId: string;
   } | null = null;
+  private activeWorkspaceInvocationAbortController: AbortController | null = null;
+  private activeWorkspaceInvocationAttemptId: string | null = null;
+  private activeWorkspaceInvocationReason: HostedWorkspaceInvocationReason | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -523,6 +533,11 @@ export class HostedUserRunner {
     const record = await this.markPendingNudgeAndApplyAlarm({
       preferredWakeAt,
     });
+    const preemptedActiveInvocation = activeInThisIsolate && runningRecord.inFlight
+      ? this.preemptActiveWorkspaceInvocationForPendingNudge({
+          userId: record.userId,
+        })
+      : false;
     let immediateDriveStarted = false;
     if (activeInThisIsolate && runningRecord.inFlight) {
       immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
@@ -544,6 +559,7 @@ export class HostedUserRunner {
         alreadyRunning,
         immediateDriveStarted,
         pendingNudge: record.pendingNudge,
+        preemptedActiveInvocation,
       },
       message: "Hosted runner nudge accepted.",
       phase: "scheduled",
@@ -915,6 +931,30 @@ export class HostedUserRunner {
       });
       return result;
     } catch (error) {
+      if (error instanceof HostedRunnerInvocationPreemptedForNudgeError) {
+        const completion = await this.stateStore.completeInvocation({
+          finishedAt: new Date().toISOString(),
+          lease,
+        });
+        const record = await this.reschedulePendingNudgeAfterInvocationLiveness(
+          completion.record,
+        ) ?? completion.record;
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            workspaceAttemptId: lease.attemptId,
+            workspaceReason: input.reason,
+          },
+          message: "Hosted runner completed preempted invocation handoff to pending nudge.",
+          phase: "scheduled",
+          userId: initialRecord.userId,
+        });
+        return {
+          nextWakeAt: record.nextWakeAt,
+          status: "scheduled",
+        };
+      }
+
       const failure = await this.stateStore.failInvocation({
         error,
         finishedAt: new Date().toISOString(),
@@ -1092,6 +1132,33 @@ export class HostedUserRunner {
       return await this.syncInvocationRecoveryAlarm(record);
     }
     return record;
+  }
+
+  private preemptActiveWorkspaceInvocationForPendingNudge(input: {
+    userId: string;
+  }): boolean {
+    const abortController = this.activeWorkspaceInvocationAbortController;
+    const reason = this.activeWorkspaceInvocationReason;
+    if (
+      !abortController
+      || abortController.signal.aborted
+      || !shouldPreemptActiveWorkspaceInvocationForNudge(reason)
+    ) {
+      return false;
+    }
+
+    abortController.abort(new HostedRunnerInvocationPreemptedForNudgeError());
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        workspaceAttemptId: this.activeWorkspaceInvocationAttemptId,
+        workspaceReason: reason,
+      },
+      message: "Hosted runner preempted lower-priority invocation for foreground nudge.",
+      phase: "scheduled",
+      userId: input.userId,
+    });
+    return true;
   }
 
   private logStaleInvocationLeaseCleared(
@@ -1413,13 +1480,26 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
-    return await invokeHostedExecutionContainerRunner({
-      job,
-      runnerContainerName,
-      runnerContainerNamespace: this.runnerContainerNamespace,
-      timeoutMs: this.env.runnerTimeoutMs,
-      userId: input.userId,
-    });
+    const abortController = new AbortController();
+    this.activeWorkspaceInvocationAbortController = abortController;
+    this.activeWorkspaceInvocationAttemptId = input.lease.attemptId;
+    this.activeWorkspaceInvocationReason = input.reason;
+    try {
+      return await invokeHostedExecutionContainerRunner({
+        job,
+        runnerContainerName,
+        runnerContainerNamespace: this.runnerContainerNamespace,
+        signal: abortController.signal,
+        timeoutMs: this.env.runnerTimeoutMs,
+        userId: input.userId,
+      });
+    } finally {
+      if (this.activeWorkspaceInvocationAbortController === abortController) {
+        this.activeWorkspaceInvocationAbortController = null;
+        this.activeWorkspaceInvocationAttemptId = null;
+        this.activeWorkspaceInvocationReason = null;
+      }
+    }
   }
 
   private async scheduleNextWorkspaceAlarm(input: {
@@ -2425,6 +2505,14 @@ function shouldRunHostedRunnerInvocation(input: {
     || input.reason === "manual"
     || input.record.pendingNudge
     || input.dueWake === true;
+}
+
+function shouldPreemptActiveWorkspaceInvocationForNudge(
+  reason: HostedWorkspaceInvocationReason | null,
+): boolean {
+  return reason === "alarm"
+    || reason === "retry"
+    || reason === "idle_shutdown_checkpoint";
 }
 
 function isCommittedIdleShutdownCheckpointResult(input: HostedWorkspaceInvocationResult): boolean {

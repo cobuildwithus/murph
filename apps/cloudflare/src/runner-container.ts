@@ -118,6 +118,7 @@ interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
+  signal?: AbortSignal;
   timeoutMs: number;
   userId: string;
 }
@@ -1248,11 +1249,26 @@ export async function invokeHostedExecutionContainerRunner(
     throw new TypeError("Hosted runner container route userId must match workspace job userId.");
   }
 
-  return input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId).invoke({
+  const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
+  const invocation = container.invoke({
     job: input.job,
     timeoutMs: input.timeoutMs,
     userId: jobUserId,
   });
+  return input.signal
+    ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
+        void container.destroyInstance().catch((error: unknown) => {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted runner could not destroy a preempted invocation container.",
+            phase: "failed",
+            userId: jobUserId,
+          });
+        });
+      })
+    : await invocation;
 }
 
 export async function refreshHostedExecutionContainerBrowserVaultReplica(input: {
