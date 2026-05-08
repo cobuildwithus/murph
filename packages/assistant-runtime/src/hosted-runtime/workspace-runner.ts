@@ -144,7 +144,6 @@ export type HostedWorkspaceRunnerAssistantPhaseResult =
 
 export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
   checkpointReason: HostedWorkspaceCheckpointReason;
-  foregroundCheckpointRequired?: boolean;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;

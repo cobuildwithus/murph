@@ -840,11 +840,6 @@ async function drainHostedPostCheckpointDeliveryCleanup(input: {
 
   return {
     checkpointReason: input.checkpointReason,
-    foregroundCheckpointRequired: input.checkpointReason === "outbox_receipt"
-      ? input.assistantDeliveryEffects.some((effect) =>
-          effect.payload.transportIdempotent !== true
-        )
-      : false,
     nextWakeAt: postNextWakeAt,
     nextWakeReason: postNextWakeAt ? "assistant" : null,
     redactedStatus: {
