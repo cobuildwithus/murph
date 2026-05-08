@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import {
-  createHostedBrowserVaultReplicaForSnapshot,
+  createHostedBrowserVaultReplicaForSourceState,
   createHostedConversationMailboxImportItem,
   enqueueHostedSystemMailboxItem,
   normalizeHostedAssistantRuntimeConfig,
@@ -268,7 +268,7 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   });
 
   if (commitKind === "working_commit") {
-    return await createHostedWorkspaceBridgeWorkingCommitSnapshot({
+    return await createWorkingCommitSnapshot({
       ...input,
       currentRefs,
     });
@@ -278,12 +278,15 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
     ? await readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(input)
     : await readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input);
   try {
-    return await createHostedWorkspaceBridgeFullCheckpointSnapshot({
-      ...input,
-      commitKind,
-      publishBrowserVaultReplica: commitKind === "full_compaction",
-      preservedState,
-    });
+    return commitKind === "full_compaction"
+      ? await createFullCompactionSnapshot({
+          ...input,
+          preservedState,
+        })
+      : await createFullSeedSnapshot({
+          ...input,
+          preservedState,
+        });
   } catch (error) {
     if (
       input.request.reason === "idle_shutdown"
@@ -305,16 +308,51 @@ class HostedWorkspaceWorkingCheckpointBaseUnavailableError extends Error {
   }
 }
 
-async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
+type HostedWorkspaceFullCheckpointCommitKind = Exclude<
+  HostedWorkspaceCommitKind,
+  "working_commit"
+>;
+type HostedWorkspaceBrowserVaultReplicaPolicy = "omit" | "publish";
+
+async function createFullSeedSnapshot(
+  input: HostedWorkspaceBridgeFullSnapshotInput,
+): Promise<{
+  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  snapshotRef: HostedExecutionBundleRef;
+}> {
+  return await createFullSnapshot({
+    ...input,
+    browserVaultReplicaPolicy: "omit",
+    commitKind: "full_seed",
+  });
+}
+
+async function createFullCompactionSnapshot(
+  input: HostedWorkspaceBridgeFullSnapshotInput,
+): Promise<{
+  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  snapshotRef: HostedExecutionBundleRef;
+}> {
+  return await createFullSnapshot({
+    ...input,
+    browserVaultReplicaPolicy: "publish",
+    commitKind: "full_compaction",
+  });
+}
+
+interface HostedWorkspaceBridgeFullSnapshotInput {
   codexHomeSnapshotHashSecret: string | null;
-  commitKind: HostedWorkspaceCommitKind;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  publishBrowserVaultReplica: boolean;
   preservedState?: HostedWorkspaceEffectivePreservedState | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
   userId: string;
   vaultRoot: string;
+}
+
+async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput & {
+  browserVaultReplicaPolicy: HostedWorkspaceBrowserVaultReplicaPolicy;
+  commitKind: HostedWorkspaceFullCheckpointCommitKind;
 }): Promise<{
   browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionBundleRef;
@@ -398,7 +436,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     },
   });
 
-  const browserVaultReplica = input.publishBrowserVaultReplica
+  const browserVaultReplica = input.browserVaultReplicaPolicy === "publish"
     ? await publishHostedWorkspaceBridgeBrowserVaultReplica({
         platform: input.platform,
         request: input.request,
@@ -410,7 +448,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
     bundlePutCount: 1,
-    browserVaultReplicaState: input.publishBrowserVaultReplica
+    browserVaultReplicaState: input.browserVaultReplicaPolicy === "publish"
       ? browserVaultReplica.browserVaultReplicaRef ? "written" : "degraded"
       : "omitted",
     commitKind: input.commitKind,
@@ -430,7 +468,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
   };
 }
 
-async function createHostedWorkspaceBridgeWorkingCommitSnapshot(input: {
+async function createWorkingCommitSnapshot(input: {
   codexHomeSnapshotHashSecret: string | null;
   currentRefs: {
     baseSnapshotRef: HostedExecutionBundleRef | null;
@@ -613,11 +651,11 @@ async function publishHostedWorkspaceBridgeBrowserVaultReplica(input: {
 }): Promise<{
   browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
 }> {
-  let replica: Awaited<ReturnType<typeof createHostedBrowserVaultReplicaForSnapshot>>;
+  let replica: Awaited<ReturnType<typeof createHostedBrowserVaultReplicaForSourceState>>;
   try {
-    replica = await createHostedBrowserVaultReplicaForSnapshot({
+    replica = await createHostedBrowserVaultReplicaForSourceState({
       generatedAt: input.sourceRef.updatedAt,
-      snapshotRef: input.sourceRef,
+      sourceStateHash: input.sourceRef.hash,
       vaultRoot: input.vaultRoot,
     });
   } catch (error) {
@@ -628,10 +666,6 @@ async function publishHostedWorkspaceBridgeBrowserVaultReplica(input: {
       request: input.request,
       sidecar: "browser-vault-replica",
     });
-    return {};
-  }
-
-  if (!replica) {
     return {};
   }
 

@@ -63,7 +63,7 @@ export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 export interface HostedWorkspaceRuntimeRestoreResult
   extends HostedRestoredExecutionContext {
   mode: HostedWorkspaceRuntimeRestoreMode;
-  restoredLegacyWorkingSnapshot: boolean;
+  appliedWorkingDelta: boolean;
 }
 
 export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
@@ -108,8 +108,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     return {
       ...restored,
+      appliedWorkingDelta: false,
       mode: "null-bootstrap",
-      restoredLegacyWorkingSnapshot: false,
     };
   }
 
@@ -258,8 +258,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
   return {
     ...restored,
+    appliedWorkingDelta: Boolean(deltaSnapshotRef),
     mode: "snapshot",
-    restoredLegacyWorkingSnapshot: Boolean(deltaSnapshotRef),
   };
 }
 
