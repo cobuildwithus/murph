@@ -346,22 +346,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       vaultRoot: hotRestoreCacheVaultRoot,
     });
   };
-  const cacheRecordingWorkspacePort: typeof guardedWorkspacePort = {
-    read: () => guardedWorkspacePort.read!(),
-    async checkpoint(request) {
-      const response = await guardedWorkspacePort.checkpoint(request);
-      await recordHotRestoreCache(response);
-      return response;
-    },
-  };
-  const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
-    read: () => workspacePort.read!(),
-    async checkpoint(request) {
-      const response = await workspacePort.checkpoint(request);
-      await recordHotRestoreCache(response);
-      return response;
-    },
-  };
   const createLivenessGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput) => {
       assertRuntimeLiveness();
@@ -413,20 +397,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       leaseGeneration: input.request.leaseGeneration,
       workspaceVersion: input.request.workspaceVersion,
     };
-    const createCheckpointRequestBuilderForWorkspace = (
-      workspace: HostedWorkspaceState | null,
-    ): HostedWorkspaceCheckpointRequestBuilder =>
-      createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-        createSnapshot: createLivenessGuardedCheckpointSnapshot,
-        metadata: {
-          attemptId: input.request.attemptId,
-          expectedWorkspaceVersion: workspace?.version ?? input.request.workspaceVersion,
-          leaseGeneration: input.request.leaseGeneration,
-          nextWakeAt: workspace?.nextWakeAt ?? null,
-          nextWakeReason: workspace?.nextWakeReason ?? null,
-        },
-      });
-    let checkpointRequestBuilder = createCheckpointRequestBuilderForWorkspace(workspaceRead.workspace);
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
       mailboxBudget.importItem(
         item,
@@ -453,9 +423,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.signal,
     );
     activeVaultRoot = restored.vaultRoot;
-	    hotRestoreCacheVaultRoot = restored.vaultRoot;
-	    assertRuntimeLiveness();
-	    if (isIdleShutdownCheckpoint) {
+    hotRestoreCacheVaultRoot = restored.vaultRoot;
+    assertRuntimeLiveness();
+    if (isIdleShutdownCheckpoint) {
+      const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+        createSnapshot: createLivenessGuardedCheckpointSnapshot,
+        metadata: {
+          attemptId: input.request.attemptId,
+          expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
+          leaseGeneration: input.request.leaseGeneration,
+          nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
+          nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
+        },
+      });
+      const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
+        read: () => workspacePort.read!(),
+        async checkpoint(request) {
+          const response = await workspacePort.checkpoint(request);
+          await recordHotRestoreCache(response);
+          return response;
+        },
+      };
       const latestLiveness = await touchRuntimeLivenessOnce({
         port: runtime.platform.runtimeLivenessPort,
         requestId,
@@ -471,8 +459,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
       }
 
-	      return await runHostedWorkspaceIdleShutdownCheckpoint({
-	        assertRuntimeLiveness,
+      return await runHostedWorkspaceIdleShutdownCheckpoint({
+        assertRuntimeLiveness,
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
         livenessAbortSignal: livenessAbortController.signal,
@@ -493,13 +481,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     if (!runnerMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
     }
+    const foregroundWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
+      read: () => guardedWorkspacePort.read!(),
+      async checkpoint() {
+        throw new Error("Foreground hosted runner must not checkpoint workspace.");
+      },
+    };
+    const foregroundCheckpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder = {
+      async createRequest() {
+        throw new Error(
+          "Foreground hosted runner must not build workspace checkpoint snapshots.",
+        );
+      },
+    };
     const runnerPlatform = {
       ...guardedRuntime.platform,
       mailboxPort: runnerMailboxPort,
-      workspacePort: cacheRecordingWorkspacePort,
+      workspacePort: foregroundWorkspacePort,
+    };
+    const foregroundRuntime = {
+      ...guardedRuntime,
+      platform: runnerPlatform,
     };
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
-      checkpointRequestBuilder,
+      checkpointRequestBuilder: foregroundCheckpointRequestBuilder,
       expectedUserId: input.request.userId,
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
@@ -511,7 +516,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     const initialMailboxImport = await raceHostedRuntimeLiveness(
       importHostedMailboxForWorkspaceRunner({
-        checkpointRequestBuilder,
+        checkpointRequestBuilder: foregroundCheckpointRequestBuilder,
         checkpointReason: "import",
         deferCheckpoint: true,
         input: baseRunnerInput,
@@ -569,7 +574,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   ...phaseInput,
                   request: input.request,
                   restored,
-                  runtime: guardedRuntime,
+                  runtime: foregroundRuntime,
                   runtimeEnv,
                   signal: livenessAbortController.signal,
                 }),
