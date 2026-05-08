@@ -10,6 +10,7 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_WORKSPACE_INVOCATION_REASONS,
   parseHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "@murphai/hosted-execution/runtime-control";
@@ -517,6 +518,15 @@ export class HostedUserRunner {
         this.logStaleInvocationLeaseCleared(recovery.attemptId, runningRecord.userId);
       }
     }
+    const persistedPreemption = activeInThisIsolate
+      ? {
+          preempted: false,
+          record: runningRecord,
+        }
+      : await this.preemptPersistedWorkspaceInvocationForPendingNudge({
+          record: runningRecord,
+        });
+    runningRecord = persistedPreemption.record;
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
     const nowMs = Date.now();
     const preferredWakeAt = alreadyRunning
@@ -559,6 +569,7 @@ export class HostedUserRunner {
         alreadyRunning,
         immediateDriveStarted,
         pendingNudge: record.pendingNudge,
+        preemptedPersistedActiveInvocation: persistedPreemption.preempted,
         preemptedActiveInvocation,
       },
       message: "Hosted runner nudge accepted.",
@@ -1159,6 +1170,107 @@ export class HostedUserRunner {
       userId: input.userId,
     });
     return true;
+  }
+
+  private async preemptPersistedWorkspaceInvocationForPendingNudge(input: {
+    record: RunnerStateRecord;
+  }): Promise<{
+    preempted: boolean;
+    record: RunnerStateRecord;
+  }> {
+    const invocation = input.record.workspaceInvocation;
+    if (
+      !input.record.inFlight
+      || !invocation
+      || !isHostedWorkspaceInvocationReasonValue(invocation.reason)
+      || !shouldPreemptActiveWorkspaceInvocationForNudge(invocation.reason)
+    ) {
+      return {
+        preempted: false,
+        record: input.record,
+      };
+    }
+
+    const destroyed = await this.destroyWorkspaceInvocationContainerForPreemption({
+      reason: invocation.reason,
+      userId: input.record.userId,
+      workspaceAttemptId: invocation.attemptId,
+    });
+    if (!destroyed) {
+      return {
+        preempted: false,
+        record: input.record,
+      };
+    }
+
+    const preemption = await this.stateStore.preemptActiveInvocation({
+      attemptId: invocation.attemptId,
+      reason: invocation.reason,
+    });
+    if (preemption.preempted) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          workspaceAttemptId: invocation.attemptId,
+          workspaceReason: invocation.reason,
+        },
+        message: "Hosted runner preempted persisted lower-priority invocation for foreground nudge.",
+        phase: "scheduled",
+        userId: input.record.userId,
+      });
+    }
+
+    return preemption;
+  }
+
+  private async destroyWorkspaceInvocationContainerForPreemption(input: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+    workspaceAttemptId: string;
+  }): Promise<boolean> {
+    if (!this.runnerContainerNamespace) {
+      return false;
+    }
+
+    try {
+      const destroyed = await destroyHostedExecutionContainer({
+        runnerContainerName: resolveHostedExecutionRunnerContainerName({
+          source: this.runnerRuntimeEnvSource,
+          userId: input.userId,
+        }),
+        runnerContainerNamespace: this.runnerContainerNamespace,
+        userId: input.userId,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          destroyAttempted: destroyed.attempted,
+          destroyErrorCode: destroyed.errorCode,
+          destroyOk: destroyed.ok,
+          workspaceAttemptId: input.workspaceAttemptId,
+          workspaceReason: input.reason,
+        },
+        level: destroyed.ok ? "info" : "warn",
+        message: "Hosted runner cleaned up lower-priority invocation container for foreground nudge.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return destroyed.ok;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          workspaceAttemptId: input.workspaceAttemptId,
+          workspaceReason: input.reason,
+        },
+        error,
+        level: "warn",
+        message: "Hosted runner could not clean up lower-priority invocation container for foreground nudge.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return false;
+    }
   }
 
   private logStaleInvocationLeaseCleared(
@@ -2513,6 +2625,14 @@ function shouldPreemptActiveWorkspaceInvocationForNudge(
   return reason === "alarm"
     || reason === "retry"
     || reason === "idle_shutdown_checkpoint";
+}
+
+function isHostedWorkspaceInvocationReasonValue(
+  value: string | null,
+): value is HostedWorkspaceInvocationReason {
+  return HOSTED_WORKSPACE_INVOCATION_REASONS.includes(
+    value as HostedWorkspaceInvocationReason,
+  );
 }
 
 function isCommittedIdleShutdownCheckpointResult(input: HostedWorkspaceInvocationResult): boolean {

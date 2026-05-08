@@ -393,6 +393,34 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async preemptActiveInvocation(input: {
+    attemptId: string;
+    reason: HostedWorkspaceInvocationReason;
+  }): Promise<{
+    preempted: boolean;
+    record: RunnerStateRecord;
+  }> {
+    const meta = this.requireMetaRowSync();
+    if (
+      meta.active_invocation_id !== input.attemptId
+      || meta.active_invocation_reason !== input.reason
+    ) {
+      return {
+        preempted: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    this.clearActiveInvocationMetaSync(meta);
+    meta.in_flight = 0;
+    this.writeMetaRowSync(meta);
+
+    return {
+      preempted: true,
+      record: this.readStateFromMetaSync(meta),
+    };
+  }
+
   async markPendingInvocationNudge(input: {
     preferredWakeAt?: string | null;
   } = {}): Promise<RunnerStateRecord> {
