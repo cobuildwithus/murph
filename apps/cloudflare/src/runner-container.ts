@@ -55,6 +55,8 @@ const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
+const RUNNER_CONTROL_TOKEN_STORAGE_KEY = "runner-container-control-token:v1";
+const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
 const RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY = "runner-container-activity-liveness:v1";
 const RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION = 1;
 
@@ -181,6 +183,12 @@ interface RunnerActivityLivenessRecord {
   activeInvocationCount: number;
   lastActivityAt: number;
   schemaVersion: typeof RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION;
+  updatedAt: number;
+}
+
+interface RunnerControlTokenRecord {
+  schemaVersion: typeof RUNNER_CONTROL_TOKEN_SCHEMA_VERSION;
+  token: string;
   updatedAt: number;
 }
 
@@ -677,13 +685,17 @@ export class RunnerContainer extends Container {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
+    const warmRunnerControlToken = isRunnerContainerStopped(status)
+      ? null
+      : this.runnerControlToken ?? await this.readRunnerControlToken();
 
-    if (!isRunnerContainerStopped(status) && this.runnerControlToken) {
+    if (!isRunnerContainerStopped(status) && warmRunnerControlToken) {
       try {
+        this.runnerControlToken = warmRunnerControlToken;
         await assertRunnerHealthy(this, Math.min(input.timeoutMs, readyTimeoutMs));
         await assertRunnerControlAuthorized(
           this,
-          this.runnerControlToken,
+          warmRunnerControlToken,
           Math.min(input.timeoutMs, readyTimeoutMs),
         );
         emitHostedExecutionStructuredLog({
@@ -698,7 +710,7 @@ export class RunnerContainer extends Container {
           phase: "container.ready",
           userId: input.userId,
         });
-        return this.runnerControlToken;
+        return warmRunnerControlToken;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -788,6 +800,7 @@ export class RunnerContainer extends Container {
       throw error;
     }
     this.runnerControlToken = runnerControlToken;
+    await this.writeRunnerControlToken(runnerControlToken);
 
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -1030,6 +1043,7 @@ export class RunnerContainer extends Container {
     this.runnerControlToken = null;
     this.runnerOutboundProxyState = null;
     this.installedRunnerOutboundProxyState = null;
+    await this.clearRunnerControlToken();
     await this.clearRunnerActivityLivenessRecord();
     await this.destroyIfRunning({ failClosed });
   }
@@ -1101,6 +1115,59 @@ export class RunnerContainer extends Container {
         userId: this.currentLogContext?.userId,
       });
       return null;
+    }
+  }
+
+  private async readRunnerControlToken(): Promise<string | null> {
+    try {
+      const value = await this.ctx.storage.get<unknown>(RUNNER_CONTROL_TOKEN_STORAGE_KEY);
+      return parseRunnerControlTokenRecord(value)?.token ?? null;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not read control token state.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+      return null;
+    }
+  }
+
+  private async writeRunnerControlToken(token: string): Promise<void> {
+    const record: RunnerControlTokenRecord = {
+      schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
+      token,
+      updatedAt: Date.now(),
+    };
+
+    try {
+      await this.ctx.storage.put(RUNNER_CONTROL_TOKEN_STORAGE_KEY, record);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not write control token state.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+    }
+  }
+
+  private async clearRunnerControlToken(): Promise<void> {
+    try {
+      await this.ctx.storage.delete(RUNNER_CONTROL_TOKEN_STORAGE_KEY);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not clear control token state.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
     }
   }
 
@@ -1928,6 +1995,28 @@ function computeRunnerActivityRenewIntervalMs(idleTtlMs: number): number {
 
 function computeRunnerActivityLivenessFreshMs(idleTtlMs: number): number {
   return Math.max(1_000, computeRunnerActivityRenewIntervalMs(idleTtlMs) * 3);
+}
+
+function parseRunnerControlTokenRecord(value: unknown): RunnerControlTokenRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    record.schemaVersion !== RUNNER_CONTROL_TOKEN_SCHEMA_VERSION
+    || typeof record.token !== "string"
+    || record.token.length === 0
+    || !isSafeNonNegativeInteger(record.updatedAt)
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
+    token: record.token,
+    updatedAt: record.updatedAt,
+  };
 }
 
 function parseRunnerActivityLivenessRecord(value: unknown): RunnerActivityLivenessRecord | null {
