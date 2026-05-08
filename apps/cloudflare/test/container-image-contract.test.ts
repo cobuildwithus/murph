@@ -359,10 +359,26 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
     expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.125.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
-    expect(baseDockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim AS whisper-builder");
-    expect(baseDockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim\n\nARG NODE_VERSION");
+    expect(baseDockerfile).toContain(
+      "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
+    );
+    expect(baseDockerfile).toContain(
+      "ARG WHISPER_CPP_SHA256=b7c6b05635e5fda85cbcc5a012d29b3a4ca1cc22d9fa54d5b6c33e4ac271e5e0",
+    );
+    expect(baseDockerfile).toContain(
+      "ARG WHISPER_MODEL_SHA256=a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    );
+    expect(baseDockerfile).toContain(
+      "FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST} AS whisper-builder",
+    );
+    expect(baseDockerfile).toContain(
+      "FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST}\n\nARG NODE_VERSION",
+    );
     expect(baseDockerfile).toContain(
       "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_CPP_VERSION}.tar.gz",
+    );
+    expect(baseDockerfile).toContain(
+      "printf '%s  %s\\n' \"${WHISPER_CPP_SHA256}\" /tmp/whisper.cpp.tar.gz | sha256sum -c -",
     );
     expect(baseDockerfile).toContain("-DBUILD_SHARED_LIBS=ON");
     expect(baseDockerfile).toContain("-DGGML_BACKEND_DL=ON");
@@ -378,6 +394,9 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/");
     expect(baseDockerfile).toContain(
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
+    );
+    expect(baseDockerfile).toContain(
+      "printf '%s  %s\\n' \"${WHISPER_MODEL_SHA256}\" \"/opt/whisper/${WHISPER_MODEL_FILE}\" | sha256sum -c -",
     );
     expect(baseDockerfile).toContain(
       "COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/model.bin",
