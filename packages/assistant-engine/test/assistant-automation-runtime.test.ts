@@ -4718,6 +4718,31 @@ describe('assistant auto-reply runtime', () => {
     expect(runLoopMocks.refreshAssistantStatusSnapshot).not.toHaveBeenCalled()
   })
 
+  it('defers cron scanning after fresh hosted queue-only replies', async () => {
+    runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
+      nextRunAt: '2026-05-08T16:00:00.000Z',
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const result = await runLoop.runAssistantAutomationPass({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-hosted-queue-only-cron',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+    expect(result.cronProcessed).toBe(0)
+    expect(result.nextWakeAt).toBe('2026-05-08T16:00:00.000Z')
+  })
+
   it('skips canonical automation branches for no-canonical-write automation passes', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')

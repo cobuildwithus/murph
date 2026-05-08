@@ -937,7 +937,11 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  const cronResult = applyCanonicalWrites
+  const shouldDeferCronAfterHostedReply =
+    executionContext?.hosted != null &&
+    input.deliveryDispatchMode === 'queue-only' &&
+    scanResult.replies.replied > 0
+  const cronResult = applyCanonicalWrites && !shouldDeferCronAfterHostedReply
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
