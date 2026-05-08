@@ -8,6 +8,7 @@ import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptWithCacheMetadata,
+  resolveAssistantMurphProductBaseUrl,
   type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
@@ -319,6 +320,7 @@ describe('assistant system prompt cache stability', () => {
         channel: 'telegram',
         currentLocalDate: '2026-04-15',
         currentTimeZone: 'Asia/Kuala_Lumpur',
+        murphProductBaseUrl: 'http://localhost:3000',
         vaultOverview: 'Vault overview for user A.',
       }),
       cacheInput,
@@ -330,6 +332,7 @@ describe('assistant system prompt cache stability', () => {
         channel: 'sms',
         currentLocalDate: '2026-04-16',
         currentTimeZone: 'America/Los_Angeles',
+        murphProductBaseUrl: 'https://withmurph.ai',
         vaultOverview: 'Vault overview for user B.',
       }),
       cacheInput,
@@ -362,10 +365,14 @@ describe('assistant system prompt cache stability', () => {
 
     expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
     expect(stablePrefix).not.toContain('2026-04-15')
+    expect(stablePrefix).not.toContain('http://localhost:3000')
     expect(stablePrefix).not.toContain('Vault overview for user A.')
     expect(stablePrefix).not.toContain('Active experiment context for user A.')
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
+    expect(dynamicSuffix).toContain(
+      'Current Murph product base URL for user-facing app links: http://localhost:3000',
+    )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
       '664ced99aa451b9e99c4bf109081852694a7d86ffd68e827983016669e4125a1',
     )
@@ -484,6 +491,7 @@ describe('assistant experiment onboarding guidance', () => {
       assistantHostedDeviceConnectAvailable: true,
       assistantHostedDeviceConnectProviders: [],
       assistantKnowledgeToolsAvailable: true,
+      murphProductBaseUrl: 'https://withmurph.ai',
       channel: 'telegram',
       cliAccess: {
         rawCommand: 'vault-cli',
@@ -516,15 +524,22 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain('commonsProtocolRef')
     expect(prompt).toContain(
-      'After successfully creating a protocol-linked run, send the public experiment page route',
+      'Current Murph product base URL for user-facing app links: https://withmurph.ai',
+    )
+    expect(prompt).toContain(
+      'After successfully creating a protocol-linked run, send the public experiment page link',
     )
     expect(prompt).toContain('/experiments/<routeId>')
     expect(prompt).toContain(
-      'http://localhost:3000/experiments/finnish-sauna',
+      'make the link absolute with that origin',
+    )
+    expect(prompt).toContain(
+      'make the experiment page URL the final line of the message with no text after it',
     )
     expect(prompt).toContain(
       'Do not invent a page URL for custom unlinked runs.',
     )
+    expect(prompt).not.toContain('http://localhost:3000/experiments/finnish-sauna')
     expect(prompt).toContain('Match the user\'s energy')
     expect(prompt).toContain('Never restate information the user has already acknowledged')
     expect(prompt).toContain('Do not surface raw revision hashes, field names, or test-plan ids')
@@ -541,6 +556,19 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Stop gathering info and create the run when you have enough context')
     expect(prompt).not.toContain('scaffold and update the experiment record')
     expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
+  })
+
+  it('resolves the injected Murph product base URL from hosted public env', () => {
+    expect(resolveAssistantMurphProductBaseUrl({
+      HOSTED_WEB_BASE_URL: 'http://localhost:3000',
+    })).toBe('http://localhost:3000')
+    expect(resolveAssistantMurphProductBaseUrl({
+      VERCEL_PROJECT_PRODUCTION_URL: 'withmurph.ai',
+    })).toBe('https://withmurph.ai')
+    expect(resolveAssistantMurphProductBaseUrl({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: 'https://join.example.test',
+      HOSTED_WEB_BASE_URL: 'https://web.example.test',
+    })).toBe('https://join.example.test')
   })
 
   it('guides first-session prep reminders through one-shot automations after run creation', () => {

@@ -4,6 +4,10 @@ import {
   buildAssistantCliGuidanceText,
   type AssistantCliAccessContext,
 } from "../assistant-cli-access.js";
+import {
+  normalizeHostedExecutionBaseUrl,
+  normalizeHostedExecutionString,
+} from "@murphai/hosted-execution/env";
 import type { AssistantTurnTrigger } from "@murphai/operator-config/assistant-cli-contracts";
 import { isAssistantUserFacingChannel } from "./channel-presentation.js";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "./first-contact-welcome.js";
@@ -29,6 +33,7 @@ export interface AssistantSystemPromptInput {
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
   currentTimeZone: string;
+  murphProductBaseUrl?: string | null;
   onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
@@ -200,6 +205,7 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
   return joinPromptSections(
     buildAssistantCurrentDateContextText({
       currentLocalDate: input.currentLocalDate,
+      currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
       currentTimeZone: input.currentTimeZone,
     }),
     input.vaultOverview ?? null,
@@ -259,6 +265,7 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
     joinPromptSections(
       buildAssistantCurrentDateContextText({
         currentLocalDate: input.currentLocalDate,
+        currentMurphProductBaseUrl: null,
         currentTimeZone: input.currentTimeZone,
       }),
       input.vaultOverview ?? null,
@@ -340,10 +347,57 @@ function stableStringifyAssistantPromptCacheValue(value: unknown): string {
 
 function buildAssistantCurrentDateContextText(input: {
   currentLocalDate: string;
+  currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
-  return `The user's canonical timezone for this vault is ${input.currentTimeZone}.
-Today's date for the user is ${input.currentLocalDate}.`;
+  return joinPromptSections(
+    `The user's canonical timezone for this vault is ${input.currentTimeZone}.
+Today's date for the user is ${input.currentLocalDate}.`,
+    input.currentMurphProductBaseUrl
+      ? `Current Murph product base URL for user-facing app links: ${input.currentMurphProductBaseUrl}`
+      : null
+  );
+}
+
+export function resolveAssistantMurphProductBaseUrl(
+  source: Readonly<Record<string, string | undefined>> = process.env
+): string | null {
+  return (
+    normalizeAssistantProductBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
+    ?? normalizeAssistantProductBaseUrl(source.HOSTED_WEB_BASE_URL)
+    ?? readAssistantVercelProductionBaseUrl(source)
+  );
+}
+
+function normalizeAssistantProductBaseUrl(
+  value: string | null | undefined
+): string | null {
+  try {
+    return normalizeHostedExecutionBaseUrl(value, {
+      allowHttpLocalhost: true,
+      requireOriginOnly: true,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function readAssistantVercelProductionBaseUrl(
+  source: Readonly<Record<string, string | undefined>>
+): string | null {
+  const productionUrl = normalizeHostedExecutionString(
+    source.VERCEL_PROJECT_PRODUCTION_URL
+  );
+
+  if (!productionUrl) {
+    return null;
+  }
+
+  const normalizedInput = /^[a-z][a-z\d+.-]*:\/\//iu.test(productionUrl)
+    ? productionUrl
+    : `https://${productionUrl}`;
+
+  return normalizeAssistantProductBaseUrl(normalizedInput);
 }
 
 function buildAssistantIdentityAndScopeText(): string {
@@ -519,7 +573,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - \`vault-cli experiment start <slug> ... --dry-run --format json\` to validate typed start fields without writing records.
 - \`vault-cli experiment edit <id> ...\` for typed repairs or enrichment of an existing experiment.
 - Preserve exact Health Commons \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`commonsProtocolRef\`.
-- After successfully creating a protocol-linked run, send the public experiment page route using the resolved Health Commons \`routeId\`: \`/experiments/<routeId>\`. If the current context exposes the hosted web origin, make it an absolute URL with that origin; in local development this looks like \`http://localhost:3000/experiments/finnish-sauna\`. Put the URL on its own line in messaging channels. Do not invent a page URL for custom unlinked runs.
+- After successfully creating a protocol-linked run, send the public experiment page link using the resolved Health Commons \`routeId\`: \`/experiments/<routeId>\`. If the current context provides a Murph product base URL, make the link absolute with that origin; otherwise use the relative route. In messaging channels, make the experiment page URL the final line of the message with no text after it. Do not invent a page URL for custom unlinked runs.
 
 # Active experiment support
 - Log sessions with typed flags: \`vault-cli experiment session log <id> ...\`
