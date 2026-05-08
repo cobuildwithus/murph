@@ -1571,6 +1571,44 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).not.toHaveBeenCalled();
     expect(alarms).toContain("2026-05-01T00:00:00.000Z");
+    const usageGateCall = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .find(([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH);
+    expect(JSON.parse(String(usageGateCall?.[0].body))).toEqual({});
+  });
+
+  it("asks the web AI usage gate to notify the user when a pending nudge is denied", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      usageGateResponse: {
+        allowed: false,
+        noticeCode: "pulse_upgrade_edge",
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+        userNotice:
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+      },
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      "UPDATE runner_meta SET pending_nudge = 1 WHERE user_id = ?",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateNoticeCode: "pulse_upgrade_edge",
+      },
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    const usageGateCall = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .find(([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH);
+    expect(JSON.parse(String(usageGateCall?.[0].body))).toEqual({
+      deniedNoticeContext: "pending_nudge",
+    });
   });
 
   it("fails closed with a retry alarm when the web AI usage gate is unavailable", async () => {

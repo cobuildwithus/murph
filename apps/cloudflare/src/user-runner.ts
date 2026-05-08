@@ -705,7 +705,10 @@ export class HostedUserRunner {
 
     const gate = input.reason === "nudge" || input.reason === "idle_shutdown_checkpoint"
       ? createAllowedHostedAiUsageGateDecision()
-      : await this.readHostedAiUsageGateBeforeInvocation(initialRecord.userId);
+      : await this.readHostedAiUsageGateBeforeInvocation({
+          notifyUserOnDenied: initialRecord.pendingNudge,
+          userId: initialRecord.userId,
+        });
     if (!gate.allowed) {
       if (gate.reason === "ai_usage_gate_unavailable") {
         const error = new Error("Hosted AI usage gate was unavailable.");
@@ -1111,8 +1114,10 @@ export class HostedUserRunner {
     return parseHostedWorkspaceReadResponse(await response.json());
   }
 
-  private async readHostedAiUsageGateBeforeInvocation(
-    userId: string,
+  private async readHostedAiUsageGateBeforeInvocation(input: {
+    notifyUserOnDenied: boolean;
+    userId: string;
+  },
   ): Promise<HostedAiUsageGateDecision> {
     try {
       const response = await fetchHostedExecutionWebControlPlaneResponse({
@@ -1120,8 +1125,10 @@ export class HostedUserRunner {
           ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
           : {}),
         baseUrl: this.readHostedWebControlBaseUrl(),
-        body: "{}",
-        boundUserId: userId,
+        body: JSON.stringify({
+          ...(input.notifyUserOnDenied ? { deniedNoticeContext: "pending_nudge" } : {}),
+        }),
+        boundUserId: input.userId,
         callbackSigning: this.env.webCallbackSigning,
         method: "POST",
         path: HOSTED_WEB_USAGE_GATE_PATH,
@@ -1145,7 +1152,7 @@ export class HostedUserRunner {
         level: "warn",
         message: "Hosted runner skipped workspace invocation because the AI usage gate was unavailable.",
         phase: "scheduled",
-        userId,
+        userId: input.userId,
       });
       return {
         allowed: false,
