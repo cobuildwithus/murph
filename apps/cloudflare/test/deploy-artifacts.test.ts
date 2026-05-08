@@ -535,6 +535,32 @@ export function loadGeneratedHealthCommonsCatalog() {
     );
   });
 
+  it("ignores generated package outputs when checking the source fingerprint", async () => {
+    const sourceFixture = await createDeployArtifactSourceFixture({
+      generatedFilesPackageName: healthCommonsPackageName,
+    });
+    const fixture = await createDeployArtifactFixture({
+      appDir: sourceFixture.appDir,
+      repoRoot: sourceFixture.repoRoot,
+    });
+    const packageDir = sourceFixture.packageDirs.get(healthCommonsPackageName);
+
+    if (!packageDir) {
+      throw new Error("Missing Health Commons source fixture.");
+    }
+
+    await mkdir(path.join(packageDir, "generated"), { recursive: true });
+    await writeFile(
+      path.join(packageDir, "generated", "catalog.json"),
+      "{\"generated\":true}\n",
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).resolves.toMatchObject({
+      sourceFingerprint: fixture.manifest.sourceFingerprint,
+    });
+  });
+
   it("accepts worker secrets rendered after the runner bundle", async () => {
     const fixture = await createDeployArtifactFixture();
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
@@ -765,6 +791,7 @@ async function rewriteRunnerBundleManifest(fixture: {
 
 async function createDeployArtifactSourceFixture(input: {
   distBinPackageName?: string;
+  generatedFilesPackageName?: string;
 } = {}): Promise<{
   appDir: string;
   packageDirs: Map<string, string>;
@@ -797,6 +824,9 @@ async function createDeployArtifactSourceFixture(input: {
     const packageJson = {
       name: packageName,
       version: "1.0.0",
+      ...(packageName === input.generatedFilesPackageName
+        ? { files: ["src", "generated"] }
+        : {}),
       ...(packageName === input.distBinPackageName
         ? { bin: { "dist-bin-fixture": "./dist/bin.js" } }
         : {}),

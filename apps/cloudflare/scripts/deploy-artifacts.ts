@@ -887,7 +887,7 @@ function listWorkspacePackageSourceAssetRoots(
   ];
 
   for (const entry of listPackageFilesEntries(packageJson.files)) {
-    if (isPackageDistEntry(entry)) {
+    if (isPackageBuildOutputEntry(entry)) {
       continue;
     }
 
@@ -895,7 +895,7 @@ function listWorkspacePackageSourceAssetRoots(
   }
 
   for (const entry of listPackageBinEntries(packageJson.bin)) {
-    if (isPackageDistEntry(entry)) {
+    if (isPackageBuildOutputEntry(entry)) {
       continue;
     }
 
@@ -905,9 +905,9 @@ function listWorkspacePackageSourceAssetRoots(
   return roots;
 }
 
-function isPackageDistEntry(entry: string): boolean {
+function isPackageBuildOutputEntry(entry: string): boolean {
   const firstPart = entry.split(/[\\/]/u).find((part) => part !== "" && part !== ".");
-  return firstPart === "dist";
+  return firstPart === "dist" || firstPart === "generated";
 }
 
 function listPackageFilesEntries(value: unknown): string[] {
