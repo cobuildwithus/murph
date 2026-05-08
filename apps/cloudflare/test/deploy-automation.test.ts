@@ -538,15 +538,14 @@ describe("hosted deploy automation helpers", () => {
       "--publish 5432:5432",
       "docker exec \"${postgres_container}\" pg_isready -U postgres -d murph_test",
       "name: Stop Postgres",
-      "uses: useblacksmith/setup-docker-builder@722e97d12b1d06a961800dd6c05d79d951ad3c80 # v1",
-      "uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2",
+      "runs-on: ubuntu-24.04",
       "uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6",
       "uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5",
       "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
       "uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6",
-      "file: Dockerfile.cloudflare-hosted-runner-base",
-      "load: true",
-      "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
+      "docker build \\",
+      "--file Dockerfile.cloudflare-hosted-runner-base \\",
+      "--tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \\",
       "name: Render Worker secrets",
       "if: ${{ inputs.deploy_worker && inputs.sync_worker_secrets }}",
       "run: pnpm --dir apps/cloudflare deploy:secrets:render",
@@ -575,6 +574,8 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toContain("name: Smoke runner container image");
     expect(workflow).not.toContain("uses: docker/setup-buildx-action@v4");
     expect(workflow).not.toContain("uses: docker/build-push-action@v7");
+    expect(workflow).not.toContain("uses: useblacksmith/setup-docker-builder");
+    expect(workflow).not.toContain("uses: useblacksmith/build-push-action");
     expect(workflow).not.toContain("cache-from: type=gha,scope=cloudflare-runner-base");
     expect(workflow).not.toContain("cache-to: type=gha,mode=max,scope=cloudflare-runner-base");
     expect(workflow).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT");
@@ -612,7 +613,8 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
-    ]).toHaveLength(4);
+    ]).toHaveLength(3);
+    expect([...workflow.matchAll(/runs-on: ubuntu-24\.04/gmu)]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
     ]).toHaveLength(3);
