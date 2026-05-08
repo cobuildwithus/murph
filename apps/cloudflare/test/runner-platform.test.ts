@@ -1375,7 +1375,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
-      dashboardReplicaSourceStateHash: sourceBundleHash,
+      browserVaultRefreshSourceStateHash: sourceBundleHash,
       fetchImpl: fetchMock as typeof fetch,
       internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: null,
@@ -1441,7 +1441,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(
       createHostedBrowserVaultReplicaWriteHeaders({
         browserVaultRefreshAuthority: false,
-        dashboardReplicaSourceStateHash: null,
+        browserVaultRefreshSourceStateHash: null,
         workspaceCheckpointBridge: null,
       }),
     ).rejects.toThrow(

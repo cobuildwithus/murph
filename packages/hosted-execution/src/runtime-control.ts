@@ -362,7 +362,6 @@ export interface HostedWorkspaceCheckpointResponse {
 }
 
 export interface HostedBrowserVaultReplicaPublishRequest {
-  expectedSourceStateHash?: string;
   replicaRef: HostedBrowserVaultReplicaRef;
 }
 

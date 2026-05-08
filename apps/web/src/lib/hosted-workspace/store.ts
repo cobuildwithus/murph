@@ -98,6 +98,12 @@ const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWorkspaceMutationTx = Prisma.TransactionClient;
 
+export interface HostedWorkspaceTransactionRunner {
+  $transaction<Result>(
+    callback: (tx: HostedWorkspaceMutationTx) => Promise<Result>,
+  ): Promise<Result>;
+}
+
 export interface HostedWorkspaceRow {
   userId: string;
   version: bigint;
@@ -298,13 +304,13 @@ export async function checkpointHostedWorkspaceTx(input: {
 }
 
 export async function publishLatestBrowserVaultReplicaRef(input: {
-  prisma?: PrismaClient;
+  prisma?: HostedWorkspaceTransactionRunner;
   replicaRef: unknown;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
-  const prisma = input.prisma ?? getPrisma();
+  const prisma: HostedWorkspaceTransactionRunner = input.prisma ?? getPrisma();
 
-  return prisma.$transaction((tx) => publishBrowserVaultReplicaRefTx({
+  return prisma.$transaction((tx: HostedWorkspaceMutationTx) => publishBrowserVaultReplicaRefTx({
     ...input,
     legacyExpectedSourceStateHash: null,
     tx,
@@ -322,23 +328,23 @@ export async function publishLatestBrowserVaultReplicaRefTx(input: {
   });
 }
 
-export async function publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuard(input: {
+export async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
   expectedSourceStateHash: string;
-  prisma?: PrismaClient;
+  prisma?: HostedWorkspaceTransactionRunner;
   replicaRef: unknown;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
-  const prisma = input.prisma ?? getPrisma();
+  const prisma: HostedWorkspaceTransactionRunner = input.prisma ?? getPrisma();
 
-  return prisma.$transaction((tx) =>
-    publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuardTx({
+  return prisma.$transaction((tx: HostedWorkspaceMutationTx) =>
+    publishLegacySourceHashBrowserVaultReplicaRefTx({
       ...input,
       tx,
     })
   );
 }
 
-export async function publishHostedBrowserVaultReplicaRefWithLegacySourceHashGuardTx(input: {
+export async function publishLegacySourceHashBrowserVaultReplicaRefTx(input: {
   expectedSourceStateHash: string;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
@@ -468,6 +474,9 @@ async function publishBrowserVaultReplicaRefAgainstCurrentWorkspace(input: {
       browserVaultReplicaRef: toNullablePrismaJson(input.replicaRef),
     },
     where: {
+      browserVaultReplicaRef: buildBrowserVaultReplicaRefUpdateFilter(
+        input.current.browserVaultReplicaRef,
+      ),
       userId: input.userId,
       version: input.current.version,
     },
@@ -509,6 +518,14 @@ function parseBrowserVaultReplicaGeneratedAt(value: string, label: string): numb
   }
 
   return timestamp;
+}
+
+function buildBrowserVaultReplicaRefUpdateFilter(
+  current: Prisma.JsonValue | null,
+): Prisma.HostedWorkspaceWhereInput["browserVaultReplicaRef"] {
+  return current === null
+    ? { equals: Prisma.DbNull }
+    : { equals: toNullablePrismaJson(current) };
 }
 
 function readHostedWorkspaceBrowserVaultSourceStateHash(

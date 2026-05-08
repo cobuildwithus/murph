@@ -5,6 +5,7 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
+  buildHostedExecutionWhatsAppConversationMessageWake,
 } from "../src/builders.ts";
 import {
   isHostedConversationMessageWake,
@@ -13,6 +14,7 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedSystemWake,
   isHostedTelegramConversationMessageWake,
+  isHostedWhatsAppConversationMessageWake,
 } from "../src/contracts.ts";
 
 describe("hosted execution wake guards", () => {
@@ -62,6 +64,18 @@ describe("hosted execution wake guards", () => {
       selfAddress: null,
       userId: "user_guard",
     });
+    const whatsappWake = buildHostedExecutionWhatsAppConversationMessageWake({
+      eventId: "whatsapp-wake-1",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      userId: "user_guard",
+      whatsappMessage: {
+        fromWaId: "15551234567",
+        messageId: "wamid.guard",
+        schema: "murph.hosted-whatsapp-message.v1",
+        text: "hello whatsapp",
+        threadId: "15551234567",
+      },
+    });
     const systemWake = buildHostedExecutionDeviceSyncWake({
       eventId: "device-sync-wake-1",
       occurredAt: "2026-04-18T00:00:00.000Z",
@@ -72,6 +86,7 @@ describe("hosted execution wake guards", () => {
     expect(isHostedConversationMessageWake(linqWake)).toBe(true);
     expect(isHostedConversationMessageWake(telegramWake)).toBe(true);
     expect(isHostedConversationMessageWake(emailWake)).toBe(true);
+    expect(isHostedConversationMessageWake(whatsappWake)).toBe(true);
     expect(isHostedConversationMessageWake(systemWake)).toBe(false);
 
     expect(isHostedLinqConversationMessageWake(linqWake)).toBe(true);
@@ -81,6 +96,10 @@ describe("hosted execution wake guards", () => {
     expect(isHostedTelegramConversationMessageWake(telegramWake)).toBe(true);
     expect(isHostedTelegramConversationMessageWake(linqWake)).toBe(false);
     expect(isHostedTelegramConversationMessageWake(emailWake)).toBe(false);
+
+    expect(isHostedWhatsAppConversationMessageWake(whatsappWake)).toBe(true);
+    expect(isHostedWhatsAppConversationMessageWake(telegramWake)).toBe(false);
+    expect(isHostedWhatsAppConversationMessageWake(systemWake)).toBe(false);
 
     expect(isHostedEmailConversationMessageWake(emailWake)).toBe(true);
     expect(isHostedEmailConversationMessageWake(linqWake)).toBe(false);

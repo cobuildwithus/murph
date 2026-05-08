@@ -89,6 +89,7 @@ type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest
 
 interface HostedExecutionContainerBrowserVaultRefreshRequest {
   runtime: HostedAssistantRuntimeConfig;
+  signal?: AbortSignal;
   timeoutMs: number;
   userId: string;
 }
@@ -565,6 +566,7 @@ export class RunnerContainer extends Container {
       await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
+      throwIfRunnerContainerOperationAborted(input.signal);
       const response = await this.containerFetch(
         RUNNER_BROWSER_VAULT_REFRESH_URL,
         {
@@ -582,7 +584,10 @@ export class RunnerContainer extends Container {
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
-          signal: AbortSignal.timeout(remainingTimeoutMs),
+          signal: combineRunnerContainerAbortSignals(
+            input.signal ?? null,
+            AbortSignal.timeout(remainingTimeoutMs),
+          ),
         },
         RUNNER_PORT,
       );
@@ -1145,6 +1150,7 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   runtime: HostedAssistantRuntimeConfig;
+  signal?: AbortSignal;
   timeoutMs: number;
   userId: string;
 }): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
@@ -1157,9 +1163,40 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
 
   return container.refreshBrowserVaultReplica({
     runtime: input.runtime,
+    signal: input.signal,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
+}
+
+function throwIfRunnerContainerOperationAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException("The operation was aborted.", "AbortError");
+  }
+}
+
+function combineRunnerContainerAbortSignals(
+  first: AbortSignal | null,
+  second: AbortSignal,
+): AbortSignal {
+  if (!first) {
+    return second;
+  }
+  if (first.aborted) {
+    return first;
+  }
+
+  const controller = new AbortController();
+  const abort = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason);
+    }
+  };
+  first.addEventListener("abort", () => abort(first), { once: true });
+  second.addEventListener("abort", () => abort(second), { once: true });
+  return controller.signal;
 }
 
 async function classifyHostedRunnerContainerErrorResponse(
@@ -1523,12 +1560,14 @@ function parseHostedExecutionContainerInvokeInput(
 function parseHostedExecutionContainerBrowserVaultRefreshInput(
   payload: {
     runtime?: unknown;
+    signal?: AbortSignal;
     timeoutMs?: unknown;
     userId?: unknown;
   },
 ): HostedExecutionContainerBrowserVaultRefreshRequest {
   return {
     runtime: readHostedAssistantRuntimeConfig(payload.runtime),
+    signal: payload.signal,
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };

@@ -33,10 +33,10 @@ import {
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
 import {
-  getDashboardReplicaFreshness,
-  readDashboardReplicaSourceStateHash,
-  shouldScheduleDashboardReplicaRefresh,
-} from "../src/dashboard-replica.ts";
+  getBrowserVaultReplicaFreshness,
+  readHostedBrowserVaultSourceStateHash,
+  shouldScheduleBrowserVaultRefresh,
+} from "../src/browser-vault.ts";
 import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -196,7 +196,7 @@ describe("hosted execution coverage gaps", () => {
     })).toThrow(/Hosted execution snapshot ref\.base/u);
   });
 
-  it("centralizes dashboard replica source hash and freshness decisions", () => {
+  it("centralizes browser-vault replica source hash and refresh decisions", () => {
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -225,37 +225,21 @@ describe("hosted execution coverage gaps", () => {
       sourceBundleHash: delta.hash,
     } satisfies HostedBrowserVaultReplicaRef;
 
-    expect(readDashboardReplicaSourceStateHash(working)).toBe(delta.hash);
-    expect(readDashboardReplicaSourceStateHash(base)).toBe(base.hash);
-    expect(getDashboardReplicaFreshness({
+    expect(readHostedBrowserVaultSourceStateHash(working)).toBe(delta.hash);
+    expect(readHostedBrowserVaultSourceStateHash(base)).toBe(base.hash);
+    expect(getBrowserVaultReplicaFreshness({
       replicaRef: freshReplica,
-      snapshotRef: working,
     })).toBe("fresh");
-    expect(getDashboardReplicaFreshness({
+    expect(getBrowserVaultReplicaFreshness({
       replicaRef: { ...freshReplica, sourceBundleHash: base.hash },
-      snapshotRef: working,
     })).toBe("fresh");
-    expect(shouldScheduleDashboardReplicaRefresh({
+    expect(shouldScheduleBrowserVaultRefresh({
       currentReplicaRef: null,
-      currentSnapshotRef: working,
-      previousSnapshotRef: base,
     })).toEqual({
       refresh: true,
     });
-    expect(shouldScheduleDashboardReplicaRefresh({
-      currentReplicaRef: null,
-      currentSnapshotRef: working,
-      previousSnapshotRef: working,
-    })).toEqual({
-      refresh: true,
-    });
-    expect(shouldScheduleDashboardReplicaRefresh({
+    expect(shouldScheduleBrowserVaultRefresh({
       currentReplicaRef: freshReplica,
-      currentSnapshotRef: working,
-    })).toBeNull();
-    expect(shouldScheduleDashboardReplicaRefresh({
-      currentReplicaRef: null,
-      currentSnapshotRef: null,
     })).toBeNull();
   });
 
@@ -429,8 +413,8 @@ describe("hosted execution coverage gaps", () => {
     const assistantUsageModule =
       await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
     const browserVaultModule = await import("../src/browser-vault.ts") as Record<string, unknown>;
-    const dashboardReplicaModule =
-      await import("../src/dashboard-replica.ts") as Record<string, unknown>;
+    const legacyDashboardReplicaModule =
+      await import("../src/dashboard-replica.ts");
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
       string,
@@ -450,8 +434,19 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);
     expect(typeof browserVaultModule.getHostedBrowserVaultReplicaStorageKeyId).toBe("function");
     expect(typeof browserVaultModule.parseHostedBrowserVaultReplicaRef).toBe("function");
-    expect(typeof dashboardReplicaModule.getDashboardReplicaFreshness).toBe("function");
-    expect(typeof dashboardReplicaModule.shouldScheduleDashboardReplicaRefresh).toBe("function");
+    expect(typeof browserVaultModule.getBrowserVaultReplicaFreshness).toBe("function");
+    expect(typeof browserVaultModule.shouldScheduleBrowserVaultRefresh).toBe("function");
+    expect(typeof legacyDashboardReplicaModule.getDashboardReplicaFreshness).toBe("function");
+    expect(legacyDashboardReplicaModule.getDashboardReplicaFreshness({
+      replicaRef: null,
+      snapshotRef: null,
+    })).toBe("stale");
+    expect(legacyDashboardReplicaModule.shouldScheduleDashboardReplicaRefresh({
+      currentReplicaRef: null,
+      currentSnapshotRef: null,
+    })).toBeNull();
+    expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
+    expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);

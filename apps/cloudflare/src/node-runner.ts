@@ -50,7 +50,7 @@ import {
   createLiveBrowserVaultProjectionHash,
   refreshBrowserVaultReplicaFromLiveWorkspace,
   type BrowserVaultReplicaRefreshResult,
-} from "./dashboard-replica/refresher.ts";
+} from "./browser-vault-refresh/refresher.ts";
 
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
@@ -252,7 +252,7 @@ export async function refreshHostedBrowserVaultReplica(
     commitTimeoutMs: runtime.commitTimeoutMs,
     internalWorkerProxyToken,
     localInternalProxyBaseUrl,
-    dashboardReplicaSourceStateHash: null,
+    browserVaultRefreshSourceStateHash: null,
     workspaceCheckpointBridge: null,
   });
   return await refreshBrowserVaultReplicaFromLiveWorkspace({

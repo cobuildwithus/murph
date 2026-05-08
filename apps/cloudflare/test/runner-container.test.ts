@@ -1889,10 +1889,11 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("does not pass AbortSignal values through browser-vault refresh container RPC", async () => {
+  it("passes AbortSignal values through browser-vault refresh container RPC", async () => {
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async () => ({ status: "already_fresh" }));
+    const signal = AbortSignal.timeout(45_000);
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
       async destroyInstance() {},
       async invoke() {
@@ -1915,13 +1916,16 @@ describe("RunnerContainer", () => {
     await refreshHostedExecutionContainerBrowserVaultReplica({
       runnerContainerNamespace: { getByName },
       runtime: {},
+      signal,
       timeoutMs: 45_000,
       userId: "member_123",
     });
 
     expect(getByName).toHaveBeenCalledWith("member_123");
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
-    expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).not.toHaveProperty("signal");
+    expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).toMatchObject({
+      signal,
+    });
   });
 
   it("resolves runner container names from worker version metadata", () => {

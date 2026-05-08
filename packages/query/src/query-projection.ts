@@ -673,12 +673,14 @@ async function readProjectionStatus(
     return null;
   }
 
-  const database = openQueryProjectionDatabase(location, {
-    create: false,
-    readOnly: true,
-  });
+  let database: DatabaseSync | undefined;
 
   try {
+    database = openQueryProjectionDatabase(location, {
+      create: false,
+      readOnly: true,
+    });
+
     if (!hasQueryProjectionTables(database)) {
       return null;
     }
@@ -694,8 +696,10 @@ async function readProjectionStatus(
         hasCurrentQueryProjectionSchema(database) &&
         sameSourceManifest(currentManifest, readStoredSourceManifest(database)),
     };
+  } catch {
+    return null;
   } finally {
-    database.close();
+    database?.close();
   }
 }
 

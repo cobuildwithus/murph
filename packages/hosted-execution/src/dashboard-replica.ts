@@ -5,18 +5,26 @@ import type {
   HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
 import {
+  getBrowserVaultReplicaFreshness,
+  shouldScheduleBrowserVaultRefresh,
+  type BrowserVaultRefreshDecision,
+  type BrowserVaultReplicaFreshness,
+} from "./browser-vault.ts";
+import {
   readHostedBrowserVaultSourceStateHash,
 } from "./parsers/cursor.ts";
 
-export type DashboardReplicaFreshness = "fresh" | "stale";
-
-export interface DashboardReplicaRefreshDecision {
-  refresh: true;
-}
+// Legacy dashboard-replica names are kept only for deploy-skew callers. Active
+// code should import browser-vault refresh helpers from `./browser-vault.ts`.
+export type DashboardReplicaFreshness = BrowserVaultReplicaFreshness;
+export type DashboardReplicaRefreshDecision = BrowserVaultRefreshDecision;
 
 export function readDashboardReplicaSourceStateHash(
   snapshotRef: HostedExecutionSnapshotRefState,
 ): string | null {
+  // Legacy source-hash compatibility helper. Active browser-vault refresh
+  // publishes the latest live projection ref instead of deriving freshness from
+  // committed workspace snapshot source hashes.
   return readHostedBrowserVaultSourceStateHash(snapshotRef);
 }
 
@@ -24,11 +32,10 @@ export function getDashboardReplicaFreshness(input: {
   replicaRef: HostedBrowserVaultReplicaRef | null;
   snapshotRef: HostedExecutionSnapshotRefState;
 }): DashboardReplicaFreshness {
-  // Compatibility helper for older browser-vault clients. Active hosted
-  // refresh now publishes the latest live projection ref instead of deriving
-  // freshness from committed workspace snapshot source hashes.
   void input.snapshotRef;
-  return input.replicaRef ? "fresh" : "stale";
+  return getBrowserVaultReplicaFreshness({
+    replicaRef: input.replicaRef,
+  });
 }
 
 export function shouldScheduleDashboardReplicaRefresh(input: {
@@ -36,11 +43,11 @@ export function shouldScheduleDashboardReplicaRefresh(input: {
   currentSnapshotRef: HostedExecutionSnapshotRefState;
   previousSnapshotRef?: HostedExecutionSnapshotRefState;
 }): DashboardReplicaRefreshDecision | null {
-  // Compatibility helper only. Active scheduling is a one-slot latest-live
-  // refresh request owned by the runner, not a source-hash queue.
   if (!input.currentSnapshotRef) {
     return null;
   }
   void input.previousSnapshotRef;
-  return input.currentReplicaRef ? null : { refresh: true };
+  return shouldScheduleBrowserVaultRefresh({
+    currentReplicaRef: input.currentReplicaRef,
+  });
 }

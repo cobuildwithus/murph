@@ -70,14 +70,14 @@ import {
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
 import {
-  DashboardReplicaCoordinator,
-  type HostedDashboardReplicaRefreshScheduleResult,
-} from "./dashboard-replica/coordinator.ts";
+  BrowserVaultRefreshCoordinator,
+  type HostedBrowserVaultRefreshScheduleResult,
+} from "./browser-vault-refresh/coordinator.ts";
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
 const ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS = 1_000;
-const PENDING_DASHBOARD_REPLICA_REFRESH_CONTINUATION_DELAY_MS = 1_000;
+const PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
@@ -115,7 +115,7 @@ export interface HostedRunnerUserDataDeletionResult {
   userId: string;
 }
 
-export type { HostedDashboardReplicaRefreshScheduleResult };
+export type { HostedBrowserVaultRefreshScheduleResult };
 
 interface RunnerUserStores {
   crypto: HostedUserCryptoContext;
@@ -133,7 +133,7 @@ export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
-  private readonly dashboardReplicaCoordinator: DashboardReplicaCoordinator;
+  private readonly browserVaultRefreshCoordinator: BrowserVaultRefreshCoordinator;
   private runnerStores: RunnerUserStores | null = null;
   private runtimeCryptoContextLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
@@ -156,8 +156,8 @@ export class HostedUserRunner {
     this.runnerContainerNamespace = runnerContainerNamespace;
     this.stateStore = new RunnerStateStore(state);
     this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(this.stateStore, state);
-    this.dashboardReplicaCoordinator = new DashboardReplicaCoordinator({
-      continuationDelayMs: PENDING_DASHBOARD_REPLICA_REFRESH_CONTINUATION_DELAY_MS,
+    this.browserVaultRefreshCoordinator = new BrowserVaultRefreshCoordinator({
+      continuationDelayMs: PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS,
       destroyActiveRefreshContainer: ({ userId }) => {
         const runnerContainerNamespace = this.runnerContainerNamespace;
         if (!runnerContainerNamespace) {
@@ -176,9 +176,12 @@ export class HostedUserRunner {
       hasForegroundWork: () => this.invocationLock !== null,
       readStateForRetryScheduling: async () => await this.tryReadStateForRetryScheduling(),
       retryDelayMs: this.env.retryDelayMs,
-      runPendingRefresh: async (input) => await this.runPendingDashboardReplicaRefresh(input),
+      runPendingRefresh: async (input) => await this.runPendingBrowserVaultRefresh(input),
       state,
       stateStore: this.stateStore,
+      syncStoredRunnerAlarm: async () => {
+        await this.runtimeAlarmScheduler.syncStoredAlarm();
+      },
     });
   }
 
@@ -285,14 +288,14 @@ export class HostedUserRunner {
 
     if (
       dueAlarm.kind === "none"
-      && await this.dashboardReplicaCoordinator.tryStart({
+      && await this.browserVaultRefreshCoordinator.tryStart({
         userId: record.userId,
       })
     ) {
       await this.runtimeAlarmScheduler.syncStoredAlarm();
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
-        message: "Hosted runner alarm started pending dashboard replica refresh.",
+        message: "Hosted runner alarm started pending browser-vault refresh.",
         phase: "scheduled",
         userId: record.userId,
       });
@@ -467,7 +470,7 @@ export class HostedUserRunner {
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
     let runningRecord = await this.stateStore.readState();
-    this.dashboardReplicaCoordinator.abortForForegroundWork({
+    this.browserVaultRefreshCoordinator.abortForForegroundWork({
       reason: "pending_nudge",
       userId: runningRecord.userId,
     });
@@ -538,13 +541,9 @@ export class HostedUserRunner {
     return this.nudgeHostedRunner();
   }
 
-  async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
+  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
-    return await this.dashboardReplicaCoordinator.schedule(input);
-  }
-
-  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
-    return await this.scheduleDashboardReplicaRefreshForUser(input);
+    return await this.browserVaultRefreshCoordinator.schedule(input);
   }
 
   async ownsActiveInvocationLease(input: {
@@ -746,7 +745,7 @@ export class HostedUserRunner {
       };
     }
 
-    this.dashboardReplicaCoordinator.abortForForegroundWork({
+    this.browserVaultRefreshCoordinator.abortForForegroundWork({
       reason: "foreground_invocation",
       userId: initialRecord.userId,
     });
@@ -848,7 +847,7 @@ export class HostedUserRunner {
               component: "hosted.runner",
               error,
               level: "warn",
-              message: "Hosted runner post-completion dashboard replica refresh scheduling failed; invocation result preserved.",
+              message: "Hosted runner post-completion browser-vault refresh scheduling failed; invocation result preserved.",
               phase: "scheduled",
               userId: initialRecord.userId,
             });
@@ -1254,7 +1253,7 @@ export class HostedUserRunner {
       return;
     }
 
-    await this.dashboardReplicaCoordinator.schedulePending({
+    await this.browserVaultRefreshCoordinator.schedulePending({
       userId: input.userId,
     });
   }
@@ -1750,11 +1749,11 @@ export class HostedUserRunner {
     return true;
   }
 
-  private async runPendingDashboardReplicaRefresh(input: {
+  private async runPendingBrowserVaultRefresh(input: {
     signal: AbortSignal;
     userId: string;
   }): Promise<void> {
-    const pending = await this.stateStore.readPendingDashboardReplicaRefresh();
+    const pending = await this.stateStore.readPendingBrowserVaultRefresh();
     if (!pending) {
       return;
     }
@@ -1793,6 +1792,7 @@ export class HostedUserRunner {
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
       runtime: runtimeConfig,
+      signal: input.signal,
       timeoutMs: this.env.runnerTimeoutMs,
       userId: input.userId,
     });
@@ -1809,11 +1809,11 @@ export class HostedUserRunner {
           browserVaultReplicaMaxBytes: generated.maxBytes,
         },
         level: "warn",
-        message: "Hosted runner skipped dashboard replica refresh because the generated replica exceeded the size limit.",
+        message: "Hosted runner skipped browser-vault refresh because the generated replica exceeded the size limit.",
         phase: "scheduled",
         userId: input.userId,
       });
-      await this.stateStore.clearPendingDashboardReplicaRefresh({
+      await this.stateStore.clearPendingBrowserVaultRefresh({
         slotId: pending.slotId,
         updatedAt: pending.updatedAt,
       });
@@ -1825,14 +1825,14 @@ export class HostedUserRunner {
     }
 
     if (generated.status !== "published") {
-      await this.stateStore.clearPendingDashboardReplicaRefresh({
+      await this.stateStore.clearPendingBrowserVaultRefresh({
         slotId: pending.slotId,
         updatedAt: pending.updatedAt,
       });
       return;
     }
 
-    await this.stateStore.clearPendingDashboardReplicaRefresh({
+    await this.stateStore.clearPendingBrowserVaultRefresh({
       slotId: pending.slotId,
       updatedAt: pending.updatedAt,
     });
@@ -2003,7 +2003,7 @@ export class HostedUserRunner {
       }
 
       if (!this.pendingRunnerDriveAfterInvocation && this.invocationLock === null) {
-        await this.dashboardReplicaCoordinator.drainAfterForegroundWork();
+        await this.browserVaultRefreshCoordinator.drainAfterForegroundWork();
       }
     }
   }

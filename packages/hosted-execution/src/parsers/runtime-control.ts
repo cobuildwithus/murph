@@ -584,14 +584,6 @@ export function parseHostedBrowserVaultReplicaPublishRequest(
   }
 
   return {
-    ...(record.expectedSourceStateHash === undefined
-      ? {}
-      : {
-          expectedSourceStateHash: requireString(
-            record.expectedSourceStateHash,
-            "Hosted browser-vault replica publish request expectedSourceStateHash",
-          ),
-        }),
     replicaRef,
   };
 }

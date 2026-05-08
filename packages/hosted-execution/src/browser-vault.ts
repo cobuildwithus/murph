@@ -1,3 +1,8 @@
+import type {
+  HostedBrowserVaultReplicaCursorRef,
+  HostedBrowserVaultReplicaRef,
+} from "./contracts.ts";
+
 export type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
@@ -9,3 +14,21 @@ export {
   parseHostedBrowserVaultReplicaRef,
   readHostedBrowserVaultSourceStateHash,
 } from "./parsers/cursor.ts";
+
+export type BrowserVaultReplicaFreshness = "fresh" | "stale";
+
+export interface BrowserVaultRefreshDecision {
+  refresh: true;
+}
+
+export function getBrowserVaultReplicaFreshness(input: {
+  replicaRef: HostedBrowserVaultReplicaRef | null;
+}): BrowserVaultReplicaFreshness {
+  return input.replicaRef ? "fresh" : "stale";
+}
+
+export function shouldScheduleBrowserVaultRefresh(input: {
+  currentReplicaRef: HostedBrowserVaultReplicaRef | null;
+}): BrowserVaultRefreshDecision | null {
+  return input.currentReplicaRef ? null : { refresh: true };
+}
