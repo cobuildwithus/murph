@@ -1,6 +1,7 @@
 import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
+  MIN_AUTOMATION_EVERY_MS,
   automationContinuityPolicyValues,
   automationScheduleKindValues,
   automationStatusValues,
@@ -134,6 +135,9 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       const everyMs = typeof object.everyMs === "number" ? object.everyMs : Number(object.everyMs);
       if (!Number.isInteger(everyMs) || everyMs <= 0) {
         throw new Error("schedule.everyMs must be a positive integer.");
+      }
+      if (everyMs < MIN_AUTOMATION_EVERY_MS) {
+        throw new Error("schedule.everyMs must be at least 60000 ms.");
       }
 
       return {

@@ -310,6 +310,9 @@ test("device sync store hosted hydration preserves existing tokens until disconn
     assert.equal(hydrated?.disconnectGeneration, 0);
 
     const disconnected = store.hydrateHostedAccount({
+      credential: {
+        kind: "none",
+      },
       connection: {
         connectedAt: "2026-04-07T00:00:00.000Z",
         displayName: "Updated User",
@@ -1506,6 +1509,108 @@ test("device sync store keeps local tokens when stale hosted disconnects send cr
   }
 });
 
+test("device sync store clears tokens for fresh hosted credential-mode changes", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-credential-mode-change");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const seeded = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-hosted-credential-mode-change",
+      displayName: "Seeded",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "seed-access",
+        accessTokenEncrypted: "enc:seed-access",
+        refreshToken: "seed-refresh",
+        refreshTokenEncrypted: "enc:seed-refresh",
+      },
+      metadata: {
+        seeded: true,
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    const hydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Fresh",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          hosted: true,
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 7,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T00:20:00.000Z",
+        lastWebhookAt: "2026-04-07T00:10:00.000Z",
+        nextReconcileAt: "2026-04-07T03:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "hosted-access-v7",
+        accessTokenEncrypted: "enc:hosted-access-v7",
+        accessTokenExpiresAt: "2026-04-07T04:00:00.000Z",
+        refreshToken: "hosted-refresh-v7",
+        refreshTokenEncrypted: "enc:hosted-refresh-v7",
+      },
+    });
+
+    assert.ok(hydrated);
+
+    const providerConfig = store.hydrateHostedAccount({
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Provider Config",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          mode: "provider-config",
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T02:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 8,
+      hostedObservedUpdatedAt: "2026-04-07T02:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T01:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T01:20:00.000Z",
+        lastWebhookAt: "2026-04-07T01:10:00.000Z",
+        nextReconcileAt: null,
+      },
+    });
+
+    assert.equal(providerConfig?.id, seeded.id);
+    assert.equal(providerConfig?.credential.kind, "provider_config");
+    assert.equal(providerConfig?.credential.providerConfigKey, "junction");
+    assert.equal(providerConfig?.accessTokenExpiresAt, null);
+    assert.equal(providerConfig?.hostedObservedTokenVersion, 8);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store clears tokens for fresh hosted disconnects after local token refreshes", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-clear-after-refresh");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -1581,6 +1686,9 @@ test("device sync store clears tokens for fresh hosted disconnects after local t
     assert.equal(locallyRefreshed.localTokenRevision, hydrated!.localTokenRevision + 1);
 
     const disconnected = store.hydrateHostedAccount({
+      credential: {
+        kind: "none",
+      },
       connection: {
         connectedAt: "2026-04-07T00:00:00.000Z",
         displayName: "Hosted Disconnect",
@@ -1651,6 +1759,45 @@ test("device sync store clears tokens for fresh hosted disconnects after local t
     assertStoredCredentialKind(replayedActiveTokens, "none");
     assert.equal(replayedActiveTokens?.accessTokenExpiresAt, null);
     assert.equal(replayedActiveTokens?.hostedObservedTokenVersion, 7);
+
+    const freshReconnectTokens = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T03:00:00.000Z",
+        displayName: "Hosted Reconnect",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          reason: "fresh-reconnect",
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T03:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 1,
+      hostedObservedUpdatedAt: "2026-04-07T03:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T02:40:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T02:35:00.000Z",
+        lastWebhookAt: "2026-04-07T02:30:00.000Z",
+        nextReconcileAt: "2026-04-07T04:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "fresh-reconnect-access-v1",
+        accessTokenEncrypted: "enc:fresh-reconnect-access-v1",
+        accessTokenExpiresAt: "2026-04-07T06:00:00.000Z",
+        refreshToken: "fresh-reconnect-refresh-v1",
+        refreshTokenEncrypted: "enc:fresh-reconnect-refresh-v1",
+      },
+    });
+
+    assert.equal(freshReconnectTokens?.id, seeded.id);
+    assert.equal(freshReconnectTokens?.status, "active");
+    const freshReconnectCredential = requireStoredOAuthCredential(freshReconnectTokens);
+    assert.equal(freshReconnectCredential.accessTokenEncrypted, "enc:fresh-reconnect-access-v1");
+    assert.equal(freshReconnectTokens?.hostedObservedTokenVersion, 1);
   } finally {
     store.close();
     await rm(tempDir, {

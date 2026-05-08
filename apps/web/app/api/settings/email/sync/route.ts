@@ -44,6 +44,7 @@ export const POST = withJsonError(async (request: Request) => {
   const verifiedAt = new Date(verifiedEmail.verifiedAt * 1000).toISOString();
   const prisma = getPrisma();
   const verifiedAtDate = new Date(verifiedAt);
+  const occurredAt = new Date().toISOString();
   const channelsUpdated = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, auth.member.id);
     const currentAuthorization = await readHostedMemberEmailAuthorization({
@@ -74,7 +75,7 @@ export const POST = withJsonError(async (request: Request) => {
     await enqueueHostedMemberChannelsUpdatedTx({
       emailLinked: true,
       memberId: auth.member.id,
-      occurredAt: verifiedAt,
+      occurredAt,
       prisma: tx,
       sourceType: "settings.email.sync",
     });

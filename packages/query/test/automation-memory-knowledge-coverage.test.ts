@@ -315,6 +315,42 @@ describe("automation helpers", () => {
       /schedule must be an object\./u,
     );
 
+    const tooFrequentVault = await createVaultRoot();
+    await writeAutomationDocument(
+      tooFrequentVault,
+      "too-frequent",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        "automationId: auto_too_frequent",
+        "slug: too-frequent",
+        "title: Too frequent",
+        "status: active",
+        "schedule:",
+        "  kind: every",
+        "  everyMs: 59999",
+        "route:",
+        "  channel: email",
+        "  deliverResponse: true",
+        "  deliveryTarget: null",
+        "  identityId: null",
+        "  participantId: null",
+        "  threadId: null",
+        "continuityPolicy: preserve",
+        "createdAt: 2026-04-08T00:00:00.000Z",
+        "updatedAt: 2026-04-08T00:00:00.000Z",
+        "---",
+        "",
+        "This should not be scheduled.",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(listAutomations(tooFrequentVault)).rejects.toThrow(
+      /schedule\.everyMs must be at least 60000 ms\./u,
+    );
+
     const invalidKindVault = await createVaultRoot();
     await writeAutomationDocument(
       invalidKindVault,
