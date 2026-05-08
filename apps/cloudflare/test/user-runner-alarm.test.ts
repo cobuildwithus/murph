@@ -386,7 +386,7 @@ describe("HostedUserRunner alarm routing", () => {
     );
 
     expect(r2Deletes).toEqual([]);
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([
       { user_id: "member_other" },
     ]);
@@ -1563,7 +1563,6 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2030,7 +2029,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-	    expect(alarms.at(-1)).toBe("2026-04-27T00:01:30.000Z");
+	    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
 	    expect(
 	      sql.exec(
 	        `SELECT idle_shutdown_checkpoint_due_at,
@@ -2748,8 +2747,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleBrowserVaultRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
@@ -2758,12 +2758,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(destroyInstance).toHaveBeenCalledOnce();
-    const refreshSignal = refreshInput?.signal;
-    expect(refreshSignal).toBeInstanceOf(AbortSignal);
-    if (!(refreshSignal instanceof AbortSignal)) {
-      throw new Error("Expected browser-vault refresh signal.");
-    }
-    expect(refreshSignal.aborted).toBe(true);
+    expect(refreshInput).toBeDefined();
+    expect(refreshInput).not.toHaveProperty("signal");
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2815,8 +2811,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleBrowserVaultRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
@@ -2854,8 +2851,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleBrowserVaultRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    await runner.alarm();
     await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
     await flushDetachedRunnerDrive();
 
@@ -2865,9 +2863,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     )).toBe(false);
   });
 
-  it("does not schedule a continuation alarm when a browser-vault refresh starts immediately", async () => {
+  it("schedules a continuation alarm before an alarm-started browser-vault refresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-immediate-no-alarm"),
+      snapshotRef: createLayeredSnapshotRef("refresh-alarm-start"),
       version: "4",
     });
     const activeRefresh = createDeferred<Awaited<ReturnType<
@@ -2884,18 +2884,21 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleBrowserVaultRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
 
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    expect(alarms).toEqual([]);
 
     activeRefresh.resolve({
       status: "already_fresh",
     });
     await flushDetachedRunnerDrive();
 
-    expect(alarms).toEqual([]);
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
   });
 
   it("keeps browser-vault refresh pending and schedules a retry after publish conflict", async () => {
@@ -2921,9 +2924,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleBrowserVaultRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
 
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(expect.objectContaining({
       userId: "member_123",
@@ -2937,7 +2941,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toContain("2026-04-27T00:00:30.050Z");
   });
 
-  it("drains a pending browser-vault refresh after an active invocation completes", async () => {
+  it("keeps pending browser-vault refresh alarm-driven after an active invocation completes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -2953,7 +2957,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     >(async () => ({
       status: "already_fresh",
     }));
-    const { runner } = createRunnerCryptoContextHarness(workspace, {
+    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
       invoke,
       refreshBrowserVaultReplica,
     });
@@ -2978,6 +2982,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "member_123",
@@ -2985,7 +2993,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     ));
   });
 
-  it("drains a refreshed pending browser-vault slot after an active refresh completes", async () => {
+  it("drains a refreshed pending browser-vault slot from a later alarm", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -3016,8 +3024,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleBrowserVaultRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "member_123",
@@ -3037,13 +3046,17 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "already_fresh",
     });
 
+    await flushDetachedRunnerDrive();
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(1);
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(2));
     expect(refreshBrowserVaultReplica).toHaveBeenLastCalledWith(expect.objectContaining({
       userId: "member_123",
     }));
   });
 
-  it("does not schedule browser-vault refresh when only workspace metadata changes", async () => {
+  it("keeps post-invocation browser-vault refresh alarm-driven when only workspace metadata changes", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("metadata-only-unchanged"),
       version: "4",
@@ -3074,6 +3087,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    });
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     await flushDetachedRunnerDrive();
     expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
@@ -3092,7 +3110,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       invoke,
       onStoragePut: ({ key }) => {
         if (key === "runner:pending-browser-vault-refresh:v1") {
-          throw new Error("dashboard refresh storage unavailable");
+          throw new Error("browser-vault refresh storage unavailable");
         }
       },
     });
@@ -3104,7 +3122,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledOnce();
   });
 
-  it("does not schedule browser-vault refresh when the current source already has a replica", async () => {
+  it("clears an alarm-driven browser-vault refresh when the current source already has a replica", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("replica-already-current-old"),
       version: "4",
@@ -3139,6 +3157,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    });
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     await flushDetachedRunnerDrive();
     expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
@@ -3171,15 +3194,16 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleBrowserVaultRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
 
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
     await flushDetachedRunnerDrive();
     expect(browserVaultPublish).not.toHaveBeenCalled();
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
-    expect(alarms).not.toContain("2026-04-27T00:00:01.000Z");
+    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:00:01.000Z")).toHaveLength(1);
   });
 
   it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {

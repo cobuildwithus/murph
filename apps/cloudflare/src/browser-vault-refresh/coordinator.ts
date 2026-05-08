@@ -62,15 +62,10 @@ export class BrowserVaultRefreshCoordinator {
 
   async schedulePending(input: { userId: string }): Promise<boolean> {
     await this.deps.stateStore.scheduleBrowserVaultRefresh();
-    const immediateRefreshStarted = await this.startDetachedRefresh({
+    await this.scheduleContinuation({
       userId: input.userId,
     });
-    if (!immediateRefreshStarted) {
-      await this.scheduleContinuation({
-        userId: input.userId,
-      });
-    }
-    return immediateRefreshStarted;
+    return false;
   }
 
   async tryStart(input: {
@@ -192,12 +187,6 @@ export class BrowserVaultRefreshCoordinator {
       return;
     }
 
-    const started = await this.tryStart();
-    if (started) {
-      await this.deps.syncStoredRunnerAlarm();
-      return;
-    }
-
     const record = await this.deps.readStateForRetryScheduling();
     if (record) {
       await this.scheduleContinuation({
@@ -260,11 +249,9 @@ export class BrowserVaultRefreshCoordinator {
         });
         return;
       }
-      if (!await this.tryStart({ userId: input.userId })) {
-        await this.scheduleContinuation({
-          userId: input.userId,
-        });
-      }
+      await this.scheduleContinuation({
+        userId: input.userId,
+      });
     });
 
     this.refreshLock = refresh;
