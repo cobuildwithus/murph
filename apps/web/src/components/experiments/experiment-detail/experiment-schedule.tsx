@@ -37,12 +37,9 @@ export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps)
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Adherence
-        </span>
-        <span className="text-xs text-muted-foreground">{schedule.cadence}</span>
-      </div>
+      <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        Adherence
+      </span>
       <div className="flex flex-col gap-2">
         {schedule.weeks.map((week) => (
           <div key={week.label} className="flex flex-col gap-1">
@@ -57,7 +54,7 @@ export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps)
           </div>
         ))}
       </div>
-      {stats.due > 0 && (
+      {stats.due > 0 ? (
         <div className="flex items-baseline justify-between border-t border-border/50 pt-3">
           <span className="text-xs text-muted-foreground">
             {stats.completed} of {stats.due} due
@@ -66,7 +63,13 @@ export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps)
             {stats.adherencePercent}%
           </span>
         </div>
-      )}
+      ) : stats.hasToday ? (
+        <div className="border-t border-border/50 pt-3">
+          <span className="text-xs text-muted-foreground">
+            First session today
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -78,9 +81,10 @@ function tallyTargetStats(schedule: ExperimentSchedule) {
   const missed = cells.filter((c) => c.kind === "missed").length;
   const failed = cells.filter((c) => c.kind === "failed").length;
   const unknown = cells.filter((c) => c.kind === "unknown").length;
+  const hasToday = cells.some((c) => c.isToday);
   const due = completed + partial + missed + failed + unknown;
   const adherencePercent = due > 0 ? Math.round((completed / due) * 100) : 0;
-  return { completed, due, adherencePercent };
+  return { completed, due, adherencePercent, hasToday };
 }
 
 function WeekDateRange({ dateRange }: { dateRange: string }) {
@@ -103,7 +107,6 @@ function CompactCellView({ cell }: { cell: ScheduleCell }) {
         "relative flex h-9 flex-col items-center justify-center rounded",
         CELL_VARIANT[cell.kind],
       )}
-      style={cell.columnStart ? { gridColumnStart: cell.columnStart } : undefined}
       title={cell.date ? `${cell.dayLabel} · ${cell.date}` : cell.dayLabel}
     >
       {cell.isToday && (
