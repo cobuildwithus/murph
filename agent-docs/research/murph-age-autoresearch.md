@@ -190,6 +190,8 @@ R177 materialized that next direction as the external-source validation protocol
 
 R178 converted the partner lane into an aggregate-only frozen-evaluator handoff contract. It defines a future authorized external-validation flow where the data holder runs locally, rows stay with the data holder, Murph receives only aggregate receipts, and receipts are rejected for unauthorized data sources, forbidden fields, small-cell leaks, denominator mismatch, or model/calibration mutation. The contract explicitly treats local storage as not overriding source rights: public, user-authorized, or data-holder-authorized sources only; leaked, bypassed, or redistributed controlled rows remain rejected.
 
+R179 added a local partner aggregate receipt validator stub. It checks the R178-required receipt sections, authority attestations, aggregate-only egress flags, model allowlist, metric allowlist, minimum cell count 11, and forbidden row/identifier/prediction/coefficient/model-parameter/source-text fields. Smoke validation passed for a clean aggregate-only receipt and rejected a bad receipt with a forbidden participant-id field plus an unsuppressed small cell.
+
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
