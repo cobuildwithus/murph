@@ -7,6 +7,9 @@ import {
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import type {
+  AssistantChannelActivityHandle,
+} from "@murphai/assistant-engine/assistant-channel-adapters";
+import type {
   HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
@@ -25,6 +28,7 @@ const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_FILE_BASE_URL",
 ] as const;
 const HOSTED_CHANNEL_TYPING_REFRESH_MS = 4_000;
+const HOSTED_CHANNEL_TYPING_EFFECT_TIMEOUT_MS = 750;
 
 export function buildHostedLinqChannelEnv(input: {
   forwardedEnv: Readonly<Record<string, string>>;
@@ -80,17 +84,10 @@ export function createHostedAssistantChannelTypingDependencies(input: {
     startLinqTyping: async (request) => {
       const sendLinqChatAction = input.effectsPort?.sendLinqChatAction;
       if (sendLinqChatAction) {
-        return startAssistantChannelActivitySession({
-          refreshMs: HOSTED_CHANNEL_TYPING_REFRESH_MS,
+        return startHostedLinqEffectsPortTypingSession({
+          sendLinqChatAction,
           signal: input.signal,
-          start: () => sendLinqChatAction({
-            action: "typing",
-            target: request.target,
-          }),
-          stop: () => sendLinqChatAction({
-            action: "typing_stop",
-            target: request.target,
-          }),
+          target: request.target,
         });
       }
 
@@ -124,6 +121,125 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       });
     },
   };
+}
+
+function startHostedLinqEffectsPortTypingSession(input: {
+  sendLinqChatAction: NonNullable<HostedRuntimeEffectsPort["sendLinqChatAction"]>;
+  signal?: AbortSignal;
+  target: string;
+}): AssistantChannelActivityHandle {
+  let activeHandle: AssistantChannelActivityHandle | null = null;
+  let loggedBestEffortFailure = false;
+  let stopRequested = false;
+  const logBestEffortFailure = (error: unknown) => {
+    if (loggedBestEffortFailure) {
+      return;
+    }
+    loggedBestEffortFailure = true;
+    logHostedLinqTypingBestEffortFailure(error);
+  };
+  const sessionReady = startAssistantChannelActivitySession({
+    refreshMs: HOSTED_CHANNEL_TYPING_REFRESH_MS,
+    signal: input.signal,
+    start: () => withHostedLinqTypingEffectTimeout(
+      input.sendLinqChatAction({
+        action: "typing",
+        target: input.target,
+      }),
+      logBestEffortFailure,
+    ),
+    stop: () => withHostedLinqTypingEffectTimeout(
+      input.sendLinqChatAction({
+        action: "typing_stop",
+        target: input.target,
+      }),
+      logBestEffortFailure,
+    ),
+  }).then(async (handle) => {
+    if (stopRequested) {
+      await stopHostedLinqTypingBestEffort(handle);
+      return null;
+    }
+
+    activeHandle = handle;
+    return handle;
+  }).catch((error: unknown) => {
+    logBestEffortFailure(error);
+    return null;
+  });
+
+  return {
+    async stop() {
+      stopRequested = true;
+      if (activeHandle) {
+        const handle = activeHandle;
+        activeHandle = null;
+        void stopHostedLinqTypingBestEffort(handle);
+        return;
+      }
+
+      void sessionReady.then((handle) => {
+        if (handle) {
+          activeHandle = null;
+          return stopHostedLinqTypingBestEffort(handle);
+        }
+        return undefined;
+      });
+    },
+  };
+}
+
+async function stopHostedLinqTypingBestEffort(
+  handle: AssistantChannelActivityHandle,
+): Promise<void> {
+  try {
+    await handle.stop();
+  } catch (error) {
+    logHostedLinqTypingBestEffortFailure(error);
+  }
+}
+
+function withHostedLinqTypingEffectTimeout(
+  task: Promise<void>,
+  logBestEffortFailure: (error: unknown) => void,
+): Promise<void> {
+  let settled = false;
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      logBestEffortFailure("timeout");
+      resolve();
+    }, HOSTED_CHANNEL_TYPING_EFFECT_TIMEOUT_MS);
+
+    task.then(
+      () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        resolve();
+      },
+      (error: unknown) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        logBestEffortFailure(error);
+        resolve();
+      },
+    );
+  });
+}
+
+function logHostedLinqTypingBestEffortFailure(error: unknown): void {
+  console.warn("Hosted Linq typing provider effect failed; continuing best-effort.", {
+    errorName: error === "timeout" ? "Timeout" : error instanceof Error ? "Error" : "NonError",
+  });
 }
 
 export async function markHostedConversationReadBestEffort(input: {
