@@ -57,9 +57,10 @@ export class HostedDeviceSyncPublicIngressService {
 
           await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
         },
-        onWebhookAccepted: async ({ account, traceId, webhook, now }) => {
+        onWebhookAccepted: async ({ account, claimToken, traceId, webhook, now }) => {
           await handleHostedDeviceSyncWebhookAccepted({
             account,
+            claimToken,
             now,
             store: this.context.store,
             traceId,
@@ -135,11 +136,17 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
-  async handleOAuthCallback(provider: string): Promise<CompleteConnectionResult> {
-    return this.handleConnectionCallback(provider);
+  async handleOAuthCallback(
+    provider: string,
+    options: { expectedOwnerId?: string | null } = {},
+  ): Promise<CompleteConnectionResult> {
+    return this.handleConnectionCallback(provider, options);
   }
 
-  async handleConnectionCallback(provider: string): Promise<CompleteConnectionResult> {
+  async handleConnectionCallback(
+    provider: string,
+    options: { expectedOwnerId?: string | null } = {},
+  ): Promise<CompleteConnectionResult> {
     const url = new URL(this.context.request.url);
     const handleConnectionCallback =
       typeof Reflect.get(this.ingress, "handleConnectionCallback") === "function"
@@ -150,6 +157,7 @@ export class HostedDeviceSyncPublicIngressService {
       provider,
       query: url.searchParams,
       code: url.searchParams.get("code"),
+      expectedOwnerId: options.expectedOwnerId ?? null,
       state: url.searchParams.get("murph_state") ?? url.searchParams.get("state"),
       scope: url.searchParams.get("scope"),
       error: url.searchParams.get("error"),

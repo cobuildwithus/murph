@@ -26,6 +26,7 @@ describe("PrismaHostedWebhookTraceStore", () => {
       store.claimWebhookTrace({
         eventType: "sleep.updated",
         externalAccountId: "external-account-123",
+        claimToken: "claim-token",
         processingExpiresAt: "2026-04-12T00:05:00.000Z",
         provider: "oura",
         receivedAt: "2026-04-12T00:00:00.000Z",

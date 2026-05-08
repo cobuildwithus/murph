@@ -6,7 +6,7 @@ Last verified against repo layout: 2026-05-05
 
 Murph's hosted device-sync stack is now split this way:
 
-- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/dirty-state/pending/ack routes.
+- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/dirty-state/pending/ack routes.
 - `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, or start a provider connect link, but it is not a second durable device-sync control plane.
 - local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
@@ -117,6 +117,7 @@ Recommended durable tables remain:
 - `device_connection`
 - `device_token_audit`
 - `device_oauth_session`
+- `device_connect_intent`
 - `device_webhook_trace`
 - `device_sync_signal`
 - `device_sync_dirty_connection`
@@ -124,6 +125,8 @@ Recommended durable tables remain:
 - optional `device_webhook_subscription`
 
 Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, dirty resource/window summaries, and the canonical hosted runtime authority consumed by the internal snapshot/apply/dirty-state/pending/ack routes. It should not store canonical health facts.
+
+`device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The provider callback then consumes OAuth state only for that same member. Intent rows must not store raw provider or Junction authorization URLs.
 
 `device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider payloads, provider tokens, raw samples, or user-visible health facts.
 
@@ -166,9 +169,11 @@ These are internet-facing and provider-facing only. `:provider` is resolved thro
 ### Hosted browser-facing connection routes
 
 - `POST /api/connect-sources/:sourceId/start`
+- `GET /device/connect/:claim`
+- `POST /device/connect/:claim`
 - `GET /device-sync/connect/complete`
 
-These are the only browser-facing wearable connection start and completion routes. The start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP plus Junction-backed Garmin/Oura/Strava targets when those providers are configured. Successful hosted provider callbacks should redirect to the completion page so the user can continue into the text-Murph flow.
+These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP plus Junction-backed Garmin/Oura/Strava targets when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Successful hosted provider callbacks should redirect to the completion page so the user can continue into the text-Murph flow.
 
 ### Hosted settings-authenticated routes
 
@@ -204,7 +209,7 @@ These are authenticated by local-agent credentials, not browser cookies.
 - `POST /api/internal/device-sync/runtime/dirty-ack` on `apps/web`
 - `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link` on `apps/web`
 
-These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. The connect-link route creates a short-lived first-party connect intent and returns `connectUrl` plus a compatibility `authorizationUrl` copy of the same first-party URL; it does not start provider OAuth or return raw provider/Junction URLs to hosted execution. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
 
 ## Runtime access strategy
 

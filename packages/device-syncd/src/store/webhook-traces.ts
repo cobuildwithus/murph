@@ -51,8 +51,9 @@ export function claimDeviceSyncWebhookTrace(
           received_at,
           payload_json,
           status,
-          processing_expires_at
-        ) values (?, ?, ?, ?, ?, ?, 'processing', ?)
+          processing_expires_at,
+          claim_token
+        ) values (?, ?, ?, ?, ?, ?, 'processing', ?, ?)
       `).run(
         input.provider,
         input.traceId,
@@ -61,6 +62,7 @@ export function claimDeviceSyncWebhookTrace(
         input.receivedAt,
         MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
         input.processingExpiresAt,
+        input.claimToken,
       );
 
       return "claimed";
@@ -84,7 +86,8 @@ export function claimDeviceSyncWebhookTrace(
           received_at = ?,
           payload_json = ?,
           status = 'processing',
-          processing_expires_at = ?
+          processing_expires_at = ?,
+          claim_token = ?
       where provider = ?
         and trace_id = ?
         and coalesce(status, 'processed') = 'processing'
@@ -98,6 +101,7 @@ export function claimDeviceSyncWebhookTrace(
       input.receivedAt,
       MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
       input.processingExpiresAt,
+      input.claimToken,
       input.provider,
       input.traceId,
       input.receivedAt,
@@ -111,31 +115,37 @@ export function completeDeviceSyncWebhookTrace(
   database: DatabaseSync,
   provider: string,
   traceId: string,
-): void {
-  database.prepare(`
+  claimToken: string,
+): boolean {
+  const result = database.prepare(`
     update webhook_trace
     set payload_json = ?,
         status = 'processed',
-        processing_expires_at = null
+        processing_expires_at = null,
+        claim_token = null
     where provider = ?
       and trace_id = ?
+      and claim_token = ?
       and coalesce(status, 'processed') = 'processing'
-  `).run(MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON, provider, traceId);
+  `).run(MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON, provider, traceId, claimToken);
 
   pruneProcessedDeviceSyncWebhookTraces(database, new Date().toISOString());
+  return (result.changes ?? 0) > 0;
 }
 
 export function releaseDeviceSyncWebhookTrace(
   database: DatabaseSync,
   provider: string,
   traceId: string,
+  claimToken: string,
 ): void {
   database.prepare(`
     delete from webhook_trace
     where provider = ?
       and trace_id = ?
+      and claim_token = ?
       and coalesce(status, 'processed') = 'processing'
-  `).run(provider, traceId);
+  `).run(provider, traceId, claimToken);
 
   pruneProcessedDeviceSyncWebhookTraces(database, new Date().toISOString());
 }

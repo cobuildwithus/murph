@@ -3024,6 +3024,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
   const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
 
   const baseTrace = {
+    claimToken: "claim-base",
     eventType: "demo.updated",
     externalAccountId: "demo-abc",
     payload: {
@@ -3051,7 +3052,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     "processing",
   );
 
-  store.completeWebhookTrace("demo", "trace-processing");
+  store.completeWebhookTrace("demo", "trace-processing", "claim-base");
   assert.equal(
     store.claimWebhookTrace({
       ...baseTrace,
@@ -3071,7 +3072,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     }),
     "claimed",
   );
-  store.releaseWebhookTrace("demo", "trace-release");
+  store.releaseWebhookTrace("demo", "trace-release", "claim-base");
   assert.equal(
     store.claimWebhookTrace({
       ...baseTrace,

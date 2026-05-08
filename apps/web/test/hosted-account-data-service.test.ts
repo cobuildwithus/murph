@@ -58,6 +58,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.device_token_audit",
   "prisma.device_sync_signal",
   "prisma.device_oauth_session",
+  "prisma.device_connect_intent",
   "prisma.device_agent_session",
   "prisma.device_browser_assertion_nonce",
   "prisma.hosted_web_internal_request_nonce",
@@ -533,6 +534,26 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("deletes short-lived hosted device connect intents with account data", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.device_connect_intent"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "deviceConnectIntent",
+      where: { memberId: "member_123" },
+    });
+  });
+
   it("reports incomplete configured Cloudflare cleanup after Prisma deletion commits", async () => {
     const order: string[] = [];
     serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue({
@@ -989,6 +1010,10 @@ async function createHostedAccountDataExportPrisma(input: {
       count,
       findMany: async () => [{ state: "oauth-state" }],
     },
+    deviceConnectIntent: {
+      count,
+      findMany: async () => [{ claimHash: "connect-claim-hash" }],
+    },
     deviceSyncSignal: {
       count,
       findMany: async () =>
@@ -1279,6 +1304,7 @@ async function createHostedAccountDataExportPrismaForTest(
 }
 
 function createHostedAccountDeletionPrismaForTest(input: {
+  deleteCalls?: HostedAccountDeletionPrismaDeleteCall[];
   deviceConnections?: Array<{
     id: string;
     provider: string;
@@ -1287,6 +1313,25 @@ function createHostedAccountDeletionPrismaForTest(input: {
   }>;
   onTransaction: () => void;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
+  const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
+    deleteMany: async (args) => {
+      input.deleteCalls?.push({ model, where: args.where });
+      return { count: 1 };
+    },
+  });
+  const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
+    $executeRaw: async () => 1,
+  }, {
+    get(target, property) {
+      if (property in target) {
+        return target[property as keyof HostedAccountDeletionPrismaTransactionFake];
+      }
+      if (typeof property === "string") {
+        return makeDeleteDelegate(property);
+      }
+      return undefined;
+    },
+  });
   const fakePrisma: unknown = {
     deviceConnection: {
       findMany: async () => input.deviceConnections ?? [],
@@ -1294,15 +1339,26 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedMember: {
       findUnique: async () => ({ id: "member_123" }),
     },
-    $transaction: async () => {
+    $transaction: async (callback: (prisma: typeof transactionPrisma) => Promise<unknown>) => {
       input.onTransaction();
-      return {
-        "prisma.hosted_member": 1,
-      };
+      return callback(transactionPrisma);
     },
   };
   return fakePrisma as Parameters<typeof deleteHostedAccountData>[0]["prisma"];
 }
+
+type HostedAccountDeletionPrismaDeleteCall = {
+  model: string;
+  where: unknown;
+};
+
+type HostedAccountDeletionPrismaDeleteDelegate = {
+  deleteMany(args: { where: unknown }): Promise<{ count: number }>;
+};
+
+type HostedAccountDeletionPrismaTransactionFake = {
+  $executeRaw: (...args: unknown[]) => Promise<number>;
+};
 
 function makeCloudflareDeletionResult() {
   return {

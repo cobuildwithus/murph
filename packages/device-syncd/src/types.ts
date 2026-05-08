@@ -224,6 +224,7 @@ export interface DeviceSyncWebhookTraceRecord {
 }
 
 export interface ClaimDeviceSyncWebhookTraceInput extends DeviceSyncWebhookTraceRecord {
+  claimToken: string;
   processingExpiresAt: string;
 }
 
@@ -243,6 +244,9 @@ export type ConsumeOAuthStateResult =
   | {
       status: "provider_mismatch";
       provider: string;
+    }
+  | {
+      status: "owner_mismatch";
     };
 
 export interface DeviceSyncPublicIngressStore {
@@ -252,6 +256,7 @@ export interface DeviceSyncPublicIngressStore {
     state: string,
     now: string,
     expectedProvider?: string,
+    expectedOwnerId?: string,
   ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
   markConnectionSetupFailed(
@@ -265,8 +270,8 @@ export interface DeviceSyncPublicIngressStore {
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
-  completeWebhookTrace(provider: string, traceId: string): void | Promise<void>;
-  releaseWebhookTrace(provider: string, traceId: string): void | Promise<void>;
+  completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
+  releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void | Promise<void>;
   markWebhookReceived(accountId: string, now: string): void | Promise<void>;
 }
 
@@ -387,6 +392,7 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
 
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
+  claimToken: string;
   traceId: string;
   webhook: DeviceSyncIngressWebhook;
   provider: DeviceSyncProvider;
@@ -514,6 +520,7 @@ export interface HandleConnectionCallbackInput {
   provider: string;
   state?: string | null;
   code?: string | null;
+  expectedOwnerId?: string | null;
   scope?: string | null;
   error?: string | null;
   errorDescription?: string | null;

@@ -569,6 +569,7 @@ describe('Codex model catalog', () => {
     const issueDeviceConnectLink = vi.fn(
       async () => ({
         authorizationUrl: 'https://connect.example.test/whoop',
+        connectUrl: 'https://connect.example.test/whoop',
         expiresAt: '2026-04-30T00:05:00.000Z',
         provider: 'whoop' as const,
         providerLabel: 'WHOOP',

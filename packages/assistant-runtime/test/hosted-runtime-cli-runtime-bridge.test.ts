@@ -28,6 +28,7 @@ function createDeviceSyncPortStub(): HostedRuntimeDeviceSyncPort {
     },
     createConnectLink: vi.fn(async ({ connectTarget }) => ({
       authorizationUrl: `https://connect.example.test/${connectTarget}?state=opaque`,
+      connectUrl: `https://connect.example.test/${connectTarget}?state=opaque`,
       expiresAt: "2026-05-03T20:15:00.000Z",
       provider: connectTarget,
       providerLabel: connectTarget.toUpperCase(),
@@ -62,6 +63,7 @@ test("hosted CLI runtime bridge creates device connect links through the runtime
 
     assert.deepEqual(result, {
       authorizationUrl: "https://connect.example.test/whoop?state=opaque",
+      connectUrl: "https://connect.example.test/whoop?state=opaque",
       expiresAt: "2026-05-03T20:15:00.000Z",
       provider: "whoop",
       providerLabel: "WHOOP",

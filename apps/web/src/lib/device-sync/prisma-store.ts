@@ -124,8 +124,9 @@ export class PrismaDeviceSyncControlPlaneStore
     state: string,
     now: string,
     expectedProvider?: string,
+    expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
-    return this.oauthSessions.consumeOAuthState(state, now, expectedProvider);
+    return this.oauthSessions.consumeOAuthState(state, now, expectedProvider, expectedOwnerId);
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -156,13 +157,14 @@ export class PrismaDeviceSyncControlPlaneStore
   async completeWebhookTrace(
     provider: string,
     traceId: string,
+    claimToken: string,
     tx?: HostedPrismaTransactionClient,
-  ): Promise<void> {
-    return this.webhookTraces.completeWebhookTrace(provider, traceId, tx);
+  ): Promise<boolean> {
+    return this.webhookTraces.completeWebhookTrace(provider, traceId, claimToken, tx);
   }
 
-  async releaseWebhookTrace(provider: string, traceId: string): Promise<void> {
-    return this.webhookTraces.releaseWebhookTrace(provider, traceId);
+  async releaseWebhookTrace(provider: string, traceId: string, claimToken: string): Promise<void> {
+    return this.webhookTraces.releaseWebhookTrace(provider, traceId, claimToken);
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {

@@ -103,6 +103,7 @@ export type HostedCliDeviceAccountListRequest =
 
 export interface HostedCliDeviceConnectLinkResponse {
   authorizationUrl: string;
+  connectUrl: string;
   expiresAt: string;
   provider: string;
   providerLabel: string;

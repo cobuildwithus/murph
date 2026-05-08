@@ -209,6 +209,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes pending provider OAuth state rows for the member.",
   },
   {
+    slug: "prisma.device_connect_intent",
+    label: "Hosted device connect intents",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes short-lived hosted wearable connection claims for the member.",
+  },
+  {
     slug: "prisma.device_agent_session",
     label: "Local device agent sessions",
     deletion: "live-delete",
@@ -1295,6 +1302,7 @@ async function countHostedAccountData(input: {
     deviceConnection,
     deviceTokenAudit,
     deviceOauthSession,
+    deviceConnectIntent,
     deviceSyncSignal,
     deviceAgentSession,
     deviceBrowserAssertionNonce,
@@ -1321,6 +1329,7 @@ async function countHostedAccountData(input: {
     input.prisma.deviceConnection.count({ where: { userId: memberId } }),
     input.prisma.deviceTokenAudit.count({ where: { userId: memberId } }),
     input.prisma.deviceOauthSession.count({ where: { userId: memberId } }),
+    input.prisma.deviceConnectIntent.count({ where: { memberId } }),
     input.prisma.deviceSyncSignal.count({ where: { userId: memberId } }),
     input.prisma.deviceAgentSession.count({ where: { userId: memberId } }),
     input.prisma.deviceBrowserAssertionNonce.count({ where: { userId: memberId } }),
@@ -1331,6 +1340,7 @@ async function countHostedAccountData(input: {
     "prisma.device_agent_session": deviceAgentSession,
     "prisma.device_browser_assertion_nonce": deviceBrowserAssertionNonce,
     "prisma.device_connection": deviceConnection,
+    "prisma.device_connect_intent": deviceConnectIntent,
     "prisma.device_oauth_session": deviceOauthSession,
     "prisma.device_sync_signal": deviceSyncSignal,
     "prisma.device_token_audit": deviceTokenAudit,
@@ -1393,6 +1403,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.device_token_audit", await input.prisma.deviceTokenAudit.deleteMany({ where: { userId: memberId } }));
   record("prisma.device_sync_signal", await input.prisma.deviceSyncSignal.deleteMany({ where: { userId: memberId } }));
   record("prisma.device_oauth_session", await input.prisma.deviceOauthSession.deleteMany({ where: { userId: memberId } }));
+  record("prisma.device_connect_intent", await input.prisma.deviceConnectIntent.deleteMany({ where: { memberId } }));
   record("prisma.device_agent_session", await input.prisma.deviceAgentSession.deleteMany({ where: { userId: memberId } }));
   record("prisma.device_browser_assertion_nonce", await input.prisma.deviceBrowserAssertionNonce.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_web_internal_request_nonce", await input.prisma.hostedWebInternalRequestNonce.deleteMany({ where: { userId: memberId } }));

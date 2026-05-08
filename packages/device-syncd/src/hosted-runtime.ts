@@ -37,6 +37,7 @@ const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN =
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;
+  connectUrl: string;
   expiresAt: string;
   provider: string;
   providerLabel: string;
@@ -341,11 +342,21 @@ export function parseHostedExecutionDeviceSyncConnectLinkResponse(
   value: unknown,
 ): HostedExecutionDeviceSyncConnectLinkResponse {
   const record = requireObject(value, "Hosted device-sync connect link response");
+  const authorizationUrl = typeof record.authorizationUrl === "string"
+    ? record.authorizationUrl
+    : null;
+  const connectUrl = typeof record.connectUrl === "string"
+    ? record.connectUrl
+    : authorizationUrl;
 
   return {
     authorizationUrl: requireString(
-      record.authorizationUrl,
+      authorizationUrl ?? connectUrl,
       "Hosted device-sync connect link response authorizationUrl",
+    ),
+    connectUrl: requireString(
+      connectUrl,
+      "Hosted device-sync connect link response connectUrl",
     ),
     expiresAt: requireString(
       record.expiresAt,

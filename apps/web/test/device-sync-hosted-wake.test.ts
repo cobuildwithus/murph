@@ -366,6 +366,7 @@ describe("appendHostedDeviceSyncWake", () => {
           },
           now: "2026-03-26T12:00:00.000Z",
           provider: {},
+          claimToken: "claim-token",
           traceId: "trace_123",
           webhook: {
             eventType: "sleep.updated",
@@ -390,7 +391,7 @@ describe("appendHostedDeviceSyncWake", () => {
     }));
     mocks.createSignal.mockResolvedValue({ id: 8 });
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
-    mocks.completeWebhookTrace.mockResolvedValue(undefined);
+    mocks.completeWebhookTrace.mockResolvedValue(true);
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -1254,7 +1255,7 @@ describe("appendHostedDeviceSyncWake", () => {
       tx: mocks.prismaTx,
       userId: "user-123",
     });
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.upsertDirtyConnection.mock.invocationCallOrder[0],
     );
@@ -1287,7 +1288,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
   });
 
   it("keeps hosted webhook traces completed when post-commit dirty nudge is not accepted", async () => {
@@ -1323,7 +1324,7 @@ describe("appendHostedDeviceSyncWake", () => {
       expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
       expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
       expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
-      expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
+      expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
       expect(consoleWarn).toHaveBeenCalledWith(
         "Hosted device-sync dirty runner nudge was not accepted after durable acceptance.",
         expect.objectContaining({
@@ -1538,6 +1539,34 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("does not nudge after a hosted webhook trace claim is lost before completion", async () => {
+    mocks.completeWebhookTrace.mockResolvedValueOnce(false);
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "WEBHOOK_TRACE_CLAIM_LOST",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();

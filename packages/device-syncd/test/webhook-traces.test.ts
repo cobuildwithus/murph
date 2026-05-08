@@ -3,7 +3,10 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureDeviceSyncStoreSchema } from "../src/store/schema.ts";
-import { claimDeviceSyncWebhookTrace } from "../src/store/webhook-traces.ts";
+import {
+  claimDeviceSyncWebhookTrace,
+  completeDeviceSyncWebhookTrace,
+} from "../src/store/webhook-traces.ts";
 
 const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 
@@ -27,6 +30,7 @@ describe("claimDeviceSyncWebhookTrace", () => {
     const result = claimDeviceSyncWebhookTrace(database, {
       eventType: "sleep.updated",
       externalAccountId: "external-account-123",
+      claimToken: "claim-1",
       processingExpiresAt: "2026-04-12T00:05:00.000Z",
       provider: "oura",
       receivedAt: "2026-04-12T00:00:00.000Z",
@@ -76,6 +80,7 @@ describe("claimDeviceSyncWebhookTrace", () => {
     const result = claimDeviceSyncWebhookTrace(database, {
       eventType: "sleep.updated",
       externalAccountId: "external-account-456",
+      claimToken: "claim-2",
       processingExpiresAt: "2026-04-12T00:05:00.000Z",
       provider: "oura",
       receivedAt: "2026-04-12T00:00:00.000Z",
@@ -92,5 +97,46 @@ describe("claimDeviceSyncWebhookTrace", () => {
         trace_id: "fresh-trace",
       },
     ]);
+  });
+
+  it("ignores stale completion attempts after a newer claim takes over", () => {
+    database = createDatabase();
+
+    expect(claimDeviceSyncWebhookTrace(database, {
+      eventType: "sleep.updated",
+      externalAccountId: "external-account-123",
+      claimToken: "claim-old",
+      processingExpiresAt: "2026-04-12T00:05:00.000Z",
+      provider: "oura",
+      receivedAt: "2026-04-12T00:00:00.000Z",
+      traceId: "trace-lease",
+    })).toBe("claimed");
+    expect(claimDeviceSyncWebhookTrace(database, {
+      eventType: "sleep.updated",
+      externalAccountId: "external-account-123",
+      claimToken: "claim-new",
+      processingExpiresAt: "2026-04-12T00:11:00.000Z",
+      provider: "oura",
+      receivedAt: "2026-04-12T00:06:00.000Z",
+      traceId: "trace-lease",
+    })).toBe("claimed");
+
+    completeDeviceSyncWebhookTrace(database, "oura", "trace-lease", "claim-old");
+
+    expect(
+      database
+        .prepare(
+          `
+            select claim_token, status
+            from webhook_trace
+            where provider = ?
+              and trace_id = ?
+          `,
+        )
+        .get("oura", "trace-lease"),
+    ).toEqual({
+      claim_token: "claim-new",
+      status: "processing",
+    });
   });
 });

@@ -252,6 +252,71 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
     });
     expect(sessions.has("state-provider-mismatch")).toBe(true);
   });
+
+  it("keeps an unexpired oauth state when the expected owner does not match", async () => {
+    const sessions = new Map<string, MutableOAuthSession>([
+      [
+        "state-owner-mismatch",
+        {
+          state: "state-owner-mismatch",
+          userId: "user-123",
+          provider: "oura",
+          returnTo: "https://example.test/return",
+          metadataJson: null,
+          createdAt: new Date("2026-03-25T00:00:00.000Z"),
+          expiresAt: new Date("2026-03-25T01:00:00.000Z"),
+        },
+      ],
+    ]);
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: {
+            deviceOauthSession: {
+              findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
+              deleteMany: ({ where }: { where: { state: string; provider?: string; userId?: string } }) => Promise<{ count: number }>;
+            };
+          }) => Promise<TResult>,
+        ) =>
+          callback({
+            deviceOauthSession: {
+              findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
+              deleteMany: async ({ where }) => {
+                const record = sessions.get(where.state);
+
+                if (!record) {
+                  return { count: 0 };
+                }
+
+                if (where.provider && record.provider !== where.provider) {
+                  return { count: 0 };
+                }
+
+                if (where.userId && record.userId !== where.userId) {
+                  return { count: 0 };
+                }
+
+                sessions.delete(where.state);
+                return { count: 1 };
+              },
+            },
+          }),
+      } as never,
+    });
+
+    await expect(
+      store.consumeOAuthState(
+        "state-owner-mismatch",
+        "2026-03-25T00:30:00.000Z",
+        "oura",
+        "user-456",
+      ),
+    ).resolves.toEqual({
+      status: "owner_mismatch",
+    });
+    expect(sessions.has("state-owner-mismatch")).toBe(true);
+  });
 });
 
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
