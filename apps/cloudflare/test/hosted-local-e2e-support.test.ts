@@ -210,20 +210,44 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
 });
 
 describe("hosted local e2e scenario registration", () => {
-  it("keeps container-continuity manual-only while remaining addressable by name", () => {
+  it("keeps container continuity scenarios manual-only while remaining addressable by name", () => {
     const allScenarios = resolveHostedLocalE2eScenarios("all");
     const containerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "container-continuity");
+    const codexContainerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "codex-container-continuity");
+    const vaultPersistence = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "vault-persistence");
 
     expect(containerContinuity).toMatchObject({
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
       manualOnly: true,
       name: "container-continuity",
     });
+    expect(codexContainerContinuity).toMatchObject({
+      file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
+      manualOnly: true,
+      name: "codex-container-continuity",
+    });
+    expect(vaultPersistence).toMatchObject({
+      file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
+      manualOnly: true,
+      name: "vault-persistence",
+    });
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("container-continuity");
+    expect(allScenarios.map((scenario) => scenario.name)).not.toContain("codex-container-continuity");
+    expect(allScenarios.map((scenario) => scenario.name)).not.toContain("vault-persistence");
     expect(resolveHostedLocalE2eScenarios("container-continuity")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
       manualOnly: true,
       name: "container-continuity",
+    })]);
+    expect(resolveHostedLocalE2eScenarios("codex-container-continuity")).toEqual([expect.objectContaining({
+      file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
+      manualOnly: true,
+      name: "codex-container-continuity",
+    })]);
+    expect(resolveHostedLocalE2eScenarios("vault-persistence")).toEqual([expect.objectContaining({
+      file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
+      manualOnly: true,
+      name: "vault-persistence",
     })]);
   });
 });

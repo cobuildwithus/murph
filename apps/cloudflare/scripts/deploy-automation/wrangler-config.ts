@@ -36,6 +36,18 @@ export function buildHostedWranglerDeployConfig(
     environment.workerVars,
     environment.hostedEmailSendBindingEnabled,
   );
+  const buildRunnerContainerConfig = (input: {
+    className: string;
+    maxInstances: number;
+  }): Record<string, unknown> => ({
+    class_name: input.className,
+    image: "../../../Dockerfile.cloudflare-hosted-runner",
+    image_build_context: "..",
+    instance_type: environment.containerInstanceType,
+    max_instances: input.maxInstances,
+    rollout_active_grace_period: CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+    rollout_step_percentage: [...CONTAINER_ROLLOUT_STEP_PERCENTAGE],
+  });
 
   return {
     $schema: "../node_modules/wrangler/config-schema.json",
@@ -47,15 +59,14 @@ export function buildHostedWranglerDeployConfig(
       mode: "smart",
     },
     containers: [
-      {
-        class_name: "RunnerContainer",
-        image: "../../../Dockerfile.cloudflare-hosted-runner",
-        image_build_context: "..",
-        instance_type: environment.containerInstanceType,
-        max_instances: environment.containerMaxInstances,
-        rollout_active_grace_period: CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
-        rollout_step_percentage: [...CONTAINER_ROLLOUT_STEP_PERCENTAGE],
-      },
+      buildRunnerContainerConfig({
+        className: "RunnerContainer",
+        maxInstances: environment.containerMaxInstances,
+      }),
+      buildRunnerContainerConfig({
+        className: "DeploySmokeRunnerContainer",
+        maxInstances: 1,
+      }),
     ],
     durable_objects: {
       bindings: [
@@ -66,6 +77,10 @@ export function buildHostedWranglerDeployConfig(
         {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
+        },
+        {
+          name: "RUNNER_CONTAINER_SMOKE",
+          class_name: "DeploySmokeRunnerContainer",
         },
       ],
     },
@@ -80,6 +95,10 @@ export function buildHostedWranglerDeployConfig(
       {
         tag: "v2",
         new_sqlite_classes: ["RunnerContainer"],
+      },
+      {
+        tag: "v3",
+        new_sqlite_classes: ["DeploySmokeRunnerContainer"],
       },
     ],
     r2_buckets: [

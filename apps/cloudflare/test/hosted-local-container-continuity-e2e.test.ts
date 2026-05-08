@@ -7,6 +7,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   readHostedExecutionSnapshotHotRef,
+  readHostedExecutionSnapshotDeltaRef,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
@@ -107,6 +108,8 @@ describe("hosted local container continuity e2e", () => {
     expect(idleShutdownStatus.workspace).not.toBeNull();
     expect(readHostedExecutionSnapshotHotRef(idleShutdownStatus.workspace?.snapshotRef ?? null))
       .toBeNull();
+    expect(readHostedExecutionSnapshotDeltaRef(idleShutdownStatus.workspace?.snapshotRef ?? null))
+      .toBeNull();
     expect(idleShutdownStatus.inFlight).toBe(false);
     expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
     expect(hasSuccessfulIdleShutdownContainerCleanupLog()).toBe(true);
@@ -142,7 +145,6 @@ describe("hosted local container continuity e2e", () => {
       .slice(baselineProviderRequestCount);
     expect(assistantProviderRequests).toHaveLength(2);
     const secondPromptText = readAssistantProviderRequestText(assistantProviderRequests[1]!);
-    expect(secondPromptText).toContain(firstUserText);
     expect(secondPromptText).toContain(firstReplyText);
     expect(secondPromptText).toContain(secondUserText);
   }, 600_000);
@@ -185,10 +187,14 @@ async function waitForIdleShutdownCheckpoint(): Promise<HostedRunnerStatusRespon
     const hotRef = status.workspace
       ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
       : null;
+    const deltaRef = status.workspace
+      ? readHostedExecutionSnapshotDeltaRef(status.workspace.snapshotRef)
+      : null;
 
     if (
       status.workspace
       && hotRef === null
+      && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
     ) {

@@ -514,6 +514,11 @@ export function loadGeneratedHealthCommonsCatalog() {
             image: "../../Dockerfile.cloudflare-hosted-runner",
             image_build_context: ".",
           },
+          {
+            class_name: "DeploySmokeRunnerContainer",
+            image: "../../Dockerfile.cloudflare-hosted-runner",
+            image_build_context: ".",
+          },
         ],
       },
     });

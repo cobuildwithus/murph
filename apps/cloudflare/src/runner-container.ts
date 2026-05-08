@@ -1112,6 +1112,8 @@ export class RunnerContainer extends Container {
   }
 }
 
+export class DeploySmokeRunnerContainer extends RunnerContainer {}
+
 RunnerContainer.outboundHandlers = {
   [RUNNER_OUTBOUND_HANDLER_METHOD]: createRunnerOutboundHandler(),
 };

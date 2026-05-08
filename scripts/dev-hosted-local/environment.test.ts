@@ -94,6 +94,11 @@ const existingAuthorityPrivateJwkJson = JSON.stringify({
   x: "xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao",
   y: "8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY",
 });
+const existingAuthorityPublicPem =
+  "-----BEGIN PUBLIC KEY-----\n"
+  + "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExSelVJv6r6LPUS8GCNgj1T/7z5GX\n"
+  + "OrhgY1cCdzGb5arweFyJLVwA8qz989+BmdvVRJ1G0Ff7g2+nxeIEe4xyZg==\n"
+  + "-----END PUBLIC KEY-----\n";
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -214,10 +219,16 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe(
       "cloudflare-automation:local",
     );
-    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toBe(
-      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1",
+    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toMatch(
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/local-[a-f0-9]{16}$/u,
     );
     expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(generatedAuthorityPublicPem);
+    expect(JSON.parse(merged.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON)).toEqual({
+      [merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION]: {
+        publicKeyPem: generatedAuthorityPublicPem.trim(),
+        status: "active",
+      },
+    });
     expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
     expect(merged.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBe("local://murph-hosted-kms");
     expect(merged.HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME).toBe(
@@ -324,8 +335,8 @@ describe("mergeCloudflareLocalEnv", () => {
     });
 
     expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
-    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
-      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1",
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toMatch(
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/local-[a-f0-9]{16}$/u,
     );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
       generatedAuthorityPublicPem,
@@ -367,8 +378,8 @@ describe("mergeCloudflareLocalEnv", () => {
     });
 
     expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
-    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
-      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1",
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toMatch(
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/local-[a-f0-9]{16}$/u,
     );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
       generatedAuthorityPublicPem,
@@ -383,14 +394,14 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
   });
 
-  it("regenerates local authority signing keys when persisted local state is mismatched", () => {
+  it("preserves matching persisted local authority signing keys and key version", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
         HOSTED_CRYPTO_ENV: "local",
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
-          "-----BEGIN PUBLIC KEY-----\\nSTALE_PUBLIC\\n-----END PUBLIC KEY-----",
-        HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+          "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: existingAuthorityPublicPem,
         HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: existingAuthorityPrivateJwkJson,
         HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "existing-wrap-key",
       },
@@ -406,12 +417,57 @@ describe("mergeCloudflareLocalEnv", () => {
       }),
     });
 
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+    );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
-      generatedAuthorityPublicPem,
+      existingAuthorityPublicPem.trim(),
     );
     expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
-      generatedAuthorityPrivateJwkJson,
+      existingAuthorityPrivateJwkJson,
     );
+  });
+
+  it("rejects mismatched persisted local authority signing keys instead of regenerating", () => {
+    expect(() =>
+      mergeCloudflareLocalEnv({
+        config: localConfig,
+        existing: {
+          HOSTED_CRYPTO_ENV: "local",
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+            "-----BEGIN PUBLIC KEY-----\\nSTALE_PUBLIC\\n-----END PUBLIC KEY-----",
+          HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+          HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: existingAuthorityPrivateJwkJson,
+          HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "existing-wrap-key",
+        },
+        oidcIdentity,
+        createEnvelopeKey: () => "generated-envelope",
+        createJwkPair: () => ({
+          privateJwkJson: generatedPrivateJwkJson,
+          publicJwkJson: generatedPublicJwkJson,
+        }),
+        createSigningKey: () => ({
+          privateJwkJson: generatedAuthorityPrivateJwkJson,
+          publicKeyPem: generatedAuthorityPublicPem,
+        }),
+      })
+    ).toThrow("Persisted local hosted crypto authority state is inconsistent");
+  });
+
+  it("rejects incomplete persisted local authority signing keys instead of regenerating", () => {
+    expect(() =>
+      mergeCloudflareLocalEnv({
+        config: localConfig,
+        existing: {
+          HOSTED_CRYPTO_ENV: "local",
+          HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+            existingAuthorityPublicPem,
+          HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+          HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "existing-wrap-key",
+        },
+        oidcIdentity,
+      })
+    ).toThrow("Persisted local hosted crypto authority state is incomplete");
   });
 
   it("repairs stale callback keyring entries for the current signing key", () => {
@@ -1097,17 +1153,32 @@ describe("buildWranglerEnvFileText", () => {
 describe("buildWranglerLocalDevConfig", () => {
   it("keeps repo-relative defaults for the checked-in local dev location", () => {
     const config = buildWranglerLocalDevConfig({});
-    const container = (config.containers as {
+    const containers = config.containers as {
+      class_name: string;
       image: string;
       image_build_context: string;
       image_vars: Record<string, string>;
-    }[])[0];
+      max_instances: number;
+    }[];
+    const container = containers[0]!;
+    const smokeContainer = containers[1]!;
 
     expect(config.main).toBe("../src/index.ts");
+    expect(config.name).toBe("murph-hosted");
+    expect(containers.map((entry) => entry.class_name)).toEqual([
+      "RunnerContainer",
+      "DeploySmokeRunnerContainer",
+    ]);
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({
       HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+    });
+    expect(smokeContainer).toMatchObject({
+      image: container.image,
+      image_build_context: container.image_build_context,
+      image_vars: container.image_vars,
+      max_instances: 1,
     });
   });
 
@@ -1120,28 +1191,44 @@ describe("buildWranglerLocalDevConfig", () => {
         workspaceRoot: "/workspace",
       },
     );
-    const container = (config.containers as {
+    const containers = config.containers as {
       image: string;
       image_build_context: string;
       image_vars: Record<string, string>;
-    }[])[0];
+    }[];
+    const container = containers[0]!;
+    const smokeContainer = containers[1]!;
 
     expect(config.main).toBe("../../workspace/apps/cloudflare/src/index.ts");
     expect(container.image).toBe("../../workspace/Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("../../workspace/apps/cloudflare");
+    expect(smokeContainer.image).toBe(container.image);
+    expect(smokeContainer.image_build_context).toBe(container.image_build_context);
   });
 
   it("passes the local runner build id as a Docker build arg", () => {
     const config = buildWranglerLocalDevConfig({
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "stack-test-build-id",
     });
-    const container = (config.containers as {
+    const containers = config.containers as {
       image_vars: Record<string, string>;
-    }[])[0];
+    }[];
 
-    expect(container.image_vars).toEqual({
-      HOSTED_RUNNER_LOCAL_BUILD_ID: buildHostedRunnerLocalBuildId("stack-test-build-id"),
+    for (const container of containers) {
+      expect(container.image_vars).toEqual({
+        HOSTED_RUNNER_LOCAL_BUILD_ID: buildHostedRunnerLocalBuildId("stack-test-build-id"),
+      });
+    }
+  });
+
+  it("uses an isolated worker name for E2E profiles", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "stack-test-build-id",
     });
+
+    expect(config.name).toMatch(/^murph-hosted-e2e-[a-f0-9]{24}$/u);
+    expect(config.name).not.toBe("murph-hosted");
   });
 
   it("hashes caller-supplied local runner build ids before they reach image metadata", () => {

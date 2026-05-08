@@ -8,6 +8,7 @@ import process from "node:process";
 import { PassThrough } from "node:stream";
 
 import {
+  cloudflareDir,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   HEALTH_POLL_INTERVAL_MS,
   HEALTH_REQUEST_TIMEOUT_MS,
@@ -17,7 +18,10 @@ import {
   repoRoot,
   webDir,
 } from "./constants.ts";
-import { buildHostedRunnerLocalBuildId } from "./environment.ts";
+import {
+  buildHostedRunnerLocalBuildId,
+  resolveWranglerLocalDevWorkerName,
+} from "./environment.ts";
 import type {
   BufferedNamedChildProcess,
   HostedLocalChildProcessName,
@@ -47,13 +51,18 @@ interface BoundedCommandResult {
   timedOut: boolean;
 }
 
-const HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-RunnerContainer-";
 const HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL = "murph.hosted.local-build-id";
 const HOSTED_WORKER_REUSE_HEALTH_MAX_BYTES = 16 * 1024;
 const HOSTED_WORKER_REUSE_HEALTH_TIMEOUT_MS = 2_000;
 const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
 
 export type HostedLocalWorkerPortMode = "start" | "reuse-existing";
+export type HostedRunnerContainerCleanupScope = "all-builds" | "current-build";
+
+const HOSTED_RUNNER_CONTAINER_LOCAL_DO_CLASS_NAMES = [
+  "RunnerContainer",
+  "DeploySmokeRunnerContainer",
+] as const;
 
 export function redactHostedLocalDiagnosticText(value: string): string {
   return redactHostedLocalPaths(value)
@@ -711,12 +720,14 @@ export async function cleanupHostedRunnerContainers(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   ignoreErrors?: boolean;
+  scope?: HostedRunnerContainerCleanupScope;
   timeoutMs?: number;
 }): Promise<void> {
   const timeoutMs = input.timeoutMs ?? 15_000;
   const listed = await listHostedRunnerContainerIds({
     cwd: input.cwd,
     env: input.env,
+    scope: input.scope,
     timeoutMs,
   });
 
@@ -752,6 +763,7 @@ export async function cleanupHostedRunnerContainers(input: {
     const disappeared = await waitForHostedRunnerContainersToDisappear({
       cwd: input.cwd,
       env: input.env,
+      scope: input.scope,
       timeoutMs: Math.min(timeoutMs, 3_000),
     });
     if (disappeared || input.ignoreErrors) {
@@ -767,21 +779,51 @@ export async function cleanupHostedRunnerContainers(input: {
   }
 }
 
+export async function cleanupHostedRunnerContainerLocalState(input: {
+  env?: NodeJS.ProcessEnv;
+  ignoreErrors?: boolean;
+  persistDir: string;
+}): Promise<void> {
+  const persistDir = path.isAbsolute(input.persistDir)
+    ? input.persistDir
+    : path.join(cloudflareDir, input.persistDir);
+  const workerName = resolveWranglerLocalDevWorkerName(input.env ?? {});
+
+  for (const className of HOSTED_RUNNER_CONTAINER_LOCAL_DO_CLASS_NAMES) {
+    const stateDir = path.join(persistDir, "v3", "do", `${workerName}-${className}`);
+    try {
+      await rm(stateDir, {
+        force: true,
+        recursive: true,
+      });
+    } catch (error) {
+      if (input.ignoreErrors) {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 async function listHostedRunnerContainerIds(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  scope?: HostedRunnerContainerCleanupScope;
   timeoutMs: number;
 }): Promise<{
   containerIds: string[];
   result: BoundedCommandResult;
 }> {
-  const localBuildId = resolveHostedRunnerCleanupLocalBuildId(input.env);
+  const localBuildId = input.scope === "all-builds"
+    ? null
+    : resolveHostedRunnerCleanupLocalBuildId(input.env);
+  const containerNamePrefix = resolveHostedRunnerContainerNamePrefix(input.env);
   const result = await runBoundedCommand({
     args: [
       "ps",
       "-aq",
       "--filter",
-      `name=${HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX}`,
+      `name=${containerNamePrefix}`,
       ...(localBuildId
         ? [
           "--filter",
@@ -804,6 +846,11 @@ async function listHostedRunnerContainerIds(input: {
   };
 }
 
+function resolveHostedRunnerContainerNamePrefix(env: NodeJS.ProcessEnv | undefined): string {
+  const workerName = resolveWranglerLocalDevWorkerName(env ?? {});
+  return `workerd-${workerName}-`;
+}
+
 function resolveHostedRunnerCleanupLocalBuildId(env: NodeJS.ProcessEnv | undefined): string | null {
   const rawValue = env?.[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim();
   return rawValue ? buildHostedRunnerLocalBuildId(rawValue) : null;
@@ -812,6 +859,7 @@ function resolveHostedRunnerCleanupLocalBuildId(env: NodeJS.ProcessEnv | undefin
 async function waitForHostedRunnerContainersToDisappear(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  scope?: HostedRunnerContainerCleanupScope;
   timeoutMs: number;
 }): Promise<boolean> {
   const startedAt = Date.now();
@@ -820,6 +868,7 @@ async function waitForHostedRunnerContainersToDisappear(input: {
     const listed = await listHostedRunnerContainerIds({
       cwd: input.cwd,
       env: input.env,
+      scope: input.scope,
       timeoutMs: Math.min(input.timeoutMs, 1_000),
     });
     if (!listed.result.timedOut && listed.result.exitCode === 0 && listed.containerIds.length === 0) {

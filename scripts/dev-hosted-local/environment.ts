@@ -40,10 +40,12 @@ const HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL_ENV =
 const HOSTED_LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
 const HOSTED_LOCAL_WEB_WRAP_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
-const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION =
-  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
+const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX =
+  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/local-";
 const HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY =
   "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const HOSTED_LOCAL_WORKER_NAME = "murph-hosted";
+const HOSTED_LOCAL_E2E_WORKER_NAME_PREFIX = "murph-hosted-e2e";
 const LEGACY_HOSTED_EXECUTION_CRYPTO_ENV_RE =
   /^HOSTED_EXECUTION_(?:PLATFORM_ENVELOPE|AUTOMATION_RECIPIENT|RECOVERY_RECIPIENT|TEE_AUTOMATION_RECIPIENT)(?:_|$)/u;
 
@@ -249,15 +251,20 @@ export function mergeCloudflareLocalEnv(input: {
     readHostedLocalKey,
     useRemoteHostedCryptoKeys,
   });
+  const authoritySignPublicKeyPem =
+    authoritySigningKey.publicKeyPem
+    ?? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM");
   const authoritySignKeyVersion =
     readHostedLocalKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
     ?? readHostedLocalKey("HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION")
     ?? (useRemoteHostedCryptoKeys
       ? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
-      : HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION);
-  const authoritySignPublicKeyPem =
-    authoritySigningKey.publicKeyPem
-    ?? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM");
+      : buildHostedLocalAuthoritySignKeyVersion(authoritySignPublicKeyPem));
+  const authorityVerifyKeyringJson = buildHostedAuthorityVerifyKeyringJson({
+    currentKeyVersionName: authoritySignKeyVersion,
+    currentPublicKeyPem: authoritySignPublicKeyPem,
+    existingKeyringJson: readHostedLocalKey("HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON"),
+  });
   const hostedCryptoEnv =
     readHostedLocalKey("HOSTED_CRYPTO_ENV") ?? (useRemoteHostedCryptoKeys ? "development" : "local");
   const gcpKmsApiRoot =
@@ -283,6 +290,7 @@ export function mergeCloudflareLocalEnv(input: {
       || "true",
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion,
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authoritySignPublicKeyPem,
+    HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: authorityVerifyKeyringJson,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: cloudflareAutomationKeyId,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
       cloudflareAutomationKeys.privateJwkJson,
@@ -336,18 +344,29 @@ function resolveHostedLocalAuthoritySigningKey(input: {
   if (
     existingPrivateJwk
     && existingPublicPem
-    && (
+  ) {
+    if (
       input.useRemoteHostedCryptoKeys
       || hostedLocalAuthoritySigningPairMatches({
         privateJwkJson: existingPrivateJwk,
         publicKeyPem: existingPublicPem,
       })
-    )
-  ) {
-    return {
-      privateJwkJson: existingPrivateJwk,
-      publicKeyPem: existingPublicPem,
-    };
+    ) {
+      return {
+        privateJwkJson: existingPrivateJwk,
+        publicKeyPem: existingPublicPem,
+      };
+    }
+
+    throw new Error(
+      "Persisted local hosted crypto authority state is inconsistent. Restore the local crypto state file, or reset the local hosted database and crypto state together.",
+    );
+  }
+
+  if (!input.useRemoteHostedCryptoKeys && (existingPrivateJwk || existingPublicPem)) {
+    throw new Error(
+      "Persisted local hosted crypto authority state is incomplete. Restore the local crypto state file, or reset the local hosted database and crypto state together.",
+    );
   }
 
   if (input.useRemoteHostedCryptoKeys) {
@@ -391,6 +410,41 @@ function hostedLocalAuthoritySigningPairMatches(input: {
 
 function normalizePublicKeyPem(value: string): string {
   return value.replace(/\\n/g, "\n").trim();
+}
+
+function buildHostedLocalAuthoritySignKeyVersion(publicKeyPem: string): string {
+  const publicKeyFingerprint = createHash("sha256")
+    .update(normalizePublicKeyPem(publicKeyPem))
+    .digest("hex")
+    .slice(0, 16);
+  return `${HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX}${publicKeyFingerprint}`;
+}
+
+function buildHostedAuthorityVerifyKeyringJson(input: {
+  currentKeyVersionName: string;
+  currentPublicKeyPem: string;
+  existingKeyringJson: string | null;
+}): string {
+  const keyring = parseOptionalJsonObject(input.existingKeyringJson) ?? {};
+  for (const [keyVersionName, entry] of Object.entries(keyring)) {
+    if (
+      keyVersionName !== input.currentKeyVersionName
+      && isJsonRecord(entry)
+      && entry.status === "active"
+    ) {
+      entry.status = "verify_only";
+    }
+  }
+
+  keyring[input.currentKeyVersionName] = {
+    publicKeyPem: normalizePublicKeyPem(input.currentPublicKeyPem),
+    status: "active",
+  };
+  return JSON.stringify(keyring);
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function resolveExistingHostedLocalKeySource(source: Record<string, string>): Record<string, string> {
@@ -570,6 +624,7 @@ export function buildHostedLocalDevOverrides(
     HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS: webOrigin,
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID"),
+    ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_ENV"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION"),
@@ -783,6 +838,7 @@ export function buildWranglerLocalDevConfig(
   const configDir = options.configDir ?? path.join(cloudflareAppDir, ".wrangler");
   const hostedRunnerLocalBuildId =
     buildHostedRunnerLocalBuildId(source[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]);
+  const workerName = resolveWranglerLocalDevWorkerName(source);
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: resolveWranglerEnvValue("HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS", source) ?? "3",
     HOSTED_EXECUTION_RETRY_DELAY_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RETRY_DELAY_MS", source) ?? "30000",
@@ -805,26 +861,33 @@ export function buildWranglerLocalDevConfig(
     ...HOSTED_WORKER_OPTIONAL_SECRET_NAMES.filter((key) => Boolean(resolveWranglerEnvValue(key, source))),
     ...WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES.filter((key) => Boolean(resolveWranglerEnvValue(key, source))),
   ];
+  const runnerContainerImage = toWranglerConfigRelativePath(
+    configDir,
+    path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
+  );
+  const runnerContainerImageBuildContext = toWranglerConfigRelativePath(configDir, cloudflareAppDir);
+  const buildRunnerContainerConfig = (input: {
+    className: string;
+    maxInstances: number;
+  }): Record<string, unknown> => ({
+    class_name: input.className,
+    image: runnerContainerImage,
+    image_build_context: runnerContainerImageBuildContext,
+    image_vars: {
+      HOSTED_RUNNER_LOCAL_BUILD_ID: hostedRunnerLocalBuildId,
+    },
+    instance_type: "standard-1",
+    max_instances: input.maxInstances,
+  });
 
   return {
-    name: "murph-hosted",
+    name: workerName,
     main: toWranglerConfigRelativePath(configDir, path.join(cloudflareAppDir, "src", "index.ts")),
     compatibility_date: "2026-03-27",
     compatibility_flags: ["nodejs_compat"],
     containers: [
-      {
-        class_name: "RunnerContainer",
-        image: toWranglerConfigRelativePath(
-          configDir,
-          path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
-        ),
-        image_build_context: toWranglerConfigRelativePath(configDir, cloudflareAppDir),
-        image_vars: {
-          HOSTED_RUNNER_LOCAL_BUILD_ID: hostedRunnerLocalBuildId,
-        },
-        instance_type: "standard-1",
-        max_instances: 50,
-      },
+      buildRunnerContainerConfig({ className: "RunnerContainer", maxInstances: 50 }),
+      buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
     ],
     durable_objects: {
       bindings: [
@@ -836,6 +899,10 @@ export function buildWranglerLocalDevConfig(
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
         },
+        {
+          name: "RUNNER_CONTAINER_SMOKE",
+          class_name: "DeploySmokeRunnerContainer",
+        },
       ],
     },
     migrations: [
@@ -846,6 +913,10 @@ export function buildWranglerLocalDevConfig(
       {
         tag: "v2",
         new_sqlite_classes: ["RunnerContainer"],
+      },
+      {
+        tag: "v3",
+        new_sqlite_classes: ["DeploySmokeRunnerContainer"],
       },
     ],
     r2_buckets: [
@@ -875,6 +946,27 @@ export function buildWranglerLocalDevConfig(
     },
     vars,
   };
+}
+
+export function resolveWranglerLocalDevWorkerName(
+  source: Readonly<Record<string, string | undefined>>,
+): string {
+  if (!requiresIsolatedWranglerLocalDevWorkerName(source)) {
+    return HOSTED_LOCAL_WORKER_NAME;
+  }
+
+  const localBuildId = buildHostedRunnerLocalBuildId(source[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]);
+  const suffix = localBuildId.replace(/^sha256-/u, "");
+  return `${HOSTED_LOCAL_E2E_WORKER_NAME_PREFIX}-${suffix}`;
+}
+
+function requiresIsolatedWranglerLocalDevWorkerName(
+  source: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const profile = normalizeOptionalString(source.MURPH_HOSTED_LOCAL_PROFILE);
+  return source.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
 }
 
 export function buildHostedRunnerLocalBuildId(value: string | undefined): string {

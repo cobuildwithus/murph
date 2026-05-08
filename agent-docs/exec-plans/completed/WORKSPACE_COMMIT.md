@@ -1,6 +1,6 @@
 # Working Workspace Commit + Async Dashboard Replica
 
-Status: active
+Status: completed
 Updated: 2026-05-08
 
 ## Goal
@@ -845,3 +845,4 @@ Working commit makes it durable.
 Async browser-vault refresh makes it visible on the website.
 Idle compaction keeps restore cheap.
 ```
+Completed: 2026-05-08

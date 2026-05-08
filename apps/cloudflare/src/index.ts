@@ -58,7 +58,7 @@ import {
   readOptionalJsonObject,
   unauthorized,
 } from "./json.ts";
-export { RunnerContainer } from "./runner-container.ts";
+export { DeploySmokeRunnerContainer, RunnerContainer } from "./runner-container.ts";
 import {
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
@@ -578,7 +578,7 @@ async function handleStatusRoute(
 async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
-  const result = await context.env.RUNNER_CONTAINER
+  const result = await context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env))
     .smokeHealth();
 
