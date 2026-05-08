@@ -202,6 +202,8 @@ R183 refined the first external-source target. MIDUS should pivot from a loose M
 
 R184 added the external-source activation checklist. MIDUS Refresher and CRELES each require six green labels before advancing: repository terms, account/download requirement, row-cache permission, aggregate-export permission, biomarker-mortality joinability, and endpoint/denominator/censoring policy. Even when all six are green, the only unlocked step is a variable-name/endpoint-label crosswalk; external scoring still requires a separate execution gate after the crosswalk.
 
+R185 added the ICPSR public-use terms update. MIDUS public-use files are actionable but not automatic: public-use download requires a free ICPSR account and Terms of Use acceptance by the user/account holder. MIDUS row download, feature crosswalk, row join, metric computation, and scoring remain blocked until user confirmation plus a separate activation record. This is a much lower-friction path than institutional BioLINCC access, but it is still not a silent background download.
+
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
