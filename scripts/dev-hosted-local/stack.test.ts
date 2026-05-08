@@ -1187,9 +1187,9 @@ describe("hosted local dev stack", () => {
 
   it("retags a split smoke container image when Wrangler omits the live runner tag", async () => {
     const imageBuildOutput = [
-      "#8 exporting manifest sha256:e144c487891e1111111111111111111111111111111111111111111111111111 done",
+      "#8 writing image sha256:e144c487891e1111111111111111111111111111111111111111111111111111 done",
       "#8 naming to docker.io/cloudflare-dev/runnercontainer:4e19cead done",
-      "#9 exporting manifest sha256:e144c487891e2222222222222222222222222222222222222222222222222 done",
+      "#9 writing image sha256:e144c487891e2222222222222222222222222222222222222222222222222 done",
       "#9 naming to docker.io/cloudflare-dev/deploysmokerunnercontainer:4e19cead done",
     ].join("\n");
     spawnChildProcess

@@ -1393,7 +1393,7 @@ function readPreparedRunnerContainerImageArtifacts(
   let latestImageIdPrefix: string | null = null;
 
   for (const line of stdout.split("\n")) {
-    const manifestMatch = line.match(/exporting manifest sha256:([a-f0-9]{12,64})/);
+    const manifestMatch = line.match(/(?:exporting manifest|writing image) sha256:([a-f0-9]{12,64})/);
     if (manifestMatch?.[1]) {
       latestImageIdPrefix = manifestMatch[1].slice(0, 12);
       continue;
