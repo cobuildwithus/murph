@@ -3,7 +3,7 @@ import { cn } from "@/src/lib/utils";
 const sentimentClassName: Record<string, string> = {
   positive: "ml-2 text-sm font-semibold text-primary",
   negative: "ml-2 text-sm font-semibold text-amber-600",
-  neutral: "ml-2 text-sm font-semibold text-foreground/50",
+  neutral: "ml-2 text-sm font-semibold text-muted-foreground",
 };
 
 const arrows: Record<string, string> = {

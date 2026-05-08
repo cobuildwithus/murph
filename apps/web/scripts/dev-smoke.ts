@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { execFileSync, spawn, type ChildProcessByStdio } from "node:child_process";
 import { access, readFile, readdir, rm, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import http from "node:http";
@@ -25,6 +25,13 @@ export const HOSTED_WEB_SMOKE_HEALTH_PATH = "/api/internal/health";
 
 type HostedWebSmokeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 type HostedWebSmokeDevCommand = "dev" | "dev:local-env";
+
+interface HostedWebSmokeLockCleanupOptions {
+  isProcessRunning?: (pid: number) => boolean;
+  processCommand?: (pid: number) => string | null;
+  sleep?: (milliseconds: number) => Promise<void>;
+  terminateProcess?: (pid: number, signal: NodeJS.Signals) => void;
+}
 
 export function resolveHostedWebSmokeDevCommand(
   environment: NodeJS.ProcessEnv = process.env,
@@ -292,7 +299,12 @@ function resolveHostedWebSmokeLockPath(distDir: string): string {
   return path.join(distDir, "dev", "lock");
 }
 
-async function clearStaleHostedWebSmokeLocks(nextLockPath: string): Promise<void> {
+export async function clearStaleHostedWebSmokeLocks(
+  nextLockPath: string,
+  options: HostedWebSmokeLockCleanupOptions = {},
+): Promise<void> {
+  const checkProcessRunning = options.isProcessRunning ?? isProcessRunning;
+  const sleepFor = options.sleep ?? sleep;
   const deadline = Date.now() + staleLockWaitTimeoutMs;
 
   while (true) {
@@ -302,15 +314,15 @@ async function clearStaleHostedWebSmokeLocks(nextLockPath: string): Promise<void
       return;
     }
 
-    if (!isProcessRunning(lockDescriptor.pid)) {
+    if (!checkProcessRunning(lockDescriptor.pid)) {
       await rm(nextLockPath, { force: true });
       return;
     }
 
-    await shutdownHostedWebLockProcess(lockDescriptor.pid, nextLockPath);
+    await shutdownHostedWebLockProcess(lockDescriptor.pid, nextLockPath, options);
     const nextLockDescriptor = await readHostedWebSmokeLockDescriptor(nextLockPath);
 
-    if (nextLockDescriptor === null || !isProcessRunning(nextLockDescriptor.pid)) {
+    if (nextLockDescriptor === null || !checkProcessRunning(nextLockDescriptor.pid)) {
       await rm(nextLockPath, { force: true });
       return;
     }
@@ -321,7 +333,7 @@ async function clearStaleHostedWebSmokeLocks(nextLockPath: string): Promise<void
       );
     }
 
-    await sleep(staleLockWaitPollIntervalMs);
+    await sleepFor(staleLockWaitPollIntervalMs);
   }
 }
 
@@ -500,27 +512,43 @@ async function readHostedWebSmokeLockPid(
 async function shutdownHostedWebLockProcess(
   pid: number | null,
   lockPath: string,
+  options: HostedWebSmokeLockCleanupOptions = {},
 ): Promise<void> {
-  if (pid !== null && isProcessRunning(pid)) {
+  const checkProcessRunning = options.isProcessRunning ?? isProcessRunning;
+  const getProcessCommand = options.processCommand ?? readProcessCommand;
+  const sleepFor = options.sleep ?? sleep;
+  const terminateProcess = options.terminateProcess ?? terminateProcessId;
+
+  if (pid !== null && checkProcessRunning(pid)) {
+    const command = getProcessCommand(pid);
+    if (!isRecoverableHostedWebSmokeLockOwner(command)) {
+      throw new Error(
+        [
+          `apps/web smoke lock is held by an active non-Next process (pid ${pid}).`,
+          "Stop that process or remove apps/web/.next-smoke after confirming it is stale.",
+        ].join(" "),
+      );
+    }
+
     terminateProcess(pid, "SIGINT");
 
     try {
-      await waitForProcessExit(pid, childShutdownTimeoutMs);
+      await waitForProcessExit(pid, childShutdownTimeoutMs, checkProcessRunning, sleepFor);
     } catch {
       terminateProcess(pid, "SIGKILL");
-      await waitForProcessExit(pid, childShutdownTimeoutMs).catch(() => {
+      await waitForProcessExit(pid, childShutdownTimeoutMs, checkProcessRunning, sleepFor).catch(() => {
         // Best-effort cleanup only.
       });
     }
   }
 
   const lockDescriptor = await readHostedWebSmokeLockDescriptor(lockPath);
-  if (lockDescriptor !== null && !isProcessRunning(lockDescriptor.pid)) {
+  if (lockDescriptor !== null && !checkProcessRunning(lockDescriptor.pid)) {
     await rm(lockPath, { force: true });
   }
 }
 
-function terminateProcess(pid: number, signal: NodeJS.Signals): void {
+function terminateProcessId(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(pid, signal);
   } catch {
@@ -528,18 +556,47 @@ function terminateProcess(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
+async function waitForProcessExit(
+  pid: number,
+  timeoutMs: number,
+  checkProcessRunning: (pid: number) => boolean = isProcessRunning,
+  sleepFor: (milliseconds: number) => Promise<void> = sleep,
+): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    if (!isProcessRunning(pid)) {
+    if (!checkProcessRunning(pid)) {
       return;
     }
 
-    await sleep(100);
+    await sleepFor(100);
   }
 
   throw new Error(`Timed out waiting ${timeoutMs}ms for process ${pid} to exit.`);
+}
+
+export function isRecoverableHostedWebSmokeLockOwner(command: string | null): boolean {
+  if (command === null) {
+    return false;
+  }
+
+  const normalizedCommand = command.replace(/\\/gu, "/");
+  return (
+    normalizedCommand.startsWith("next-server ")
+    || normalizedCommand === "next-server"
+    || normalizedCommand.includes("/node_modules/next/dist/bin/next")
+  );
+}
+
+function readProcessCommand(pid: number): string | null {
+  try {
+    return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveTerminationSignals(): NodeJS.Signals[] {

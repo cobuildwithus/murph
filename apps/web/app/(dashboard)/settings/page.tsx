@@ -110,7 +110,7 @@ export default async function SettingsPage() {
         </div>
         <Link
           href="/connect"
-          className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
+          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
         >
           Manage wearables
         </Link>

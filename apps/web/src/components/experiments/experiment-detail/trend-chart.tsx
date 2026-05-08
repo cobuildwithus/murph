@@ -113,7 +113,7 @@ export function TrendChart({ data, className }: TrendChartProps) {
             type="button"
             onClick={() => setShowHistory((v) => !v)}
             className={cn(
-              "absolute left-1.5 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border border-border/60 bg-card shadow-sm transition-opacity duration-500 ease-in-out",
+              "absolute left-1.5 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md border border-secondary/25 bg-[rgba(255,252,246,0.9)] transition-opacity duration-500 ease-in-out",
               showHistory
                 ? "opacity-100"
                 : "opacity-0 group-hover/chart:opacity-70 hover:!opacity-100",
@@ -121,8 +121,8 @@ export function TrendChart({ data, className }: TrendChartProps) {
             aria-label={showHistory ? "Hide history" : "Show history"}
           >
             {showHistory
-              ? <ChevronRight className="size-3.5 text-muted-foreground" />
-              : <ChevronLeft className="size-3.5 text-muted-foreground" />
+              ? <ChevronRight className="size-3.5 text-chart-5" />
+              : <ChevronLeft className="size-3.5 text-chart-5" />
             }
           </button>
         )}
@@ -326,8 +326,4 @@ function dayToDate(startDate: string, day: number): string {
   const date = new Date(startDate);
   date.setDate(date.getDate() + day - 1);
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function roundChartValue(value: number): number {
-  return Math.round(value * 10) / 10;
 }

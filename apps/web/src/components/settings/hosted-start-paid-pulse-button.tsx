@@ -79,7 +79,7 @@ export function StartPaidPulseButton(props: {
     <div className="flex flex-col items-start gap-2 sm:items-end">
       <Button
         type="button"
-        variant={props.presentation === "banner" ? "unstyled" : "outline"}
+        variant={props.presentation === "banner" ? "unstyled" : "default"}
         size={props.presentation === "banner" ? "unstyled" : "default"}
         className={props.presentation === "banner"
           ? "inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
@@ -92,13 +92,15 @@ export function StartPaidPulseButton(props: {
           <ArrowRight className="size-4" aria-hidden="true" />
         ) : null}
       </Button>
-      <p
-        role={confirmationOpen || !errorMessage ? undefined : "alert"}
-        aria-live="polite"
-        className="min-h-[1rem] text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
-      >
-        {confirmationOpen ? null : errorMessage}
-      </p>
+      {!confirmationOpen && errorMessage ? (
+        <p
+          role="alert"
+          aria-live="polite"
+          className="text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
       <StartPaidPulseConfirmationDialog
         errorMessage={errorMessage}
         isStarting={isStarting}

@@ -14,6 +14,7 @@ import type {
 } from "@/src/types/experiments";
 import { Button } from "@/src/components/ui/button";
 import { ConclusionCard } from "@/src/components/conclusion-card";
+import { ExperimentSummaryTiles } from "./experiment-summary-tiles";
 import { ResultsSummary, ResultsSummarySkeleton } from "./results-summary";
 import { StartExperimentButton } from "./start-experiment-button";
 
@@ -66,7 +67,12 @@ export function ResultsTab({
   return (
     <div className="flex flex-col gap-10">
       {!hasPrivateRun && privateRunStatus === "loading" && (
-        <ResultsSummarySkeleton />
+        <div className="flex flex-col gap-4">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Loading your private run
+          </p>
+          <ResultsSummarySkeleton />
+        </div>
       )}
 
       {!hasPrivateRun && privateRunStatus === "error" && (
@@ -136,6 +142,10 @@ export function ResultsTab({
           </p>
         </div>
       )}
+
+      {hasPrivateRun && isRunnable ? (
+        <ExperimentSummaryTiles experiment={experiment} />
+      ) : null}
 
       <ResultsSummary
         signals={experiment.signals}

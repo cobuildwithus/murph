@@ -50,11 +50,9 @@ export default async function ExperimentDetailPage({
   return (
     <div className="flex flex-col gap-10">
       {resultsPublic && (
-        <section id="results" className="scroll-mt-24">
-          <Suspense fallback={<ResultsSummarySkeleton />}>
-            <ActiveRunSummaryClient protocol={resultsPublic} />
-          </Suspense>
-        </section>
+        <Suspense fallback={<ResultsSummarySkeleton />}>
+          <ActiveRunSummaryClient protocol={resultsPublic} />
+        </Suspense>
       )}
       <ProtocolTab
         key={protocolTab.revision.pageRevisionId ?? protocolTab.id}

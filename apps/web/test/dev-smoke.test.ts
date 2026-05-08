@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { test } from "vitest";
 
 import {
   HOSTED_WEB_SMOKE_HEALTH_PATH,
+  clearStaleHostedWebSmokeLocks,
   isHostedWebSmokeArtifactFresh,
+  isRecoverableHostedWebSmokeLockOwner,
   resolveHostedWebSmokeDevCommand,
   shouldPruneHostedWebSmokeCache,
 } from "../scripts/dev-smoke";
@@ -88,6 +93,86 @@ test("hosted web smoke artifact freshness allows current-run mtimes", () => {
   assert.equal(isHostedWebSmokeArtifactFresh({ mtimeMs: 10_000 }, 10_000), true);
   assert.equal(isHostedWebSmokeArtifactFresh({ mtimeMs: 8_500 }, 10_000), true);
   assert.equal(isHostedWebSmokeArtifactFresh({ mtimeMs: 7_999 }, 10_000), false);
+});
+
+test("hosted web smoke recognizes recoverable Next lock owners", () => {
+  assert.equal(isRecoverableHostedWebSmokeLockOwner("next-server (v16.2.4)"), true);
+  assert.equal(
+    isRecoverableHostedWebSmokeLockOwner("/repo/node_modules/next/dist/bin/next dev"),
+    true,
+  );
+  assert.equal(isRecoverableHostedWebSmokeLockOwner("node unrelated-server.js"), false);
+  assert.equal(isRecoverableHostedWebSmokeLockOwner(null), false);
+});
+
+test("hosted web smoke removes a stale lock when its pid is no longer running", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-dev-smoke-lock-"));
+  const lockPath = path.join(tempDir, "lock");
+
+  try {
+    await writeFile(lockPath, `${JSON.stringify({ pid: 12345, port: 3060 })}\n`, "utf8");
+
+    await clearStaleHostedWebSmokeLocks(lockPath, {
+      isProcessRunning: () => false,
+    });
+
+    await assert.rejects(readFile(lockPath, "utf8"), /ENOENT/u);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("hosted web smoke refuses to terminate non-Next stale lock owners", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-dev-smoke-lock-"));
+  const lockPath = path.join(tempDir, "lock");
+  const terminated: string[] = [];
+
+  try {
+    await writeFile(lockPath, `${JSON.stringify({ pid: 12345, port: 3060 })}\n`, "utf8");
+
+    await assert.rejects(
+      clearStaleHostedWebSmokeLocks(lockPath, {
+        isProcessRunning: () => true,
+        processCommand: () => "node unrelated-server.js",
+        terminateProcess: (_pid, signal) => terminated.push(signal),
+      }),
+      /active non-Next process/u,
+    );
+
+    assert.deepEqual(terminated, []);
+    assert.equal(
+      await readFile(lockPath, "utf8"),
+      `${JSON.stringify({ pid: 12345, port: 3060 })}\n`,
+    );
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("hosted web smoke terminates a stale live Next lock owner", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-dev-smoke-lock-"));
+  const lockPath = path.join(tempDir, "lock");
+  const signals: NodeJS.Signals[] = [];
+  let running = true;
+
+  try {
+    await writeFile(lockPath, `${JSON.stringify({ pid: 12345, port: 3060 })}\n`, "utf8");
+
+    await clearStaleHostedWebSmokeLocks(lockPath, {
+      isProcessRunning: () => running,
+      processCommand: () => "next-server (v16.2.4)",
+      sleep: async () => {},
+      terminateProcess: (_pid, signal) => {
+        signals.push(signal);
+        running = false;
+      },
+    });
+
+    assert.deepEqual(signals, ["SIGINT"]);
+    await assert.rejects(readFile(lockPath, "utf8"), /ENOENT/u);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
 test("hosted web smoke falls back to the local database url when none is configured", () => {
