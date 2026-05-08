@@ -59,13 +59,14 @@ export function ResultsSummary({ signals, trends, schedule }: ResultsSummaryProp
 
 function MetricCardSkeleton() {
   return (
-    <div className="flex flex-1 flex-col gap-2 rounded-xl bg-muted/50 p-5">
-      <Skeleton className="h-3 w-24" />
-      <div className="flex items-baseline gap-2">
-        <Skeleton className="h-8 w-16" />
+    <div className="flex flex-1 flex-col gap-3 rounded-xl bg-muted/50 p-5">
+      <Skeleton className="h-2.5 w-28" />
+      <div className="flex items-baseline gap-1.5">
+        <Skeleton className="h-[38px] w-16" />
+        <Skeleton className="h-4 w-10" />
         <Skeleton className="h-4 w-20" />
       </div>
-      <Skeleton className="h-3 w-16" />
+      <Skeleton className="h-3 w-20" />
     </div>
   );
 }
@@ -74,13 +75,13 @@ function TrendChartSkeleton() {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-secondary/25 bg-card/90 p-5">
       <div className="flex items-start justify-between">
-        <Skeleton className="h-3 w-28" />
-        <Skeleton className="h-3 w-32" />
+        <Skeleton className="h-2.5 w-28" />
+        <Skeleton className="h-4 w-24" />
       </div>
       <Skeleton className="h-32 w-full rounded-lg" />
       <div className="flex justify-between">
-        <Skeleton className="h-3 w-20" />
-        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-24" />
       </div>
     </div>
   );
@@ -88,22 +89,27 @@ function TrendChartSkeleton() {
 
 function ScheduleSidebarSkeleton() {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-secondary/25 bg-card/90 p-5">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-3 w-16" />
-        <Skeleton className="h-3 w-24" />
-      </div>
-      <div className="flex flex-col gap-3">
-        {Array.from({ length: 3 }, (_, i) => (
-          <div key={i} className="flex flex-col gap-1.5">
-            <Skeleton className="h-3 w-14" />
-            <div className="flex gap-1.5">
-              {Array.from({ length: 7 }, (_, j) => (
-                <Skeleton key={j} className="size-7 rounded-md" />
-              ))}
+    <div className="self-start">
+      <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">
+        <Skeleton className="h-2.5 w-20" />
+        <div className="flex flex-col gap-4">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="flex flex-col gap-1.5">
+              <div className="flex justify-between">
+                <Skeleton className="h-2 w-10" />
+                <Skeleton className="h-2 w-10" />
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {Array.from({ length: 7 }, (_, j) => (
+                  <Skeleton key={j} className="h-9 rounded" />
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+        <div className="border-t border-border/50 pt-3">
+          <Skeleton className="h-3 w-28" />
+        </div>
       </div>
     </div>
   );
@@ -112,7 +118,12 @@ function ScheduleSidebarSkeleton() {
 export function ResultsSummarySkeleton() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 md:grid-cols-2">
+      <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-foreground/50">
+        <span className="size-1.5 rounded-full bg-primary" />
+        Your active run
+      </span>
+      <div className="grid gap-4 md:grid-cols-3">
+        <MetricCardSkeleton />
         <MetricCardSkeleton />
         <MetricCardSkeleton />
       </div>
