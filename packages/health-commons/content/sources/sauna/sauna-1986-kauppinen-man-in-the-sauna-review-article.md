@@ -19,6 +19,8 @@ relations:
   -
     type: parent_family
     target: experiment_family:dry-sauna
+  - type: same_work_as
+    target: source_artifact:pmid-3538994
 source:
   kind: review
   title: "Man in the sauna. Review article"

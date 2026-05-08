@@ -15,6 +15,8 @@ relations:
     target: "experiment_family:social-media-abstinence"
   - type: "related_protocol"
     target: "protocol_variant:social-media-abstinence/social-media-fast"
+  - type: same_work_as
+    target: source_artifact:doi-10-1037-ppm0000583
 sourceIdentity: 
   identityKind: "scholarly_work"
   canonicalIdBasis: "doi"

@@ -18,6 +18,8 @@ relations:
   -
     type: "parent_family"
     target: "experiment_family:dry-sauna"
+  - type: same_work_as
+    target: source_artifact:bryan-johnson-protocol-2026-01-23
 source:
   kind: "external_protocol"
   title: "DON'T DIE Protocol: Sauna"

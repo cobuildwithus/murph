@@ -19,6 +19,8 @@ relations:
   target: protocol_variant:dry-sauna/bryan-johnson-blueprint
 - type: parent_family
   target: experiment_family:dry-sauna
+- type: same_work_as
+  target: source_artifact:bryan-johnson-saunamaxx-2026-04-14
 source:
   kind: web_page
   title: 31 brutal minutes to saunamaxx
