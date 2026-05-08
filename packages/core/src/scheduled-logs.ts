@@ -32,6 +32,10 @@ import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { generateRecordId } from "./ids.ts";
 import { addMeal } from "./mutations.ts";
+import {
+  canonicalLogicalResource,
+  withCanonicalResourceLocks,
+} from "./operations/index.ts";
 import { acquireCanonicalWriteLock, withCanonicalWriteLockScope } from "./operations/canonical-write-lock.ts";
 import {
   loadMarkdownRegistryDocuments,
@@ -43,6 +47,10 @@ import {
 import type { FrontmatterObject } from "./types.ts";
 
 const SCHEDULED_LOGS_DIRECTORY = VAULT_LAYOUT.scheduledLogsDirectory;
+const scheduledLogRegistryResource = canonicalLogicalResource(
+  "bank/scheduled-logs",
+  SCHEDULED_LOGS_DIRECTORY,
+);
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -398,6 +406,10 @@ export async function showScheduledLog(input: ReadScheduledLogInput): Promise<Sc
 }
 
 export async function upsertScheduledLog(input: UpsertScheduledLogInput): Promise<UpsertScheduledLogResult> {
+  return withScheduledLogRegistryLock(input.vaultRoot, () => upsertScheduledLogWithLatestRegistry(input));
+}
+
+async function upsertScheduledLogWithLatestRegistry(input: UpsertScheduledLogInput): Promise<UpsertScheduledLogResult> {
   const normalizedId = normalizeId(input.scheduledLogId, "scheduledLogId", CONTRACT_ID_PREFIXES.scheduledLog);
   const title = normalizeScheduledLogTitle(input.title);
   const requestedSlug = normalizeSlug(input.slug, "slug", title);
@@ -453,46 +465,50 @@ export async function upsertScheduledLog(input: UpsertScheduledLogInput): Promis
 }
 
 export async function setScheduledLogStatus(input: SetScheduledLogStatusInput): Promise<UpsertScheduledLogResult> {
-  const existing = await readScheduledLog(input);
-  return upsertScheduledLog({
-    vaultRoot: input.vaultRoot,
-    scheduledLogId: existing.scheduledLogId,
-    slug: existing.slug,
-    title: existing.title,
-    status: input.status,
-    summary: existing.summary ?? undefined,
-    schedule: existing.schedule,
-    action: existing.action,
-    tags: existing.tags,
-    body: existing.body,
-    now: input.now,
+  return withScheduledLogRegistryLock(input.vaultRoot, async () => {
+    const existing = await readScheduledLog(input);
+    return upsertScheduledLogWithLatestRegistry({
+      vaultRoot: input.vaultRoot,
+      scheduledLogId: existing.scheduledLogId,
+      slug: existing.slug,
+      title: existing.title,
+      status: input.status,
+      summary: existing.summary ?? undefined,
+      schedule: existing.schedule,
+      action: existing.action,
+      tags: existing.tags,
+      body: existing.body,
+      now: input.now,
+    });
   });
 }
 
 export async function upsertDailyFoodScheduledLog(
   input: UpsertDailyFoodScheduledLogInput,
 ): Promise<DailyFoodScheduledLogResult> {
-  const localTime = normalizeDailyFoodLocalTime(input.localTime);
-  const food = await readFood({ vaultRoot: input.vaultRoot, foodId: input.foodId });
-  const existing = (await findGeneratedDailyFoodScheduledLogs({
-    vaultRoot: input.vaultRoot,
-    foodId: food.foodId,
-  }))[0] ?? null;
-  const result = await upsertScheduledLog({
-    vaultRoot: input.vaultRoot,
-    scheduledLogId: existing?.scheduledLogId,
-    slug: existing?.slug ?? buildDailyFoodScheduledLogSlug(food),
-    title: buildDailyFoodScheduledLogTitle(food),
-    status: "active",
-    summary: buildDailyFoodScheduledLogSummary(food),
-    schedule: { kind: "dailyLocal", localTime },
-    action: {
-      kind: "meal.add",
+  const result = await withScheduledLogRegistryLock(input.vaultRoot, async () => {
+    const localTime = normalizeDailyFoodLocalTime(input.localTime);
+    const food = await readFood({ vaultRoot: input.vaultRoot, foodId: input.foodId });
+    const existing = (await findGeneratedDailyFoodScheduledLogs({
+      vaultRoot: input.vaultRoot,
       foodId: food.foodId,
-    },
-    tags: ["food", "scheduled"],
-    body: buildDailyFoodScheduledLogBody(food),
-    now: input.now,
+    }))[0] ?? null;
+    return upsertScheduledLogWithLatestRegistry({
+      vaultRoot: input.vaultRoot,
+      scheduledLogId: existing?.scheduledLogId,
+      slug: existing?.slug ?? buildDailyFoodScheduledLogSlug(food),
+      title: buildDailyFoodScheduledLogTitle(food),
+      status: "active",
+      summary: buildDailyFoodScheduledLogSummary(food),
+      schedule: { kind: "dailyLocal", localTime },
+      action: {
+        kind: "meal.add",
+        foodId: food.foodId,
+      },
+      tags: ["food", "scheduled"],
+      body: buildDailyFoodScheduledLogBody(food),
+      now: input.now,
+    });
   });
 
   return {
@@ -504,27 +520,47 @@ export async function upsertDailyFoodScheduledLog(
 export async function archiveDailyFoodScheduledLog(
   input: ArchiveDailyFoodScheduledLogInput,
 ): Promise<ArchiveDailyFoodScheduledLogResult> {
-  const records = await findGeneratedDailyFoodScheduledLogs({
-    vaultRoot: input.vaultRoot,
-    foodId: input.foodId,
-  });
-  const archived: ScheduledLogRecord[] = [];
+  return withScheduledLogRegistryLock(input.vaultRoot, async () => {
+    const records = await findGeneratedDailyFoodScheduledLogs({
+      vaultRoot: input.vaultRoot,
+      foodId: input.foodId,
+    });
+    const archived: ScheduledLogRecord[] = [];
 
-  for (const record of records) {
-    if (record.status === "archived") {
-      continue;
+    for (const record of records) {
+      if (record.status === "archived") {
+        continue;
+      }
+
+      const result = await upsertScheduledLogWithLatestRegistry({
+        vaultRoot: input.vaultRoot,
+        scheduledLogId: record.scheduledLogId,
+        slug: record.slug,
+        title: record.title,
+        status: "archived",
+        summary: record.summary ?? undefined,
+        schedule: record.schedule,
+        action: record.action,
+        tags: record.tags,
+        body: record.body,
+        now: input.now,
+      });
+      archived.push(result.record);
     }
 
-    const result = await setScheduledLogStatus({
-      vaultRoot: input.vaultRoot,
-      scheduledLogId: record.scheduledLogId,
-      status: "archived",
-      now: input.now,
-    });
-    archived.push(result.record);
-  }
+    return { archived };
+  });
+}
 
-  return { archived };
+function withScheduledLogRegistryLock<TResult>(
+  vaultRoot: string,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  return withCanonicalResourceLocks({
+    vaultRoot,
+    resources: [scheduledLogRegistryResource],
+    run,
+  });
 }
 
 export function buildScheduledLogMarkdownPreview(input: ScheduledLogScaffoldPayload): string {

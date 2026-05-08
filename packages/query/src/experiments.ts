@@ -26,6 +26,8 @@ import { summarizeWearableDay, type WearableDaySummary, type WearableResolvedMet
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
+const MAX_EXPERIMENT_ANALYSIS_WINDOW_DAYS = 366;
+
 export type ExperimentProgressPhase =
   | "planned"
   | "baseline"
@@ -1396,6 +1398,16 @@ function dayInRun(frontmatter: ExperimentFrontmatter, asOf: string): number | nu
 function dateRange(start: string | undefined, end: string | undefined | null): string[] {
   if (!start || !end || start > end) {
     return [];
+  }
+
+  const totalDays = daysBetweenInclusive(start, end);
+  if (!Number.isFinite(totalDays) || totalDays < 1) {
+    throw new Error(`Experiment analysis window ${start} to ${end} is invalid.`);
+  }
+  if (totalDays > MAX_EXPERIMENT_ANALYSIS_WINDOW_DAYS) {
+    throw new Error(
+      `Experiment analysis window ${start} to ${end} spans ${totalDays} days; maximum supported span is ${MAX_EXPERIMENT_ANALYSIS_WINDOW_DAYS} days.`,
+    );
   }
 
   const dates: string[] = [];
