@@ -1408,7 +1408,9 @@ function safeAssistantInputTextSchema(fieldName: string) {
     .string()
     .max(ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH)
     .superRefine((value, context) => {
-      assertSafeAssistantInputText(value, context, fieldName)
+      assertSafeAssistantInputText(value, context, fieldName, {
+        allowPathOrUrlTokens: true,
+      })
     })
 }
 
@@ -1562,6 +1564,9 @@ function assertSafeAssistantInputText(
   text: string,
   context: z.RefinementCtx,
   fieldName: string,
+  options: {
+    allowPathOrUrlTokens?: boolean
+  } = {},
 ): void {
   const lines = text.split(/\r?\n/u)
   const lowerText = text.toLowerCase()
@@ -1582,7 +1587,7 @@ function assertSafeAssistantInputText(
     }
   }
 
-  if (containsPathOrUrlToken(text)) {
+  if (!options.allowPathOrUrlTokens && containsPathOrUrlToken(text)) {
     context.addIssue({
       code: 'custom',
       message: `${fieldName} must be minimized and must not contain paths or URLs.`,

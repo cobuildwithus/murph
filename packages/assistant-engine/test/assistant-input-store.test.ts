@@ -1369,7 +1369,7 @@ describe('assistant input event store', () => {
     ).rejects.toThrow(/Too big/iu)
   })
 
-  it('rejects paths, URLs, and raw email headers in prompt text fields', async () => {
+  it('accepts ordinary URLs and paths in prompt text fields while rejecting raw email headers', async () => {
     const { vaultRoot } = await createAssistantInputStoreVault(
       'assistant-input-store-raw-text-shapes-',
     )
@@ -1388,7 +1388,13 @@ describe('assistant input event store', () => {
           }),
         },
       }),
-    ).rejects.toThrow(/paths or URLs/iu)
+    ).resolves.toEqual(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          text: 'downloaded from https://example.invalid/raw-message',
+        }),
+      }),
+    )
 
     await expect(
       upsertAssistantInputEvent({
@@ -1426,7 +1432,40 @@ describe('assistant input event store', () => {
           }),
         },
       }),
-    ).rejects.toThrow(/paths or URLs/iu)
+    ).resolves.toEqual(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          userMessageContent: [
+            {
+              text: 'read /tmp/raw-email.eml before replying',
+              type: 'text',
+            },
+          ],
+        }),
+      }),
+    )
+
+    await expect(
+      upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: {
+          content: {
+            transcriptText: 'the user mentioned /notes/meeting-summary.md and https://example.invalid/context',
+          },
+          occurredAt: '2026-04-22T10:00:00.000Z',
+          sourceRef: createHostedMailboxSourceRef({
+            eventId: 'evt_transcript_paths',
+            laneSeq: '45',
+          }),
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          transcriptText: 'the user mentioned /notes/meeting-summary.md and https://example.invalid/context',
+        }),
+      }),
+    )
   })
 
   it('rejects unsafe source, conversation, and reply metadata', async () => {
