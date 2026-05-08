@@ -124,9 +124,19 @@ export function createHostedWebhookLinqMessageSideEffect(
   const replyToMessageId = input.replyToMessageId ?? null;
 
   return {
-    effectId: `linq-message:${input.sourceEventId}`,
+    effectId: buildHostedWebhookLinqMessageEffectId(input),
     payload: buildHostedWebhookLinqMessagePayload(input, replyToMessageId),
   };
+}
+
+function buildHostedWebhookLinqMessageEffectId(
+  input: CreateHostedWebhookLinqMessageSideEffectInput,
+): string {
+  if (input.template === "invite_signup") {
+    return `linq-invite-signup:${input.inviteId}`;
+  }
+
+  return `linq-message:${input.sourceEventId}`;
 }
 
 export async function drainHostedLinqSideEffectsDirect(input: {
