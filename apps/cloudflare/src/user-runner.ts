@@ -65,6 +65,9 @@ import {
 import type {
   RunnerInvocationLease,
 } from "./user-runner/runner-state-store.js";
+import {
+  RunnerInvocationAlreadyActiveError,
+} from "./user-runner/runner-state-store.js";
 import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import { RunnerStateStore } from "./user-runner/runner-state-store.js";
 import { RunnerRuntimeAlarmScheduler } from "./user-runner/runner-runtime-alarm-scheduler.js";
@@ -780,11 +783,34 @@ export class HostedUserRunner {
         userId: initialRecord.userId,
       });
     }
-    let lease = await this.stateStore.beginInvocation({
-      consumePendingNudge: input.reason === "idle_shutdown_checkpoint" ? false : undefined,
-      reason: input.reason,
-      userId: initialRecord.userId,
-    });
+    let lease: RunnerInvocationLease;
+    try {
+      lease = await this.stateStore.beginInvocation({
+        consumePendingNudge: input.reason === "idle_shutdown_checkpoint" ? false : undefined,
+        reason: input.reason,
+        userId: initialRecord.userId,
+      });
+    } catch (error) {
+      if (!(error instanceof RunnerInvocationAlreadyActiveError)) {
+        throw error;
+      }
+      const record = await this.syncInvocationRecoveryAlarm(error.record, {
+        minimumDelayMs: ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          reason: input.reason,
+        },
+        message: "Hosted runner invocation already active; synced recovery wake.",
+        phase: "scheduled",
+        userId: record.userId,
+      });
+      return {
+        nextWakeAt: record.nextWakeAt,
+        status: "scheduled",
+      };
+    }
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
