@@ -19,10 +19,14 @@ import {
   isBrowserVaultAbortError,
   loadBrowserVaultReplica,
   normalizeBrowserVaultError,
+  type BrowserVaultFreshness,
   type BrowserVaultSessionLoadResult,
 } from "./loader";
 
 export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
+
+const BROWSER_VAULT_STALE_POLL_INTERVAL_MS = 1_500;
+const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
 
 export interface BrowserVaultContextValue {
   /**
@@ -33,9 +37,12 @@ export interface BrowserVaultContextValue {
   client: BrowserVaultQueryClient | null;
   dataVersion: string | null;
   error: string | null;
+  freshness: BrowserVaultFreshness;
   ref: HostedBrowserVaultReplicaRef | null;
+  refreshPending: boolean;
   refresh(): Promise<void>;
   status: BrowserVaultStatus;
+  workspaceVersion: string | null;
 }
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
@@ -44,6 +51,9 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   const { authenticated } = useAuth();
   const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [freshness, setFreshness] = useState<BrowserVaultFreshness>("stale");
+  const [refreshPending, setRefreshPending] = useState(false);
+  const [workspaceVersion, setWorkspaceVersion] = useState<string | null>(null);
   const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
   const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
   const clientRef = useRef<BrowserVaultQueryClient | null>(null);
@@ -72,9 +82,16 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     commitClientAndRef(null, null);
     setStatus("empty");
     setError(null);
+    setFreshness("stale");
+    setRefreshPending(false);
+    setWorkspaceVersion(null);
   }, [cancelActiveLoad, commitClientAndRef]);
 
   const commitLoadResult = useCallback((result: BrowserVaultSessionLoadResult) => {
+    setFreshness(result.freshness);
+    setRefreshPending(result.refreshPending);
+    setWorkspaceVersion(result.workspaceVersion);
+
     if (result.state === "not_modified") {
       if (!clientRef.current) {
         throw new Error("Browser vault replica was unchanged but no decrypted client was available.");
@@ -98,7 +115,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, [commitClientAndRef]);
 
-  const load = useCallback(async () => {
+  const loadReplica = useCallback(async (options: { background?: boolean } = {}) => {
     if (!authenticated) {
       resetAnonymousVaultState();
       return;
@@ -112,7 +129,9 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     activeLoadIdRef.current = loadId;
     const abortController = new AbortController();
     activeAbortControllerRef.current = abortController;
-    setStatus("loading");
+    if (!options.background) {
+      setStatus("loading");
+    }
     setError(null);
 
     const loadPromise = (async () => {
@@ -149,6 +168,12 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     return loadPromise;
   }, [authenticated, commitLoadResult, resetAnonymousVaultState]);
 
+  const load = useCallback(async () => loadReplica(), [loadReplica]);
+  const pollStaleReplica = useCallback(
+    async () => loadReplica({ background: true }),
+    [loadReplica],
+  );
+
   useEffect(() => {
     mountedRef.current = true;
     void load();
@@ -159,18 +184,88 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     };
   }, [cancelActiveLoad, load]);
 
+  useEffect(() => {
+    if (!authenticated || status === "error" || (freshness === "fresh" && !refreshPending)) {
+      return;
+    }
+
+    let cancelled = false;
+    const startedAt = Date.now();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = () => {
+      if (cancelled || Date.now() - startedAt > BROWSER_VAULT_STALE_POLL_WINDOW_MS) {
+        return;
+      }
+
+      void pollStaleReplica().finally(() => {
+        if (!cancelled && Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS) {
+          timeoutId = setTimeout(poll, BROWSER_VAULT_STALE_POLL_INTERVAL_MS);
+        }
+      });
+    };
+
+    timeoutId = setTimeout(poll, BROWSER_VAULT_STALE_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [authenticated, freshness, pollStaleReplica, refreshPending, status]);
+
+  useEffect(() => {
+    if (!authenticated) {
+      return;
+    }
+
+    const onFocus = () => {
+      if (freshness === "stale" || refreshPending) {
+        void pollStaleReplica();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [authenticated, freshness, pollStaleReplica, refreshPending]);
+
   const value = useMemo<BrowserVaultContextValue>(() => ({
     client: authenticated ? client : null,
     dataVersion: authenticated ? ref?.dataVersion ?? null : null,
     error: authenticated ? error : null,
+    freshness: authenticated ? freshness : "stale",
     ref: authenticated ? ref : null,
+    refreshPending: authenticated ? refreshPending : false,
     refresh: load,
     status: authenticated ? status : "empty",
-  }), [authenticated, client, error, load, ref, status]);
+    workspaceVersion: authenticated ? workspaceVersion : null,
+  }), [authenticated, client, error, freshness, load, ref, refreshPending, status, workspaceVersion]);
+  const showSyncIndicator =
+    authenticated
+    && status !== "error"
+    && (freshness === "stale" || refreshPending);
 
   return (
     <BrowserVaultContext.Provider value={value}>
       {children}
+      {showSyncIndicator ? (
+        <div
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-lg"
+          role="status"
+        >
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+          />
+          <span>
+            {status === "empty"
+              ? "Preparing dashboard..."
+              : "Syncing latest changes..."}
+          </span>
+        </div>
+      ) : null}
     </BrowserVaultContext.Provider>
   );
 }

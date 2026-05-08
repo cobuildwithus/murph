@@ -8,6 +8,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "browser-vault/session",
   },
+  browserVaultRefresh: {
+    method: "POST",
+    suffix: "browser-vault/refresh",
+  },
   runnerNudge: {
     method: "POST",
     suffix: "nudge",
@@ -41,6 +45,10 @@ export function buildCloudflareHostedControlUserDataDeletionPath(userId: string)
 
 export function buildCloudflareHostedControlBrowserVaultSessionPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("browserVaultSession", userId);
+}
+
+export function buildCloudflareHostedControlBrowserVaultRefreshPath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("browserVaultRefresh", userId);
 }
 
 export function matchCloudflareHostedControlUserRoutePath(

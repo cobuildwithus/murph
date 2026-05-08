@@ -4,6 +4,8 @@ export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
 export const HOSTED_RUNTIME_WORKSPACE_PATH = "/api/internal/hosted-workspace";
 export const HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH =
   "/api/internal/hosted-workspace/checkpoint";
+export const HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH =
+  "/api/internal/hosted-workspace/browser-vault-replica";
 export const HOSTED_RUNTIME_LOG_PATH = "/api/internal/hosted-runtime/log";
 export const HOSTED_RUNTIME_STATUS_PATH = "/api/internal/hosted-runtime/status";
 export const HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH =

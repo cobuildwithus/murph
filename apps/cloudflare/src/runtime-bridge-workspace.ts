@@ -10,7 +10,7 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
-  buildHostedExecutionLayeredSnapshotRef,
+  buildHostedExecutionWorkingSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
@@ -35,11 +35,10 @@ import {
   HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
   HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
   createHostedPortableWorkspaceManifestFromBundle,
-  listHostedBundleArtifacts,
   readHostedPortableWorkspaceDeltaManifestFromBundle,
   readHostedPortableWorkspaceManifestFromBundle,
   sha256HostedBundleHex,
-  snapshotHostedAssistantRuntimeHotState,
+  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedExecutionContext,
   type HostedBundleArtifactRef,
   type HostedBundleArtifactRestoreInput,
@@ -47,6 +46,8 @@ import {
   type HostedCodexHomeSnapshotDiagnostics,
   type HostedPortableWorkspaceDeltaManifest,
   type HostedPortableWorkspaceManifest,
+  type HostedPortableWorkspaceManifestFile,
+  type HostedWorkspaceArtifactPersistInput,
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 
@@ -54,6 +55,7 @@ import {
   HostedRuntimeBridgeCheckpointLeaseError,
   snapshotHostedRuntimeBridgeWorkspaceBundle,
   type HostedRuntimeBridgeCheckpointLease,
+  type HostedRuntimeBridgeCheckpointLeaseStage,
 } from "./runtime-bridge-checkpoint.ts";
 import type {
   HostedMailboxPayloadDecodeInput,
@@ -253,9 +255,23 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
-  const mode = resolveHostedWorkspaceCheckpointSnapshotMode(input.request.reason);
-  if (mode === "hot") {
-    return await createHostedWorkspaceBridgeHotStateCheckpointSnapshot(input);
+  const currentRefs = input.platform.workspacePort?.read
+    ? await readHostedWorkspaceCurrentCheckpointRefs(input)
+    : {
+        baseSnapshotRef: null,
+        browserVaultReplicaRef: null,
+        snapshotRef: null,
+      };
+  const commitKind = resolveHostedWorkspaceCommitKind({
+    currentSnapshotRef: currentRefs.snapshotRef,
+    reason: input.request.reason,
+  });
+
+  if (commitKind === "working_commit") {
+    return await createHostedWorkspaceBridgeWorkingCommitSnapshot({
+      ...input,
+      currentRefs,
+    });
   }
 
   const preservedState = input.request.reason === "idle_shutdown"
@@ -264,6 +280,8 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   try {
     return await createHostedWorkspaceBridgeFullCheckpointSnapshot({
       ...input,
+      commitKind,
+      publishBrowserVaultReplica: commitKind === "full_compaction",
       preservedState,
     });
   } catch (error) {
@@ -287,16 +305,11 @@ class HostedWorkspaceWorkingCheckpointBaseUnavailableError extends Error {
   }
 }
 
-class HostedWorkspaceHotCheckpointWorkingSnapshotUnsupportedError extends Error {
-  constructor() {
-    super("Hosted live hot checkpoints require a full or layered base snapshot; compact working snapshots first.");
-    this.name = "HostedWorkspaceHotCheckpointWorkingSnapshotUnsupportedError";
-  }
-}
-
 async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
   codexHomeSnapshotHashSecret: string | null;
+  commitKind: HostedWorkspaceCommitKind;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  publishBrowserVaultReplica: boolean;
   preservedState?: HostedWorkspaceEffectivePreservedState | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
@@ -312,6 +325,7 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
   let bundlePutBytes = 0;
   let leaseCheckCount = 0;
   let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
+  const pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[] = [];
   const snapshotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle({
     readCurrentLease: async () => {
       leaseCheckCount += 1;
@@ -322,22 +336,9 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
       let snapshot: Awaited<ReturnType<typeof snapshotHostedExecutionContext>>;
       try {
         snapshot = await snapshotHostedExecutionContext({
-          assertSnapshotLive: async () => {
-            leaseCheckCount += 1;
-            assertHostedWorkspaceBridgeCheckpointLease({
-              lease: await input.readCurrentLease(),
-              request: input.request,
-              userId: input.userId,
-            });
-          },
           artifactRefProvider: input.preservedState?.artifactRefProvider,
           artifactSink: async (artifact) => {
-            externalArtifactPutCount += 1;
-            externalArtifactPutBytes += artifact.bytes.byteLength;
-            await input.platform.artifactStore.put({
-              bytes: artifact.bytes,
-              sha256: artifact.ref.sha256,
-            });
+            pendingArtifactPuts.push(artifact);
           },
           codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
           operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
@@ -375,6 +376,14 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     writeBundle: async ({ bundle }) => {
       const hash = sha256HostedBundleHex(bundle);
       bundlePutBytes = bundle.byteLength;
+      for (const artifact of pendingArtifactPuts) {
+        externalArtifactPutCount += 1;
+        externalArtifactPutBytes += artifact.bytes.byteLength;
+        await input.platform.artifactStore.put({
+          bytes: artifact.bytes,
+          sha256: artifact.ref.sha256,
+        });
+      }
       await input.platform.artifactStore.put({
         bytes: bundle,
         sha256: hash,
@@ -389,9 +398,22 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
     },
   });
 
+  const browserVaultReplica = input.publishBrowserVaultReplica
+    ? await publishHostedWorkspaceBridgeBrowserVaultReplica({
+        platform: input.platform,
+        request: input.request,
+        sourceRef: snapshotRef,
+        vaultRoot: input.vaultRoot,
+      })
+    : {};
+
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
     bundlePutCount: 1,
+    browserVaultReplicaState: input.publishBrowserVaultReplica
+      ? browserVaultReplica.browserVaultReplicaRef ? "written" : "degraded"
+      : "omitted",
+    commitKind: input.commitKind,
     externalArtifactPutBytes,
     externalArtifactPutCount,
     leaseCheckCount,
@@ -403,13 +425,183 @@ async function createHostedWorkspaceBridgeFullCheckpointSnapshot(input: {
   });
 
   return {
-    ...await publishHostedWorkspaceBridgeBrowserVaultReplica({
+    ...browserVaultReplica,
+    snapshotRef,
+  };
+}
+
+async function createHostedWorkspaceBridgeWorkingCommitSnapshot(input: {
+  codexHomeSnapshotHashSecret: string | null;
+  currentRefs: {
+    baseSnapshotRef: HostedExecutionBundleRef | null;
+    browserVaultReplicaRef: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"] | null;
+    snapshotRef: HostedExecutionSnapshotRef | null;
+  };
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
+  request: HostedWorkspaceCheckpointRequest;
+  userId: string;
+  vaultRoot: string;
+}): Promise<{
+  browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  snapshotRef: HostedExecutionSnapshotRef;
+}> {
+  const baseSnapshotRef = input.currentRefs.baseSnapshotRef;
+  if (!baseSnapshotRef) {
+    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+  }
+  const baseBundle = await input.platform.artifactStore.get(baseSnapshotRef.hash);
+  if (!baseBundle) {
+    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+  }
+  const baseManifest =
+    readHostedPortableWorkspaceManifestFromBundle(baseBundle)
+      ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+  const preservedState = input.currentRefs.snapshotRef
+    ? await readHostedWorkspaceEffectivePreservedState({
+        platform: input.platform,
+        snapshotRef: input.currentRefs.snapshotRef,
+      })
+    : createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest);
+
+  const startedAt = Date.now();
+  let externalArtifactPutBytes = 0;
+  let externalArtifactPutCount = 0;
+  let bundlePutBytes = 0;
+  let leaseCheckCount = 0;
+  let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
+  let workingDeltaUpsertCount = 0;
+  let workingDeltaTombstoneCount = 0;
+  const pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[] = [];
+
+  leaseCheckCount += 1;
+  assertHostedWorkspaceBridgeCheckpointLease({
+    lease: await input.readCurrentLease(),
+    request: input.request,
+    userId: input.userId,
+    stage: "before_snapshot",
+  });
+
+  let snapshot: Awaited<ReturnType<typeof snapshotHostedPortableWorkspaceDelta>>;
+  try {
+    snapshot = await snapshotHostedPortableWorkspaceDelta({
+      artifactRefProvider: preservedState.artifactRefProvider,
+      artifactSink: async (artifact) => {
+        pendingArtifactPuts.push(artifact);
+      },
+      baseManifest,
+      baseSnapshotHash: baseSnapshotRef.hash,
+      codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
+      materializedArtifactPaths: createHostedWorkspaceBridgeMaterializedArtifactPathSet(
+        preservedState.preservedArtifacts,
+      ),
+      operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+      preservedArtifacts: preservedState.preservedArtifacts,
+      vaultRoot: input.vaultRoot,
+      workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
+        workspaceSnapshotSizeDiagnostics = diagnostics;
+        await writeHostedCheckpointSnapshotSizeDiagnosticLog({
+          diagnostics,
+          mode: "working",
+          platform: input.platform,
+          request: input.request,
+        });
+      },
+    });
+  } catch (error) {
+    await writeHostedCodexHomeSnapshotFailureLog({
+      error,
       platform: input.platform,
       request: input.request,
-      sourceRef: snapshotRef,
-      vaultRoot: input.vaultRoot,
+      snapshotMode: "working",
+    });
+    throw error;
+  }
+
+  await writeHostedCodexHomeSnapshotDiagnosticLog({
+    diagnostics: snapshot.codexHomeSnapshotDiagnostics,
+    platform: input.platform,
+    request: input.request,
+  });
+  workspaceSnapshotSizeDiagnostics = snapshot.workspaceSnapshotSizeDiagnostics;
+
+  if (snapshot.kind === "unchanged") {
+    await writeHostedCheckpointSnapshotMetricLog({
+      bundlePutBytes,
+      bundlePutCount: 0,
+      browserVaultReplicaState: "omitted",
+      commitKind: "working_commit",
+      externalArtifactPutBytes,
+      externalArtifactPutCount,
+      leaseCheckCount,
+      mode: "working",
+      platform: input.platform,
+      request: input.request,
+      snapshotElapsedMs: Date.now() - startedAt,
+      workingDeltaTombstoneCount,
+      workingDeltaUpsertCount,
+      workspaceSnapshotSizeDiagnostics,
+    });
+
+    return {
+      snapshotRef: input.currentRefs.snapshotRef ?? baseSnapshotRef,
+    };
+  }
+
+  workingDeltaUpsertCount = snapshot.manifest.upserts.length;
+  workingDeltaTombstoneCount = snapshot.manifest.tombstones.length;
+
+  leaseCheckCount += 1;
+  assertHostedWorkspaceBridgeCheckpointLease({
+    lease: await input.readCurrentLease(),
+    request: input.request,
+    userId: input.userId,
+    stage: "before_bundle_write",
+  });
+
+  const deltaHash = sha256HostedBundleHex(snapshot.bundle);
+  bundlePutBytes = snapshot.bundle.byteLength;
+  for (const artifact of pendingArtifactPuts) {
+    externalArtifactPutCount += 1;
+    externalArtifactPutBytes += artifact.bytes.byteLength;
+    await input.platform.artifactStore.put({
+      bytes: artifact.bytes,
+      sha256: artifact.ref.sha256,
+    });
+  }
+  await input.platform.artifactStore.put({
+    bytes: snapshot.bundle,
+    sha256: deltaHash,
+  });
+  const deltaRef: HostedExecutionBundleRef = {
+    hash: deltaHash,
+    key: `cloudflare-workspace-deltas/${deltaHash}.bundle`,
+    size: snapshot.bundle.byteLength,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeHostedCheckpointSnapshotMetricLog({
+    bundlePutBytes,
+    bundlePutCount: 1,
+    browserVaultReplicaState: "omitted",
+    commitKind: "working_commit",
+    externalArtifactPutBytes,
+    externalArtifactPutCount,
+    leaseCheckCount,
+    mode: "working",
+    platform: input.platform,
+    request: input.request,
+    snapshotElapsedMs: Date.now() - startedAt,
+    workingDeltaTombstoneCount,
+    workingDeltaUpsertCount,
+    workspaceSnapshotSizeDiagnostics,
+  });
+
+  return {
+    snapshotRef: buildHostedExecutionWorkingSnapshotRef({
+      base: baseSnapshotRef,
+      delta: deltaRef,
     }),
-    snapshotRef,
   };
 }
 
@@ -483,162 +675,6 @@ async function publishHostedWorkspaceBridgeBrowserVaultReplica(input: {
   };
 }
 
-async function createHostedWorkspaceBridgeHotStateCheckpointSnapshot(input: {
-  codexHomeSnapshotHashSecret: string | null;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceCheckpointRequest;
-  userId: string;
-  vaultRoot: string;
-}): Promise<{
-  snapshotRef: HostedExecutionSnapshotRef;
-}> {
-  const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
-  if (readHostedExecutionSnapshotDeltaRef(currentRefs.snapshotRef)) {
-    throw new HostedWorkspaceHotCheckpointWorkingSnapshotUnsupportedError();
-  }
-
-  const startedAt = Date.now();
-  let externalArtifactPutBytes = 0;
-  let externalArtifactPutCount = 0;
-  let bundlePutBytes = 0;
-  let leaseCheckCount = 0;
-  const codexContinuityArtifactRefProvider =
-    await createCurrentHotStateCodexContinuityArtifactRefProvider({
-      platform: input.platform,
-      snapshotRef: currentRefs.snapshotRef,
-    });
-  const hotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle({
-    readCurrentLease: async () => {
-      leaseCheckCount += 1;
-      return await input.readCurrentLease();
-    },
-    request: input.request,
-    snapshotWorkspace: async () => {
-      let snapshot: Awaited<ReturnType<typeof snapshotHostedAssistantRuntimeHotState>>;
-      try {
-        snapshot = await snapshotHostedAssistantRuntimeHotState({
-          assertSnapshotLive: async () => {
-            leaseCheckCount += 1;
-            assertHostedWorkspaceBridgeCheckpointLease({
-              lease: await input.readCurrentLease(),
-              request: input.request,
-              userId: input.userId,
-            });
-          },
-          codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
-          codexContinuityArtifactRefProvider,
-          codexContinuityArtifactSink: async (artifact) => {
-            externalArtifactPutCount += 1;
-            externalArtifactPutBytes += artifact.bytes.byteLength;
-            await input.platform.artifactStore.put({
-              bytes: artifact.bytes,
-              sha256: artifact.ref.sha256,
-            });
-          },
-          operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-          vaultRoot: input.vaultRoot,
-        });
-      } catch (error) {
-        await writeHostedCodexHomeSnapshotFailureLog({
-          error,
-          platform: input.platform,
-          request: input.request,
-          snapshotMode: "hot",
-        });
-        throw error;
-      }
-      await writeHostedCodexHomeSnapshotDiagnosticLog({
-        diagnostics: snapshot.codexHomeSnapshotDiagnostics,
-        platform: input.platform,
-        request: input.request,
-      });
-
-      return snapshot.bundle;
-    },
-    userId: input.userId,
-    writeBundle: async ({ bundle }) => {
-      const hash = sha256HostedBundleHex(bundle);
-      bundlePutBytes = bundle.byteLength;
-      await input.platform.artifactStore.put({
-        bytes: bundle,
-        sha256: hash,
-      });
-
-      return {
-        hash,
-        key: `cloudflare-workspace-hot-state/${hash}.bundle`,
-        size: bundle.byteLength,
-        updatedAt: new Date().toISOString(),
-      };
-    },
-  });
-
-  await writeHostedCheckpointSnapshotMetricLog({
-    bundlePutBytes,
-    bundlePutCount: 1,
-    externalArtifactPutBytes,
-    externalArtifactPutCount,
-    leaseCheckCount,
-    mode: "hot",
-    platform: input.platform,
-    request: input.request,
-    snapshotElapsedMs: Date.now() - startedAt,
-    workspaceSnapshotSizeDiagnostics: null,
-  });
-
-  const snapshotRef = buildHostedExecutionLayeredSnapshotRef({
-    base: currentRefs.baseSnapshotRef,
-    hot: hotRef,
-  });
-
-  return {
-    snapshotRef,
-  };
-}
-
-async function createCurrentHotStateCodexContinuityArtifactRefProvider(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  snapshotRef: HostedExecutionSnapshotRef | null;
-}): Promise<(artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null> {
-  const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
-  if (!hotSnapshotRef) {
-    return () => null;
-  }
-
-  let hotBundle: Uint8Array | null;
-  try {
-    hotBundle = await input.platform.artifactStore.get(hotSnapshotRef.hash);
-  } catch {
-    return () => null;
-  }
-  if (!hotBundle) {
-    return () => null;
-  }
-
-  let artifactRefsByPath: Map<string, HostedBundleArtifactRef>;
-  try {
-    artifactRefsByPath = new Map(
-      listHostedBundleArtifacts({
-        bytes: hotBundle,
-        expectedKind: "vault",
-      }).map((artifact) => [`${artifact.root}:${artifact.path}`, artifact.ref] as const),
-    );
-  } catch {
-    return () => null;
-  }
-
-  return (artifact) => {
-    const ref = artifactRefsByPath.get(`${artifact.root}:${artifact.path}`);
-    if (!ref || ref.byteSize !== artifact.bytes.byteLength) {
-      return null;
-    }
-
-    const liveHash = sha256HostedBundleHex(artifact.bytes);
-    return ref.sha256 === liveHash ? ref : null;
-  };
-}
-
 function createBaseManifestArtifactRefProvider(
   baseManifest: HostedPortableWorkspaceManifest,
 ): (artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null {
@@ -674,6 +710,43 @@ function createBaseManifestPreservedArtifacts(
           root: file.root,
         }]
       : []);
+}
+
+function createHostedWorkspaceBridgeMaterializedArtifactPathSet(
+  artifacts: readonly HostedBundleArtifactRestoreInput[],
+): Set<string> {
+  return new Set(
+    artifacts
+      .filter((artifact) => shouldRestoreHostedRuntimeBridgeEagerArtifact(artifact))
+      .map((artifact) => `${artifact.root}:${artifact.path}`),
+  );
+}
+
+function shouldRestoreHostedRuntimeBridgeEagerArtifact(input: {
+  path: string;
+  root: string;
+}): boolean {
+  if (input.root === "operator-home") {
+    return hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, ".codex-hosted");
+  }
+
+  if (input.root !== "vault") {
+    return false;
+  }
+
+  return (
+    hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "raw/inbox")
+    || hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "raw/assistant-input")
+    || hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "derived/inbox")
+    || hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "derived/assistant-input")
+  );
+}
+
+function hasHostedRuntimeBridgeEagerArtifactPrefix(
+  relativePath: string,
+  prefix: string,
+): boolean {
+  return relativePath === prefix || relativePath.startsWith(`${prefix}/`);
 }
 
 interface HostedWorkspaceEffectivePreservedState {
@@ -745,6 +818,20 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
       ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(input.snapshotRef);
   if (!deltaSnapshotRef) {
+    const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
+    if (hotSnapshotRef) {
+      const hotBundle = await input.platform.artifactStore.get(hotSnapshotRef.hash);
+      if (!hotBundle) {
+        throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+      }
+      const hotManifest = createHostedPortableWorkspaceManifestFromBundle(hotBundle);
+      return createHostedWorkspaceEffectivePreservedStateFromManifest(
+        createHostedWorkspaceBridgeOverlayManifest({
+          baseManifest,
+          overlayManifest: hotManifest,
+        }),
+      );
+    }
     return createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest);
   }
 
@@ -814,6 +901,56 @@ function createHostedWorkspaceEffectiveManifestFromDelta(input: {
     manifestHash: input.deltaManifest.effectiveManifestHash,
     policyVersion: input.baseManifest.policyVersion,
     schema: input.baseManifest.schema,
+  };
+}
+
+function createHostedWorkspaceBridgeOverlayManifest(input: {
+  baseManifest: HostedPortableWorkspaceManifest;
+  overlayManifest: HostedPortableWorkspaceManifest;
+}): HostedPortableWorkspaceManifest {
+  const files = new Map(input.baseManifest.files.map((file) => [
+    `${file.root}:${file.path}`,
+    file,
+  ]));
+  for (const file of input.overlayManifest.files) {
+    files.set(`${file.root}:${file.path}`, file);
+  }
+
+  return finalizeHostedWorkspaceBridgePortableManifest([...files.values()]);
+}
+
+function finalizeHostedWorkspaceBridgePortableManifest(
+  files: HostedPortableWorkspaceManifestFile[],
+): HostedPortableWorkspaceManifest {
+  const manifestBody: Omit<HostedPortableWorkspaceManifest, "manifestHash"> = {
+    files: files
+      .map(canonicalizeHostedWorkspaceBridgePortableManifestFile)
+      .sort((left, right) => `${left.root}:${left.path}`.localeCompare(`${right.root}:${right.path}`)),
+    policyVersion: HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+    schema: HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
+  };
+  return {
+    ...manifestBody,
+    manifestHash: sha256HostedBundleHex(Buffer.from(JSON.stringify(manifestBody))),
+  };
+}
+
+function canonicalizeHostedWorkspaceBridgePortableManifestFile(
+  file: HostedPortableWorkspaceManifestFile,
+): HostedPortableWorkspaceManifestFile {
+  return {
+    ...(file.artifact
+      ? {
+          artifact: {
+            byteSize: file.artifact.byteSize,
+            sha256: file.artifact.sha256,
+          },
+        }
+      : {}),
+    path: file.path,
+    root: file.root,
+    sha256: file.sha256,
+    size: file.size,
   };
 }
 
@@ -1025,34 +1162,32 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
   }
 }
 
-type HostedWorkspaceCheckpointSnapshotMode = "full" | "hot";
+type HostedWorkspaceCommitKind =
+  | "full_compaction"
+  | "full_seed"
+  | "working_commit";
+type HostedWorkspaceCheckpointSnapshotMode = "full" | "working";
 
-function resolveHostedWorkspaceCheckpointSnapshotMode(
-  reason: HostedWorkspaceCheckpointRequest["reason"],
-): HostedWorkspaceCheckpointSnapshotMode {
-  switch (reason) {
-    case "activation_bootstrap":
-    case "idle_shutdown":
-      return "full";
-    case "active_turn_acceptance":
-    case "active_turn_input":
-    case "assistant_runtime_commit":
-    case "canonical_runtime_commit":
-    case "import":
-    case "outbox_receipt":
-    case "outbox_sending":
-    case "provider_cleanup":
-    case "system_mailbox_receipt":
-      return "hot";
+function resolveHostedWorkspaceCommitKind(input: {
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
+  reason: HostedWorkspaceCheckpointRequest["reason"];
+}): HostedWorkspaceCommitKind {
+  if (!readHostedExecutionSnapshotBaseRef(input.currentSnapshotRef)) {
+    return "full_seed";
   }
 
-  const exhaustive: never = reason;
-  return exhaustive;
+  if (input.reason === "idle_shutdown") {
+    return "full_compaction";
+  }
+
+  return "working_commit";
 }
 
 async function writeHostedCheckpointSnapshotMetricLog(input: {
+  browserVaultReplicaState: "degraded" | "omitted" | "written";
   bundlePutBytes: number;
   bundlePutCount: number;
+  commitKind: HostedWorkspaceCommitKind;
   externalArtifactPutBytes: number;
   externalArtifactPutCount: number;
   leaseCheckCount: number;
@@ -1060,6 +1195,8 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
   snapshotElapsedMs: number;
+  workingDeltaTombstoneCount?: number;
+  workingDeltaUpsertCount?: number;
   workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
 }): Promise<void> {
   if (!input.platform.logPort) {
@@ -1067,16 +1204,24 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   }
 
   const redactedJson: HostedRuntimeRedactedJson = {
+    browserVaultReplicaState: input.browserVaultReplicaState,
     bundlePutBytes: input.bundlePutBytes,
     bundlePutCount: input.bundlePutCount,
     checkpointPolicy: input.mode,
     checkpointReason: input.request.reason,
+    commitKind: input.commitKind,
     externalArtifactPutBytes: input.externalArtifactPutBytes,
     externalArtifactPutCount: input.externalArtifactPutCount,
     leaseCheckCount: input.leaseCheckCount,
     snapshotElapsedMs: input.snapshotElapsedMs,
     snapshotMode: input.mode,
   };
+  if (input.workingDeltaTombstoneCount !== undefined) {
+    redactedJson.workingDeltaTombstoneCount = input.workingDeltaTombstoneCount;
+  }
+  if (input.workingDeltaUpsertCount !== undefined) {
+    redactedJson.workingDeltaUpsertCount = input.workingDeltaUpsertCount;
+  }
   if (input.workspaceSnapshotSizeDiagnostics) {
     appendHostedWorkspaceSnapshotSizeDiagnostics(
       redactedJson,
@@ -1264,19 +1409,21 @@ function normalizeHostedRuntimeBridgeString(value: string | null | undefined): s
 function assertHostedWorkspaceBridgeCheckpointLease(input: {
   lease: HostedRuntimeBridgeCheckpointLease | null;
   request: HostedWorkspaceCheckpointRequest;
+  stage?: HostedRuntimeBridgeCheckpointLeaseStage;
   userId: string;
 }): void {
+  const stage = input.stage ?? "before_snapshot";
   if (!input.lease) {
-    throw new HostedRuntimeBridgeCheckpointLeaseError("missing_lease", "before_snapshot");
+    throw new HostedRuntimeBridgeCheckpointLeaseError("missing_lease", stage);
   }
   if (input.lease.userId !== input.userId) {
-    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_user", "before_snapshot");
+    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_user", stage);
   }
   if (input.lease.attemptId !== input.request.attemptId) {
-    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_attempt", "before_snapshot");
+    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_attempt", stage);
   }
   if (input.lease.leaseGeneration !== input.request.leaseGeneration) {
-    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_lease_generation", "before_snapshot");
+    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_lease_generation", stage);
   }
 }
 

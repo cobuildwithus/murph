@@ -14,6 +14,7 @@ import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
   parseHostedBrowserVaultReplicaRef,
+  parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeLogResponse,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
@@ -23,6 +24,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
@@ -248,8 +250,10 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(input.internalWorkerProxyToken && input.workspaceCheckpointBridge
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
+            boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,
+            transport: hostedWebControlTransport,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           }),
           runtimeLivenessPort: createCloudflareRuntimeLivenessPort({
@@ -474,11 +478,33 @@ async function requireHostedRuntimeActiveLeaseHeaders(
 }
 
 function createCloudflareBrowserVaultReplicaPort(input: {
+  boundUserId: string;
   fetchImpl: typeof fetch;
   timeoutMs: number;
+  transport: HostedWebControlTransport | null;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }) {
   return {
+    ...(input.transport
+      ? {
+          async publishRef(publishInput: {
+            expectedSourceStateHash: string;
+            replicaRef: NonNullable<ReturnType<typeof parseHostedBrowserVaultReplicaRef>>;
+          }) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: publishInput,
+              boundUserId: input.boundUserId,
+              description: "Hosted browser-vault replica publish",
+              fetchImpl: input.fetchImpl,
+              path: HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+              timeoutMs: input.timeoutMs,
+              transport: input.transport!,
+            });
+
+            return parseHostedBrowserVaultReplicaPublishResponse(payload);
+          },
+        }
+      : {}),
     async write(writeInput: {
       replica: unknown;
     }) {

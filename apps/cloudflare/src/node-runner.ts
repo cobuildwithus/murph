@@ -1,6 +1,10 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import {
+  createHostedBrowserVaultReplicaForSourceState,
+  restoreHostedWorkspaceRuntimeJobWorkspace,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedAssistantRuntimeConfig,
   type HostedAssistantWorkspaceRuntimeJobResult,
@@ -46,6 +50,9 @@ import {
 import {
   LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
 } from "./web-control-plane.ts";
+import {
+  readHostedBrowserVaultSourceStateHash,
+} from "@murphai/hosted-execution/parsers";
 
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
@@ -79,6 +86,25 @@ export interface HostedWorkspaceInvocationRunner {
     options?: HostedWorkspaceInvocationOptions,
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 }
+
+export interface HostedBrowserVaultReplicaRefreshInput {
+  runtime?: HostedAssistantRuntimeConfig | null;
+  sourceStateHash: string;
+  userId: string;
+}
+
+export type HostedBrowserVaultReplicaRefreshResult =
+  | {
+      replica: unknown;
+      sourceStateHash: string;
+      status: "generated";
+      userId: string;
+    }
+  | {
+      sourceStateHash: string;
+      status: "already_fresh" | "stale_source" | "workspace_missing";
+      userId: string;
+    };
 
 export function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
@@ -221,6 +247,79 @@ export function createHostedWorkspaceInvocationRunner(
 }
 
 export const runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner();
+
+export async function refreshHostedBrowserVaultReplica(
+  input: HostedBrowserVaultReplicaRefreshInput,
+  options?: HostedWorkspaceInvocationOptions,
+): Promise<HostedBrowserVaultReplicaRefreshResult> {
+  const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
+  const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
+  const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
+  const platform = buildHostedExecutionRuntimePlatform({
+    boundUserId: input.userId,
+    commitTimeoutMs: runtime.commitTimeoutMs,
+    internalWorkerProxyToken,
+    localInternalProxyBaseUrl,
+    workspaceCheckpointBridge: null,
+  });
+  const workspacePort = platform.workspacePort;
+  if (!workspacePort?.read) {
+    throw new TypeError("Hosted browser-vault refresh requires a workspace read port.");
+  }
+
+  const workspaceRead = await workspacePort.read();
+  const workspace = workspaceRead.workspace;
+  if (!workspace) {
+    return {
+      sourceStateHash: input.sourceStateHash,
+      status: "workspace_missing",
+      userId: input.userId,
+    };
+  }
+
+  const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(workspace.snapshotRef);
+  if (currentSourceStateHash !== input.sourceStateHash) {
+    return {
+      sourceStateHash: input.sourceStateHash,
+      status: "stale_source",
+      userId: input.userId,
+    };
+  }
+
+  if (workspace.browserVaultReplicaRef?.sourceBundleHash === input.sourceStateHash) {
+    return {
+      sourceStateHash: input.sourceStateHash,
+      status: "already_fresh",
+      userId: input.userId,
+    };
+  }
+
+  const refreshRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+  try {
+    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+      platform,
+      vaultRoot: refreshRoot,
+      workspace,
+    });
+    const replica = await createHostedBrowserVaultReplicaForSourceState({
+      generatedAt: new Date().toISOString(),
+      sourceBundleHash: input.sourceStateHash,
+      vaultRoot: restored.vaultRoot,
+    });
+
+    return {
+      replica,
+      sourceStateHash: input.sourceStateHash,
+      status: "generated",
+      userId: input.userId,
+    };
+  } finally {
+    await rm(refreshRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+}
 
 function resolveHostedWorkspaceInProcessVaultRoot(): string {
   const vaultRoot = process.env.VAULT?.trim();

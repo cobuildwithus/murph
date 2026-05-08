@@ -19,6 +19,17 @@ import {
 
 type RunnerMetaBundleRow = RunnerMetaRow;
 
+const PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY =
+  "runner:pending-browser-vault-refresh:v1";
+const PENDING_BROWSER_VAULT_REFRESH_SCHEMA =
+  "murph.hosted-runner.pending-browser-vault-refresh.v1";
+
+interface PendingBrowserVaultRefreshRecord {
+  schema: typeof PENDING_BROWSER_VAULT_REFRESH_SCHEMA;
+  sourceStateHash: string;
+  updatedAt: string;
+}
+
 export interface RunnerInvocationLease {
   attemptId: string;
   leaseGeneration: string;
@@ -112,13 +123,78 @@ export class RunnerStateStore {
     }
 
     if (!meta) {
+      await this.state.storage.delete(PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY);
       this.userId = null;
       return { deleted: false };
     }
 
     this.sql.exec("DELETE FROM runner_meta WHERE singleton = 1");
+    await this.state.storage.delete(PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY);
     this.userId = null;
     return { deleted: true };
+  }
+
+  async scheduleBrowserVaultRefresh(input: {
+    sourceStateHash: string;
+  }): Promise<{
+    deduped: boolean;
+    sourceStateHash: string;
+  }> {
+    const sourceStateHash = requireRunnerStateNonEmptyString(
+      input.sourceStateHash,
+      "Hosted browser-vault refresh sourceStateHash",
+    );
+    const current = await this.readPendingBrowserVaultRefresh();
+    if (current?.sourceStateHash === sourceStateHash) {
+      return {
+        deduped: true,
+        sourceStateHash,
+      };
+    }
+
+    await this.state.storage.put<PendingBrowserVaultRefreshRecord>(
+      PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
+      {
+        schema: PENDING_BROWSER_VAULT_REFRESH_SCHEMA,
+        sourceStateHash,
+        updatedAt: new Date().toISOString(),
+      },
+    );
+
+    return {
+      deduped: false,
+      sourceStateHash,
+    };
+  }
+
+  async readPendingBrowserVaultRefresh(): Promise<{
+    sourceStateHash: string;
+  } | null> {
+    const value = await this.state.storage.get<unknown>(
+      PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
+    );
+
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+
+    const record = value as Partial<PendingBrowserVaultRefreshRecord>;
+    return record.schema === PENDING_BROWSER_VAULT_REFRESH_SCHEMA
+      && typeof record.sourceStateHash === "string"
+      && record.sourceStateHash.length > 0
+      ? { sourceStateHash: record.sourceStateHash }
+      : null;
+  }
+
+  async clearPendingBrowserVaultRefresh(input: {
+    sourceStateHash: string;
+  }): Promise<boolean> {
+    const current = await this.readPendingBrowserVaultRefresh();
+    if (!current || current.sourceStateHash !== input.sourceStateHash) {
+      return false;
+    }
+
+    return await this.state.storage.delete(PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY);
   }
 
   async assertStateForUser(userId: string): Promise<void> {
@@ -763,6 +839,14 @@ export class RunnerStateStore {
 
 function normalizeLeaseGeneration(value: number | null): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function requireRunnerStateNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }
 
 function isIdleShutdownCheckpointBlockedByPendingNudge(meta: RunnerMetaBundleRow): boolean {

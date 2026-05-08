@@ -34,6 +34,8 @@ import {
   type HostedMailboxPayload,
   type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
+  type HostedBrowserVaultReplicaPublishRequest,
+  type HostedBrowserVaultReplicaPublishResponse,
   type HostedRunnerNudgeResult,
   type HostedRunnerStatusResponse,
   type HostedRuntimeDeviceSyncBridgeEnvelope,
@@ -561,6 +563,44 @@ export function parseHostedWorkspaceCheckpointResponse(
     checkpointed: requireBoolean(
       record.checkpointed,
       "Hosted workspace checkpoint response checkpointed",
+    ),
+    workspace: parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+export function parseHostedBrowserVaultReplicaPublishRequest(
+  value: unknown,
+): HostedBrowserVaultReplicaPublishRequest {
+  const record = requireObject(value, "Hosted browser-vault replica publish request");
+  const replicaRef = parseHostedBrowserVaultReplicaRef(
+    record.replicaRef,
+    "Hosted browser-vault replica publish request replicaRef",
+  );
+
+  if (!replicaRef) {
+    throw new TypeError(
+      "Hosted browser-vault replica publish request replicaRef must not be null.",
+    );
+  }
+
+  return {
+    expectedSourceStateHash: requireString(
+      record.expectedSourceStateHash,
+      "Hosted browser-vault replica publish request expectedSourceStateHash",
+    ),
+    replicaRef,
+  };
+}
+
+export function parseHostedBrowserVaultReplicaPublishResponse(
+  value: unknown,
+): HostedBrowserVaultReplicaPublishResponse {
+  const record = requireObject(value, "Hosted browser-vault replica publish response");
+
+  return {
+    published: requireBoolean(
+      record.published,
+      "Hosted browser-vault replica publish response published",
     ),
     workspace: parseHostedWorkspaceState(record.workspace),
   };

@@ -226,6 +226,20 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     beforeMethod(context, params) {
+      return requireBoundInternalRouteUser(context, params, "browser-vault-refresh");
+    },
+    async handle(context, params) {
+      return handleBrowserVaultRefreshRoute(context, params.userId);
+    },
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("browserVaultRefresh", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.browserVaultRefresh.method],
+    name: "browser-vault-refresh",
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    beforeMethod(context, params) {
       return requireBoundInternalRouteUser(context, params, "user-status");
     },
     async handle(context, params) {
@@ -324,6 +338,13 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult> {
     return this.runner.nudgeHostedRunnerForUser(userId);
+  }
+
+  async scheduleBrowserVaultRefreshForUser(input: {
+    sourceStateHash: string;
+    userId: string;
+  }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
+    return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
   async ownsActiveInvocationLease(input: {
@@ -931,8 +952,54 @@ async function handleBrowserVaultSessionRoute(
   });
 }
 
+async function handleBrowserVaultRefreshRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  let body;
+  try {
+    body = parseBrowserVaultRefreshRequest(parseJsonValue(await readCachedRequestText(context)));
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "browser-vault-refresh-request-invalid",
+        routeName: "browser-vault-refresh",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker browser-vault refresh route rejected an invalid request body.",
+      phase: "failed",
+      userId,
+    });
+    throw error;
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId);
+  if (!stub.scheduleBrowserVaultRefreshForUser) {
+    throw new Error("Hosted user runner does not support browser-vault refresh scheduling.");
+  }
+  return json(await stub.scheduleBrowserVaultRefreshForUser({
+    sourceStateHash: body.sourceStateHash,
+    userId,
+  }));
+}
+
 function parseJsonValue(value: string): unknown {
   return JSON.parse(value);
+}
+
+function parseBrowserVaultRefreshRequest(value: unknown): {
+  sourceStateHash: string;
+} {
+  const record = requireJsonRecord(value, "Browser vault refresh request");
+  return {
+    sourceStateHash: requireNonEmptyString(
+      record.sourceStateHash,
+      "Browser vault refresh request sourceStateHash",
+    ),
+  };
 }
 
 function parseBrowserVaultSessionRequest(value: unknown): {
@@ -1040,6 +1107,14 @@ function requireJsonRecord(value: unknown, label: string): Record<string, unknow
   }
 
   return value as Record<string, unknown>;
+}
+
+function requireNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }
 
 interface InternalProxyRequestInit extends RequestInit {
