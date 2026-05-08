@@ -5,9 +5,15 @@ import type {
   AssistantInputAttachmentEvidence,
   AssistantInputAttachmentEvidenceItem,
 } from './input-store.js'
+import { ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT } from './input-store.js'
 import { normalizeAssistantInputFileName } from './attachment-file-name.js'
 
 const INLINE_FRAGMENT_TEXT_MAX_LENGTH = 6_000
+const ATTACHMENT_EVIDENCE_MAX_COUNT =
+  ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT
+const ATTACHMENT_EVIDENCE_PARTIAL_REASON_CODE = 'attachment.evidence_partial'
+const ATTACHMENT_EVIDENCE_OVERFLOW_REASON_CODE =
+  'attachment.evidence_partial.attachment_limit'
 const SAFE_EVIDENCE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,190}$/u
 const SAFE_CONTENT_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9.+-]{0,126}$/u
 const SAFE_SHA256_PATTERN = /^[0-9a-f]{64}$/u
@@ -67,20 +73,26 @@ export function createAssistantInputAttachmentEvidenceFromInboxCapture(input: {
   }) => string | null
   source: EvidenceSource
 }): AssistantInputAttachmentEvidence {
-  const attachments = input.capture.attachments.map((attachment, index) =>
-    createAssistantInputAttachmentEvidenceItemFromInboxAttachment({
-      attachment,
-      descriptorAttachmentId:
-        input.descriptorAttachmentIdForAttachment?.(attachment, index) ?? null,
-      fallbackAttachmentId: `attachment-${index + 1}`,
-      index,
-      rawArtifactPathForAttachment: input.rawArtifactPathForAttachment,
-    }),
-  )
+  const attachments = input.capture.attachments
+    .slice(0, ATTACHMENT_EVIDENCE_MAX_COUNT)
+    .map((attachment, index) =>
+      createAssistantInputAttachmentEvidenceItemFromInboxAttachment({
+        attachment,
+        descriptorAttachmentId:
+          input.descriptorAttachmentIdForAttachment?.(attachment, index) ?? null,
+        fallbackAttachmentId: `attachment-${index + 1}`,
+        index,
+        rawArtifactPathForAttachment: input.rawArtifactPathForAttachment,
+      }),
+    )
+  const hasOmittedAttachmentEvidence =
+    input.capture.attachments.length > attachments.length
   const hasMissingAttachmentEvidence =
     attachments.length > 0 && attachments.some((attachment) =>
       !hasMaterialAttachmentEvidence(attachment)
     )
+  const hasPartialAttachmentEvidence =
+    hasMissingAttachmentEvidence || hasOmittedAttachmentEvidence
 
   return {
     attachments,
@@ -88,9 +100,13 @@ export function createAssistantInputAttachmentEvidenceFromInboxCapture(input: {
       input.capture.captureId,
       null,
     ),
-    reasonCode: hasMissingAttachmentEvidence ? 'attachment.evidence_partial' : null,
+    reasonCode: hasOmittedAttachmentEvidence
+      ? ATTACHMENT_EVIDENCE_OVERFLOW_REASON_CODE
+      : hasMissingAttachmentEvidence
+        ? ATTACHMENT_EVIDENCE_PARTIAL_REASON_CODE
+        : null,
     source: input.source,
-    status: hasMissingAttachmentEvidence ? 'partial' : 'available',
+    status: hasPartialAttachmentEvidence ? 'partial' : 'available',
     updatedAt: input.now ?? null,
   }
 }
@@ -185,7 +201,7 @@ export async function materializeAssistantInputAttachmentRawArtifactRefs(input: 
   vaultRoot: string
 }): Promise<Map<number, string>> {
   const refs = new Map<number, string>()
-  await Promise.all(input.attachments.map(async (attachment, index) => {
+  await Promise.all(input.attachments.slice(0, ATTACHMENT_EVIDENCE_MAX_COUNT).map(async (attachment, index) => {
     const sourcePath = normalizeRawArtifactPath(attachment.storedPath ?? null)
     if (!sourcePath) {
       return
