@@ -280,6 +280,10 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     deliverMessage.mock.calls[0]?.[0]?.identityId,
     'identity-saved',
   )
+  assert.equal(
+    deliverMessage.mock.calls[0]?.[0]?.deliveryTransportIdempotent,
+    false,
+  )
   assert.equal(result.response, 'Raw notification text')
   assert.deepEqual(result.session, deliveredSession)
   assert.equal(startTypingIndicator.mock.calls.length, 1)
@@ -341,6 +345,159 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   expect(JSON.stringify(rawEvent)).not.toContain('identity-initial')
   expect(JSON.stringify(rawEvent)).not.toContain('thread-initial')
   expect(JSON.stringify(rawEvent)).not.toContain(initialSession.sessionId)
+})
+
+test('sendAssistantNotificationLocal marks hosted Linq delivery with deterministic keys idempotent', async () => {
+  const linqSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-linq',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-linq',
+      },
+      identityId: 'identity-linq',
+      threadId: 'thread-linq',
+      threadIsDirect: true,
+    },
+  })
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'Hosted Linq notification',
+    }),
+    session: linqSession,
+  })
+  const deliverMessage = vi.fn(async () => ({
+    delivery: null,
+    intent: {
+      intentId: 'intent-hosted-linq-notification',
+    },
+    kind: 'queued',
+    session: linqSession,
+  }))
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => ({
+      outbox: {
+        deliverMessage,
+      },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
+      },
+    })),
+    executeProviderTurnWithRecovery: vi.fn(async () => ({
+      kind: 'succeeded',
+      providerTurn: providerResult,
+    })),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
+    ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
+    persistAssistantTurnAndSession: vi.fn(async () => linqSession),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
+    resolveAssistantOperatorDefaults: vi.fn(async () => ({
+      timezone: 'Australia/Sydney',
+    })),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      created: false,
+      session: linqSession,
+    })),
+    resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => createSharedPlan()),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
+    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-hosted-linq-notification',
+  }))
+  vi.doMock('../src/assistant/channel-adapters.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.js')
+
+    return {
+      ...actual,
+      getAssistantChannelAdapter: vi.fn(() => null),
+    }
+  })
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  await sendAssistantNotificationLocal({
+    deliveryIdempotencyKey: 'sha256:hosted-linq-notification',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Deliver this hosted notification.',
+    vault: '/vaults/test',
+  })
+
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      channel: 'linq',
+      deliveryIdempotencyKey: 'sha256:hosted-linq-notification',
+      deliveryTransportIdempotent: true,
+    }),
+  )
 })
 
 test('sendAssistantNotificationLocal passes user-facing provider text through before outbound delivery', async () => {

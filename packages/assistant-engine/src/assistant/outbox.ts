@@ -156,6 +156,7 @@ export async function createAssistantOutboxIntent(input: {
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
+  deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
   identityId?: string | null
   message: string
@@ -218,7 +219,7 @@ export async function createAssistantOutboxIntent(input: {
       deliveryIdempotencyKey: normalizeNullableString(input.deliveryIdempotencyKey),
       deliveryTransportIdempotent: inferAssistantOutboxDeliveryTransportIdempotent({
         channel: input.channel ?? null,
-        deliveryTransportIdempotent: false,
+        deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? false,
       }),
       lastError: null,
     })
@@ -504,7 +505,9 @@ export async function dispatchAssistantOutboxIntent(input: {
         delivered.delivery.idempotencyKey ??
         dispatchIntent.deliveryIdempotencyKey,
     })
-    deliveryTransportIdempotent = delivered.deliveryTransportIdempotent === true
+    deliveryTransportIdempotent =
+      dispatchIntent.deliveryTransportIdempotent ||
+      delivered.deliveryTransportIdempotent === true
     deliveryMayHaveSucceeded = true
     const deliveredIntent = buildAssistantOutboxDeliveredIntent({
       delivery,
@@ -592,6 +595,7 @@ export async function deliverAssistantOutboxMessage(input: {
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
+  deliveryTransportIdempotent?: boolean
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
@@ -614,6 +618,7 @@ export async function deliverAssistantOutboxMessage(input: {
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? false,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     message: input.message,
