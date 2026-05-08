@@ -270,7 +270,7 @@ describe("hosted deploy automation helpers", () => {
         instance_type: "standard-1",
         max_instances: 1,
         rollout_active_grace_period: 300,
-        rollout_step_percentage: [10, 25, 50, 100],
+        rollout_step_percentage: [100],
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([
