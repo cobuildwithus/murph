@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAssistantInputAttachmentModelBundle,
   hasAssistantInputAttachmentEvidenceCandidate,
@@ -27,6 +27,10 @@ describe('assistant input attachment evidence model materialization', () => {
     const vaultRoot = await createTempVaultRoot()
     const imagePath = 'raw/inbox/capture-1/attachments/01__meal.jpg'
     const imageBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb])
+    const materializeWorkspaceArtifacts = vi.fn(async () => ({
+      materializedArtifactPaths: new Set([`vault:${imagePath}`]),
+      missingArtifactPaths: new Set<string>(),
+    }))
     await writeVaultFile(vaultRoot, imagePath, imageBytes)
 
     const bundle = await buildAssistantInputAttachmentModelBundle({
@@ -50,6 +54,7 @@ describe('assistant input attachment evidence model materialization', () => {
 
     const prepared = await prepareAssistantInputMultimodalUserMessageContent({
       attachmentSources: [bundle],
+      materializeWorkspaceArtifacts,
       prompt: 'Look at this image.',
       vaultRoot,
     })
@@ -65,6 +70,7 @@ describe('assistant input attachment evidence model materialization', () => {
       type: 'text',
       text: 'Attachment image 1 (01__meal.jpg).',
     })
+    expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([imagePath])
   })
 
   it('uses preserved filenames when deciding image routing eligibility', async () => {
@@ -356,6 +362,10 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('reads derived parser manifest text only from the declared allowed root', async () => {
     const vaultRoot = await createTempVaultRoot()
+    const materializeWorkspaceArtifacts = vi.fn(async () => ({
+      materializedArtifactPaths: new Set<string>(),
+      missingArtifactPaths: new Set<string>(),
+    }))
     await writeVaultFile(
       vaultRoot,
       'derived/inbox/capture-1/attachments/att-1/manifest.json',
@@ -392,11 +402,21 @@ describe('assistant input attachment evidence model materialization', () => {
           manifestPath: 'derived/inbox/capture-1/attachments/att-1/manifest.json',
         },
       },
+      materializeWorkspaceArtifacts,
       vaultRoot,
     })
 
     expect(bundle.combinedText).toContain('Plain parser text.')
     expect(bundle.combinedText).toContain('Markdown parser text.')
+    expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([
+      'derived/inbox/capture-1/attachments/att-1/manifest.json',
+    ])
+    expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([
+      'derived/inbox/capture-1/attachments/att-1/plain.txt',
+    ])
+    expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([
+      'derived/inbox/capture-1/attachments/att-1/plain.md',
+    ])
   })
 
   it('ignores derived parser manifest output paths outside the declared allowed root', async () => {

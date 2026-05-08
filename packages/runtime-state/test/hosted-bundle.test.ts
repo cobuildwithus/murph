@@ -2892,6 +2892,11 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
       "{\"debug\":true}\n",
       "utf8",
     );
+    await writeFile(
+      path.join(hotAssistantRoot, "hosted-materialized-artifacts.json"),
+      "{\"schema\":\"murph.hosted-materialized-artifacts.v1\",\"materializedArtifactPaths\":[\"vault:raw/inbox/example/scan.pdf\"]}\n",
+      "utf8",
+    );
     await writeFile(path.join(hotVaultRoot, "note.md"), "hot note should not be captured\n", "utf8");
 
     const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
@@ -2925,6 +2930,15 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
       }),
       null,
     );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: hotSnapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/hosted-materialized-artifacts.json",
+        root: "vault",
+      }),
+      null,
+    );
 
     const restored = await restoreHostedExecutionContext({
       bundle: baseSnapshot.bundle,
@@ -2934,10 +2948,22 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent-a.json"), "utf8"),
       "{\"intent\":\"old\"}\n",
     );
+    await writeFile(
+      path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "hosted-materialized-artifacts.json"),
+      "{\"schema\":\"murph.hosted-materialized-artifacts.v1\",\"materializedArtifactPaths\":[\"vault:raw/inbox/example/scan.pdf\"]}\n",
+      "utf8",
+    );
 
     await clearHostedAssistantRuntimeHotState({
       vaultRoot: restored.vaultRoot,
     });
+    assert.equal(
+      await readFile(
+        path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "hosted-materialized-artifacts.json"),
+        "utf8",
+      ),
+      "{\"schema\":\"murph.hosted-materialized-artifacts.v1\",\"materializedArtifactPaths\":[\"vault:raw/inbox/example/scan.pdf\"]}\n",
+    );
     await restoreHostedBundleRoots({
       bytes: hotSnapshot.bundle,
       expectedKind: "vault",
@@ -5136,6 +5162,60 @@ test("hosted execution targeted materialization rejects corrupt artifact bytes",
       bundle: snapshot.bundle,
       workspaceRoot: restoreRoot,
     })).rejects.toThrow("Hosted bundle artifact size mismatch");
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted execution targeted materialization rejects same-size corrupt artifact bytes", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-artifact-target-hash-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-artifact-target-hash-restore-"));
+  const artifacts = new Map<string, Uint8Array>();
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "home");
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "inbox", "example", "scan.pdf");
+    const originalBytes = Buffer.from("pdf-binary-artifact\n", "utf8");
+
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph"), { recursive: true });
+    await writeFile(rawAttachmentPath, originalBytes);
+    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
+
+    const snapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error(`Missing artifact ${ref.sha256}.`);
+        }
+
+        return bytes;
+      },
+      shouldRestoreArtifact: () => false,
+      bundle: snapshot.bundle,
+      workspaceRoot: restoreRoot,
+    });
+
+    const sameSizeCorruptBytes = Buffer.from(originalBytes);
+    sameSizeCorruptBytes[0] = sameSizeCorruptBytes[0]! ^ 0xff;
+    await expect(materializeHostedExecutionArtifacts({
+      artifactResolver: async () => sameSizeCorruptBytes,
+      shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+        root === "vault" && artifactPath === "raw/inbox/example/scan.pdf"
+      ),
+      bundle: snapshot.bundle,
+      workspaceRoot: restoreRoot,
+    })).rejects.toThrow("Hosted bundle artifact hash mismatch");
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });

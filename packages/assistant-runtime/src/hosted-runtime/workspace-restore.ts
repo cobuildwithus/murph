@@ -953,7 +953,7 @@ function shouldRestoreHostedRuntimeEagerArtifact(input: {
     return false;
   }
 
-  return false;
+  return !isHostedRuntimeLazyContentPath(input.path);
 }
 
 function shouldRestoreHostedRuntimeInlineFile(input: {

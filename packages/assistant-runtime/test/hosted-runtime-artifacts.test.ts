@@ -118,10 +118,21 @@ test("hosted artifact materializer records only paths that restore", async () =>
   const artifactBytesByHash = new Map<string, Uint8Array>();
 
   try {
-    const sourcePath = path.join(sourceVaultRoot, "raw", "inbox", "example", "scan.txt");
-    const sourceBytes = Buffer.from("scan artifact\n", "utf8");
-    await mkdir(path.dirname(sourcePath), { recursive: true });
-    await writeFile(sourcePath, sourceBytes);
+    const sourceFiles = [
+      {
+        bytes: Buffer.from("scan artifact\n", "utf8"),
+        path: "raw/inbox/example/scan.txt",
+      },
+      {
+        bytes: Buffer.from("derived summary\n", "utf8"),
+        path: "derived/assistant-input/example/summary.txt",
+      },
+    ];
+    for (const file of sourceFiles) {
+      const sourcePath = path.join(sourceVaultRoot, file.path);
+      await mkdir(path.dirname(sourcePath), { recursive: true });
+      await writeFile(sourcePath, file.bytes);
+    }
     const bundle = await snapshotHostedBundleRoots({
       externalizeFile: async (file) => {
         const sha256 = sha256HostedBundleHex(file.bytes);
@@ -155,12 +166,29 @@ test("hosted artifact materializer records only paths that restore", async () =>
     assert.deepEqual([...missing.missingArtifactPaths], ["vault:raw/inbox/example/missing.txt"]);
     assert.deepEqual([...materializedArtifactPaths], []);
 
-    const restored = await materialize(["raw/inbox/example/scan.txt"]);
-    assert.deepEqual([...restored.materializedArtifactPaths], ["vault:raw/inbox/example/scan.txt"]);
+    const restored = await materialize([
+      "derived/assistant-input/example/summary.txt",
+      "raw/inbox/example/scan.txt",
+    ]);
+    assert.deepEqual(
+      [...restored.materializedArtifactPaths].sort(),
+      [
+        "vault:derived/assistant-input/example/summary.txt",
+        "vault:raw/inbox/example/scan.txt",
+      ],
+    );
     assert.deepEqual([...restored.missingArtifactPaths], []);
-    assert.deepEqual([...materializedArtifactPaths], ["vault:raw/inbox/example/scan.txt"]);
+    assert.deepEqual(
+      [...materializedArtifactPaths].sort(),
+      [
+        "vault:derived/assistant-input/example/summary.txt",
+        "vault:raw/inbox/example/scan.txt",
+      ],
+    );
     await expect(readFile(path.join(vaultRoot, "raw", "inbox", "example", "scan.txt"), "utf8"))
       .resolves.toBe("scan artifact\n");
+    await expect(readFile(path.join(vaultRoot, "derived", "assistant-input", "example", "summary.txt"), "utf8"))
+      .resolves.toBe("derived summary\n");
   } finally {
     await rm(sourceVaultRoot, { force: true, recursive: true });
     await rm(vaultRoot, { force: true, recursive: true });

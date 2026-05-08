@@ -79,7 +79,6 @@ const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/automation-runtime.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/jobs.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-mailbox.json`,
-  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-materialized-artifacts.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-provider-cleanup.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-system-mailbox.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/indexes.json`,
