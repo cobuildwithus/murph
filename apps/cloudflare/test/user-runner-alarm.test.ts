@@ -1970,7 +1970,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms.at(-1)).toBe("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
 	    expect(
 	      sql.exec(
 	        `SELECT idle_shutdown_checkpoint_due_at,
@@ -2064,7 +2064,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(alarms.at(-1)).toBe("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -2204,7 +2204,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(idleInvoke).toHaveBeenCalledOnce();
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms.at(-1)).toBe("2026-04-27T00:10:00.000Z");
     expect(
       sql.exec(

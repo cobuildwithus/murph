@@ -33,13 +33,14 @@ The live ownership split is:
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
   After a runner finishes idle with a working checkpoint and no workspace
-  next wake, Cloudflare schedules one `idle_shutdown_checkpoint` alarm at the
-  runner idle TTL minus the configured safety margin. Fresh nudges clear that
-  pending idle checkpoint. When the idle alarm is still current, Cloudflare
-  starts a normal lease-scoped invocation that runs checkpoint reason
-  `idle_shutdown`, validates the same workspace CAS/user fences, writes a
-  full/base checkpoint, and destroys the warm container only if no pending work
-  arrived meanwhile.
+  next wake, Cloudflare schedules one `idle_shutdown_checkpoint` alarm for the
+  configured idle window, five minutes by default. The runner container's own
+  activity expiry is a later fallback, not the checkpoint owner. Fresh nudges
+  clear that pending idle checkpoint. When the idle alarm is still current,
+  Cloudflare starts a normal lease-scoped invocation that renews container
+  liveness, runs checkpoint reason `idle_shutdown`, validates the same
+  workspace CAS/user fences, writes a full/base checkpoint, and destroys the
+  warm container only if no pending work arrived meanwhile.
   When hosted runtime crypto is configured, Cloudflare fetches signed
   ingress/runtime root envelopes from web through the signed
   `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority

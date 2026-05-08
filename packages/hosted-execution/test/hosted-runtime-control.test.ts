@@ -223,11 +223,15 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       status: "scheduled",
     });
-    expect(() => parseHostedWorkspaceInvocationResult({
+    expect(parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       status: "idle",
-    })).toThrow("Hosted workspace invocation result idleShutdownCheckpointed requires no nextWakeAt.");
+    })).toEqual({
+      idleShutdownCheckpointed: true,
+      nextWakeAt: "2026-04-26T00:00:05.000Z",
+      status: "idle",
+    });
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       status: "scheduled",

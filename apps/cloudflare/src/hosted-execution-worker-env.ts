@@ -96,7 +96,7 @@ export function readHostedExecutionWorkerEnvironment(
     ),
     idleShutdownCheckpointSafetyMarginMs: parseNonNegativeInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS),
-      5_000,
+      0,
       "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS",
     ),
     retryDelayMs: parsePositiveInteger(

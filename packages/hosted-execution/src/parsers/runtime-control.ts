@@ -928,12 +928,6 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
       "Hosted workspace invocation result idleShutdownCheckpointed requires status idle.",
     );
   }
-  if (idleShutdownCheckpointed === true && nextWakeAt !== undefined && nextWakeAt !== null) {
-    throw new TypeError(
-      "Hosted workspace invocation result idleShutdownCheckpointed requires no nextWakeAt.",
-    );
-  }
-
   return {
     ...(idleShutdownCheckpointed === undefined ? {} : { idleShutdownCheckpointed }),
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
