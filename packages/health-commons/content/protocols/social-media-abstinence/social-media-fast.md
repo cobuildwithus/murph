@@ -7,6 +7,7 @@ title: "Social Media Fast"
 summary: "A bounded 24-hour, 72-hour, or 7-day break from chosen social media apps while tracking mood, connection, urges, sleep context, and life-fit."
 status: "draft"
 quality: "usable"
+hidden: true
 aliases: 
   - "social media break"
   - "social media abstinence"
