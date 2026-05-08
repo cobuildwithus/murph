@@ -611,8 +611,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.latestWorkspace?.version, "0");
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -2261,7 +2260,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("defers assistant post-commit runtime receipt checkpoint after a progressed phase", async () => {
+  test("defers normal hosted post-assistant effects to idle shutdown without foreground checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2297,7 +2296,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             afterCheckpoint: async () => ({
               checkpointReason: "outbox_receipt",
-              foregroundCheckpointRequired: false,
               nextWakeAt: "2026-04-26T00:05:00.000Z",
               nextWakeReason: "assistant",
               redactedStatus: {
@@ -2331,60 +2329,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         checkpointPhase: "post_assistant",
         checkpointReason: "outbox_receipt",
       });
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("defers post-assistant receipt checkpoint even when delivery cleanup requested foreground durability", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const { mailboxPort } = createMailboxPort({ items: [] });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-
-    try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_required_receipt",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          throw new Error("Import should not run without mailbox items.");
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort: createWorkspacePort({ checkpointRequests }),
-        }),
-        requestId: "request_synthetic_runner_required_receipt",
-        async runAssistantPhase() {
-          return {
-            afterCheckpoint: async () => ({
-              checkpointReason: "outbox_receipt",
-              foregroundCheckpointRequired: true,
-              redactedStatus: {
-                hostedOutboxDeliveryAttempted: 1,
-                hostedOutboxDeliverySent: 1,
-              },
-            }),
-            checkpointReason: "outbox_sending",
-            progressed: true,
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-      ]);
     } finally {
       await rm(vaultRoot, {
         force: true,
