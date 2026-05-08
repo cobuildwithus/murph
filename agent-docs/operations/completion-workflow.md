@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-04-25
+Last verified: 2026-05-09
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -28,7 +28,7 @@ This completion workflow is standing user approval to spawn the required local C
 6. When `security-privacy-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/security-privacy-review.md` plus the audit handoff packet below, and run it before coverage or final review. If `simplify` also applies, run both passes in parallel after implementation is stable enough for review. Keep this pass review-only and scope it to security, privacy, data minimization, and leakage risks.
 7. When `frontend-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/frontend-review.md` plus the audit handoff packet below, and run it after any simplify/security-privacy pass but before the final completion review. Keep it review-only and scope it to user-facing `apps/web` surfaces plus the frontend guidance in `agent-docs/FRONTEND.md`.
 8. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there.
-9. When step 8 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.4-mini` after any simplify/security-privacy pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
+9. When step 8 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.5` with medium reasoning after any simplify/security-privacy pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
 10. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
 11. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any security/privacy-review-driven fixes, after any required coverage pass lands, after any frontend-review-driven fixes, and after any later review-driven fixes.
 12. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
@@ -68,7 +68,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 
 ## Audit Worker Rules
 
-- `coverage-write` is the default write-capable audit pass, must run on `gpt-5.4-mini`, and should stay narrowly scoped to tests or direct-proof scaffolding.
+- `coverage-write` is the default write-capable audit pass, must run on `gpt-5.5` with medium reasoning, and should stay narrowly scoped to tests or direct-proof scaffolding.
 - `security-privacy-review` is a review-only pass for changes that touch user data/state, auth/session behavior, secrets, payments, health data, contact identifiers, observability/logging, external surfaces, or trust boundaries. It should read `agent-docs/SECURITY.md` and focus on data minimization, leakage risks, authority expansion, and privacy/security regressions.
 - `frontend-review` is a review-only pass for user-facing `apps/web` pages, components, and design-system-facing UI. It should read `agent-docs/FRONTEND.md` and focus on design-system alignment, product context, UX quality, and unnecessary UI drift.
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
@@ -117,7 +117,7 @@ For the required `coverage-write` pass, also provide:
 - The exact coverage-bearing command or commands required for the task plus the current pass/fail status or the most relevant failing-output summary.
 - The exact write scope, limited to tests or proof scaffolding for already-landed behavior.
 - An explicit instruction not to modify production code unless the parent agent separately widens that scope.
-- The required model choice, `gpt-5.4-mini`; do not silently substitute regular `gpt-5.4` for this pass.
+- The required model choice, `gpt-5.5` with medium reasoning; do not silently substitute a mini model or a different reasoning effort for this pass.
 
 ## Safety Rules
 
