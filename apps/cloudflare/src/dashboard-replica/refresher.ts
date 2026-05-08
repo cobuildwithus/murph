@@ -13,6 +13,9 @@ import {
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedBrowserVaultReplicaPublishResponse,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
@@ -31,7 +34,7 @@ export type DashboardReplicaRefreshResult =
   | {
       byteLength: number;
       replicaRef: HostedBrowserVaultReplicaRef;
-      status: "written";
+      status: "published";
     }
   | {
       byteLength: number;
@@ -39,11 +42,12 @@ export type DashboardReplicaRefreshResult =
       status: "refresh_failed_too_large";
     }
   | {
-      status: "already_fresh" | "stale_source" | "workspace_missing";
+      status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing";
     };
 
 export async function refreshDashboardReplicaFromCommittedWorkspace(input: {
   platform: HostedRuntimePlatform;
+  signal?: AbortSignal;
   sourceStateHash: string;
   userId: string;
 }): Promise<DashboardReplicaRefreshResult> {
@@ -53,6 +57,9 @@ export async function refreshDashboardReplicaFromCommittedWorkspace(input: {
   }
   if (!input.platform.browserVaultReplicaPort?.write) {
     throw new TypeError("Dashboard replica refresh requires a browser-vault replica write port.");
+  }
+  if (!input.platform.browserVaultReplicaPort.publishRef) {
+    throw new TypeError("Dashboard replica refresh requires a browser-vault replica publish port.");
   }
 
   const workspaceRead = await workspacePort.read();
@@ -78,6 +85,7 @@ export async function refreshDashboardReplicaFromCommittedWorkspace(input: {
 
   const warmResult = await tryRefreshDashboardReplicaFromWarmRoot({
     platform: input.platform,
+    signal: input.signal,
     sourceStateHash: input.sourceStateHash,
     userId: input.userId,
   });
@@ -92,10 +100,10 @@ export async function refreshDashboardReplicaFromCommittedWorkspace(input: {
       vaultRoot: refreshRoot,
       workspace,
     });
-    return await createAndWriteDashboardReplica({
+    return await createWriteAndPublishDashboardReplica({
       platform: input.platform,
+      signal: input.signal,
       sourceStateHash: input.sourceStateHash,
-      userId: input.userId,
       vaultRoot: restored.vaultRoot,
     });
   } finally {
@@ -108,6 +116,7 @@ export async function refreshDashboardReplicaFromCommittedWorkspace(input: {
 
 async function tryRefreshDashboardReplicaFromWarmRoot(input: {
   platform: HostedRuntimePlatform;
+  signal?: AbortSignal;
   sourceStateHash: string;
   userId: string;
 }): Promise<DashboardReplicaRefreshResult | null> {
@@ -120,10 +129,10 @@ async function tryRefreshDashboardReplicaFromWarmRoot(input: {
   }
 
   try {
-    return await createAndWriteDashboardReplica({
+    return await createWriteAndPublishDashboardReplica({
       platform: input.platform,
+      signal: input.signal,
       sourceStateHash: input.sourceStateHash,
-      userId: input.userId,
       vaultRoot: warmVaultRoot,
     });
   } catch {
@@ -131,17 +140,19 @@ async function tryRefreshDashboardReplicaFromWarmRoot(input: {
   }
 }
 
-async function createAndWriteDashboardReplica(input: {
+async function createWriteAndPublishDashboardReplica(input: {
   platform: HostedRuntimePlatform;
+  signal?: AbortSignal;
   sourceStateHash: string;
-  userId: string;
   vaultRoot: string;
-}): Promise<Extract<DashboardReplicaRefreshResult, { status: "written" | "refresh_failed_too_large" }>> {
+}): Promise<DashboardReplicaRefreshResult> {
+  throwIfDashboardReplicaRefreshAborted(input.signal);
   const replica = await createHostedBrowserVaultReplicaForSourceState({
     generatedAt: new Date().toISOString(),
     sourceStateHash: input.sourceStateHash,
     vaultRoot: input.vaultRoot,
   });
+  throwIfDashboardReplicaRefreshAborted(input.signal);
   const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
   if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
     return {
@@ -152,9 +163,84 @@ async function createAndWriteDashboardReplica(input: {
   }
 
   const replicaRef = await input.platform.browserVaultReplicaPort!.write({ replica });
+  assertDashboardReplicaWriteResult({
+    byteLength,
+    expectedSourceStateHash: input.sourceStateHash,
+    replicaRef,
+  });
+  throwIfDashboardReplicaRefreshAborted(input.signal);
+
+  const publish = await input.platform.browserVaultReplicaPort!.publishRef!({
+    expectedSourceStateHash: input.sourceStateHash,
+    replicaRef,
+  });
+  if (!publish.published) {
+    return classifyDashboardReplicaPublishMiss({
+      sourceStateHash: input.sourceStateHash,
+      workspace: publish.workspace,
+    });
+  }
+
   return {
     byteLength: replicaRef.byteLength,
     replicaRef,
-    status: "written",
+    status: "published",
   };
+}
+
+function classifyDashboardReplicaPublishMiss(input: {
+  sourceStateHash: string;
+  workspace: HostedBrowserVaultReplicaPublishResponse["workspace"];
+}): Extract<
+  DashboardReplicaRefreshResult,
+  { status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing" }
+> {
+  if (!input.workspace) {
+    return {
+      status: "workspace_missing",
+    };
+  }
+
+  if (readDashboardReplicaSourceStateHash(input.workspace.snapshotRef) !== input.sourceStateHash) {
+    return {
+      status: "stale_source",
+    };
+  }
+
+  if (input.workspace.browserVaultReplicaRef?.sourceBundleHash === input.sourceStateHash) {
+    return {
+      status: "already_fresh",
+    };
+  }
+
+  return {
+    status: "publish_conflict",
+  };
+}
+
+function assertDashboardReplicaWriteResult(input: {
+  byteLength: number;
+  expectedSourceStateHash: string;
+  replicaRef: HostedBrowserVaultReplicaRef;
+}): void {
+  if (input.replicaRef.sourceBundleHash !== input.expectedSourceStateHash) {
+    throw new Error("Dashboard replica refresh wrote a stale replica ref.");
+  }
+
+  if (
+    input.byteLength !== input.replicaRef.byteLength
+    || input.byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES
+  ) {
+    throw new Error("Dashboard replica refresh wrote invalid replica size metadata.");
+  }
+}
+
+function throwIfDashboardReplicaRefreshAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Dashboard replica refresh aborted before publish.");
 }

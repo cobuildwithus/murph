@@ -2714,9 +2714,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     const activeRefresh = createDeferred<Awaited<ReturnType<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >>>();
+    let refreshSignal: AbortSignal | undefined;
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => await activeRefresh.promise);
+    >(async (input) => {
+      refreshSignal = input.signal;
+      return await activeRefresh.promise;
+    });
     const destroyGate = createDeferred<void>();
     const destroyInstance = vi.fn(async () => await destroyGate.promise);
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
@@ -2748,6 +2752,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(refreshSignal?.aborted).toBe(true);
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     destroyGate.resolve();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -2814,61 +2819,79 @@ describe("HostedUserRunner runtime crypto context", () => {
     await flushDetachedRunnerDrive();
   });
 
-  it("does not publish dashboard replica refresh output when a nudge arrives during the final workspace check", async () => {
+  it("clears pending dashboard replica refresh after the container publishes the replica", async () => {
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-publish-preempted-by-nudge"),
+      snapshotRef: createLayeredSnapshotRef("refresh-published"),
       version: "4",
     });
-    const finalWorkspaceRead = createDeferred<void>();
-    let finalWorkspaceReadStarted = false;
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async (input) => ({
       byteLength: 256,
       replicaRef: createBrowserVaultReplicaRef(input.sourceStateHash),
       sourceStateHash: input.sourceStateHash,
-      status: "written",
+      status: "published",
       userId: input.userId,
     }));
-    const browserVaultPublish = vi.fn();
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      nextWakeAt: null,
-      status: "idle",
-    }));
-    const { runner } = createRunnerCryptoContextHarness(workspace, {
-      browserVaultPublish,
-      destroyInstance,
-      invoke,
-      onWorkspaceRead: async ({ readCount }) => {
-        if (readCount !== 2) {
-          return;
-        }
-        finalWorkspaceReadStarted = true;
-        await finalWorkspaceRead.promise;
-      },
+    const { readPendingDashboardReplicaRefreshStorage, runner } = createRunnerCryptoContextHarness(workspace, {
       refreshBrowserVaultReplica,
     });
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: "refresh-publish-preempted-by-nudge-base_hash",
+      sourceStateHash: "refresh-published-base_hash",
       userId: "member_123",
     })).resolves.toMatchObject({
       immediateRefreshStarted: true,
     });
-    await vi.waitFor(() => expect(finalWorkspaceReadStarted).toBe(true));
-
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: true,
-    });
-    finalWorkspaceRead.resolve();
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(readPendingDashboardReplicaRefreshStorage()).toBeUndefined());
     await flushDetachedRunnerDrive();
 
-    expect(destroyInstance).toHaveBeenCalledOnce();
-    expect(browserVaultPublish).not.toHaveBeenCalled();
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(([input]) =>
+      input.path === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
+    )).toBe(false);
+  });
+
+  it("keeps dashboard replica refresh pending and schedules a retry after publish conflict", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("refresh-conflict"),
+      version: "4",
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "publish_conflict",
+    }));
+    const { alarms, readPendingDashboardReplicaRefreshStorage, runner } = createRunnerCryptoContextHarness(
+      workspace,
+      {
+        refreshBrowserVaultReplica,
+      },
+    );
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleDashboardReplicaRefreshForUser({
+      sourceStateHash: "refresh-conflict-base_hash",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      immediateRefreshStarted: true,
+    });
+
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(expect.objectContaining({
+      sourceStateHash: "refresh-conflict-base_hash",
+      userId: "member_123",
+    }));
+
+    await flushDetachedRunnerDrive();
+
+    expect(readPendingDashboardReplicaRefreshStorage()).toMatchObject({
+      sourceStateHash: "refresh-conflict-base_hash",
+    });
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
   });
 
   it("does not enter dashboard replica refresh container work when a nudge arrives during refresh setup", async () => {
