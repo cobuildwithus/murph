@@ -317,7 +317,7 @@ describe("createHostedAssistantInputSource", () => {
     });
   });
 
-  it("skips active-turn mailbox refreshes during a fresh foreground input pass", async () => {
+  it("honors explicit active-turn mailbox refresh suppression", async () => {
     const vaultRoot = await createTempVault();
     const refreshMailboxForActiveTurnInput =
       vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({

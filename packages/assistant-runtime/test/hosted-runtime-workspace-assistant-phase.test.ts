@@ -1487,7 +1487,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
         preferredInputIds: ["ain_00000000000000000000000000000001"],
-        skipActiveTurnMailboxRefresh: true,
+        skipActiveTurnMailboxRefresh: false,
         skipDeviceSync: true,
         skipInitialMailboxRefresh: true,
       }),
@@ -1523,7 +1523,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
         preferredInputIds: ["ain_00000000000000000000000000000007"],
-        skipActiveTurnMailboxRefresh: true,
+        skipActiveTurnMailboxRefresh: false,
         skipInitialMailboxRefresh: true,
       }),
     );
