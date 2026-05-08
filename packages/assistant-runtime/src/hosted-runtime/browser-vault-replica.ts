@@ -94,7 +94,8 @@ export async function writeHostedBrowserVaultWarmSourceStateHashBestEffort(input
       },
     );
   } catch {
-    // Browser-vault freshness remains source-hash guarded by hosted workspace state.
+    // The marker only helps the detached live refresh name the current source.
+    // Failing to write it should not block workspace progress.
   }
 }
 
