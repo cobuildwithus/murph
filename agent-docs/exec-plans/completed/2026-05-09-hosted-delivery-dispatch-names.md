@@ -29,3 +29,6 @@ Success criteria:
 - Focused assistant-runtime and assistant-engine tests covering changed helpers/events.
 - `pnpm typecheck` plus truthful diff or package coverage lane.
 - Security/privacy and completion review because this touches outbound delivery trace semantics and hosted retry behavior.
+Status: completed
+Updated: 2026-05-09
+Completed: 2026-05-09
