@@ -73,6 +73,7 @@ export async function installPackedRunnerDependencies(
   );
   await installPinnedProductionDependencies(bundleDir, {
     policy: workspaceInstallPolicy,
+    repoRoot: input.repoRoot,
   });
 }
 
@@ -192,6 +193,7 @@ async function installPinnedProductionDependencies(
   installRoot: string,
   input: {
     policy: WorkspacePnpmInstallPolicy;
+    repoRoot: string;
   },
 ): Promise<void> {
   const installEnv = {
@@ -203,10 +205,80 @@ async function installPinnedProductionDependencies(
     cwd: installRoot,
     env: installEnv,
   });
+  await assertRunnerBundleLockfileUsesCommittedResolutions({
+    bundleLockfilePath: path.join(installRoot, "pnpm-lock.yaml"),
+    rootLockfilePath: path.join(input.repoRoot, "pnpm-lock.yaml"),
+  });
   await runPnpmCommand(["install", "--prod", "--frozen-lockfile"], {
     cwd: installRoot,
     env: installEnv,
   });
+}
+
+export async function assertRunnerBundleLockfileUsesCommittedResolutions(input: {
+  bundleLockfilePath: string;
+  rootLockfilePath: string;
+}): Promise<void> {
+  const [bundleLockfile, rootLockfile] = await Promise.all([
+    readFile(input.bundleLockfilePath, "utf8"),
+    readFile(input.rootLockfilePath, "utf8"),
+  ]);
+  const bundlePackages = extractPnpmLockPackageResolutions(bundleLockfile);
+  const rootPackages = extractPnpmLockPackageResolutions(rootLockfile);
+  const mismatchedKeys = [...bundlePackages]
+    .filter(([key]) => !isLocalRunnerBundlePackageKey(key))
+    .filter(([key, resolution]) => rootPackages.get(key) !== resolution)
+    .map(([key]) => key);
+
+  if (mismatchedKeys.length > 0) {
+    throw new Error(
+      [
+        "Runner bundle lockfile resolved packages that are not present with the same resolution in the committed root pnpm-lock.yaml.",
+        "Update the root lockfile through the normal dependency workflow before assembling the runner bundle.",
+        `Mismatched package keys: ${mismatchedKeys.slice(0, 10).join(", ")}`,
+      ].join(" "),
+    );
+  }
+}
+
+function extractPnpmLockPackageResolutions(lockfile: string): Map<string, string | null> {
+  const packages = new Map<string, string | null>();
+  let inPackagesSection = false;
+  let currentPackageKey: string | null = null;
+
+  for (const line of lockfile.split(/\r?\n/u)) {
+    if (/^\S[^:]*:\s*$/u.test(line)) {
+      inPackagesSection = line === "packages:";
+      currentPackageKey = null;
+      continue;
+    }
+
+    if (!inPackagesSection) {
+      continue;
+    }
+
+    const match = /^  (.+):\s*$/u.exec(line);
+    if (match) {
+      currentPackageKey = stripYamlStringQuotes(match[1]!.trim());
+      packages.set(currentPackageKey, null);
+      continue;
+    }
+
+    if (!currentPackageKey) {
+      continue;
+    }
+
+    const resolutionMatch = /^    resolution:\s*(.+)$/u.exec(line);
+    if (resolutionMatch) {
+      packages.set(currentPackageKey, resolutionMatch[1]!.trim());
+    }
+  }
+
+  return packages;
+}
+
+function isLocalRunnerBundlePackageKey(key: string): boolean {
+  return key.startsWith("file:") || key.startsWith("link:");
 }
 
 export async function writeRunnerBundlePnpmInstallConfig(

@@ -35,6 +35,10 @@ import type {
 import {
   writeHostedMailboxImportState,
 } from "./mailbox-state.ts";
+import {
+  appendHostedCanonicalWriteReceiptToArtifactLog,
+  hostedCanonicalWriteReceiptLogStatusFields,
+} from "./canonical-write-receipt-log.ts";
 import type {
   HostedRuntimeActiveTurnInputCheckpointInput,
   HostedRuntimeMailboxPort,
@@ -616,9 +620,15 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         ?? input.initialMailboxImport.checkpoint?.workspace
         ?? input.input.workspace
         ?? null;
+      const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
+        artifactStore: input.input.platform.artifactStore,
+        previousStatus: latestWorkspace?.redactedStatus ?? null,
+        receipt: persistenceInput.receipt,
+      });
       const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
         mailboxImport,
         {
+          ...hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate),
           hostedCanonicalWriteActionCount: persistenceInput.receipt.actions.length,
           hostedCanonicalWriteOperationId: persistenceInput.receipt.operationId,
           hostedCanonicalWritePayloadCount: persistenceInput.payloads.length,

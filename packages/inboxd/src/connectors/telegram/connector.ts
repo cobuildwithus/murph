@@ -19,6 +19,12 @@ import type {
   TelegramVenue,
   TelegramWebhookInfo,
   TelegramDirectMessagesTopic,
+  TelegramThreadTarget,
+} from "@murphai/messaging-ingress/telegram-webhook";
+import {
+  buildTelegramThreadTarget,
+  extractTelegramMessage,
+  parseTelegramThreadTarget,
 } from "@murphai/messaging-ingress/telegram-webhook";
 import {
   createNormalizedChatPollConnector,
@@ -207,6 +213,7 @@ export function createTelegramPollConnector({
   resetWebhookOnStart,
 }: TelegramConnectorOptions) {
   const normalizedAccountId = normalizeTelegramAccountId(accountId);
+  const authorizedTarget = parseAuthorizedTelegramTarget(normalizedAccountId);
   const connectorId = id ?? `${source}:${normalizedAccountId ?? "default"}`;
   const effectiveTransportMode = resolveTelegramPollTransportMode({
     resetWebhookOnStart,
@@ -260,13 +267,15 @@ export function createTelegramPollConnector({
       };
     },
     normalize: async ({ message, source, accountId, context }) =>
-      normalizeTelegramUpdate({
-        update: message,
-        source,
-        accountId,
-        botUser: context?.botUser ?? null,
-        downloadDriver: downloadAttachments ? driver : null,
-      }),
+      isAuthorizedTelegramPollUpdate(message, authorizedTarget)
+        ? normalizeTelegramUpdate({
+            update: message,
+            source,
+            accountId,
+            botUser: context?.botUser ?? null,
+            downloadDriver: downloadAttachments ? driver : null,
+          })
+        : null,
     checkpoint: ({ message }) => createTelegramUpdateCheckpoint(message),
     compare: compareTelegramCaptures,
   });
@@ -450,6 +459,57 @@ function normalizeTelegramAccountId(accountId: string | null | undefined): strin
 
   const normalized = accountId.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function isAuthorizedTelegramPollUpdate(
+  update: TelegramUpdateLike,
+  allowedTarget: TelegramThreadTarget | null,
+): boolean {
+  if (!allowedTarget) {
+    return false;
+  }
+
+  const message = extractTelegramMessage(update);
+  if (!message) {
+    return false;
+  }
+
+  const messageTarget = buildTelegramThreadTarget(message);
+  return telegramTargetMatchesAllowedTarget(messageTarget, allowedTarget);
+}
+
+function parseAuthorizedTelegramTarget(
+  accountId: string | null | undefined,
+): TelegramThreadTarget | null {
+  const normalized = normalizeTelegramAccountId(accountId);
+  if (!normalized || normalized === "bot") {
+    return null;
+  }
+
+  return parseTelegramThreadTarget(normalized);
+}
+
+function telegramTargetMatchesAllowedTarget(
+  messageTarget: TelegramThreadTarget,
+  allowedTarget: TelegramThreadTarget,
+): boolean {
+  if (messageTarget.chatId !== allowedTarget.chatId) {
+    return false;
+  }
+
+  if ((messageTarget.businessConnectionId ?? null) !== (allowedTarget.businessConnectionId ?? null)) {
+    return false;
+  }
+
+  if ((messageTarget.messageThreadId ?? null) !== (allowedTarget.messageThreadId ?? null)) {
+    return false;
+  }
+
+  if ((messageTarget.directMessagesTopicId ?? null) !== (allowedTarget.directMessagesTopicId ?? null)) {
+    return false;
+  }
+
+  return true;
 }
 
 function nextUpdateOffset(cursor: Record<string, unknown> | null | undefined): number {

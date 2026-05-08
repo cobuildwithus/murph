@@ -57,7 +57,7 @@ export interface CreateNormalizedChatPollConnectorInput<
     source: string;
     accountId?: string | null;
     context: TContext | null;
-  }): Promise<InboundCapture> | InboundCapture;
+  }): Promise<InboundCapture | null> | InboundCapture | null;
   checkpoint?: (input: {
     message: TMessage;
     capture: InboundCapture;
@@ -130,6 +130,9 @@ export function createNormalizedChatPollConnector<
             accountId,
             context,
           });
+          if (!capture) {
+            continue;
+          }
           captures.push({ capture, message, context });
         }
 
@@ -191,6 +194,9 @@ export function createNormalizedChatPollConnector<
             accountId,
             context,
           });
+          if (!capture) {
+            return;
+          }
           const nextCheckpoint = checkpoint?.({
             message,
             capture,

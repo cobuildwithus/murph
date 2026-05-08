@@ -237,8 +237,11 @@ the bundle. Live correctness barriers do not scan the current portable
 workspace: mailbox import, active-turn acceptance, `canonical_runtime_commit`,
 assistant-runtime commits, provider cleanup, system-mailbox receipts, and
 pre-delivery outbox state write only a bounded hot-state bundle containing
-assistant runtime resume state, required Codex continuity, outbox/receipt state,
-and exact hosted canonical write receipts. `activation_bootstrap` and
+assistant runtime resume state, required Codex continuity, and outbox/receipt
+state. `canonical_runtime_commit` stores exact hosted canonical write receipts
+in supervisor-owned artifacts and checkpoints the authoritative receipt-log ref
+on the workspace state; restore does not replay assistant-local receipt files.
+`activation_bootstrap` and
 `idle_shutdown` are the only full/base snapshot producers. Live checkpoints fail
 closed when the current workspace pointer cannot be read or when the hot-state
 budget is exceeded; they must not fall back to broad workspace snapshots.

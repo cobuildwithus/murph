@@ -29,9 +29,21 @@ jobs:
       is_prerelease: ${{ steps.tag_metadata.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+
+      - name: Validate release commit ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main; then
+            echo "Release tags must point at commits reachable from origin/main." >&2
+            exit 1
+          fi
 
       - name: Validate release tag format and shared package version
         id: tag_metadata

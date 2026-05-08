@@ -611,6 +611,7 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
 
   const connector = createTelegramPollConnector({
     driver,
+    accountId: "10",
     downloadAttachments: false,
   });
 
@@ -619,7 +620,7 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
     return createPersistedCapture(capture);
   });
 
-  assert.equal(connector.id, "telegram:bot");
+  assert.equal(connector.id, "telegram:10");
   assert.equal(deleteWebhookCalls, 1);
   assert.deepEqual(
     emitted.map((entry) => entry.capture.externalId),
@@ -668,6 +669,81 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
   assert.equal(deleteWebhookCalls, 1);
   assert.equal(closeCount, 1);
   assert.deepEqual(emitted.at(-1)?.checkpoint, { updateId: 7 });
+});
+
+test("createTelegramPollConnector drops updates outside the configured Telegram account binding", async () => {
+  const emitted: string[] = [];
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "murph_bot" };
+      },
+      async getMessages({ cursor }) {
+        if (cursor) {
+          return {
+            messages: [],
+          };
+        }
+
+        return {
+          messages: [
+            {
+              update_id: 1,
+              message: {
+                message_id: 1,
+                date: 1_773_397_100,
+                text: "trusted",
+                chat: { id: 10, type: "private", first_name: "Alice" },
+                from: { id: 111, first_name: "Alice" },
+              },
+            },
+            {
+              update_id: 2,
+              message: {
+                message_id: 2,
+                date: 1_773_397_101,
+                text: "untrusted",
+                chat: { id: 11, type: "private", first_name: "Eve" },
+                from: { id: 222, first_name: "Eve" },
+              },
+            },
+            {
+              update_id: 3,
+              message: {
+                message_id: 3,
+                date: 1_773_397_102,
+                message_thread_id: 7,
+                text: "wrong thread",
+                chat: { id: 10, type: "supergroup", title: "Ops" },
+                from: { id: 333, first_name: "Mallory" },
+              },
+            },
+          ],
+          nextCursor: { updateId: 3 },
+        };
+      },
+      async startWatching() {
+        return undefined;
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+    },
+    accountId: "10",
+    downloadAttachments: false,
+    transportMode: "require-no-webhook",
+  });
+
+  const cursor = await connector.backfill(null, async (capture) => {
+    emitted.push(capture.text ?? "");
+    return createPersistedCapture(capture);
+  });
+
+  assert.deepEqual(emitted, ["trusted"]);
+  assert.deepEqual(cursor, { updateId: 3 });
 });
 
 test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api shape", async () => {
@@ -945,6 +1021,7 @@ test("createTelegramPollConnector backfills page-by-page so cursors advance afte
         throw new Error("downloadFile should not be called in this test");
       },
     },
+    accountId: "10",
     downloadAttachments: false,
     backfillLimit: 3,
     transportMode: "require-no-webhook",
@@ -1011,6 +1088,7 @@ test("createTelegramPollConnector advances raw cursors even when a page emits no
         throw new Error("downloadFile should not be called in this test");
       },
     },
+    accountId: "10",
     downloadAttachments: false,
     backfillLimit: 3,
     transportMode: "require-no-webhook",

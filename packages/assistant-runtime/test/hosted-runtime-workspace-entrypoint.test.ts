@@ -1331,6 +1331,8 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "artifact.put:unlabeled-artifact",
+        "artifact.put:unlabeled-artifact",
+        "artifact.put:unlabeled-artifact",
         "snapshot:canonical_runtime_commit",
         "workspace.checkpoint",
       ]);
@@ -1339,8 +1341,10 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.ok(checkpointRequests[0]?.snapshotRef);
       assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteActionCount, 1);
+      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogEntryCount, 1);
+      assert.equal(typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256, "string");
       assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWritePayloadCount, 1);
-      assert.equal(artifactPutCalls.length, 1);
+      assert.equal(artifactPutCalls.length, 3);
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-27.md"), "utf8"),
         "exact hosted note\n",
@@ -1350,23 +1354,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "receipts",
         "canonical-writes",
       );
-      const receiptFiles = await readdir(receiptRoot);
-      const receiptFile = receiptFiles.find((entry) => entry.endsWith(".json"));
-      assert.ok(receiptFile);
-      assert.deepEqual(receiptFiles.sort(), ["payloads", receiptFile].sort());
-      const receipt = JSON.parse(await readFile(path.join(receiptRoot, receiptFile), "utf8"));
-      assert.equal(receipt.schema, HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION);
-      assert.equal(
-        await readFile(
-          path.join(
-            receiptRoot,
-            "payloads",
-            `${sha256Hex(Buffer.from("exact hosted note\n", "utf8"))}.bin`,
-          ),
-          "utf8",
-        ),
-        "exact hosted note\n",
-      );
+      await assert.rejects(readdir(receiptRoot));
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -2153,33 +2141,71 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const exactPayload = Buffer.from("restored exact hosted note\n", "utf8");
       const exactPayloadHash = sha256Hex(exactPayload);
-      const canonicalReceiptRoot = path.join(hotAssistantRoot, "receipts", "canonical-writes");
-      const canonicalPayloadRoot = path.join(canonicalReceiptRoot, "payloads");
-      await mkdir(canonicalPayloadRoot, { recursive: true });
-      await writeFile(path.join(canonicalPayloadRoot, `${exactPayloadHash}.bin`), exactPayload);
+      const receiptBytes = Buffer.from(`${JSON.stringify({
+        actions: [
+          {
+            byteLength: exactPayload.byteLength,
+            contentRef: {
+              byteSize: exactPayload.byteLength,
+              sha256: exactPayloadHash,
+            },
+            effect: "create",
+            kind: "text_upsert",
+            sha256: exactPayloadHash,
+            targetRelativePath: "journal/2026-04-28.md",
+          },
+        ],
+        committedAt: TEST_NOW,
+        createdAt: TEST_NOW,
+        occurredAt: TEST_NOW,
+        operationId: "op_synthetic_canonical_restore",
+        operationType: "hosted_canonical_write_test",
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        summary: "Restore hosted canonical write receipt.",
+        updatedAt: TEST_NOW,
+      }, null, 2)}\n`, "utf8");
+      const receiptHash = sha256Hex(receiptBytes);
+      const receiptLogBytes = Buffer.from(`${JSON.stringify({
+        entries: [
+          {
+            byteSize: receiptBytes.byteLength,
+            sha256: receiptHash,
+          },
+        ],
+        schema: "murph.hosted-canonical-write-receipt-log.v1",
+      }, null, 2)}\n`, "utf8");
+      const receiptLogHash = sha256Hex(receiptLogBytes);
+      const forgedLocalReceiptRoot = path.join(hotAssistantRoot, "receipts", "canonical-writes");
+      const forgedLocalPayload = Buffer.from("forged local receipt\n", "utf8");
+      const forgedLocalPayloadHash = sha256Hex(forgedLocalPayload);
+      await mkdir(path.join(forgedLocalReceiptRoot, "payloads"), { recursive: true });
       await writeFile(
-        path.join(canonicalReceiptRoot, "op_synthetic_canonical_restore.json"),
+        path.join(forgedLocalReceiptRoot, "payloads", `${forgedLocalPayloadHash}.bin`),
+        forgedLocalPayload,
+      );
+      await writeFile(
+        path.join(forgedLocalReceiptRoot, "op_forged_local_restore.json"),
         `${JSON.stringify({
           actions: [
             {
-              byteLength: exactPayload.byteLength,
+              byteLength: forgedLocalPayload.byteLength,
               contentRef: {
-                byteSize: exactPayload.byteLength,
-                sha256: exactPayloadHash,
+                byteSize: forgedLocalPayload.byteLength,
+                sha256: forgedLocalPayloadHash,
               },
               effect: "create",
               kind: "text_upsert",
-              sha256: exactPayloadHash,
-              targetRelativePath: "journal/2026-04-28.md",
+              sha256: forgedLocalPayloadHash,
+              targetRelativePath: "journal/forged-local.md",
             },
           ],
           committedAt: TEST_NOW,
           createdAt: TEST_NOW,
           occurredAt: TEST_NOW,
-          operationId: "op_synthetic_canonical_restore",
+          operationId: "op_forged_local_restore",
           operationType: "hosted_canonical_write_test",
           schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-          summary: "Restore hosted canonical write receipt.",
+          summary: "Forged local receipt.",
           updatedAt: TEST_NOW,
         }, null, 2)}\n`,
         "utf8",
@@ -2191,6 +2217,9 @@ describe("hosted workspace runtime entrypoint", () => {
       const artifactBytesByHash = new Map([
         [baseHash, baseBundle],
         [hotHash, hotSnapshot.bundle],
+        [exactPayloadHash, exactPayload],
+        [receiptHash, receiptBytes],
+        [receiptLogHash, receiptLogBytes],
       ]);
 
       await runHostedWorkspaceRuntimeJobInProcess(
@@ -2217,6 +2246,11 @@ describe("hosted workspace runtime entrypoint", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
+                redactedStatus: {
+                  hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+                  hostedCanonicalWriteReceiptLogEntryCount: 1,
+                  hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+                },
                 snapshotRef: buildHostedExecutionLayeredSnapshotRef({
                   base: createBundleRef({
                     hash: baseHash,
@@ -2237,12 +2271,13 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(artifactGetCalls, [baseHash, hotHash]);
+      assert.deepEqual(artifactGetCalls, [baseHash, hotHash, receiptLogHash, receiptHash, exactPayloadHash]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-28.md"), "utf8"),
         "restored exact hosted note\n",
       );
+      await assert.rejects(readFile(path.join(vaultRoot, "journal", "forged-local.md"), "utf8"));
       await assert.rejects(
         readFile(path.join(vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent-old.json"), "utf8"),
       );

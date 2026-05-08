@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   assertInstalledRunnerHealthCommonsRuntimeImport,
+  assertRunnerBundleLockfileUsesCommittedResolutions,
   pinInstalledDependencyVersions,
   writeRunnerBundlePnpmInstallConfig,
 } from "../scripts/runner-bundle/dependency-install.js";
@@ -118,6 +119,137 @@ describe("runner bundle pnpm install config", () => {
         "",
       ].join("\n"),
     );
+  });
+});
+
+describe("runner bundle lockfile policy", () => {
+  it("accepts generated bundle lockfiles whose external packages are in the root lockfile", async () => {
+    const tempDir = await createRuntimePackageRoot();
+    const bundleLockfilePath = path.join(tempDir, "bundle-pnpm-lock.yaml");
+    const rootLockfilePath = path.join(tempDir, "root-pnpm-lock.yaml");
+
+    await writeFile(
+      rootLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      bundleLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+        "  file:packages/assistant-runtime.tgz:",
+        "    resolution: {integrity: sha512-local}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      assertRunnerBundleLockfileUsesCommittedResolutions({
+        bundleLockfilePath,
+        rootLockfilePath,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects generated bundle lockfiles with external package resolutions absent from the root lockfile", async () => {
+    const tempDir = await createRuntimePackageRoot();
+    const bundleLockfilePath = path.join(tempDir, "bundle-pnpm-lock.yaml");
+    const rootLockfilePath = path.join(tempDir, "root-pnpm-lock.yaml");
+
+    await writeFile(
+      rootLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      bundleLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+        "  'zod@4.2.1':",
+        "    resolution: {integrity: sha512-new}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      assertRunnerBundleLockfileUsesCommittedResolutions({
+        bundleLockfilePath,
+        rootLockfilePath,
+      }),
+    ).rejects.toThrow(/zod@4\.2\.1/u);
+  });
+
+  it("rejects generated bundle lockfiles when an external package resolves differently than the committed root lockfile", async () => {
+    const tempDir = await createRuntimePackageRoot();
+    const bundleLockfilePath = path.join(tempDir, "bundle-pnpm-lock.yaml");
+    const rootLockfilePath = path.join(tempDir, "root-pnpm-lock.yaml");
+
+    await writeFile(
+      rootLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      bundleLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-drifted}",
+        "",
+        "  file:packages/assistant-runtime.tgz:",
+        "    resolution: {integrity: sha512-local}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      assertRunnerBundleLockfileUsesCommittedResolutions({
+        bundleLockfilePath,
+        rootLockfilePath,
+      }),
+    ).rejects.toThrow(/jose@6\.2\.2/u);
   });
 });
 
