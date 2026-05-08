@@ -2431,6 +2431,31 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects detached browser-vault refresh authority on committed workspace reads", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const sourceBundleHash = "b".repeat(64);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId(sourceBundleHash),
+        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("allows detached browser-vault refresh authority to publish the latest replica ref", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
