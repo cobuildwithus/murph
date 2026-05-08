@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   findHostedRunStaleResidueMatches,
@@ -6,6 +6,30 @@ import {
 } from "./check-hosted-run-stale-residue.ts";
 
 describe("check-hosted-run-stale-residue", () => {
+  it("does not scan the repo when imported as a helper module", async () => {
+    vi.doMock("node:fs/promises", async () => {
+      const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      return {
+        ...actual,
+        async readdir() {
+          throw new Error("import should not scan");
+        },
+      };
+    });
+
+    try {
+      const moduleUrl = new URL(
+        `./check-hosted-run-stale-residue.ts?import-test=${Date.now()}`,
+        import.meta.url,
+      ).href;
+      await expect(
+        import(/* @vite-ignore */ moduleUrl),
+      ).resolves.toHaveProperty("findHostedRunStaleResidueMatches");
+    } finally {
+      vi.doUnmock("node:fs/promises");
+    }
+  });
+
   it("scans production app and package source files only", () => {
     expect(shouldScanHostedRunProductionFile("apps/web/app/api/internal/hosted-run/route.ts")).toBe(
       true,

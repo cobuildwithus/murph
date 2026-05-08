@@ -176,7 +176,7 @@ function isTelegramSetupConnector(connector: SetupListedConnector): boolean {
 }
 
 function isEmailSetupConnector(connector: SetupListedConnector): boolean {
-  return connector.id === EMAIL_SETUP_CONNECTOR_ID || connector.source === 'email'
+  return connector.id === EMAIL_SETUP_CONNECTOR_ID
 }
 
 function isSetupAddedEmailConnectorResult(

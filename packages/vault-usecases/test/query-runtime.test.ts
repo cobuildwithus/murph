@@ -12,13 +12,20 @@ import {
 
 describe("query runtime compatibility surface", () => {
   it("keeps the local lookup helpers as thin aliases over the shared query owner", () => {
-    const lookupId = "evt_01JABCDEF0123456789ABCDEF";
+    const lookupIds = [
+      "evt_01JABCDEF0123456789ABCDEF",
+      "prot_01JABCDEF0123456789ABCDEF",
+      "pack_01JABCDEF0123456789ABCDEF",
+      "xfm_01JABCDEF0123456789ABCDEF",
+    ];
 
-    expect(inferQueryIdEntityKind(lookupId)).toBe(sharedQuery.inferIdEntityKind(lookupId));
-    expect(isQueryableQueryLookupId(lookupId)).toBe(sharedQuery.isQueryableLookupId(lookupId));
-    expect(describeQueryLookupConstraint(lookupId)).toBe(
-      sharedQuery.describeLookupConstraint(lookupId),
-    );
+    for (const lookupId of lookupIds) {
+      expect(inferQueryIdEntityKind(lookupId)).toBe(sharedQuery.inferIdEntityKind(lookupId));
+      expect(isQueryableQueryLookupId(lookupId)).toBe(sharedQuery.isQueryableLookupId(lookupId));
+      expect(describeQueryLookupConstraint(lookupId)).toBe(
+        sharedQuery.describeLookupConstraint(lookupId),
+      );
+    }
   });
 
   it("loads the shared query runtime surface without a second local function layer", async () => {

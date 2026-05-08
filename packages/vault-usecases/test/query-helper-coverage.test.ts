@@ -81,7 +81,7 @@ describe("query record command helpers", () => {
       attributes: {
         extraLinks: ["xfm_batch_1", "prov_fitbit", "", 7, "evt_walk", " evt_padded "],
       },
-      relatedIds: ["prov_fitbit", " evt_walk ", "", "rcp_soup"],
+      relatedIds: ["prov_fitbit", " evt_walk ", "", "prot_template", "rcp_soup"],
     });
 
     Reflect.set(record, "title", undefined);
@@ -101,6 +101,7 @@ describe("query record command helpers", () => {
     expect(result.links).toEqual([
       { id: " evt_padded ", kind: "event", queryable: true },
       { id: "evt_walk", kind: "event", queryable: true },
+      { id: "prot_template", kind: "protocol", queryable: true },
       { id: "prov_fitbit", kind: "provider", queryable: true },
       { id: "rcp_soup", kind: "recipe", queryable: true },
       { id: "xfm_batch_1", kind: "transform", queryable: false },
@@ -333,9 +334,11 @@ describe("query helper primitives", () => {
 describe("query runtime wrappers", () => {
   it("classifies query lookup ids through the shared id-family rules", () => {
     expect(inferQueryIdEntityKind("exp_morning")).toBe("experiment");
+    expect(inferQueryIdEntityKind("prot_template")).toBe("protocol");
     expect(inferQueryIdEntityKind("unknown_lookup")).toBe("entity");
 
     expect(isQueryableQueryLookupId("journal:2026-04-08")).toBe(true);
+    expect(isQueryableQueryLookupId("prot_template")).toBe(true);
     expect(isQueryableQueryLookupId("xfm_batch_1")).toBe(false);
 
     expect(describeQueryLookupConstraint("exp_morning")).toBeNull();

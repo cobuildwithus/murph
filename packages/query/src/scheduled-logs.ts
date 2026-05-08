@@ -72,12 +72,21 @@ function requireStringValue(value: unknown, fieldName: string): string {
 }
 
 function normalizeScheduledLogStatus(value: unknown): ScheduledLogStatus {
-  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
+  if (value === undefined || value === null) {
+    return "active";
+  }
+  if (typeof value !== "string") {
+    throw new Error("status must be a string.");
+  }
+  const normalized = normalizeNullableString(value);
+  if (normalized === null) {
+    return "active";
+  }
   if (normalized && scheduledLogStatusValues.includes(normalized as ScheduledLogStatus)) {
     return normalized as ScheduledLogStatus;
   }
 
-  return "active";
+  throw new Error(`status must be one of ${scheduledLogStatusValues.join(", ")}.`);
 }
 
 function normalizeScheduleIntent(value: unknown): ScheduleIntent {

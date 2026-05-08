@@ -12,6 +12,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { compactObject, normalizeOptionalText, toEventUpsertVaultCliError } from './vault-usecase-helpers.js'
+import { inferDurationMinutes } from './text-duration.js'
 import { buildStructuredWorkoutActivitySessionDraft } from './workout.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
 
@@ -240,7 +241,7 @@ function parseDistanceKm(value: string | undefined): number | undefined {
 }
 
 function parseDurationSeconds(value: string | undefined): number | undefined {
-  const normalized = normalizeOptionalText(value)
+  const normalized = normalizeOptionalText(value)?.toLowerCase()
   if (!normalized) {
     return undefined
   }
@@ -257,6 +258,11 @@ function parseDurationSeconds(value: string | undefined): number | undefined {
       const [hours, minutes, seconds] = numbers
       return hours! * 3600 + minutes! * 60 + seconds!
     }
+  }
+
+  const inferredMinutes = inferDurationMinutes(normalized)
+  if (typeof inferredMinutes === 'number') {
+    return inferredMinutes * 60
   }
 
   const amount = parseOptionalNumber(normalized)
@@ -276,7 +282,7 @@ function parseDurationSeconds(value: string | undefined): number | undefined {
 }
 
 function parseDurationMinutes(value: string | undefined): number | undefined {
-  const normalized = normalizeOptionalText(value)
+  const normalized = normalizeOptionalText(value)?.toLowerCase()
   if (!normalized) {
     return undefined
   }
@@ -284,6 +290,11 @@ function parseDurationMinutes(value: string | undefined): number | undefined {
   if (normalized.includes(':')) {
     const seconds = parseDurationSeconds(normalized)
     return seconds !== undefined ? Math.max(1, Math.round(seconds / 60)) : undefined
+  }
+
+  const inferredMinutes = inferDurationMinutes(normalized)
+  if (typeof inferredMinutes === 'number') {
+    return inferredMinutes
   }
 
   const amount = parseOptionalNumber(normalized)
