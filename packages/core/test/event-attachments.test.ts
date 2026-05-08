@@ -336,4 +336,55 @@ describe("event attachment helpers", () => {
     await expect(access(stageOperationAbsolutePath)).rejects.toThrow();
     await expect(access(stageRootAbsolutePath)).rejects.toThrow();
   });
+
+  it("rejects forged staged operation ids before deleting operation directories", async () => {
+    const vaultRoot = await createTempVault("murph-core-event-attachments-forged-cleanup-");
+    const sourcePath = await createSourceFile(vaultRoot, "forged-cleanup.txt", "payload");
+    const staged = await stageEventAttachments({
+      vaultRoot,
+      operationType: "test_event_attachment_stage",
+      summary: "Stage forged cleanup fixture",
+      ownerKind: "workout",
+      ownerId: WORKOUT_OWNER_ID,
+      occurredAt: "2026-04-07T08:30:00.000Z",
+      attachments: [
+        {
+          role: "note",
+          kind: "document",
+          sourcePath,
+          targetName: "forged-cleanup.txt",
+        },
+      ],
+      importId: IMPORT_ID,
+      importKind: "workout_batch",
+      importedAt: "2026-04-07T08:31:00.000Z",
+      source: "test",
+      provenance: {},
+    });
+
+    expect(staged).not.toBeNull();
+    if (!staged?.stageOperationPath) {
+      return;
+    }
+
+    const operation = await readStoredWriteOperation(vaultRoot, staged.stageOperationPath);
+    const forgedOperationPath = path.join(vaultRoot, ".runtime", "operations", "..json");
+    const sentinelPath = path.join(vaultRoot, ".runtime", "operations", "sentinel.txt");
+    await writeFile(
+      forgedOperationPath,
+      `${JSON.stringify({ ...operation, operationId: "." }, null, 2)}\n`,
+    );
+    await writeFile(sentinelPath, "do-not-delete");
+
+    await expect(
+      cleanupStagedEventAttachments({
+        vaultRoot,
+        manifestPath: staged.manifestPath,
+        stageOperationPath: ".runtime/operations/..json",
+      }),
+    ).rejects.toThrow("invalid operation id");
+
+    await expect(access(sentinelPath)).resolves.toBeUndefined();
+    await expect(access(path.join(vaultRoot, ".runtime", "operations"))).resolves.toBeUndefined();
+  });
 });

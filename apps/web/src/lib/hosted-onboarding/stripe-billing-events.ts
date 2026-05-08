@@ -941,6 +941,11 @@ export async function applyStripeDisputeUpdated(
   prisma: Prisma.TransactionClient,
   customerId?: string | null,
 ): Promise<void> {
+  const outcome = classifyHostedStripeDisputeOutcome(dispute, dispatchContext.sourceType);
+  if (outcome === "ignore") {
+    return;
+  }
+
   const member = await findMemberForStripeReversal({
     chargeId: coerceStripeObjectId(dispute.charge),
     customerId: customerId ?? null,
@@ -953,13 +958,52 @@ export async function applyStripeDisputeUpdated(
     return;
   }
 
+  const billingDispatchContext = {
+    eventCreatedAt: dispatchContext.eventCreatedAt,
+    occurredAt: dispatchContext.eventCreatedAt.toISOString(),
+    sourceEventId: dispatchContext.sourceEventId,
+    sourceType: dispatchContext.sourceType,
+  };
+
+  if (outcome === "restore") {
+    const subscription = await readHostedMemberStripeSubscription(member);
+    if (!subscription) {
+      return;
+    }
+
+    const canonicalBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
+    if (canonicalBillingStatus !== HostedBillingStatus.active) {
+      return;
+    }
+
+    const { canonicalBillingStatus: resolvedCanonicalBillingStatus, member: preparedMember } =
+      await prepareHostedMemberStripeBillingWrite({
+        canonicalBillingStatus,
+        dispatchContext: billingDispatchContext,
+        member,
+      });
+
+    await writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: resolvedCanonicalBillingStatus,
+      ...buildHostedStripeSubscriptionBillingPeriodSnapshot(subscription),
+      ...buildHostedStripeSubscriptionBillingPhaseSnapshot(subscription, member),
+      dispatchContext: billingDispatchContext,
+      member: preparedMember,
+      stripeCustomerId:
+        customerId ??
+        coerceStripeObjectId(subscription.customer) ??
+        member.billingRef?.stripeCustomerId ??
+        null,
+      stripeSubscriptionId: subscription.id,
+      suspendedAtOverride: null,
+      tx: prisma,
+    });
+    return;
+  }
+
   const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
-    dispatchContext: {
-      eventCreatedAt: dispatchContext.eventCreatedAt,
-      occurredAt: dispatchContext.eventCreatedAt.toISOString(),
-      sourceEventId: dispatchContext.sourceEventId,
-      sourceType: dispatchContext.sourceType,
-    },
+    dispatchContext: billingDispatchContext,
     member,
   });
 
@@ -970,4 +1014,42 @@ export async function applyStripeDisputeUpdated(
     stripeCustomerId: customerId ?? undefined,
     tx: prisma,
   });
+}
+
+type HostedStripeDisputeOutcome = "ignore" | "restore" | "suspend";
+
+function classifyHostedStripeDisputeOutcome(
+  dispute: Stripe.Dispute,
+  sourceType: string,
+): HostedStripeDisputeOutcome {
+  if (sourceType === "stripe.charge.dispute.funds_reinstated") {
+    return "restore";
+  }
+
+  if (sourceType === "stripe.charge.dispute.funds_withdrawn") {
+    return "suspend";
+  }
+
+  const status = dispute.status as string;
+
+  if (status === "won" || status === "warning_closed") {
+    return "restore";
+  }
+
+  if (status === "lost" || status === "charge_refunded") {
+    return "suspend";
+  }
+
+  return "ignore";
+}
+
+async function readHostedMemberStripeSubscription(
+  member: HostedMemberBillingSnapshot,
+): Promise<Stripe.Subscription | null> {
+  const subscriptionId = member.billingRef?.stripeSubscriptionId;
+  if (!subscriptionId) {
+    return null;
+  }
+
+  return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
 }

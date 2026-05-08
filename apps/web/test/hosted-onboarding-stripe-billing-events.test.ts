@@ -7,8 +7,11 @@ import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/ho
 const mocks = vi.hoisted(() => ({
   activateHostedMemberForPositiveSourceTx: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
+  findMemberForStripeReversal: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
+  requireHostedStripeApi: vi.fn(),
+  suspendHostedMemberForBillingReversalTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
@@ -25,6 +28,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   return {
     ...actual,
     findMemberForStripeInvoice: mocks.findMemberForStripeInvoice,
+    findMemberForStripeReversal: mocks.findMemberForStripeReversal,
     findMemberForStripeSubscription: mocks.findMemberForStripeSubscription,
   };
 });
@@ -37,6 +41,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
   return {
     ...actual,
     prepareHostedMemberStripeBillingWrite: mocks.prepareHostedMemberStripeBillingWrite,
+    suspendHostedMemberForBillingReversalTx: mocks.suspendHostedMemberForBillingReversalTx,
     writeHostedMemberStripeBillingTx: mocks.writeHostedMemberStripeBillingTx,
   };
 });
@@ -53,7 +58,19 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/runtime")
+  >("@/src/lib/hosted-onboarding/runtime");
+
+  return {
+    ...actual,
+    requireHostedStripeApi: mocks.requireHostedStripeApi,
+  };
+});
+
 import {
+  applyStripeDisputeUpdated,
   applyStripeInvoicePaid,
   applyStripeInvoicePaymentFailed,
   applyStripeSubscriptionUpdated,
@@ -65,12 +82,14 @@ describe("hosted onboarding stripe billing events", () => {
 
     const member = makeMemberSnapshot();
     mocks.findMemberForStripeInvoice.mockResolvedValue(member);
+    mocks.findMemberForStripeReversal.mockResolvedValue(member);
     mocks.findMemberForStripeSubscription.mockResolvedValue(member);
     mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValue({
       canonicalBillingStatus: HostedBillingStatus.active,
       member,
     });
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(member);
+    mocks.suspendHostedMemberForBillingReversalTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx.mockResolvedValue({
       directPublicSender: null,
       memberId: "member_123",
@@ -84,6 +103,11 @@ describe("hosted onboarding stripe billing events", () => {
       activated: true,
       hostedExecutionEventId: "wake_123",
       memberId: member.core.id,
+    });
+    mocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription()),
+      },
     });
   });
 
@@ -628,6 +652,92 @@ describe("hosted onboarding stripe billing events", () => {
       stripeSubscriptionId: "sub_standard_123",
     }));
   });
+
+  it("ignores non-adverse dispute updates", async () => {
+    await applyStripeDisputeUpdated(
+      makeStripeDispute({ status: "under_review" }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_dispute_created",
+        sourceType: "stripe.charge.dispute.created",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.findMemberForStripeReversal).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("suspends members for adverse dispute outcomes", async () => {
+    await applyStripeDisputeUpdated(
+      makeStripeDispute({ status: "under_review" }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_dispute_funds_withdrawn",
+        sourceType: "stripe.charge.dispute.funds_withdrawn",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.suspendHostedMemberForBillingReversalTx).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: expect.objectContaining({
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceType: "stripe.charge.dispute.funds_withdrawn",
+      }),
+    }));
+  });
+
+  it("clears dispute suspension when reinstated funds match an active subscription", async () => {
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.unpaid,
+    }));
+
+    await applyStripeDisputeUpdated(
+      makeStripeDispute({ status: "won" }),
+      {
+        eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
+        sourceEventId: "evt_dispute_funds_reinstated",
+        sourceType: "stripe.charge.dispute.funds_reinstated",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      suspendedAtOverride: null,
+    }));
+  });
+
+  it("does not clear dispute suspension when the canonical subscription is not active", async () => {
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.unpaid,
+    }));
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({ status: "past_due" })),
+      },
+    });
+
+    await applyStripeDisputeUpdated(
+      makeStripeDispute({ status: "won" }),
+      {
+        eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
+        sourceEventId: "evt_dispute_won_past_due",
+        sourceType: "stripe.charge.dispute.closed",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
 });
 
 function makeMemberSnapshot(input?: {
@@ -667,6 +777,18 @@ function makeStripeInvoice(
     id: overrides?.id ?? "in_123",
     subscription: overrides?.subscription ?? "sub_123",
   } as Stripe.Invoice;
+}
+
+function makeStripeDispute(overrides?: Partial<{
+  charge: string | null;
+  paymentIntent: string | null;
+  status: Stripe.Dispute.Status;
+}>): Stripe.Dispute {
+  return {
+    charge: overrides?.charge ?? "ch_123",
+    payment_intent: overrides?.paymentIntent ?? "pi_123",
+    status: overrides?.status ?? "under_review",
+  } as Stripe.Dispute;
 }
 
 function makeStripeSubscription(

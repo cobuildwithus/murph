@@ -5,6 +5,7 @@ import {
   readRawEmailHeaderValue,
   type ParsedEmailMessage,
 } from "@murphai/inboxd/connectors/email/parsed";
+import type { HostedEmailAuthenticatedSenderVerdict } from "@murphai/runtime-state";
 import type { HostedExecutionEmailAttachmentSummary } from "@murphai/hosted-execution";
 import {
   buildParsedEmailThreadTarget,
@@ -38,10 +39,34 @@ export interface HostedEmailIngressExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
 }
 
+export interface HostedEmailTrustedSenderVerificationInput {
+  envelopeFrom: string;
+  headerFrom: string | null;
+  message: HostedEmailWorkerRequest;
+  parsedMessage: ParsedEmailMessage;
+  rawBytes: Uint8Array;
+  to: string;
+}
+
+export type HostedEmailTrustedSenderVerifier = (
+  input: HostedEmailTrustedSenderVerificationInput,
+) => Promise<HostedEmailAuthenticatedSenderVerdict | null> | HostedEmailAuthenticatedSenderVerdict | null;
+
+export interface HostedEmailIngressOptions {
+  trustedSenderVerifier?: HostedEmailTrustedSenderVerifier;
+}
+
+export function verifyHostedEmailTrustedSender(
+  _input: HostedEmailTrustedSenderVerificationInput,
+): HostedEmailAuthenticatedSenderVerdict | null {
+  return null;
+}
+
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
   ctx?: HostedEmailIngressExecutionContext,
+  options: HostedEmailIngressOptions = {},
 ): Promise<void> {
   const stringEnv = asWorkerStringEnvironment(env);
   const environment = readHostedExecutionEnvironment(stringEnv);
@@ -92,6 +117,14 @@ export async function handleHostedEmailIngress(
   const parsedMessage = parseRawEmailMessage(rawBytes);
   const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
   const resolvedHeaderFrom = headerFrom.value ?? parsedMessage.from;
+  const authenticatedSender = await (options.trustedSenderVerifier ?? verifyHostedEmailTrustedSender)({
+    envelopeFrom: message.from,
+    headerFrom: resolvedHeaderFrom,
+    message,
+    parsedMessage,
+    rawBytes,
+    to: message.to,
+  });
   const rejectReason = "Hosted email message was not accepted.";
   const shouldRejectOnIngressFailure = shouldRejectHostedEmailIngressFailure({
     config,
@@ -103,7 +136,7 @@ export async function handleHostedEmailIngress(
     }
   };
   const route = await resolveHostedEmailIngressRoute({
-    authenticatedSender: message.authenticatedSender ?? null,
+    authenticatedSender,
     config,
     envelopeFrom: message.from,
     fetchImpl: fetch,

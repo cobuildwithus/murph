@@ -43,6 +43,90 @@ export const scheduleIntentSchema = z.discriminatedUnion("kind", [
   scheduleIntentDailyLocalSchema,
 ]);
 
+function isValidCronField(
+  field: string,
+  minimum: number,
+  maximum: number,
+): boolean {
+  if (field === "*") {
+    return true;
+  }
+
+  return field.split(",").every((part) => {
+    if (!part) {
+      return false;
+    }
+
+    const segments = part.split("/");
+    if (segments.length > 2) {
+      return false;
+    }
+
+    const [base, stepText] = segments;
+    if (!base) {
+      return false;
+    }
+
+    if (stepText !== undefined && (!/^\d+$/u.test(stepText) || Number(stepText) <= 0)) {
+      return false;
+    }
+
+    if (base === "*") {
+      return true;
+    }
+
+    const range = base.split("-");
+    if (range.length > 2 || range.some((entry) => !/^\d+$/u.test(entry))) {
+      return false;
+    }
+
+    const start = Number(range[0]);
+    const end = range.length === 2 ? Number(range[1]) : start;
+    return Number.isInteger(start) &&
+      Number.isInteger(end) &&
+      start >= minimum &&
+      end <= maximum &&
+      start <= end;
+  });
+}
+
+export function isValidExecutableCronExpression(expression: string): boolean {
+  const fields = expression.trim().split(/\s+/u);
+  if (fields.length !== 5) {
+    return false;
+  }
+
+  return isValidCronField(fields[0] ?? "", 0, 59) &&
+    isValidCronField(fields[1] ?? "", 0, 23) &&
+    isValidCronField(fields[2] ?? "", 1, 31) &&
+    isValidCronField(fields[3] ?? "", 1, 12) &&
+    isValidCronField(fields[4] ?? "", 0, 7);
+}
+
+export const executableScheduleIntentAtSchema = z.object({
+  kind: z.literal("at"),
+  at: z.string().datetime({ offset: true }),
+}).strict();
+
+export const executableScheduleIntentEverySchema = scheduleIntentEverySchema;
+
+export const executableScheduleIntentCronSchema = z.object({
+  kind: z.literal("cron"),
+  expression: z.string().min(1).max(400).refine(
+    isValidExecutableCronExpression,
+    "Expected a five-field cron expression.",
+  ),
+}).strict();
+
+export const executableScheduleIntentDailyLocalSchema = scheduleIntentDailyLocalSchema;
+
+export const executableScheduleIntentSchema = z.discriminatedUnion("kind", [
+  executableScheduleIntentAtSchema,
+  executableScheduleIntentEverySchema,
+  executableScheduleIntentCronSchema,
+  executableScheduleIntentDailyLocalSchema,
+]);
+
 export const experimentRunScheduleIntentCronSchema = z.object({
   kind: z.literal("cron"),
   expression: z
@@ -78,11 +162,11 @@ function formatScheduleIntentIssue(issue: z.ZodIssue): string {
     case "kind":
       return "schedule.kind must match a supported scheduled-log schedule.";
     case "at":
-      return "schedule.at is required.";
+      return issue.code === "invalid_type" ? "schedule.at is required." : issue.message;
     case "everyMs":
       return "schedule.everyMs must be a positive integer.";
     case "expression":
-      return "schedule.expression is required.";
+      return issue.code === "invalid_type" ? "schedule.expression is required." : issue.message;
     case "localTime":
       return "schedule.localTime must use HH:MM format.";
     default:
@@ -96,5 +180,6 @@ export function formatScheduleIntentIssues(error: z.ZodError): string {
 
 export type ScheduleIntentKind = (typeof scheduleIntentKindValues)[number];
 export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
+export type ExecutableScheduleIntent = z.infer<typeof executableScheduleIntentSchema>;
 export type ExperimentRunScheduleIntentKind = (typeof experimentRunScheduleIntentKindValues)[number];
 export type ExperimentRunScheduleIntent = z.infer<typeof experimentRunScheduleIntentSchema>;

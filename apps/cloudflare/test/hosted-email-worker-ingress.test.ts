@@ -76,7 +76,7 @@ import {
   readHostedEmailRawMessage,
   writeHostedEmailRawMessage,
 } from "../src/hosted-email.ts";
-import { handleHostedEmailIngress } from "../src/hosted-email/worker-ingress.ts";
+import { handleHostedEmailIngress as handleHostedEmailIngressImpl } from "../src/hosted-email/worker-ingress.ts";
 import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
 
 import {
@@ -105,6 +105,22 @@ const AUTHENTICATED_SENDER = {
   dmarcPass: true,
   spfAligned: false,
 };
+
+type HostedEmailWorkerIngressTestMessage = Parameters<typeof handleHostedEmailIngressImpl>[0] & {
+  authenticatedSender?: typeof AUTHENTICATED_SENDER | null;
+};
+
+function handleHostedEmailIngress(
+  message: HostedEmailWorkerIngressTestMessage,
+  env: Parameters<typeof handleHostedEmailIngressImpl>[1],
+  ctx?: Parameters<typeof handleHostedEmailIngressImpl>[2],
+) {
+  const { authenticatedSender, ...workerMessage } = message;
+
+  return handleHostedEmailIngressImpl(workerMessage, env, ctx, {
+    trustedSenderVerifier: () => authenticatedSender ?? null,
+  });
+}
 
 describe("hosted email worker ingress", () => {
   beforeEach(() => {
@@ -252,6 +268,41 @@ describe("hosted email worker ingress", () => {
     expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+  });
+
+  it("fails closed when no trusted sender verifier is configured", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+    const setReject = vi.fn();
+
+    await handleHostedEmailIngressImpl({
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: replyAliasAddress,
+      }),
+      setReject,
+      to: replyAliasAddress,
+    }, createWorkerEnv(bucket));
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });

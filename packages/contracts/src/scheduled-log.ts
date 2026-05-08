@@ -2,7 +2,10 @@ import * as z from "zod";
 
 import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES, ID_PREFIXES } from "./constants.ts";
 import { idPattern } from "./ids.ts";
-import { scheduleIntentSchema } from "./schedule-intent.ts";
+import {
+  executableScheduleIntentSchema,
+  type ExecutableScheduleIntent,
+} from "./schedule-intent.ts";
 import { withContractMetadata } from "./schema-metadata.ts";
 import {
   mealNutritionSchema,
@@ -15,12 +18,18 @@ import {
 
 export {
   formatScheduleIntentIssues,
+  executableScheduleIntentAtSchema,
+  executableScheduleIntentCronSchema,
+  executableScheduleIntentDailyLocalSchema,
+  executableScheduleIntentEverySchema,
+  executableScheduleIntentSchema,
   scheduleIntentAtSchema,
   scheduleIntentCronSchema,
   scheduleIntentDailyLocalSchema,
   scheduleIntentEverySchema,
   scheduleIntentKindValues,
   scheduleIntentSchema,
+  type ExecutableScheduleIntent,
   type ScheduleIntent,
   type ScheduleIntentKind,
 } from "./schedule-intent.ts";
@@ -109,7 +118,7 @@ export const scheduledLogFrontmatterSchema = withContractMetadata(
       slug: slugSchema,
       title: titleSchema,
       status: scheduledLogStatusSchema,
-      schedule: scheduleIntentSchema,
+      schedule: executableScheduleIntentSchema,
       action: scheduledLogActionSchema,
       summary: z.string().min(1).max(500).optional(),
       tags: tagListSchema.optional(),
@@ -131,7 +140,7 @@ export const scheduledLogScaffoldPayloadSchema = z.object({
   slug: slugSchema.optional(),
   title: titleSchema,
   status: scheduledLogStatusSchema.default("active"),
-  schedule: scheduleIntentSchema,
+  schedule: executableScheduleIntentSchema,
   action: scheduledLogActionSchema,
   summary: z.string().min(1).max(500).optional(),
   tags: tagListSchema.optional(),
@@ -141,6 +150,7 @@ export const scheduledLogScaffoldPayloadSchema = z.object({
 export type ScheduledLogFrontmatter = z.infer<typeof scheduledLogFrontmatterSchema>;
 export type ScheduledLogMarkdownDocument = z.infer<typeof scheduledLogMarkdownDocumentSchema>;
 export type ScheduledLogScaffoldPayload = z.infer<typeof scheduledLogScaffoldPayloadSchema>;
+export type ScheduledLogSchedule = ExecutableScheduleIntent;
 export type ScheduledLogMealAction = Extract<ScheduledLogAction, { kind: "meal.add" }> & {
   nutrition?: MealNutrition;
 };

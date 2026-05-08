@@ -96,6 +96,15 @@ function normalizeStageOperationPath(stageOperationPath: string): string {
   return normalizedPath;
 }
 
+function assertGeneratedWriteOperationId(operationId: string): void {
+  if (!/^op_[0-9a-f]{32}$/u.test(operationId)) {
+    throw new VaultError(
+      "OPERATION_INVALID",
+      "write operation metadata contains an invalid operation id.",
+    );
+  }
+}
+
 function assertStagedEventAttachmentOperation(operation: {
   status: string;
   actions: Array<{
@@ -365,7 +374,15 @@ export async function cleanupStagedEventAttachments(input: {
   const manifestPath = normalizeRelativeVaultPath(input.manifestPath);
   const stageOperationPath = normalizeStageOperationPath(input.stageOperationPath);
   const operation = await readStoredWriteOperation(input.vaultRoot, stageOperationPath);
-  const expectedOperationPath = path.posix.join(WRITE_OPERATION_DIRECTORY, `${operation.operationId}.json`);
+  assertGeneratedWriteOperationId(operation.operationId);
+  const stageRootRelativePath = path.posix.join(WRITE_OPERATION_DIRECTORY, operation.operationId);
+  if (path.posix.dirname(stageRootRelativePath) !== WRITE_OPERATION_DIRECTORY) {
+    throw new VaultError(
+      "OPERATION_INVALID",
+      "write operation staging directory must stay under .runtime/operations.",
+    );
+  }
+  const expectedOperationPath = `${WRITE_OPERATION_DIRECTORY}/${operation.operationId}.json`;
 
   if (stageOperationPath !== expectedOperationPath) {
     throw new VaultError(
@@ -379,7 +396,7 @@ export async function cleanupStagedEventAttachments(input: {
   const resolvedOperationPath = resolveVaultPath(input.vaultRoot, stageOperationPath);
   const resolvedStageRoot = resolveVaultPath(
     input.vaultRoot,
-    path.posix.join(WRITE_OPERATION_DIRECTORY, operation.operationId),
+    stageRootRelativePath,
   );
   await Promise.all([
     fs.rm(resolvedOperationPath.absolutePath, { force: true }),
