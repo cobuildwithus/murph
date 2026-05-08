@@ -53,8 +53,8 @@ import {
   LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
 } from "./web-control-plane.ts";
 import {
-  readHostedBrowserVaultSourceStateHash,
-} from "@murphai/hosted-execution/parsers";
+  readDashboardReplicaSourceStateHash,
+} from "@murphai/hosted-execution/dashboard-replica";
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
@@ -290,7 +290,7 @@ export async function refreshHostedBrowserVaultReplica(
     };
   }
 
-  const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(workspace.snapshotRef);
+  const currentSourceStateHash = readDashboardReplicaSourceStateHash(workspace.snapshotRef);
   if (currentSourceStateHash !== input.sourceStateHash) {
     return {
       status: "stale_source",

@@ -1,8 +1,11 @@
 import {
   parseHostedExecutionSnapshotRef,
   parseHostedBrowserVaultReplicaRef,
-  readHostedBrowserVaultSourceStateHash,
 } from "@murphai/hosted-execution/parsers";
+import {
+  getDashboardReplicaFreshness,
+  readDashboardReplicaSourceStateHash,
+} from "@murphai/hosted-execution/dashboard-replica";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
@@ -51,13 +54,14 @@ export function createBrowserVaultSessionRoute(input: {
       workspace?.snapshotRef ?? null,
       "Hosted browser vault session workspace snapshot ref",
     );
-    const sourceStateHash = readHostedBrowserVaultSourceStateHash(
+    const sourceStateHash = readDashboardReplicaSourceStateHash(
       snapshotRef,
     );
     const workspaceVersion = workspace?.version ?? null;
-    const freshness = replicaRef && sourceStateHash && replicaRef.sourceBundleHash === sourceStateHash
-      ? "fresh" as const
-      : "stale" as const;
+    const freshness = getDashboardReplicaFreshness({
+      replicaRef,
+      snapshotRef,
+    });
 
     if (!replicaRef) {
       void scheduleBrowserVaultRefreshBestEffort({

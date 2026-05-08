@@ -15,10 +15,13 @@ import {
   parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceReadResponse,
-  readHostedBrowserVaultSourceStateHash,
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
+import {
+  readDashboardReplicaSourceStateHash,
+  shouldScheduleDashboardReplicaRefresh,
+} from "@murphai/hosted-execution/dashboard-replica";
 import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
@@ -1230,22 +1233,17 @@ export class HostedUserRunner {
 
     const workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
     this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
-    const previousSourceStateHash = readHostedBrowserVaultSourceStateHash(
-      input.previousWorkspace?.snapshotRef ?? null,
-    );
-    const nextSourceStateHash = readHostedBrowserVaultSourceStateHash(
-      workspaceRead.workspace?.snapshotRef ?? null,
-    );
-    if (
-      !nextSourceStateHash
-      || nextSourceStateHash === previousSourceStateHash
-      || workspaceRead.workspace?.browserVaultReplicaRef?.sourceBundleHash === nextSourceStateHash
-    ) {
+    const refreshDecision = shouldScheduleDashboardReplicaRefresh({
+      currentReplicaRef: workspaceRead.workspace?.browserVaultReplicaRef ?? null,
+      currentSnapshotRef: workspaceRead.workspace?.snapshotRef ?? null,
+      previousSnapshotRef: input.previousWorkspace?.snapshotRef ?? null,
+    });
+    if (!refreshDecision) {
       return;
     }
 
     await this.stateStore.scheduleBrowserVaultRefresh({
-      sourceStateHash: nextSourceStateHash,
+      sourceStateHash: refreshDecision.sourceStateHash,
     });
     const immediateRefreshStarted = await this.startDetachedBrowserVaultRefresh({
       userId: input.userId,
@@ -1949,7 +1947,7 @@ export class HostedUserRunner {
     }
 
     let workspace = workspaceRead.workspace;
-    const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(
+    const currentSourceStateHash = readDashboardReplicaSourceStateHash(
       workspace?.snapshotRef ?? null,
     );
     if (!workspace || currentSourceStateHash !== pending.sourceStateHash) {
@@ -2049,7 +2047,7 @@ export class HostedUserRunner {
     this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
     workspace = workspaceRead.workspace;
     if (
-      readHostedBrowserVaultSourceStateHash(workspace?.snapshotRef ?? null)
+      readDashboardReplicaSourceStateHash(workspace?.snapshotRef ?? null)
         !== pending.sourceStateHash
     ) {
       await this.stateStore.clearPendingBrowserVaultRefresh({
@@ -2078,7 +2076,7 @@ export class HostedUserRunner {
     if (
       publish.published
       || !publish.workspace
-      || readHostedBrowserVaultSourceStateHash(publish.workspace.snapshotRef) !== pending.sourceStateHash
+      || readDashboardReplicaSourceStateHash(publish.workspace.snapshotRef) !== pending.sourceStateHash
     ) {
       await this.stateStore.clearPendingBrowserVaultRefresh({
         sourceStateHash: pending.sourceStateHash,

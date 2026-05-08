@@ -64,6 +64,9 @@
       "@murphai/hosted-execution/contracts": [
         "packages/hosted-execution/src/contracts.ts"
       ],
+      "@murphai/hosted-execution/dashboard-replica": [
+        "packages/hosted-execution/src/dashboard-replica.ts"
+      ],
       "@murphai/hosted-execution/env": [
         "packages/hosted-execution/src/env.ts"
       ],
