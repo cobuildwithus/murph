@@ -247,7 +247,8 @@ describe("cloudflare worker routes", () => {
 
   it("uses a version-specific deploy smoke Durable Object name when version metadata is present", async () => {
     const baseEnv = createWorkerEnv();
-    const getByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const runnerGetByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
     const env = {
       ...baseEnv,
       CF_VERSION_METADATA: {
@@ -256,7 +257,10 @@ describe("cloudflare worker routes", () => {
         timestamp: "2026-04-24T00:00:00.000Z",
       },
       RUNNER_CONTAINER: {
-        getByName,
+        getByName: runnerGetByName,
+      },
+      RUNNER_CONTAINER_SMOKE: {
+        getByName: smokeGetByName,
       },
     };
     const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
@@ -275,7 +279,8 @@ describe("cloudflare worker routes", () => {
     const response = await worker.fetch(request, env);
 
     expect(response.status).toBe(200);
-    expect(getByName).toHaveBeenCalledWith("__deploy-smoke-version-123");
+    expect(smokeGetByName).toHaveBeenCalledWith("__deploy-smoke-version-123");
+    expect(runnerGetByName).not.toHaveBeenCalled();
   });
 
   it("rejects unsigned deploy container smoke requests", async () => {
@@ -1221,6 +1226,48 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
+  it("schedules browser-vault refreshes through the direct Durable Object path", async () => {
+    const sourceStateHash = "a".repeat(64);
+    const stub = createUserRunnerStub({
+      scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
+        sourceStateHash: string;
+        userId: string;
+      }) => ({
+        accepted: true,
+        immediateRefreshStarted: false,
+        sourceStateHash: input.sourceStateHash,
+        userId: input.userId,
+      })),
+    });
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
+        body: JSON.stringify({ sourceStateHash }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      immediateRefreshStarted: false,
+      sourceStateHash,
+      userId: "member_123",
+    });
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
+      sourceStateHash,
+      userId: "member_123",
+    });
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+  });
+
   it("deletes hosted runner user data without queuing a new invocation", async () => {
     const stub = createUserRunnerStub({
       deleteHostedUserData: vi.fn(async (userId: string) => ({
@@ -1848,6 +1895,7 @@ function createWorkerEnv(
     ...createHostedExecutionTestEnv(),
     BUNDLES: bucketStore.api,
     RUNNER_CONTAINER: createRunnerContainerNamespace(),
+    RUNNER_CONTAINER_SMOKE: createRunnerContainerNamespace(),
     ...overrides,
     USER_RUNNER: {
       getByName(userId: string) {
@@ -2076,6 +2124,15 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recentLogs: [],
       userId: "member_123",
       workspace: null,
+    })),
+    scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
+      sourceStateHash: string;
+      userId: string;
+    }) => ({
+      accepted: true as const,
+      immediateRefreshStarted: false,
+      sourceStateHash: input.sourceStateHash,
+      userId: input.userId,
     })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;

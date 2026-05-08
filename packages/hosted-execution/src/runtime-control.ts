@@ -14,6 +14,7 @@ import type {
 } from "./assistant-usage.ts";
 import type {
   HostedBrowserVaultReplicaCursorRef,
+  HostedBrowserVaultReplicaRef,
 } from "./contracts.ts";
 
 export const HOSTED_MAILBOX_LANES = [
@@ -357,6 +358,16 @@ export interface HostedWorkspaceCheckpointRequest {
 
 export interface HostedWorkspaceCheckpointResponse {
   checkpointed: boolean;
+  workspace: HostedWorkspaceState;
+}
+
+export interface HostedBrowserVaultReplicaPublishRequest {
+  expectedSourceStateHash: string;
+  replicaRef: HostedBrowserVaultReplicaRef;
+}
+
+export interface HostedBrowserVaultReplicaPublishResponse {
+  published: boolean;
   workspace: HostedWorkspaceState;
 }
 

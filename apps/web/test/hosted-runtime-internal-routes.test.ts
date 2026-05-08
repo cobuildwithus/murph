@@ -1,4 +1,5 @@
 import {
+  parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
   parseHostedRuntimeLogResponse,
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
+  publishHostedBrowserVaultReplicaRef: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
+  publishHostedBrowserVaultReplicaRef: mocks.publishHostedBrowserVaultReplicaRef,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
 }));
@@ -46,6 +49,8 @@ type MailboxPayloadFetchRoute =
 type WorkspaceRoute = typeof import("../app/api/internal/hosted-workspace/route");
 type WorkspaceCheckpointRoute =
   typeof import("../app/api/internal/hosted-workspace/checkpoint/route");
+type BrowserVaultReplicaRoute =
+  typeof import("../app/api/internal/hosted-workspace/browser-vault-replica/route");
 type RuntimeLogRoute = typeof import("../app/api/internal/hosted-runtime/log/route");
 type RuntimeStatusRoute = typeof import("../app/api/internal/hosted-runtime/status/route");
 
@@ -53,6 +58,7 @@ let mailboxFetchRoute: MailboxFetchRoute;
 let mailboxPayloadFetchRoute: MailboxPayloadFetchRoute;
 let workspaceRoute: WorkspaceRoute;
 let workspaceCheckpointRoute: WorkspaceCheckpointRoute;
+let browserVaultReplicaRoute: BrowserVaultReplicaRoute;
 let runtimeLogRoute: RuntimeLogRoute;
 let runtimeStatusRoute: RuntimeStatusRoute;
 
@@ -65,6 +71,9 @@ describe("hosted runtime internal web routes", () => {
     workspaceRoute = await import("../app/api/internal/hosted-workspace/route");
     workspaceCheckpointRoute = await import(
       "../app/api/internal/hosted-workspace/checkpoint/route"
+    );
+    browserVaultReplicaRoute = await import(
+      "../app/api/internal/hosted-workspace/browser-vault-replica/route"
     );
     runtimeLogRoute = await import("../app/api/internal/hosted-runtime/log/route");
     runtimeStatusRoute = await import("../app/api/internal/hosted-runtime/status/route");
@@ -335,6 +344,44 @@ describe("hosted runtime internal web routes", () => {
       expectedVersion: "4",
       reason: "import",
       snapshotRef: createBundleRef("snapshot_2"),
+      userId: "member_routes_1",
+    });
+  });
+
+  it("publishes browser-vault replica refs through the separate derived-data route", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
+    mocks.publishHostedBrowserVaultReplicaRef.mockResolvedValue({
+      status: "published",
+      workspace: buildWorkspaceRecord({
+        browserVaultReplicaRef: replicaRef,
+        snapshotRef: createBundleRef("snapshot_2"),
+        version: "5",
+      }),
+    });
+
+    const response = await browserVaultReplicaRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/browser-vault-replica",
+      {
+        expectedSourceStateHash: "snapshot_2_hash",
+        replicaRef,
+      },
+    ));
+    const payload = parseHostedBrowserVaultReplicaPublishResponse(
+      await response.json(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      published: true,
+      workspace: {
+        browserVaultReplicaRef: replicaRef,
+        snapshotRef: createBundleRef("snapshot_2"),
+        version: "5",
+      },
+    });
+    expect(mocks.publishHostedBrowserVaultReplicaRef).toHaveBeenCalledWith({
+      expectedSourceStateHash: "snapshot_2_hash",
+      replicaRef,
       userId: "member_routes_1",
     });
   });

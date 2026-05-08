@@ -24,6 +24,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "getRunnerStatus",
       "nudgeUserRunner",
+      "scheduleBrowserVaultRefresh",
     ]);
   });
 
@@ -84,6 +85,12 @@ describe("createCloudflareHostedControlClient", () => {
     expect(() => client.deleteUserData("")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
+    expect(() =>
+      client.scheduleBrowserVaultRefresh({
+        sourceStateHash: "a".repeat(64),
+        userId: "",
+      })
+    ).toThrow("Cloudflare hosted control userId must not be blank.");
     expect(() =>
       client.createBrowserVaultSession({
         browserPublicKeyJwk: {
@@ -538,6 +545,39 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.method).toBe("POST");
     expect(request.init?.body).toBe("{}");
     expectNoRunContractFields(result);
+  });
+
+  it("schedules browser vault refreshes with only the source-state hash", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const result = {
+      accepted: true,
+      immediateRefreshStarted: false,
+      sourceStateHash: "a".repeat(64),
+      userId: "user_123",
+    };
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(result);
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.scheduleBrowserVaultRefresh({
+      sourceStateHash: "a".repeat(64),
+      userId: "user_123",
+    })).resolves.toEqual(result);
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/browser-vault/refresh");
+    expect(request.init?.method).toBe("POST");
+    expect(request.init?.body).toBe(JSON.stringify({
+      sourceStateHash: "a".repeat(64),
+    }));
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
   });
 
   it("posts user data deletion requests and validates the bound user in the response", async () => {

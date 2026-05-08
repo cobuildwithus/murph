@@ -59,6 +59,45 @@ test("browser vault replica ref matching is exact across immutable object fields
   assert.equal(browserVaultReplicaRefsMatch(ref, null), false);
 });
 
+test("browser vault session parser accepts freshness metadata and defaults old responses safely", () => {
+  assert.deepEqual(parseBrowserVaultSessionResponse({
+    encryptedReplica: null,
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    state: "empty",
+  }), {
+    encryptedReplica: null,
+    freshness: "stale",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: false,
+    state: "empty",
+    workspaceVersion: null,
+  });
+
+  assert.deepEqual(parseBrowserVaultSessionResponse({
+    encryptedReplica: null,
+    freshness: "stale",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: createReplicaRef(),
+    refreshPending: true,
+    state: "not_modified",
+    workspaceVersion: "7",
+  }), {
+    encryptedReplica: null,
+    freshness: "stale",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: createReplicaRef(),
+    refreshPending: true,
+    state: "not_modified",
+    workspaceVersion: "7",
+  });
+});
+
 test("browser vault abort detection accepts DOM-style abort errors", () => {
   const abortError = new Error("Browser vault load was aborted.");
   abortError.name = "AbortError";
@@ -82,7 +121,44 @@ test("browser vault loader treats unauthorized responses as empty by default", a
     knownReplicaRef: null,
   });
 
-  assert.deepEqual(result, { state: "empty" });
+  assert.deepEqual(result, {
+    freshness: "stale",
+    refreshPending: false,
+    state: "empty",
+    workspaceVersion: null,
+  });
+});
+
+test("browser vault loader opts in to stale replicas explicitly", async () => {
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+    encryptedReplica: null,
+    freshness: "stale",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    refreshPending: true,
+    state: "empty",
+    workspaceVersion: "7",
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  }));
+
+  const result = await loadBrowserVaultReplica({
+    fetchImpl,
+    knownReplicaRef: createReplicaRef(),
+  });
+
+  assert.deepEqual(result, {
+    freshness: "stale",
+    refreshPending: true,
+    state: "empty",
+    workspaceVersion: "7",
+  });
+  assert.equal(fetchImpl.mock.calls.length, 1);
+  const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+  assert.equal(body.acceptStaleReplica, true);
+  assert.deepEqual(body.knownReplicaRef, createReplicaRef());
 });
 
 test("browser vault loader can surface unauthorized responses for privacy export", async () => {

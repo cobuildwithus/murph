@@ -21,10 +21,25 @@ import {
 
 import { browserVaultReplicaRefsMatch } from "./ref";
 
+export type BrowserVaultFreshness = "fresh" | "stale";
+
+export interface BrowserVaultSessionMetadata {
+  freshness: BrowserVaultFreshness;
+  refreshPending: boolean;
+  workspaceVersion: string | null;
+}
+
 export type BrowserVaultSessionLoadResult =
-  | { state: "empty" }
-  | { replicaRef: HostedBrowserVaultReplicaRef; state: "not_modified" }
-  | { client: BrowserVaultQueryClient; replicaRef: HostedBrowserVaultReplicaRef; state: "ready" };
+  | (BrowserVaultSessionMetadata & { state: "empty" })
+  | (BrowserVaultSessionMetadata & {
+      replicaRef: HostedBrowserVaultReplicaRef;
+      state: "not_modified";
+    })
+  | (BrowserVaultSessionMetadata & {
+      client: BrowserVaultQueryClient;
+      replicaRef: HostedBrowserVaultReplicaRef;
+      state: "ready";
+    });
 
 export interface LoadBrowserVaultReplicaInput {
   emptyOnUnauthorized?: boolean;
@@ -50,6 +65,7 @@ export async function loadBrowserVaultReplica({
 
   const response = await fetchImpl(endpoint, {
     body: JSON.stringify({
+      acceptStaleReplica: true,
       browserPublicKeyJwk: publicKeyJwk,
       knownReplicaRef,
     }),
@@ -63,7 +79,7 @@ export async function loadBrowserVaultReplica({
 
   if (response.status === 401 || response.status === 403) {
     if (emptyOnUnauthorized) {
-      return { state: "empty" };
+      return createEmptyLoadResult();
     }
 
     throw new Error(`Browser vault session failed with HTTP ${response.status}: ${await readJsonErrorMessage(response)}`);
@@ -79,7 +95,12 @@ export async function loadBrowserVaultReplica({
   const session = parseBrowserVaultSessionResponse(sessionValue);
 
   if (session.state === "empty") {
-    return { state: "empty" };
+    return {
+      freshness: session.freshness,
+      refreshPending: session.refreshPending,
+      state: "empty",
+      workspaceVersion: session.workspaceVersion,
+    };
   }
 
   if (session.state === "not_modified") {
@@ -90,8 +111,11 @@ export async function loadBrowserVaultReplica({
     });
 
     return {
+      freshness: session.freshness,
       replicaRef: session.replicaRef,
+      refreshPending: session.refreshPending,
       state: "not_modified",
+      workspaceVersion: session.workspaceVersion,
     };
   }
 
@@ -139,8 +163,11 @@ export async function loadBrowserVaultReplica({
 
   return {
     client: createBrowserVaultQueryClient(replica),
+    freshness: session.freshness,
     replicaRef: session.replicaRef,
+    refreshPending: session.refreshPending,
     state: "ready",
+    workspaceVersion: session.workspaceVersion,
   };
 }
 
@@ -173,24 +200,33 @@ export function isBrowserVaultAbortError(error: unknown): boolean {
 export type BrowserVaultSessionResponse =
   | {
       encryptedReplica: null;
+      freshness: BrowserVaultFreshness;
       replicaAad: null;
       replicaKeyEnvelope: null;
       replicaRef: null;
+      refreshPending: boolean;
       state: "empty";
+      workspaceVersion: string | null;
     }
   | {
       encryptedReplica: null;
+      freshness: BrowserVaultFreshness;
       replicaAad: null;
       replicaKeyEnvelope: null;
       replicaRef: HostedBrowserVaultReplicaRef;
+      refreshPending: boolean;
       state: "not_modified";
+      workspaceVersion: string | null;
     }
   | {
       encryptedReplica: HostedCipherEnvelope;
+      freshness: BrowserVaultFreshness;
       replicaAad: BrowserVaultReplicaAad;
       replicaKeyEnvelope: HostedBrowserSessionKeyEnvelope;
       replicaRef: HostedBrowserVaultReplicaRef;
+      refreshPending: boolean;
       state: "ready";
+      workspaceVersion: string | null;
     };
 
 export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSessionResponse {
@@ -203,10 +239,13 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
 
     return {
       encryptedReplica: null,
+      freshness: parseBrowserVaultFreshness(record.freshness, "stale"),
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
+      refreshPending: readOptionalBoolean(record.refreshPending, false),
       state,
+      workspaceVersion: readOptionalNullableString(record.workspaceVersion, "Browser vault session response.workspaceVersion"),
     };
   }
 
@@ -215,10 +254,13 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
 
     return {
       encryptedReplica: null,
+      freshness: parseBrowserVaultFreshness(record.freshness, "fresh"),
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: parseRequiredReplicaRef(record.replicaRef, "Browser vault session response replicaRef"),
+      refreshPending: readOptionalBoolean(record.refreshPending, false),
       state,
+      workspaceVersion: readOptionalNullableString(record.workspaceVersion, "Browser vault session response.workspaceVersion"),
     };
   }
 
@@ -231,6 +273,7 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
       record.encryptedReplica,
       "Browser vault session response encryptedReplica",
     ),
+    freshness: parseBrowserVaultFreshness(record.freshness, "fresh"),
     replicaAad: parseBrowserVaultReplicaAad(
       record.replicaAad,
       "Browser vault session response replicaAad",
@@ -240,7 +283,9 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
       "Browser vault session response replicaKeyEnvelope",
     ),
     replicaRef: parseRequiredReplicaRef(record.replicaRef, "Browser vault session response replicaRef"),
+    refreshPending: readOptionalBoolean(record.refreshPending, false),
     state,
+    workspaceVersion: readOptionalNullableString(record.workspaceVersion, "Browser vault session response.workspaceVersion"),
   };
 }
 
@@ -412,4 +457,48 @@ function requireNonEmptyString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function createEmptyLoadResult(): Extract<BrowserVaultSessionLoadResult, { state: "empty" }> {
+  return {
+    freshness: "stale",
+    refreshPending: false,
+    state: "empty",
+    workspaceVersion: null,
+  };
+}
+
+function parseBrowserVaultFreshness(
+  value: unknown,
+  fallback: BrowserVaultFreshness,
+): BrowserVaultFreshness {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (value === "fresh" || value === "stale") {
+    return value;
+  }
+
+  throw new TypeError("Browser vault session response freshness must be fresh or stale.");
+}
+
+function readOptionalBoolean(value: unknown, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new TypeError("Browser vault session response refreshPending must be a boolean.");
+  }
+
+  return value;
+}
+
+function readOptionalNullableString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return requireNonEmptyString(value, label);
 }

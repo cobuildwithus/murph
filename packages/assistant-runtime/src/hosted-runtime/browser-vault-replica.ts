@@ -18,9 +18,21 @@ export async function createHostedBrowserVaultReplicaForSnapshot(input: {
     return null;
   }
 
-  return await createBrowserVaultReplica({
+  return await createHostedBrowserVaultReplicaForSourceState({
     generatedAt: input.generatedAt,
     sourceBundleHash: input.snapshotRef.hash,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+export async function createHostedBrowserVaultReplicaForSourceState(input: {
+  generatedAt?: string;
+  sourceBundleHash: string;
+  vaultRoot: string;
+}): Promise<BrowserVaultReplica> {
+  return await createBrowserVaultReplica({
+    generatedAt: input.generatedAt,
+    sourceBundleHash: input.sourceBundleHash,
     vault: await readVault(input.vaultRoot),
   });
 }

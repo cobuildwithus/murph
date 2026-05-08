@@ -110,7 +110,7 @@ describe("browser vault session route", () => {
       prisma: mocks.prismaClient,
     });
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -139,7 +139,7 @@ describe("browser vault session route", () => {
       prisma: mocks.prismaClient,
     });
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -165,7 +165,7 @@ describe("browser vault session route", () => {
     expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
         message: "Hosted browser mutation origin is not allowed.",
@@ -190,7 +190,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_CONSENT_REQUIRED",
         message: "Accept the current Murph legal consent before continuing.",
@@ -267,7 +267,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -306,7 +306,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -345,7 +345,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -379,7 +379,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -391,6 +391,12 @@ describe("browser vault session route", () => {
   it("returns empty when the workspace snapshot ref no longer matches the replica source bundle hash", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
+    const scheduleBrowserVaultRefresh = vi.fn().mockResolvedValue({
+      accepted: true,
+      immediateRefreshStarted: false,
+      sourceStateHash: "b".repeat(64),
+      userId: "member_123",
+    });
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -403,7 +409,10 @@ describe("browser vault session route", () => {
       userId: "member_123",
       version: "1",
     });
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
+    });
 
     const response = await browserVaultSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
@@ -413,12 +422,72 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+      sourceStateHash: "b".repeat(64),
+      userId: "member_123",
+    });
     await expect(response.json()).resolves.toEqual({
       encryptedReplica: null,
+      freshness: "stale",
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
+      refreshPending: true,
       state: "empty",
+      workspaceVersion: "1",
+    });
+  });
+
+  it("returns stale not_modified only to clients that opt in to stale replicas", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    const createBrowserVaultSession = vi.fn();
+    const scheduleBrowserVaultRefresh = vi.fn().mockResolvedValue({
+      accepted: true,
+      immediateRefreshStarted: false,
+      sourceStateHash: "b".repeat(64),
+      userId: "member_123",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "3",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        acceptStaleReplica: true,
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+      sourceStateHash: "b".repeat(64),
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      freshness: "stale",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef,
+      refreshPending: true,
+      state: "not_modified",
+      workspaceVersion: "3",
     });
   });
 
@@ -450,7 +519,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -487,7 +556,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -523,7 +592,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,
@@ -573,7 +642,7 @@ describe("browser vault session route", () => {
       replicaRef,
       userId: "member_123",
     });
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: createReplicaEnvelope(),
       replicaAad: createReplicaAad(),
       replicaKeyEnvelope: createReplicaKeyEnvelope(),
@@ -605,7 +674,7 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_EXECUTION_CONTROL_NOT_CONFIGURED",
         message: "Hosted execution control plane is not configured.",
@@ -643,7 +712,7 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
         message: "Hosted execution control plane returned an invalid browser vault session.",
@@ -680,7 +749,7 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,
       replicaKeyEnvelope: null,

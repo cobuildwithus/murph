@@ -14,6 +14,9 @@ import {
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedAssistantRuntimeConfig,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
@@ -22,6 +25,7 @@ import {
 
 const HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV = "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN";
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+const HOSTED_BROWSER_VAULT_REFRESH_REQUEST_BODY_LIMIT_BYTES = 512 * 1024;
 
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
@@ -139,6 +143,7 @@ export async function startHostedContainerEntrypoint(input: {
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
     let job: HostedExecutionRunnerJobInput | null = null;
+    let browserVaultRefreshUserId: string | null = null;
     let internalWorkerProxyToken: string | null = null;
     let localBridge: HostedExecutionLocalBridgeConfig = {
       localInternalProxyBaseUrl: null,
@@ -163,8 +168,10 @@ export async function startHostedContainerEntrypoint(input: {
         request.method === "GET" && requestUrl.pathname === "/internal/control-health";
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
+      const isBrowserVaultRefreshRequest =
+        request.method === "POST" && requestUrl.pathname === "/internal/browser-vault-refresh";
 
-      if (!isControlHealthRequest && !isWorkspaceInvocationRequest) {
+      if (!isControlHealthRequest && !isWorkspaceInvocationRequest && !isBrowserVaultRefreshRequest) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
@@ -215,8 +222,10 @@ export async function startHostedContainerEntrypoint(input: {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
           component: "container",
-          level: "warn",
-          message: "Hosted container entrypoint rejected a concurrent invocation request.",
+          level: isBrowserVaultRefreshRequest ? "info" : "warn",
+          message: isBrowserVaultRefreshRequest
+            ? "Hosted container entrypoint rejected a concurrent browser-vault refresh request."
+            : "Hosted container entrypoint rejected a concurrent invocation request.",
           phase: "failed",
         });
         writeJsonResponse(response, 409, {
@@ -226,6 +235,61 @@ export async function startHostedContainerEntrypoint(input: {
       }
       activeHostedRunnerJobCount += 1;
       claimedRunnerSlot = true;
+
+      if (isBrowserVaultRefreshRequest) {
+        try {
+          const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(
+            request,
+            HOSTED_BROWSER_VAULT_REFRESH_REQUEST_BODY_LIMIT_BYTES,
+          ));
+          const parsed = parseHostedBrowserVaultRefreshContainerRequest(requestBody);
+          browserVaultRefreshUserId = parsed.userId;
+          internalWorkerProxyToken = parsed.internalWorkerProxyToken;
+          localBridge = parsed.localBridge;
+
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            message: "Hosted container entrypoint accepted browser-vault refresh job.",
+            phase: "wake.running",
+            userId: parsed.userId,
+          });
+
+          const result = await runHostedBrowserVaultRefreshWithProcessIsolation(
+            {
+              runtime: parsed.runtime,
+              sourceStateHash: parsed.sourceStateHash,
+              userId: parsed.userId,
+            },
+            runtime,
+            {
+              internalWorkerProxyToken,
+              localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
+              signal: requestAbort.signal,
+            },
+          );
+
+          if (requestAbort.signal.aborted || response.destroyed) {
+            return;
+          }
+
+          response.statusCode = 200;
+          response.setHeader("content-type", "application/json; charset=utf-8");
+          response.end(JSON.stringify(result));
+          return;
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted container entrypoint failed browser-vault refresh job.",
+            phase: "failed",
+            userId: browserVaultRefreshUserId,
+          });
+          const classified = classifyRunnerJobError(error);
+          writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
+      }
 
       try {
         const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
@@ -292,7 +356,9 @@ export async function startHostedContainerEntrypoint(input: {
         error,
         message: "Hosted container entrypoint failed a runner job.",
         phase: "failed",
-        userId: typeof job === "object" && job ? readHostedExecutionRunnerJobUserId(job) : null,
+        userId: typeof job === "object" && job
+          ? readHostedExecutionRunnerJobUserId(job)
+          : browserVaultRefreshUserId,
       });
       if (error instanceof HostedRunnerShellIsolationError) {
         runtime.exitScheduler();
@@ -385,6 +451,44 @@ async function parseHostedExecutionContainerInvocationRequest(
   };
 }
 
+function parseHostedBrowserVaultRefreshContainerRequest(value: unknown): {
+  internalWorkerProxyToken: string | null;
+  localBridge: HostedExecutionLocalBridgeConfig;
+  runtime: HostedAssistantRuntimeConfig | null;
+  sourceStateHash: string;
+  userId: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted browser-vault refresh request must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    internalWorkerProxyToken: readNullableString(
+      record.internalWorkerProxyToken,
+      "Hosted browser-vault refresh request.internalWorkerProxyToken",
+    ),
+    localBridge: {
+      localInternalProxyBaseUrl: readNullableString(
+        record.localInternalProxyBaseUrl,
+        "Hosted browser-vault refresh request.localInternalProxyBaseUrl",
+      ),
+    },
+    runtime: readOptionalRuntimeConfig(
+      record.runtime,
+      "Hosted browser-vault refresh request.runtime",
+    ),
+    sourceStateHash: requireContainerRequestString(
+      record.sourceStateHash,
+      "Hosted browser-vault refresh request.sourceStateHash",
+    ),
+    userId: requireContainerRequestString(
+      record.userId,
+      "Hosted browser-vault refresh request.userId",
+    ),
+  };
+}
+
 if (isHostedContainerCliEntrypoint()) {
   void startHostedContainerEntrypointCli().catch((error) => {
     emitHostedExecutionStructuredLog({
@@ -441,6 +545,29 @@ function readNullableString(value: unknown, label: string): string | null {
   return normalizeOptionalString(value);
 }
 
+function readOptionalRuntimeConfig(
+  value: unknown,
+  label: string,
+): HostedAssistantRuntimeConfig | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object or null.`);
+  }
+
+  return value as HostedAssistantRuntimeConfig;
+}
+
+function requireContainerRequestString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
 function readBearerAuthorizationToken(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -455,16 +582,17 @@ function readBearerAuthorizationToken(value: string | undefined): string | null 
   return token.length > 0 ? token : null;
 }
 
-async function readHostedContainerInvocationRequestBody(request: IncomingMessage): Promise<string> {
+async function readHostedContainerInvocationRequestBody(
+  request: IncomingMessage,
+  limitBytes = HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES,
+): Promise<string> {
   const declaredLength = readContentLengthBytes(request.headers["content-length"]);
 
   if (
     declaredLength !== null
-    && declaredLength > HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES
+    && declaredLength > limitBytes
   ) {
-    throw new HostedContainerRequestBodyTooLargeError(
-      HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES,
-    );
+    throw new HostedContainerRequestBodyTooLargeError(limitBytes);
   }
 
   const chunks: Buffer[] = [];
@@ -474,10 +602,8 @@ async function readHostedContainerInvocationRequestBody(request: IncomingMessage
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buffer.byteLength;
 
-    if (totalBytes > HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES) {
-      throw new HostedContainerRequestBodyTooLargeError(
-        HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES,
-      );
+    if (totalBytes > limitBytes) {
+      throw new HostedContainerRequestBodyTooLargeError(limitBytes);
     }
 
     chunks.push(buffer);
@@ -944,6 +1070,33 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
 
   try {
     return await runHostedWorkspaceInvocation(input, runtime, options);
+  } finally {
+    if (processBaseline) {
+      await enforceHostedContainerProcessIsolation(runtime.processApi, processBaseline);
+    }
+  }
+}
+
+async function runHostedBrowserVaultRefresh(
+  input: Parameters<typeof import("./node-runner.js")["refreshHostedBrowserVaultReplica"]>[0],
+  runtime: HostedContainerRuntimeDependencies,
+  options?: Parameters<typeof import("./node-runner.js")["refreshHostedBrowserVaultReplica"]>[1],
+): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["refreshHostedBrowserVaultReplica"]>>> {
+  const nodeRunner = await runtime.loadNodeRunner();
+  return await nodeRunner.refreshHostedBrowserVaultReplica(input, options);
+}
+
+async function runHostedBrowserVaultRefreshWithProcessIsolation(
+  input: Parameters<typeof import("./node-runner.js")["refreshHostedBrowserVaultReplica"]>[0],
+  runtime: HostedContainerRuntimeDependencies,
+  options?: Parameters<typeof import("./node-runner.js")["refreshHostedBrowserVaultReplica"]>[1],
+): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["refreshHostedBrowserVaultReplica"]>>> {
+  const processBaseline = runtime.processIsolation
+    ? await snapshotHostedContainerProcesses(process.pid, runtime.processApi)
+    : null;
+
+  try {
+    return await runHostedBrowserVaultRefresh(input, runtime, options);
   } finally {
     if (processBaseline) {
       await enforceHostedContainerProcessIsolation(runtime.processApi, processBaseline);

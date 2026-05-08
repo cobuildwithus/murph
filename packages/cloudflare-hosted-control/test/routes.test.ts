@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
+  buildCloudflareHostedControlBrowserVaultRefreshPath,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserRunnerNudgePath,
@@ -17,6 +18,9 @@ describe("cloudflare hosted control routes", () => {
   it("builds the narrowed internal routes with encoded identifiers", () => {
     expect(buildCloudflareHostedControlBrowserVaultSessionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/browser-vault/session",
+    );
+    expect(buildCloudflareHostedControlBrowserVaultRefreshPath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/browser-vault/refresh",
     );
     expect(buildCloudflareHostedControlUserStatusPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/status",
@@ -32,6 +36,7 @@ describe("cloudflare hosted control routes", () => {
   it("rejects blank user identifiers before building routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
+      buildCloudflareHostedControlBrowserVaultRefreshPath,
       buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlUserRunnerNudgePath,
       buildCloudflareHostedControlUserStatusPath,
@@ -48,6 +53,12 @@ describe("cloudflare hosted control routes", () => {
       matchCloudflareHostedControlUserRoutePath(
         "browserVaultSession",
         buildCloudflareHostedControlBrowserVaultSessionPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "browserVaultRefresh",
+        buildCloudflareHostedControlBrowserVaultRefreshPath(userId),
       ),
     ).toEqual({ userId: encodedUserId });
     expect(
@@ -75,6 +86,7 @@ describe("cloudflare hosted control routes", () => {
       matchCloudflareHostedControlUserRoutePath("status", "/internal/users//status"),
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
+      browserVaultRefresh: { method: "POST", suffix: "browser-vault/refresh" },
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
       runnerNudge: { method: "POST", suffix: "nudge" },
       status: { method: "GET", suffix: "status" },
@@ -122,6 +134,7 @@ describe("cloudflare hosted control routes", () => {
     expect(Object.keys(routesModule).sort()).toEqual([
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
+      "buildCloudflareHostedControlBrowserVaultRefreshPath",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserRunnerNudgePath",
@@ -129,6 +142,7 @@ describe("cloudflare hosted control routes", () => {
       "matchCloudflareHostedControlUserRoutePath",
     ]);
     expect(routesModule).toMatchObject({
+      buildCloudflareHostedControlBrowserVaultRefreshPath: expect.any(Function),
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
       buildCloudflareHostedControlUserDataDeletionPath: expect.any(Function),
       buildCloudflareHostedControlUserRunnerNudgePath: expect.any(Function),

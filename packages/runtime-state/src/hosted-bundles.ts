@@ -15,6 +15,7 @@ import {
   RUNTIME_TEMP_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
 import {
+  HOSTED_BUNDLE_SCHEMA,
   isHostedBundleArtifactEntry,
   parseHostedBundleArchive,
   readHostedBundleTextFile,
@@ -227,7 +228,7 @@ export async function snapshotHostedExecutionContext(
   codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
 }> {
-  return await snapshotHostedExecutionContextWithProviderContinuityPolicy({
+  return await snapshotHostedPortableWorkspaceBundleWithProviderContinuityPolicy({
     ...input,
     enforceProviderContinuity: true,
   });
@@ -240,7 +241,7 @@ export async function snapshotHostedExecutionContextUnsafeForFixture(
   codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
 }> {
-  return await snapshotHostedExecutionContextWithProviderContinuityPolicy({
+  return await snapshotHostedPortableWorkspaceBundleWithProviderContinuityPolicy({
     ...input,
     enforceProviderContinuity: false,
   });
@@ -277,7 +278,95 @@ export interface HostedPortableWorkspaceDeltaManifest {
   upserts: HostedPortableWorkspaceManifestFile[];
 }
 
-async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
+export type HostedPortableWorkspaceDeltaSnapshot =
+  | {
+      bundle: Uint8Array;
+      codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+      kind: "changed";
+      manifest: HostedPortableWorkspaceDeltaManifest;
+      workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
+    }
+  | {
+      codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+      currentManifest: HostedPortableWorkspaceManifest;
+      kind: "unchanged";
+      workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
+    };
+
+export async function snapshotHostedPortableWorkspaceDelta(input: Omit<
+  HostedExecutionContextSnapshotInput,
+  "assertSnapshotLive"
+> & {
+  baseManifest: HostedPortableWorkspaceManifest;
+  baseSnapshotHash: string;
+}): Promise<HostedPortableWorkspaceDeltaSnapshot> {
+  const vaultRoot = path.resolve(input.vaultRoot);
+  const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
+  const workspaceSnapshotHashSecret =
+    normalizeHostedCodexHomeSnapshotHashSecret(input.codexHomeSnapshotHashSecret);
+  const workspaceSnapshotSizeDiagnostics =
+    createHostedWorkspaceSnapshotSizeDiagnosticsCollector({
+      hashSecret: workspaceSnapshotHashSecret,
+    });
+  const preparedCodexContinuity = await prepareHostedCodexContinuitySnapshot({
+    assistantStateRoot,
+    prepareCodexContinuitySnapshot: input.prepareCodexContinuitySnapshot,
+  });
+  const hostedCodexContinuity = operatorHomeRoot
+    ? await collectHostedCodexContinuity({
+        assistantStateRoot,
+        hashSecret: workspaceSnapshotHashSecret,
+        operatorHomeRoot,
+        preparedThreads: preparedCodexContinuity.preparedThreads,
+      })
+    : await collectMissingHostedCodexContinuity(assistantStateRoot);
+  hostedCodexContinuity.flushFailed ||= preparedCodexContinuity.flushFailed;
+  const codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
+    collection: hostedCodexContinuity,
+    hashSecret: workspaceSnapshotHashSecret,
+  });
+  assertHostedCodexContinuityComplete(
+    hostedCodexContinuity,
+    codexHomeSnapshotDiagnostics,
+  );
+
+  const scan = await collectHostedPortableWorkspaceDeltaFiles({
+    artifactRefProvider: input.artifactRefProvider,
+    artifactSink: input.artifactSink,
+    baseManifest: input.baseManifest,
+    baseSnapshotHash: input.baseSnapshotHash,
+    codexHomeSnapshotDiagnostics,
+    codexContinuity: hostedCodexContinuity,
+    materializedArtifactPaths: input.materializedArtifactPaths,
+    operatorHomeRoot,
+    preservedArtifacts: input.preservedArtifacts,
+    vaultRoot,
+    workspaceSnapshotSizeDiagnostics,
+  });
+  await input.workspaceSnapshotSizeDiagnosticsSink?.(
+    workspaceSnapshotSizeDiagnostics.finish(),
+  );
+
+  if (scan.delta === null) {
+    return {
+      codexHomeSnapshotDiagnostics,
+      currentManifest: scan.currentManifest,
+      kind: "unchanged",
+      workspaceSnapshotSizeDiagnostics: workspaceSnapshotSizeDiagnostics.finish(),
+    };
+  }
+
+  return {
+    bundle: scan.delta.bundle,
+    codexHomeSnapshotDiagnostics,
+    kind: "changed",
+    manifest: scan.delta.manifest,
+    workspaceSnapshotSizeDiagnostics: workspaceSnapshotSizeDiagnostics.finish(),
+  };
+}
+
+async function snapshotHostedPortableWorkspaceBundleWithProviderContinuityPolicy(
   input: HostedExecutionContextSnapshotInput & {
     enforceProviderContinuity: boolean;
   },
@@ -319,10 +408,15 @@ async function snapshotHostedExecutionContextWithProviderContinuityPolicy(
       codexHomeSnapshotDiagnostics,
     );
   }
+  const codexContinuityArtifactPaths = createHostedCodexContinuitySnapshotArtifactPathSet(
+    hostedCodexContinuity,
+  );
   const vaultBundle = await snapshotHostedBundleRoots({
     assertSnapshotLive: input.assertSnapshotLive,
     externalizeFile: async (artifact) => {
-      const shouldExternalize = shouldExternalizeWorkspaceArtifact(artifact);
+      const shouldExternalize =
+        shouldExternalizeWorkspaceArtifact(artifact)
+        || codexContinuityArtifactPaths.has(`${artifact.root}:${artifact.path}`);
       const existingRef = shouldExternalize
         ? await input.artifactRefProvider?.(artifact) ?? null
         : null;
@@ -568,6 +662,420 @@ export function createHostedWorkspaceWorkingDeltaBundle(input: {
     files: deltaFiles,
     kind: "vault",
     schema: archive.schema,
+  });
+
+  return {
+    bundle: writeHostedBundleTextFile({
+      bytes: deltaBundle,
+      kind: "vault",
+      path: HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH,
+      root: HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
+      text: JSON.stringify(manifest) + "\n",
+    }),
+    manifest,
+  };
+}
+
+async function collectHostedPortableWorkspaceDeltaFiles(input: {
+  artifactRefProvider?: (
+    input: HostedBundleArtifactSnapshotInput,
+  ) => HostedBundleArtifactRef | null | Promise<HostedBundleArtifactRef | null>;
+  artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
+  baseManifest: HostedPortableWorkspaceManifest;
+  baseSnapshotHash: string;
+  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
+  codexContinuity: HostedCodexContinuityCollection;
+  materializedArtifactPaths?: ReadonlySet<string>;
+  operatorHomeRoot: string | null;
+  preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
+  vaultRoot: string;
+  workspaceSnapshotSizeDiagnostics: ReturnType<typeof createHostedWorkspaceSnapshotSizeDiagnosticsCollector>;
+}): Promise<{
+  currentManifest: HostedPortableWorkspaceManifest;
+  delta: {
+    bundle: Uint8Array;
+    manifest: HostedPortableWorkspaceDeltaManifest;
+  } | null;
+}> {
+  const files = new Map<string, HostedPortableWorkspaceManifestFile>();
+  const archiveFiles = new Map<string, HostedBundleArchiveFile>();
+  const includedPaths = new Set<string>();
+  const codexContinuityArtifactPaths = createHostedCodexContinuitySnapshotArtifactPathSet(
+    input.codexContinuity,
+  );
+
+  await collectHostedPortableWorkspaceDeltaRoot({
+    artifactRefProvider: input.artifactRefProvider,
+    artifactSink: input.artifactSink,
+    archiveFiles,
+    codexContinuityArtifactPaths,
+    files,
+    includedPaths,
+    root: input.vaultRoot,
+    rootKey: "vault",
+    shouldIncludeRelativePath(relativePath) {
+      return shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath);
+    },
+    workspaceSnapshotSizeDiagnostics: input.workspaceSnapshotSizeDiagnostics,
+  });
+
+  if (input.operatorHomeRoot) {
+    await collectHostedPortableWorkspaceDeltaRoot({
+      artifactRefProvider: input.artifactRefProvider,
+      artifactSink: input.artifactSink,
+      archiveFiles,
+      codexContinuityArtifactPaths,
+      explicitFiles: createHostedCodexContinuitySnapshotExplicitFiles(input.codexContinuity),
+      files,
+      includedPaths,
+      optional: true,
+      root: input.operatorHomeRoot,
+      rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
+      shouldIncludeRelativePath(relativePath) {
+        return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
+      },
+      workspaceSnapshotSizeDiagnostics: input.workspaceSnapshotSizeDiagnostics,
+    });
+  }
+
+  if (input.codexContinuity.entries.length > 0) {
+    await addHostedPortableWorkspaceDeltaInlineFile({
+      archiveFiles,
+      bytes: Buffer.from(
+        JSON.stringify(createHostedCodexContinuityManifestFromArchiveFiles({
+          codexHomeSnapshotDiagnostics: input.codexHomeSnapshotDiagnostics,
+          entries: input.codexContinuity.entries,
+          files: [...archiveFiles.values()],
+        })) + "\n",
+        "utf8",
+      ),
+      files,
+      path: HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
+      root: WORKSPACE_OPERATOR_HOME_ROOT,
+    });
+  }
+
+  carryForwardUnmaterializedHostedWorkspaceArtifacts({
+    archiveFiles,
+    files,
+    materializedArtifactPaths: input.materializedArtifactPaths,
+    preservedArtifacts: input.preservedArtifacts,
+  });
+
+  const currentManifest = finalizeHostedPortableWorkspaceManifest(
+    [...files.values()].sort(compareHostedPortableWorkspaceManifestFiles),
+  );
+  const delta = createHostedWorkspaceWorkingDeltaBundleFromManifestFiles({
+    archiveFiles,
+    baseManifest: input.baseManifest,
+    baseSnapshotHash: input.baseSnapshotHash,
+    currentManifest,
+  });
+
+  return {
+    currentManifest,
+    delta,
+  };
+}
+
+async function collectHostedPortableWorkspaceDeltaRoot(input: {
+  artifactRefProvider?: (
+    input: HostedBundleArtifactSnapshotInput,
+  ) => HostedBundleArtifactRef | null | Promise<HostedBundleArtifactRef | null>;
+  artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
+  archiveFiles: Map<string, HostedBundleArchiveFile>;
+  codexContinuityArtifactPaths: ReadonlySet<string>;
+  explicitFiles?: readonly string[];
+  files: Map<string, HostedPortableWorkspaceManifestFile>;
+  includedPaths: Set<string>;
+  optional?: boolean;
+  relativeDirectory?: string;
+  root: string;
+  rootKey: string;
+  shouldIncludeRelativePath: (relativePath: string) => boolean;
+  workspaceSnapshotSizeDiagnostics: ReturnType<typeof createHostedWorkspaceSnapshotSizeDiagnosticsCollector>;
+}): Promise<void> {
+  const relativeDirectory = input.relativeDirectory ?? "";
+  const directoryPath = relativeDirectory ? path.join(input.root, relativeDirectory) : input.root;
+  let entries;
+  try {
+    entries = await readdir(directoryPath, { withFileTypes: true });
+  } catch (error) {
+    if (input.optional && isMissingPathError(error)) {
+      return;
+    }
+    throw error;
+  }
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const relativePath = relativeDirectory
+      ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
+      : entry.name;
+
+    if (!input.shouldIncludeRelativePath(relativePath)) {
+      continue;
+    }
+
+    const absolutePath = path.join(directoryPath, entry.name);
+    if (entry.isDirectory()) {
+      await collectHostedPortableWorkspaceDeltaRoot({
+        ...input,
+        optional: false,
+        relativeDirectory: path.join(relativeDirectory, entry.name),
+      });
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    await addHostedPortableWorkspaceDeltaFile({
+      absolutePath,
+      artifactRefProvider: input.artifactRefProvider,
+      artifactSink: input.artifactSink,
+      archiveFiles: input.archiveFiles,
+      codexContinuityArtifactPaths: input.codexContinuityArtifactPaths,
+      files: input.files,
+      includedPaths: input.includedPaths,
+      path: normalizeWorkspaceSnapshotRelativePath(relativePath),
+      root: input.rootKey,
+      workspaceSnapshotSizeDiagnostics: input.workspaceSnapshotSizeDiagnostics,
+    });
+  }
+
+  if (relativeDirectory !== "") {
+    return;
+  }
+
+  for (const explicitFile of input.explicitFiles ?? []) {
+    const normalizedPath = normalizeWorkspaceSnapshotRelativePath(explicitFile);
+    if (input.includedPaths.has(`${input.rootKey}:${normalizedPath}`)) {
+      continue;
+    }
+    if (!(await isHostedPortableWorkspaceDeltaRegularFile(input.root, normalizedPath))) {
+      throw new Error(`Hosted portable workspace delta explicit file is not a regular file for root "${input.rootKey}".`);
+    }
+    await addHostedPortableWorkspaceDeltaFile({
+      absolutePath: path.join(input.root, ...normalizedPath.split(path.posix.sep)),
+      artifactRefProvider: input.artifactRefProvider,
+      artifactSink: input.artifactSink,
+      archiveFiles: input.archiveFiles,
+      codexContinuityArtifactPaths: input.codexContinuityArtifactPaths,
+      files: input.files,
+      includedPaths: input.includedPaths,
+      path: normalizedPath,
+      root: input.rootKey,
+      workspaceSnapshotSizeDiagnostics: input.workspaceSnapshotSizeDiagnostics,
+    });
+  }
+}
+
+async function addHostedPortableWorkspaceDeltaFile(input: {
+  absolutePath: string;
+  artifactRefProvider?: (
+    input: HostedBundleArtifactSnapshotInput,
+  ) => HostedBundleArtifactRef | null | Promise<HostedBundleArtifactRef | null>;
+  artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
+  archiveFiles: Map<string, HostedBundleArchiveFile>;
+  codexContinuityArtifactPaths: ReadonlySet<string>;
+  files: Map<string, HostedPortableWorkspaceManifestFile>;
+  includedPaths: Set<string>;
+  path: string;
+  root: string;
+  workspaceSnapshotSizeDiagnostics: ReturnType<typeof createHostedWorkspaceSnapshotSizeDiagnosticsCollector>;
+}): Promise<void> {
+  const key = `${input.root}:${input.path}`;
+  if (input.includedPaths.has(key)) {
+    return;
+  }
+
+  const bytes = new Uint8Array(await readFile(input.absolutePath));
+  const artifactInput = {
+    absolutePath: input.absolutePath,
+    bytes,
+    path: input.path,
+    root: input.root,
+  };
+  const shouldExternalize =
+    shouldExternalizeWorkspaceArtifact(artifactInput)
+    || input.codexContinuityArtifactPaths.has(key);
+  const existingRef = shouldExternalize
+    ? await input.artifactRefProvider?.(artifactInput) ?? null
+    : null;
+  const willExternalize = shouldExternalize && (existingRef !== null || Boolean(input.artifactSink));
+  input.workspaceSnapshotSizeDiagnostics.record({
+    artifact: artifactInput,
+    externalized: willExternalize,
+  });
+
+  if (willExternalize) {
+    const ref = existingRef ?? createHostedWorkspaceArtifactRef(bytes);
+    if (!existingRef) {
+      await input.artifactSink?.({
+        ...artifactInput,
+        ref,
+      });
+    }
+    input.files.set(key, {
+      artifact: ref,
+      path: input.path,
+      root: input.root,
+      sha256: ref.sha256,
+      size: ref.byteSize,
+    });
+    input.archiveFiles.set(key, {
+      artifact: ref,
+      path: input.path,
+      root: input.root,
+    });
+    input.includedPaths.add(key);
+    return;
+  }
+
+  addHostedPortableWorkspaceDeltaInlineFile({
+    archiveFiles: input.archiveFiles,
+    bytes,
+    files: input.files,
+    path: input.path,
+    root: input.root,
+  });
+  input.includedPaths.add(key);
+}
+
+async function isHostedPortableWorkspaceDeltaRegularFile(
+  root: string,
+  relativePath: string,
+): Promise<boolean> {
+  const absolutePath = path.join(
+    root,
+    ...normalizeWorkspaceSnapshotRelativePath(relativePath).split(path.posix.sep),
+  );
+  try {
+    const stats = await lstat(absolutePath);
+    return stats.isFile();
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function addHostedPortableWorkspaceDeltaInlineFile(input: {
+  archiveFiles: Map<string, HostedBundleArchiveFile>;
+  bytes: Uint8Array;
+  files: Map<string, HostedPortableWorkspaceManifestFile>;
+  path: string;
+  root: string;
+}): void {
+  const key = `${input.root}:${input.path}`;
+  input.files.set(key, {
+    path: input.path,
+    root: input.root,
+    sha256: sha256BytesHex(input.bytes),
+    size: input.bytes.byteLength,
+  });
+  input.archiveFiles.set(key, {
+    contentsBase64: Buffer.from(input.bytes).toString("base64"),
+    path: input.path,
+    root: input.root,
+  });
+}
+
+function carryForwardUnmaterializedHostedWorkspaceArtifacts(input: {
+  archiveFiles: Map<string, HostedBundleArchiveFile>;
+  files: Map<string, HostedPortableWorkspaceManifestFile>;
+  materializedArtifactPaths?: ReadonlySet<string>;
+  preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
+}): void {
+  const materializedArtifactPathKeys = new Set(
+    [...(input.materializedArtifactPaths ?? [])]
+      .map((relativePath) => normalizeWorkspaceSnapshotArtifactPathKey(relativePath))
+      .filter((artifactPathKey): artifactPathKey is string => artifactPathKey !== null),
+  );
+
+  for (const artifact of input.preservedArtifacts ?? []) {
+    const normalizedPath = normalizeWorkspaceSnapshotRelativePath(artifact.path);
+    const key = `${artifact.root}:${normalizedPath}`;
+    if (input.files.has(key) || materializedArtifactPathKeys.has(key)) {
+      continue;
+    }
+    const file = {
+      artifact: artifact.ref,
+      path: normalizedPath,
+      root: artifact.root,
+      sha256: artifact.ref.sha256,
+      size: artifact.ref.byteSize,
+    };
+    input.files.set(key, file);
+    input.archiveFiles.set(key, {
+      artifact: artifact.ref,
+      path: normalizedPath,
+      root: artifact.root,
+    });
+  }
+}
+
+function createHostedWorkspaceWorkingDeltaBundleFromManifestFiles(input: {
+  archiveFiles: ReadonlyMap<string, HostedBundleArchiveFile>;
+  baseManifest: HostedPortableWorkspaceManifest;
+  baseSnapshotHash: string;
+  currentManifest: HostedPortableWorkspaceManifest;
+}): {
+  bundle: Uint8Array;
+  manifest: HostedPortableWorkspaceDeltaManifest;
+} | null {
+  const baseFiles = new Map(input.baseManifest.files.map((file) => [
+    hostedPortableWorkspaceManifestFileKey(file),
+    file,
+  ]));
+  const currentFiles = new Map(input.currentManifest.files.map((file) => [
+    hostedPortableWorkspaceManifestFileKey(file),
+    file,
+  ]));
+  const upserts = input.currentManifest.files.filter((file) => {
+    const baseFile = baseFiles.get(hostedPortableWorkspaceManifestFileKey(file));
+    return !baseFile || !hostedPortableWorkspaceManifestFilesEqual(baseFile, file);
+  });
+  const tombstones = input.baseManifest.files
+    .filter((file) => !currentFiles.has(hostedPortableWorkspaceManifestFileKey(file)))
+    .map((file): HostedPortableWorkspaceDeltaTombstone => ({
+      path: file.path,
+      root: file.root,
+    }))
+    .sort(compareHostedPortableWorkspaceDeltaTombstones);
+
+  if (upserts.length === 0 && tombstones.length === 0) {
+    return null;
+  }
+
+  const deltaFiles: HostedBundleArchiveFile[] = upserts.map((upsert) => {
+    const key = hostedPortableWorkspaceManifestFileKey(upsert);
+    const archiveFile = input.archiveFiles.get(key);
+    if (archiveFile) {
+      return archiveFile;
+    }
+    if (upsert.artifact) {
+      return {
+        artifact: upsert.artifact,
+        path: upsert.path,
+        root: upsert.root,
+      };
+    }
+    throw new Error(`Hosted workspace working delta upsert "${key}" is missing from the current scan.`);
+  });
+  const manifest = finalizeHostedPortableWorkspaceDeltaManifest({
+    baseManifestHash: input.baseManifest.manifestHash,
+    baseSnapshotHash: input.baseSnapshotHash,
+    effectiveManifestHash: input.currentManifest.manifestHash,
+    tombstones,
+    upserts,
+  });
+  const deltaBundle = serializeHostedBundleArchive({
+    files: deltaFiles,
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
   });
 
   return {
@@ -911,8 +1419,11 @@ async function snapshotHostedAssistantRuntimeHotStateOnce(input: {
     hostedCodexContinuity,
   );
 
+  await input.assertSnapshotLive?.();
   const bundle = await snapshotHostedBundleRoots({
-    assertSnapshotLive: input.assertSnapshotLive,
+    // Hot checkpoints are already bounded and the Cloudflare bridge checks the
+    // active lease before snapshot and before publish. Keep live hot snapshots
+    // from turning many tiny hot-state files into many runner lease RPCs.
     externalizeFile: async (artifact) => {
       if (!codexContinuityArtifactPaths.has(`${artifact.root}:${artifact.path}`)) {
         return null;
@@ -2520,18 +3031,11 @@ function createHostedCodexContinuityManifest(entries: HostedCodexContinuityEntry
   };
 }
 
-function createHostedCodexContinuityManifestFromBundle(input: {
-  bytes: Uint8Array | ArrayBuffer;
+function createHostedCodexContinuityManifestFromArchiveFiles(input: {
   codexHomeSnapshotDiagnostics?: HostedCodexHomeSnapshotDiagnostics | null;
   entries: HostedCodexContinuityEntry[];
+  files: readonly HostedBundleArchiveFile[];
 }): ReturnType<typeof createHostedCodexContinuityManifest> {
-  const archive = parseHostedBundleArchive(input.bytes);
-  if (archive.kind !== "vault") {
-    throw new Error(
-      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
-    );
-  }
-
   const expectedThreadKeys = new Set(
     input.entries.map((entry) =>
       createHostedCodexContinuityThreadKey({
@@ -2547,7 +3051,9 @@ function createHostedCodexContinuityManifestFromBundle(input: {
       expectedEntriesByProviderSessionId.set(entry.providerSessionId, entry);
     }
   }
-  const finalRequirements = readHostedCodexContinuityRequirementsFromBundleArchive(archive);
+  const finalRequirements = readHostedCodexContinuityRequirementsFromBundleArchive({
+    files: input.files,
+  });
   const finalThreadKeys = new Set<string>();
   const finalEntries: HostedCodexContinuityEntry[] = [];
 
@@ -2575,7 +3081,7 @@ function createHostedCodexContinuityManifestFromBundle(input: {
     }
 
     const snapshotPath = `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${normalizedPath.relativePath}`;
-    const rolloutFile = archive.files.find((file) =>
+    const rolloutFile = input.files.find((file) =>
       file.root === WORKSPACE_OPERATOR_HOME_ROOT && file.path === snapshotPath
     );
     if (!rolloutFile) {
@@ -2617,8 +3123,27 @@ function createHostedCodexContinuityManifestFromBundle(input: {
   return createHostedCodexContinuityManifest(finalEntries);
 }
 
+function createHostedCodexContinuityManifestFromBundle(input: {
+  bytes: Uint8Array | ArrayBuffer;
+  codexHomeSnapshotDiagnostics?: HostedCodexHomeSnapshotDiagnostics | null;
+  entries: HostedCodexContinuityEntry[];
+}): ReturnType<typeof createHostedCodexContinuityManifest> {
+  const archive = parseHostedBundleArchive(input.bytes);
+  if (archive.kind !== "vault") {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected vault, got ${archive.kind}.`,
+    );
+  }
+
+  return createHostedCodexContinuityManifestFromArchiveFiles({
+    codexHomeSnapshotDiagnostics: input.codexHomeSnapshotDiagnostics,
+    entries: input.entries,
+    files: archive.files,
+  });
+}
+
 function readHostedCodexContinuityRequirementsFromBundleArchive(input: {
-  files: HostedBundleArchiveFile[];
+  files: readonly HostedBundleArchiveFile[];
 }): Array<{
   codexRolloutRelativePath: string | null;
   providerSessionId: string;

@@ -1,6 +1,7 @@
 import { Container, type OutboundHandlerContext, type StopParams } from "@cloudflare/containers";
 import {
   type HostedAssistantWorkspaceRuntimeJobResult,
+  type HostedAssistantRuntimeConfig,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   emitHostedExecutionStructuredLog,
@@ -32,6 +33,7 @@ const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_CONTROL_HEALTH_URL = "http://container/internal/control-health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
+const RUNNER_BROWSER_VAULT_REFRESH_URL = "http://container/internal/browser-vault-refresh";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
@@ -74,6 +76,26 @@ interface HostedExecutionContainerInvokeRequest {
 
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
+interface HostedExecutionContainerBrowserVaultRefreshRequest {
+  runtime: HostedAssistantRuntimeConfig;
+  sourceStateHash: string;
+  timeoutMs: number;
+  userId: string;
+}
+
+type HostedExecutionContainerBrowserVaultRefreshResult =
+  | {
+      replica: unknown;
+      sourceStateHash: string;
+      status: "generated";
+      userId: string;
+    }
+  | {
+      sourceStateHash: string;
+      status: "already_fresh" | "stale_source" | "workspace_missing";
+      userId: string;
+    };
+
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   runnerContainerName?: string;
@@ -91,6 +113,9 @@ export interface HostedExecutionContainerStubLike {
     token: string;
     userId?: string;
   }): Promise<boolean>;
+  refreshBrowserVaultReplica?(
+    input: HostedExecutionContainerBrowserVaultRefreshRequest,
+  ): Promise<HostedExecutionContainerBrowserVaultRefreshResult>;
   smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult>;
 }
 
@@ -181,6 +206,16 @@ export class RunnerContainer extends Container {
     await this.withLifecycleLock(async () => {
       await this.stopWarmContainer();
     });
+  }
+
+  async refreshBrowserVaultReplica(
+    payload: HostedExecutionContainerBrowserVaultRefreshRequest,
+  ): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
+    return this.withLifecycleLock(async () =>
+      this.invokeHostedBrowserVaultRefresh(
+        parseHostedExecutionContainerBrowserVaultRefreshInput(payload),
+      )
+    );
   }
 
   async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
@@ -335,7 +370,11 @@ export class RunnerContainer extends Container {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/internal/workspace-invocation" || url.pathname === "/internal/destroy") {
+    if (
+      url.pathname === "/internal/workspace-invocation"
+      || url.pathname === "/internal/browser-vault-refresh"
+      || url.pathname === "/internal/destroy"
+    ) {
       return methodNotAllowed();
     }
 
@@ -468,8 +507,111 @@ export class RunnerContainer extends Container {
     }
   }
 
+  private async invokeHostedBrowserVaultRefresh(
+    input: HostedExecutionContainerBrowserVaultRefreshRequest,
+  ): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
+    const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
+      this.environment,
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV,
+    );
+    const logContext: RunnerContainerLogContext = {
+      userId: input.userId,
+    };
+    const outboundProxyState: RunnerOutboundProxyState = {
+      attemptId: `browser-vault-refresh:${input.sourceStateHash}`,
+      leaseGeneration: "0",
+      token: createRunnerOutboundProxyToken(),
+      userId: input.userId,
+    };
+    let completedSuccessfully = false;
+    this.currentLogContext = logContext;
+    this.activeInvocationCount += 1;
+    const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
+    await this.noteRunnerActivityDurably("browser-vault-refresh-started");
+
+    try {
+      const startTime = Date.now();
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          hasLocalInternalProxyBaseUrl: localInternalProxyBaseUrl !== null,
+          readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
+          runnerIdleTtlMs: readRunnerIdleTtlMs(this.environment),
+          runnerPort: RUNNER_PORT,
+          timeoutMs: input.timeoutMs,
+        },
+        message: "Hosted execution container browser-vault refresh received.",
+        phase: "container.starting",
+        userId: input.userId,
+      });
+      const runnerControlToken = await this.ensureContainerReady(input);
+      await this.noteRunnerActivityDurably("container-ready");
+      this.runnerOutboundProxyState = outboundProxyState;
+      await this.installOutboundHandlers(outboundProxyState);
+
+      const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
+      const response = await this.containerFetch(
+        RUNNER_BROWSER_VAULT_REFRESH_URL,
+        {
+          body: JSON.stringify({
+            internalWorkerProxyToken: outboundProxyState.token,
+            localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
+              localInternalProxyBaseUrl,
+              userId: input.userId,
+            }),
+            runtime: input.runtime,
+            sourceStateHash: input.sourceStateHash,
+            userId: input.userId,
+          }),
+          headers: {
+            authorization: `Bearer ${runnerControlToken}`,
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+          signal: AbortSignal.timeout(remainingTimeoutMs),
+        },
+        RUNNER_PORT,
+      );
+      await this.noteRunnerActivityDurably("browser-vault-refresh-response-received");
+
+      if (!response.ok) {
+        throw await classifyHostedRunnerContainerErrorResponse(response);
+      }
+
+      const result = parseHostedBrowserVaultRefreshContainerResult(await response.json());
+      completedSuccessfully = true;
+      return result;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        message: "Hosted execution container browser-vault refresh failed.",
+        phase: "failed",
+        userId: input.userId,
+      });
+      throw error;
+    } finally {
+      try {
+        const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
+        const shouldKeepWarm = completedSuccessfully && outboundProxyExpired;
+        if (!shouldKeepWarm) {
+          await this.stopWarmContainer({
+            failClosed: true,
+          });
+        }
+      } finally {
+        stopRunnerActivityRenewal();
+        this.activeInvocationCount = Math.max(0, this.activeInvocationCount - 1);
+        await this.noteRunnerActivityDurably("browser-vault-refresh-finished");
+        if (this.currentLogContext === logContext) {
+          this.currentLogContext = null;
+        }
+      }
+    }
+  }
+
   private async ensureContainerReady(
-    input: HostedExecutionContainerInvokeInput,
+    input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
   ): Promise<string> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
@@ -981,6 +1123,29 @@ export async function invokeHostedExecutionContainerRunner(
   });
 }
 
+export async function refreshHostedExecutionContainerBrowserVaultReplica(input: {
+  runnerContainerName?: string;
+  runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
+  runtime: HostedAssistantRuntimeConfig;
+  sourceStateHash: string;
+  timeoutMs: number;
+  userId: string;
+}): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
+  const container = input.runnerContainerNamespace.getByName(
+    input.runnerContainerName ?? input.userId,
+  );
+  if (!container.refreshBrowserVaultReplica) {
+    throw new Error("Hosted runner container does not support browser-vault refresh.");
+  }
+
+  return container.refreshBrowserVaultReplica({
+    runtime: input.runtime,
+    sourceStateHash: input.sourceStateHash,
+    timeoutMs: input.timeoutMs,
+    userId: input.userId,
+  });
+}
+
 async function classifyHostedRunnerContainerErrorResponse(
   response: Response,
 ): Promise<Error> {
@@ -1330,6 +1495,67 @@ function parseHostedExecutionContainerInvokeInput(
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId,
   };
+}
+
+function parseHostedExecutionContainerBrowserVaultRefreshInput(
+  payload: {
+    runtime?: unknown;
+    sourceStateHash?: unknown;
+    timeoutMs?: unknown;
+    userId?: unknown;
+  },
+): HostedExecutionContainerBrowserVaultRefreshRequest {
+  return {
+    runtime: readHostedAssistantRuntimeConfig(payload.runtime),
+    sourceStateHash: requireString(payload.sourceStateHash, "payload.sourceStateHash"),
+    timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
+    userId: requireString(payload.userId, "payload.userId"),
+  };
+}
+
+function readHostedAssistantRuntimeConfig(value: unknown): HostedAssistantRuntimeConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("payload.runtime must be an object.");
+  }
+
+  return value as HostedAssistantRuntimeConfig;
+}
+
+function parseHostedBrowserVaultRefreshContainerResult(
+  value: unknown,
+): HostedExecutionContainerBrowserVaultRefreshResult {
+  const record = requireRecord(value, "Hosted browser-vault refresh container result");
+  const status = requireString(record.status, "Hosted browser-vault refresh container result.status");
+  const sourceStateHash = requireString(
+    record.sourceStateHash,
+    "Hosted browser-vault refresh container result.sourceStateHash",
+  );
+  const userId = requireString(record.userId, "Hosted browser-vault refresh container result.userId");
+
+  if (status === "generated") {
+    if (!Object.hasOwn(record, "replica")) {
+      throw new TypeError("Hosted browser-vault refresh container result.replica is required.");
+    }
+
+    return {
+      replica: record.replica,
+      sourceStateHash,
+      status,
+      userId,
+    };
+  }
+
+  if (status === "already_fresh" || status === "stale_source" || status === "workspace_missing") {
+    return {
+      sourceStateHash,
+      status,
+      userId,
+    };
+  }
+
+  throw new TypeError(
+    "Hosted browser-vault refresh container result.status must be generated, already_fresh, stale_source, or workspace_missing.",
+  );
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

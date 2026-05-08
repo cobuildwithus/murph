@@ -14,6 +14,7 @@ import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
+  HostedBrowserVaultReplicaPublishResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
@@ -51,6 +52,10 @@ export interface HostedRuntimeArtifactStore {
 }
 
 export interface HostedRuntimeBrowserVaultReplicaPort {
+  publishRef?(input: {
+    expectedSourceStateHash: string;
+    replicaRef: HostedBrowserVaultReplicaRef;
+  }): Promise<HostedBrowserVaultReplicaPublishResponse>;
   write(input: {
     replica: unknown;
   }): Promise<HostedBrowserVaultReplicaRef>;

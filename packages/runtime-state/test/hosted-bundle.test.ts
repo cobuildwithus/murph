@@ -2024,7 +2024,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       },
       { expected: null, path: ".codex-hosted/session_index.jsonl", root: "operator-home" },
       {
-        expected: activeCodexRolloutJson,
+        expected: null,
         path: `.codex-hosted/${activeCodexRolloutRelativePath}`,
         root: "operator-home",
       },
@@ -2143,10 +2143,15 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       expectedKind: "vault",
     });
     assert.deepEqual(
-      artifactRefs.map((artifact) => artifact.path),
-      ["raw/inbox/2026-03-28/capture_123/attachments/report.pdf"],
+      artifactRefs.map((artifact) => artifact.path).sort(),
+      [
+        "raw/inbox/2026-03-28/capture_123/attachments/report.pdf",
+        `.codex-hosted/${activeCodexRolloutRelativePath}`,
+      ].sort(),
     );
-    assert.equal(artifacts.has(artifactRefs[0]!.ref.sha256), true);
+    for (const artifactRef of artifactRefs) {
+      assert.equal(artifacts.has(artifactRef.ref.sha256), true);
+    }
 
     const restored = await restoreHostedExecutionContext({
       artifactResolver: async ({ ref }) => {

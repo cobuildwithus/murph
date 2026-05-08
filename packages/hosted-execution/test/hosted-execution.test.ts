@@ -402,6 +402,7 @@ describe("hosted execution coverage gaps", () => {
     expect("HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH" in routeModule).toBe(false);
     expect("HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH" in routeModule).toBe(false);
     expect(Object.keys(routeModule).sort()).toEqual([
+      "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",

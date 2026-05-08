@@ -230,6 +230,40 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("keeps one replaceable pending browser-vault refresh source hash", async () => {
+    const { store } = createRunnerStateStoreHarness();
+
+    await expect(store.scheduleBrowserVaultRefresh({
+      sourceStateHash: "a".repeat(64),
+    })).resolves.toEqual({
+      deduped: false,
+      sourceStateHash: "a".repeat(64),
+    });
+    await expect(store.scheduleBrowserVaultRefresh({
+      sourceStateHash: "a".repeat(64),
+    })).resolves.toEqual({
+      deduped: true,
+      sourceStateHash: "a".repeat(64),
+    });
+    await expect(store.readPendingBrowserVaultRefresh()).resolves.toEqual({
+      sourceStateHash: "a".repeat(64),
+    });
+
+    await expect(store.scheduleBrowserVaultRefresh({
+      sourceStateHash: "b".repeat(64),
+    })).resolves.toEqual({
+      deduped: false,
+      sourceStateHash: "b".repeat(64),
+    });
+    await expect(store.clearPendingBrowserVaultRefresh({
+      sourceStateHash: "a".repeat(64),
+    })).resolves.toBe(false);
+    await expect(store.clearPendingBrowserVaultRefresh({
+      sourceStateHash: "b".repeat(64),
+    })).resolves.toBe(true);
+    await expect(store.readPendingBrowserVaultRefresh()).resolves.toBeNull();
+  });
+
   it("ignores stale invocation completion and failure metadata", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");

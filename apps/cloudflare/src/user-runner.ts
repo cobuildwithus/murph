@@ -1,4 +1,5 @@
 import type {
+  HostedBrowserVaultReplicaPublishResponse,
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedRuntimeWebStatusResponse,
@@ -11,12 +12,15 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceReadResponse,
+  readHostedBrowserVaultSourceStateHash,
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -47,6 +51,7 @@ import {
 import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
+  refreshHostedExecutionContainerBrowserVaultReplica,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -68,6 +73,9 @@ import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
+import {
+  createHostedBrowserVaultReplicaStore,
+} from "./browser-vault-store.ts";
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
@@ -109,6 +117,13 @@ export interface HostedRunnerUserDataDeletionResult {
   userId: string;
 }
 
+export interface HostedBrowserVaultRefreshScheduleResult {
+  accepted: true;
+  immediateRefreshStarted: boolean;
+  sourceStateHash: string;
+  userId: string;
+}
+
 interface RunnerUserStores {
   crypto: HostedUserCryptoContext;
   runnerSecrets: RunnerSecretsService;
@@ -128,6 +143,8 @@ export class HostedUserRunner {
   private runnerStores: RunnerUserStores | null = null;
   private runtimeCryptoContextLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
+  private browserVaultRefreshAbortController: AbortController | null = null;
+  private browserVaultRefreshLock: Promise<void> | null = null;
   private pendingRunnerDriveAfterInvocation: {
     reason: HostedWorkspaceInvocationReason;
     userId: string;
@@ -415,6 +432,10 @@ export class HostedUserRunner {
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
     let runningRecord = await this.stateStore.readState();
+    await this.abortBrowserVaultRefreshIfRunning({
+      reason: "pending_nudge",
+      userId: runningRecord.userId,
+    });
     if (!activeInThisIsolate && runningRecord.inFlight) {
       const recovery = await this.stateStore.clearStaleInvocationIfExpired({
         nowMs: Date.now(),
@@ -480,6 +501,36 @@ export class HostedUserRunner {
   async nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult> {
     await this.stateStore.bindUser(userId);
     return this.nudgeHostedRunner();
+  }
+
+  async scheduleBrowserVaultRefreshForUser(input: {
+    sourceStateHash: string;
+    userId: string;
+  }): Promise<HostedBrowserVaultRefreshScheduleResult> {
+    await this.stateStore.bindUser(input.userId);
+    await this.stateStore.scheduleBrowserVaultRefresh({
+      sourceStateHash: input.sourceStateHash,
+    });
+    const immediateRefreshStarted = this.startDetachedBrowserVaultRefresh({
+      userId: input.userId,
+    });
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        immediateRefreshStarted,
+      },
+      message: "Hosted runner accepted browser-vault refresh schedule.",
+      phase: "scheduled",
+      userId: input.userId,
+    });
+
+    return {
+      accepted: true,
+      immediateRefreshStarted,
+      sourceStateHash: input.sourceStateHash,
+      userId: input.userId,
+    };
   }
 
   async ownsActiveInvocationLease(input: {
@@ -765,6 +816,10 @@ export class HostedUserRunner {
               userId: initialRecord.userId,
             });
           }
+          await this.scheduleBrowserVaultRefreshAfterWorkspaceChange({
+            previousWorkspace: workspaceRead.workspace,
+            userId: initialRecord.userId,
+          });
         }
       }
       emitHostedExecutionStructuredLog({
@@ -1138,6 +1193,35 @@ export class HostedUserRunner {
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
       timeoutMs: this.env.runnerTimeoutMs,
+      userId: input.userId,
+    });
+  }
+
+  private async scheduleBrowserVaultRefreshAfterWorkspaceChange(input: {
+    previousWorkspace: HostedWorkspaceState | null;
+    userId: string;
+  }): Promise<void> {
+    const record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight) {
+      return;
+    }
+
+    const workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
+    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
+    const previousSourceStateHash = readHostedBrowserVaultSourceStateHash(
+      input.previousWorkspace?.snapshotRef ?? null,
+    );
+    const nextSourceStateHash = readHostedBrowserVaultSourceStateHash(
+      workspaceRead.workspace?.snapshotRef ?? null,
+    );
+    if (!nextSourceStateHash || nextSourceStateHash === previousSourceStateHash) {
+      return;
+    }
+
+    await this.stateStore.scheduleBrowserVaultRefresh({
+      sourceStateHash: nextSourceStateHash,
+    });
+    this.startDetachedBrowserVaultRefresh({
       userId: input.userId,
     });
   }
@@ -1608,6 +1692,252 @@ export class HostedUserRunner {
     return true;
   }
 
+  private startDetachedBrowserVaultRefresh(input: {
+    userId: string;
+  }): boolean {
+    if (this.browserVaultRefreshLock !== null || this.invocationLock !== null) {
+      return false;
+    }
+
+    const abortController = new AbortController();
+    this.browserVaultRefreshAbortController = abortController;
+    const refresh = this.runPendingBrowserVaultRefresh({
+      signal: abortController.signal,
+      userId: input.userId,
+    }).then(() => undefined, (error) => {
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted runner browser-vault refresh failed; pending refresh remains best-effort.",
+        phase: "failed",
+        userId: input.userId,
+      });
+    }).finally(() => {
+      if (this.browserVaultRefreshLock === refresh) {
+        this.browserVaultRefreshLock = null;
+      }
+      if (this.browserVaultRefreshAbortController === abortController) {
+        this.browserVaultRefreshAbortController = null;
+      }
+    });
+
+    this.browserVaultRefreshLock = refresh;
+    try {
+      this.state.waitUntil?.(refresh);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted runner browser-vault refresh could not be registered with Durable Object waitUntil.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+    }
+
+    return true;
+  }
+
+  private async abortBrowserVaultRefreshIfRunning(input: {
+    reason: string;
+    userId: string;
+  }): Promise<void> {
+    if (!this.browserVaultRefreshAbortController) {
+      return;
+    }
+
+    this.browserVaultRefreshAbortController.abort(new Error(input.reason));
+    if (this.runnerContainerNamespace) {
+      try {
+        await destroyHostedExecutionContainer({
+          runnerContainerName: resolveHostedExecutionRunnerContainerName({
+            source: this.runnerRuntimeEnvSource,
+            userId: input.userId,
+          }),
+          runnerContainerNamespace: this.runnerContainerNamespace,
+          userId: input.userId,
+        });
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          error,
+          level: "warn",
+          message: "Hosted runner could not stop optional browser-vault refresh container.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+      }
+    }
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        reason: input.reason,
+      },
+      message: "Hosted runner aborted optional browser-vault refresh.",
+      phase: "scheduled",
+      userId: input.userId,
+    });
+  }
+
+  private async runPendingBrowserVaultRefresh(input: {
+    signal: AbortSignal;
+    userId: string;
+  }): Promise<void> {
+    const pending = await this.stateStore.readPendingBrowserVaultRefresh();
+    if (!pending) {
+      return;
+    }
+
+    let record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
+      return;
+    }
+
+    let workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
+    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
+    let workspace = workspaceRead.workspace;
+    const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(
+      workspace?.snapshotRef ?? null,
+    );
+    if (!workspace || currentSourceStateHash !== pending.sourceStateHash) {
+      await this.stateStore.clearPendingBrowserVaultRefresh({
+        sourceStateHash: pending.sourceStateHash,
+      });
+      return;
+    }
+
+    if (workspace.browserVaultReplicaRef?.sourceBundleHash === pending.sourceStateHash) {
+      await this.stateStore.clearPendingBrowserVaultRefresh({
+        sourceStateHash: pending.sourceStateHash,
+      });
+      return;
+    }
+
+    if (!this.runnerContainerNamespace) {
+      throw new Error("Native hosted execution requires a RunnerContainer binding.");
+    }
+
+    const { crypto, runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(input.userId);
+    const runnerSecrets = await runnerSecretsService.readRunnerSecrets(input.userId);
+    const forwardedEnv = buildHostedRunnerContainerEnv(
+      this.runnerRuntimeEnvSource,
+    );
+    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
+      configSource: this.readRunnerRuntimeConfigSource(),
+      forwardedEnv,
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets,
+    });
+    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+      source: this.runnerRuntimeEnvSource,
+      userId: input.userId,
+    });
+
+    const generated = await refreshHostedExecutionContainerBrowserVaultReplica({
+      runnerContainerName,
+      runnerContainerNamespace: this.runnerContainerNamespace,
+      runtime: runtimeConfig,
+      sourceStateHash: pending.sourceStateHash,
+      timeoutMs: this.env.runnerTimeoutMs,
+      userId: input.userId,
+    });
+
+    if (input.signal.aborted) {
+      return;
+    }
+
+    if (generated.status !== "generated") {
+      await this.stateStore.clearPendingBrowserVaultRefresh({
+        sourceStateHash: pending.sourceStateHash,
+      });
+      return;
+    }
+
+    record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
+      return;
+    }
+
+    workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
+    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
+    workspace = workspaceRead.workspace;
+    if (
+      readHostedBrowserVaultSourceStateHash(workspace?.snapshotRef ?? null)
+        !== pending.sourceStateHash
+    ) {
+      await this.stateStore.clearPendingBrowserVaultRefresh({
+        sourceStateHash: pending.sourceStateHash,
+      });
+      return;
+    }
+    if (workspace?.browserVaultReplicaRef?.sourceBundleHash === pending.sourceStateHash) {
+      await this.stateStore.clearPendingBrowserVaultRefresh({
+        sourceStateHash: pending.sourceStateHash,
+      });
+      return;
+    }
+
+    const replicaStore = createHostedBrowserVaultReplicaStore({
+      bucket: this.bucket,
+      keysById: crypto.keysById,
+      resolveRootKeyById: crypto.resolveKeyById,
+      rootKey: crypto.rootKey,
+      rootKeyId: crypto.rootKeyId,
+      userId: input.userId,
+    });
+    const replicaRef = await replicaStore.writeBrowserVaultReplica({
+      replica: generated.replica,
+      userId: input.userId,
+    });
+    const publish = await this.publishBrowserVaultReplicaRef({
+      expectedSourceStateHash: pending.sourceStateHash,
+      replicaRef,
+      userId: input.userId,
+    });
+
+    if (
+      publish.published
+      || readHostedBrowserVaultSourceStateHash(publish.workspace.snapshotRef) !== pending.sourceStateHash
+    ) {
+      await this.stateStore.clearPendingBrowserVaultRefresh({
+        sourceStateHash: pending.sourceStateHash,
+      });
+    }
+  }
+
+  private async publishBrowserVaultReplicaRef(input: {
+    expectedSourceStateHash: string;
+    replicaRef: NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]>;
+    userId: string;
+  }): Promise<HostedBrowserVaultReplicaPublishResponse> {
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(this.env.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
+        : {}),
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      body: JSON.stringify({
+        expectedSourceStateHash: input.expectedSourceStateHash,
+        replicaRef: input.replicaRef,
+      }),
+      boundUserId: input.userId,
+      callbackSigning: this.env.webCallbackSigning,
+      method: "POST",
+      path: HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+      timeoutMs: this.env.webControlTimeoutMs,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Hosted browser-vault replica publish failed with HTTP ${response.status}.`);
+    }
+
+    return parseHostedBrowserVaultReplicaPublishResponse(await response.json());
+  }
+
   private startDetachedRunnerDrive(input: {
     reason: HostedWorkspaceInvocationReason;
     userId: string;
@@ -1769,6 +2099,16 @@ export class HostedUserRunner {
         const started = this.startDetachedRunnerDrive(pendingDrive);
         if (!started) {
           this.pendingRunnerDriveAfterInvocation = pendingDrive;
+        }
+      }
+
+      if (!this.pendingRunnerDriveAfterInvocation && this.invocationLock === null) {
+        const pendingRefresh = await this.stateStore.readPendingBrowserVaultRefresh();
+        const record = pendingRefresh ? await this.stateStore.readState() : null;
+        if (pendingRefresh && record && !record.pendingNudge && !record.inFlight) {
+          this.startDetachedBrowserVaultRefresh({
+            userId: record.userId,
+          });
         }
       }
     }
