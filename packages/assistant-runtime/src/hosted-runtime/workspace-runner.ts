@@ -274,13 +274,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       requestId: input.requestId,
     });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
-  if (input.runAssistantPhase) {
-    await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
-      checkpointRequestBuilder: checkpointRequestSession,
-      input,
-      phase: "import",
-    });
-  }
 
   if (!input.runAssistantPhase) {
     await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
@@ -375,14 +368,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     }
-    await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
+    scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
+      phase: "import",
     });
   } catch (error) {
-    await runHostedMailboxPostCheckpointEffectsBestEffort(
-      checkpointRequestSession.takeMailboxPostCheckpointEffects(),
-    );
+    scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      input,
+      phase: "import",
+    });
     throw error;
   }
 
@@ -446,7 +442,7 @@ function withActiveTurnInputWorkspacePorts(input: {
         input.checkpointRequestBuilder.recordCheckpointResult(result);
       }
       if (result.checkpoint?.checkpointed === true) {
-        await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+        scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           input: input.input,
           phase: "active_turn_input",
@@ -830,52 +826,36 @@ async function runHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
   input: HostedWorkspaceRunnerInput;
 }): Promise<void> {
   const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
+  await runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
+    effects,
+    input: input.input,
+    phase: "import",
+  });
+}
+
+function scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  input: HostedWorkspaceRunnerInput;
+  phase: "active_turn_input" | "import";
+}): void {
+  const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
   if (effects.length === 0) {
     return;
   }
 
-  const result = await runHostedMailboxPostCheckpointEffectsBestEffort(effects);
-  if (!result.attempted) {
-    return;
-  }
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
-      component: "mailbox",
-      eventCode: "mailbox.post_checkpoint_effects_finished",
-      level: result.failed > 0 || result.partial > 0 ? "warn" : "info",
-      phase: "import",
-      redactedJson: {
-        attemptedCount: effects.length,
-        effectAttachmentEvidenceUpdated: result.effectAttachmentEvidenceUpdated.slice(0, 16),
-        effectKinds: result.effectKinds.slice(0, 16),
-        effectProjectionUpdated: result.effectProjectionUpdated.slice(0, 16),
-        effectReasonCodes: result.effectReasonCodes.slice(0, 16),
-        effectStatuses: result.effectStatuses.slice(0, 16),
-        errorCodes: compactHostedRuntimeLogCodes(result.errorCodes),
-        ...(result.failureCodeDetails.length > 0
-          ? { failureCodeDetails: [...result.failureCodeDetails] }
-          : {}),
-        ...(result.failureNames.length > 0 ? { failureNames: [...result.failureNames] } : {}),
-        ...(result.failureSummaries.length > 0
-          ? { failureSummaries: [...result.failureSummaries] }
-          : {}),
-        failedCount: result.failed,
-        partialCount: result.partial,
-        succeededCount: result.succeeded,
-      },
-    },
-    now: input.input.now,
-    platform: input.input.platform,
+  void runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
+    effects,
+    input: input.input,
+    phase: input.phase,
   });
 }
 
-async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort(input: {
-  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+async function runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort(input: {
+  effects: readonly HostedMailboxPostCheckpointEffect[];
   input: HostedWorkspaceRunnerInput;
   phase: "active_turn_input" | "import";
 }): Promise<void> {
-  const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
+  const effects = input.effects;
   if (effects.length === 0) {
     return;
   }
