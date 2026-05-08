@@ -130,6 +130,8 @@ R155 asked three GPT-5.5 Extended Pro ReviewGPT lanes whether R152/R154 are enou
 
 R156 built the R155-approved no-score NHANES III adapter-preflight scaffold. The validator passed with 18 feature-manifest rows, 8 mortality-manifest rows, 21 denied effects, 9 active blockers, no-score mode enabled, and an empty non-source fixture. The scaffold includes a manifest, no-score adapter contract, denied-effects policy, unresolved-blocker register, validator result, and reviewer packet. It validates only local metadata shape, label coverage, unresolved blockers, denied-effect policy, and storage/authorization attestations. It still authorizes no source download, row hydration, endpoint extraction, scoring, model mutation, or claims.
 
+R157 added synthetic denied-effect fixtures for the no-score preflight scaffold. The validator passed with 13 expected-deny fixtures covering source download, source body storage, row payloads, participant identifiers, endpoint vectors, denominator rows, metrics/scoring, predictions, split memberships, benchmark mutation, model mutation, claims, and embeddings. The fixture set contains no source rows or source bodies and still authorizes no source download, row hydration, endpoint extraction, scoring, model mutation, or claims.
+
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
