@@ -189,7 +189,11 @@ describe("hosted runtime callbacks", () => {
       },
     ]);
 
-    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
 
     expect(sideEffects).toEqual([
       buildHostedAssistantDeliveryEffect({
@@ -237,7 +241,11 @@ describe("hosted runtime callbacks", () => {
       },
     ]);
 
-    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
 
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.payload).toMatchObject({
@@ -298,14 +306,18 @@ describe("hosted runtime callbacks", () => {
       },
     ]);
 
-    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
 
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.effectId).toBe("intent_fresh");
     expect(sideEffects[0]?.payload.message).toBe("fresh reply");
   });
 
-  it("uses preferred current-turn deliveries before older due backlog at the hosted effect cap", async () => {
+  it("uses all preferred current-turn deliveries before older due backlog", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
         actorId: "actor_old",
@@ -351,17 +363,44 @@ describe("hosted runtime callbacks", () => {
         threadIsDirect: true,
         turnId: "turn_fresh",
       },
+      {
+        actorId: "actor_fresh_2",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_fresh_2",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "h1_333333333333333333333333",
+        identityId: "identity_1",
+        intentId: "intent_fresh_2",
+        lastError: null,
+        message: "second current-turn reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "fresh-message-2",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_fresh_2",
+      },
     ]);
 
     const sideEffects = await collectHostedAssistantDeliverySideEffects({
-      includeBackgroundDueIntents: false,
-      preferredIntentIds: ["intent_fresh"],
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: ["intent_fresh_2", "intent_fresh"],
       vaultRoot: "/tmp/vault",
     });
 
-    expect(sideEffects).toHaveLength(1);
-    expect(sideEffects[0]?.effectId).toBe("intent_fresh");
-    expect(sideEffects[0]?.payload.message).toBe("fresh current-turn reply");
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_fresh_2",
+      "intent_fresh",
+    ]);
+    expect(sideEffects.map((effect) => effect.payload.message)).toEqual([
+      "second current-turn reply",
+      "fresh current-turn reply",
+    ]);
   });
 
   it("rejects hosted email participant routes before collecting committed delivery effects", async () => {
@@ -387,7 +426,11 @@ describe("hosted runtime callbacks", () => {
     ]);
 
     await expect(
-      collectHostedAssistantDeliverySideEffects("/tmp/vault"),
+      collectHostedAssistantDeliverySideEffects({
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: "/tmp/vault",
+      }),
     ).rejects.toMatchObject({
       code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
     });
@@ -429,7 +472,11 @@ describe("hosted runtime callbacks", () => {
       ),
     );
 
-    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
 
     expect(sideEffects).toEqual([]);
   });

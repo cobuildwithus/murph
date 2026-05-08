@@ -143,6 +143,12 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   };
 }
 
+export function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
+  outcomes: readonly HostedAssistantDeliveryOutcome[],
+): string[] {
+  return normalizeHostedProviderMessageIds(collectHostedLinqProviderMessageIds(outcomes));
+}
+
 async function assertHostedProviderCleanupLiveNow(input: {
   assertLiveness?: () => Promise<void>;
   signal?: AbortSignal | null;

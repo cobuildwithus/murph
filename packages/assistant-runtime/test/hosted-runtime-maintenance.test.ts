@@ -385,6 +385,7 @@ describe("runHostedAssistantAutomation", () => {
       createHostedAutomationRuntime(),
       [],
       false,
+      false,
       true,
     );
 
