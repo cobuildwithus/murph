@@ -12,6 +12,7 @@ export type AssistantChannelTypingDependencies = Pick<
 
 export interface AssistantHostedDeviceConnectLink {
   authorizationUrl: string
+  connectUrl: string
   expiresAt: string
   provider: string
   providerLabel: string

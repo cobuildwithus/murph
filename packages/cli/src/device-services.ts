@@ -453,6 +453,8 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       )
     })
 
+    const connectUrl = result.connectUrl ?? result.authorizationUrl
+
     return {
       status: 'ok',
       kind: 'device_connect_link',
@@ -460,7 +462,8 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       provider: result.provider,
       providerLabel: result.providerLabel,
       expiresAt: result.expiresAt,
-      authorizationUrl: result.authorizationUrl,
+      authorizationUrl: connectUrl,
+      connectUrl,
     }
   }
 

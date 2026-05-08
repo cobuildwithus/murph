@@ -31,6 +31,7 @@ export class PrismaHostedWebhookTraceStore {
           data: {
             provider: input.provider,
             traceId: input.traceId,
+            claimToken: input.claimToken,
             providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
             eventType: input.eventType,
             processingExpiresAt,
@@ -89,6 +90,7 @@ export class PrismaHostedWebhookTraceStore {
         data: {
           providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
           eventType: input.eventType,
+          claimToken: input.claimToken,
           processingExpiresAt,
           receivedAt: claimedAt,
           status: "processing",
@@ -104,29 +106,34 @@ export class PrismaHostedWebhookTraceStore {
   async completeWebhookTrace(
     provider: string,
     traceId: string,
+    claimToken: string,
     tx?: HostedPrismaTransactionClient,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const prisma = tx ?? this.prisma;
-    await prisma.deviceWebhookTrace.updateMany({
+    const result = await prisma.deviceWebhookTrace.updateMany({
       where: {
         provider,
         traceId,
+        claimToken,
         status: "processing",
       },
       data: {
+        claimToken: null,
         processingExpiresAt: null,
         status: "processed",
       },
     });
 
     await this.pruneProcessedWebhookTraces(prisma, new Date());
+    return result.count > 0;
   }
 
-  async releaseWebhookTrace(provider: string, traceId: string): Promise<void> {
+  async releaseWebhookTrace(provider: string, traceId: string, claimToken: string): Promise<void> {
     await this.prisma.deviceWebhookTrace.deleteMany({
       where: {
         provider,
         traceId,
+        claimToken,
         status: "processing",
       },
     });

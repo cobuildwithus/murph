@@ -43,6 +43,7 @@ export class PrismaHostedOAuthSessionStore {
     state: string,
     now: string,
     expectedProvider?: string,
+    expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
     return this.prisma.$transaction(async (tx) => {
       const record = await tx.deviceOauthSession.findUnique({
@@ -75,12 +76,19 @@ export class PrismaHostedOAuthSessionStore {
         };
       }
 
+      if (expectedOwnerId && record.userId !== expectedOwnerId) {
+        return {
+          status: "owner_mismatch",
+        };
+      }
+
       // Delete with a count check so duplicate callbacks or retries fail closed as
       // already-consumed/missing instead of surfacing as a transaction error.
       const deleteResult = await tx.deviceOauthSession.deleteMany({
         where: {
           state,
           provider: record.provider,
+          ...(expectedOwnerId ? { userId: expectedOwnerId } : {}),
         },
       });
 

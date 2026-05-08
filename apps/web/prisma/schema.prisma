@@ -106,11 +106,29 @@ model DeviceOauthSession {
   @@map("device_oauth_session")
 }
 
+model DeviceConnectIntent {
+  claimHash            String    @id @map("claim_hash")
+  memberId             String    @map("member_id")
+  provider             String
+  connectSourceId      String    @map("connect_source_id")
+  connectTarget        String    @map("connect_target")
+  sourceProviderSlug   String?   @map("source_provider_slug")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  expiresAt            DateTime  @map("expires_at")
+  startedAt            DateTime? @map("started_at")
+
+  @@index([expiresAt])
+  @@index([memberId, expiresAt])
+  @@index([startedAt])
+  @@map("device_connect_intent")
+}
+
 model DeviceWebhookTrace {
   provider                  String
   traceId                   String    @map("trace_id")
   providerAccountBlindIndex String    @map("provider_account_blind_index")
   eventType                 String    @map("event_type")
+  claimToken                String?   @map("claim_token")
   status                    String    @default("processed")
   processingExpiresAt       DateTime? @map("processing_expires_at")
   receivedAt                DateTime  @map("received_at")

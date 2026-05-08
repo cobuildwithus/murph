@@ -38,6 +38,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly webhookTraces = new Map<
     string,
     {
+      claimToken: string;
       expiresAt: string | null;
       record: DeviceSyncWebhookTraceRecord;
       status: DeviceSyncWebhookTraceClaimResult | "stored";
@@ -66,7 +67,12 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     return input;
   }
 
-  consumeOAuthState(state: string, now: string, expectedProvider?: string): ConsumeOAuthStateResult {
+  consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): ConsumeOAuthStateResult {
     const record = this.oauthStates.get(state) ?? null;
 
     if (!record || Date.parse(record.expiresAt) <= Date.parse(now)) {
@@ -80,6 +86,12 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       return {
         status: "provider_mismatch",
         provider: record.provider,
+      };
+    }
+
+    if (expectedOwnerId && record.ownerId !== expectedOwnerId) {
+      return {
+        status: "owner_mismatch",
       };
     }
 
@@ -185,6 +197,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 
     if (!existing) {
       this.webhookTraces.set(key, {
+        claimToken: input.claimToken,
         expiresAt: input.processingExpiresAt,
         record: {
           eventType: input.eventType,
@@ -207,6 +220,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
 
     this.webhookTraces.set(key, {
+      claimToken: input.claimToken,
       expiresAt: input.processingExpiresAt,
       record: {
         eventType: input.eventType,
@@ -220,28 +234,30 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     return "claimed";
   }
 
-  completeWebhookTrace(provider: string, traceId: string): void {
+  completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean {
     this.completedWebhookTraceCalls += 1;
     const key = `${provider}:${traceId}`;
     const existing = this.webhookTraces.get(key);
 
-    if (!existing || existing.status !== "processing") {
-      return;
+    if (!existing || existing.status !== "processing" || existing.claimToken !== claimToken) {
+      return false;
     }
 
     this.lastRecordedWebhookTrace = existing.record;
     this.webhookTraces.set(key, {
+      claimToken: "",
       expiresAt: null,
       record: existing.record,
       status: "stored",
     });
+    return true;
   }
 
-  releaseWebhookTrace(provider: string, traceId: string): void {
+  releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void {
     const key = `${provider}:${traceId}`;
     const existing = this.webhookTraces.get(key);
 
-    if (!existing || existing.status !== "processing") {
+    if (!existing || existing.status !== "processing" || existing.claimToken !== claimToken) {
       return;
     }
 
@@ -288,8 +304,9 @@ function completeWebhookAcceptDurably(
   store: InMemoryPublicIngressStore,
   account: PublicDeviceSyncAccount,
   traceId: string,
+  claimToken: string,
 ): DeviceSyncPublicIngressWebhookAcceptedResult {
-  store.completeWebhookTrace(account.provider, traceId);
+  store.completeWebhookTrace(account.provider, traceId, claimToken);
   return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
 }
 
@@ -1803,9 +1820,9 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId, webhook }) {
+      onWebhookAccepted({ account, claimToken, traceId, webhook }) {
         acceptedCalls.push({ traceId, webhook });
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -1917,10 +1934,10 @@ test("public ingress scopes durable webhook traces by external account while pre
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId, webhook }) {
+      onWebhookAccepted({ account, claimToken, traceId, webhook }) {
         assert.equal("traceId" in webhook, false);
         acceptedWebhooks.push(`${account.id}:${traceId}`);
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -1997,9 +2014,9 @@ test("public ingress marks disconnected-account webhook traces processed so dela
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId }) {
+      onWebhookAccepted({ account, claimToken, traceId }) {
         acceptedWebhooks.push(account.id);
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -2047,9 +2064,9 @@ test("public ingress leaves reauthorization-required webhook traces retryable un
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId }) {
+      onWebhookAccepted({ account, claimToken, traceId }) {
         acceptedWebhooks.push(account.id);
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -2104,7 +2121,7 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId }) {
+      onWebhookAccepted({ account, claimToken, traceId }) {
         attempts += 1;
 
         if (attempts === 1) {
@@ -2112,7 +2129,7 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
         }
 
         successes += 1;
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -2326,12 +2343,12 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
     ]),
     store,
     hooks: {
-      async onWebhookAccepted({ account, traceId, webhook }) {
+      async onWebhookAccepted({ account, claimToken, traceId, webhook }) {
         acceptedCalls += 1;
         releaseProcessing?.();
         await processingGate;
         assert.equal("traceId" in webhook, false);
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -2391,9 +2408,9 @@ test("public ingress releases claimed traces when the accepted hook returns with
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId }) {
+      onWebhookAccepted({ account, claimToken, traceId }) {
         attempts += 1;
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -2401,11 +2418,11 @@ test("public ingress releases claimed traces when the accepted hook returns with
   Object.defineProperty(ingress, "hooks", {
     configurable: true,
     value: {
-      onWebhookAccepted({ account, traceId }: DeviceSyncPublicIngressWebhookAcceptedInput) {
+      onWebhookAccepted({ account, claimToken, traceId }: DeviceSyncPublicIngressWebhookAcceptedInput) {
         attempts += 1;
 
         if (attempts > 1) {
-          return completeWebhookAcceptDurably(store, account, traceId);
+          return completeWebhookAcceptDurably(store, account, traceId, claimToken);
         }
 
         return undefined;
@@ -2731,6 +2748,47 @@ test("public ingress does not burn valid oauth state on provider mismatch", asyn
   assert.equal(store.hasOAuthState(begin.state), false);
 });
 
+test("public ingress does not burn valid oauth state on owner mismatch", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    allowedReturnOrigins: ["https://app.example.test"],
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    ownerId: "member_a",
+    provider: "demo",
+    returnTo: "https://app.example.test/settings/devices",
+  });
+
+  await assert.rejects(
+    () =>
+      ingress.handleConnectionCallback({
+        expectedOwnerId: "member_b",
+        provider: "demo",
+        state: begin.state,
+        code: "abc",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OAUTH_STATE_OWNER_MISMATCH" &&
+      error.httpStatus === 403,
+  );
+  assert.equal(store.hasOAuthState(begin.state), true);
+
+  const connected = await ingress.handleConnectionCallback({
+    expectedOwnerId: "member_a",
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  assert.equal(connected.account.provider, "demo");
+  assert.equal(store.hasOAuthState(begin.state), false);
+});
+
 test("public ingress discards tampered persisted returnTo values before reuse", async () => {
   const store = new InMemoryPublicIngressStore();
   store.createOAuthState({
@@ -2894,10 +2952,10 @@ test("public ingress stores webhook receipt timestamps using ingestion time, not
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId, webhook, now }) {
+      onWebhookAccepted({ account, claimToken, traceId, webhook, now }) {
         assert.equal("traceId" in webhook, false);
         observedAcceptedAt.push(now);
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
@@ -2928,9 +2986,9 @@ test("public ingress does not complete a claimed webhook trace twice when the du
     registry: createDeviceSyncRegistry([createFakeProvider()]),
     store,
     hooks: {
-      onWebhookAccepted({ account, traceId, webhook }) {
+      onWebhookAccepted({ account, claimToken, traceId, webhook }) {
         assert.equal("traceId" in webhook, false);
-        return completeWebhookAcceptDurably(store, account, traceId);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });

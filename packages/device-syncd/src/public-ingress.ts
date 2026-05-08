@@ -557,7 +557,13 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    const stateResult = await this.store.consumeOAuthState(state, now, provider.provider);
+    const expectedOwnerId = normalizeString(input.expectedOwnerId);
+    const stateResult = await this.store.consumeOAuthState(
+      state,
+      now,
+      provider.provider,
+      expectedOwnerId ?? undefined,
+    );
 
     if (stateResult.status === "missing") {
       throw deviceSyncError({
@@ -574,6 +580,15 @@ export class DeviceSyncPublicIngress {
         message: `OAuth state belongs to provider ${stateResult.provider}, not ${provider.provider}.`,
         retryable: false,
         httpStatus: 400,
+      });
+    }
+
+    if (stateResult.status === "owner_mismatch") {
+      throw deviceSyncError({
+        code: "OAUTH_STATE_OWNER_MISMATCH",
+        message: "OAuth state belongs to a different Murph session.",
+        retryable: false,
+        httpStatus: 403,
       });
     }
 
@@ -765,6 +780,7 @@ export class DeviceSyncPublicIngress {
       parsed.externalAccountId,
       parsed.traceId,
     );
+    const claimToken = generateStateCode();
     const webhook = toIngressWebhook({
       ...parsed,
       jobs,
@@ -773,6 +789,7 @@ export class DeviceSyncPublicIngress {
     const traceClaim = await this.store.claimWebhookTrace({
       provider: provider.provider,
       traceId,
+      claimToken,
       externalAccountId: parsed.externalAccountId,
       eventType: webhook.eventType,
       receivedAt: now,
@@ -817,12 +834,12 @@ export class DeviceSyncPublicIngress {
           now,
         });
       } catch (error) {
-        await this.store.releaseWebhookTrace(provider.provider, traceId);
+        await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
         throw error;
       }
 
       if (parsed.unknownAccountAction === "accept" && this.hooks.onUnknownWebhook) {
-        await this.store.completeWebhookTrace(provider.provider, traceId);
+        await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
 
         return {
           accepted: true,
@@ -834,7 +851,7 @@ export class DeviceSyncPublicIngress {
         };
       }
 
-      await this.store.releaseWebhookTrace(provider.provider, traceId);
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
 
       throw deviceSyncError({
         code: "WEBHOOK_ACCOUNT_NOT_READY",
@@ -855,7 +872,7 @@ export class DeviceSyncPublicIngress {
           eventType: webhook.eventType,
           traceId,
         });
-        await this.store.releaseWebhookTrace(provider.provider, traceId);
+        await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
         throw deviceSyncError({
           code: "WEBHOOK_ACCOUNT_NOT_READY",
           message: "Device sync account must be reconnected before webhook side effects can be accepted.",
@@ -870,7 +887,7 @@ export class DeviceSyncPublicIngress {
           eventType: webhook.eventType,
           traceId,
         });
-        await this.store.completeWebhookTrace(provider.provider, traceId);
+        await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
 
         return {
           accepted: true,
@@ -886,6 +903,7 @@ export class DeviceSyncPublicIngress {
     try {
       const acceptedResult = await onWebhookAccepted?.({
         account,
+        claimToken,
         traceId,
         webhook,
         provider,
@@ -893,7 +911,7 @@ export class DeviceSyncPublicIngress {
       });
 
       if (!onWebhookAccepted) {
-        await this.store.completeWebhookTrace(provider.provider, traceId);
+        await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
       } else if (acceptedResult?.webhookTraceCompleted !== true) {
         throw deviceSyncError({
           code: "WEBHOOK_TRACE_COMPLETION_REQUIRED",
@@ -903,7 +921,7 @@ export class DeviceSyncPublicIngress {
         });
       }
     } catch (error) {
-      await this.store.releaseWebhookTrace(provider.provider, traceId);
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
       throw error;
     }
 
@@ -1104,6 +1122,23 @@ export class DeviceSyncPublicIngress {
         },
       });
     }
+  }
+}
+
+async function completeClaimedWebhookTrace(
+  store: DeviceSyncPublicIngressStore,
+  provider: string,
+  traceId: string,
+  claimToken: string,
+): Promise<void> {
+  const completed = await store.completeWebhookTrace(provider, traceId, claimToken);
+  if (!completed) {
+    throw deviceSyncError({
+      code: "WEBHOOK_TRACE_CLAIM_LOST",
+      message: "Webhook trace claim was lost before durable acceptance completed.",
+      retryable: true,
+      httpStatus: 503,
+    });
   }
 }
 

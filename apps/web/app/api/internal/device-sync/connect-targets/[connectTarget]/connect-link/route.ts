@@ -6,8 +6,9 @@ import {
   resolveConfiguredDeviceSyncConnectTarget,
 } from "@murphai/device-syncd/config";
 
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
-import { buildHostedDeviceConnectCompletionReturnTo } from "@/src/lib/device-sync/connect-completion-return";
+import {
+  createHostedDeviceConnectIntent,
+} from "@/src/lib/device-sync/connect-intents";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http";
 import {
@@ -80,14 +81,11 @@ export const POST = withJsonError(async (
     stage = "connect_target_resolution";
     const target = resolveHostedDeviceConnectTarget(connectTarget);
     stage = "control_plane";
-    const result = await startHostedDeviceConnection(
+    const result = await createHostedDeviceConnectLinkIntent({
       request,
       userId,
-      target.connectSourceId,
-      target.connectTarget,
-      target.provider,
-      target.sourceProviderSlug ?? null,
-    );
+      target,
+    });
     logHostedDeviceConnectRouteDiagnostic({
       expiresAtPresent: Boolean(result.expiresAt),
       messagingReturnTarget,
@@ -97,7 +95,8 @@ export const POST = withJsonError(async (
     });
 
     return jsonOk({
-      authorizationUrl: result.authorizationUrl,
+      authorizationUrl: result.connectUrl,
+      connectUrl: result.connectUrl,
       expiresAt: result.expiresAt,
       provider: target.connectTarget,
       providerLabel: target.label,
@@ -130,26 +129,20 @@ async function requireHostedDeviceConnectCallbackRequest(request: Request): Prom
   }
 }
 
-async function startHostedDeviceConnection(
-  request: Request,
-  userId: string,
-  connectSourceId: string,
-  connectTarget: string,
-  provider: string,
-  sourceProviderSlug: string | null,
-) {
+async function createHostedDeviceConnectLinkIntent(input: {
+  request: Request;
+  target: NonNullable<ReturnType<typeof resolveConfiguredDeviceSyncConnectTarget>>;
+  userId: string;
+}) {
   try {
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    return await controlPlane.startConnection(
-      userId,
-      provider,
-      buildHostedDeviceConnectCompletionReturnTo({
-        connectSourceId,
-        connectTarget,
-        source: "assistant",
-      }),
-      { connectSourceId, connectTarget, sourceProviderSlug },
-    );
+    return await createHostedDeviceConnectIntent({
+      connectSourceId: input.target.connectSourceId,
+      connectTarget: input.target.connectTarget,
+      memberId: input.userId,
+      provider: input.target.provider,
+      request: input.request,
+      sourceProviderSlug: input.target.sourceProviderSlug ?? null,
+    });
   } catch (error) {
     remapHostedDeviceConnectBackendSetupError(error, "control_plane_setup");
   }

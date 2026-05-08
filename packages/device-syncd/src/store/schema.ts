@@ -37,6 +37,10 @@ function readDeviceConnectionColumns(database: DatabaseSync): SqliteTableColumn[
   return database.prepare("pragma table_info(device_connection)").all() as SqliteTableColumn[];
 }
 
+function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(webhook_trace)").all() as SqliteTableColumn[];
+}
+
 function columnNames(columns: readonly SqliteTableColumn[]): Set<string> {
   return new Set(
     columns
@@ -169,6 +173,17 @@ function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
 
   if (!names.has(DEVICE_CONNECTION_SETUP_COLUMNS.setupExpiresAt)) {
     database.exec("alter table device_connection add column setup_expires_at text");
+  }
+}
+
+function ensureWebhookTraceClaimTokenColumn(database: DatabaseSync): void {
+  if (!tableExists(database, "webhook_trace")) {
+    return;
+  }
+
+  const names = columnNames(readWebhookTraceColumns(database));
+  if (!names.has("claim_token")) {
+    database.exec("alter table webhook_trace add column claim_token text");
   }
 }
 
@@ -313,6 +328,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         payload_json text not null,
         status text not null default 'processed',
         processing_expires_at text,
+        claim_token text,
         primary key (provider, trace_id)
       );
 
@@ -322,5 +338,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
 
   ensureDeviceCredentialStateSchema(database);
   ensureDeviceConnectionSetupColumns(database);
+  ensureWebhookTraceClaimTokenColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

@@ -159,8 +159,8 @@ class DeviceSyncServiceController {
       store: {
         deleteExpiredOAuthStates: (now) => this.store.deleteExpiredOAuthStates(now),
         createOAuthState: (record) => this.store.createOAuthState(record),
-        consumeOAuthState: (state, now, expectedProvider) =>
-          this.store.consumeOAuthState(state, now, expectedProvider),
+        consumeOAuthState: (state, now, expectedProvider, expectedOwnerId) =>
+          this.store.consumeOAuthState(state, now, expectedProvider, expectedOwnerId),
         upsertConnection: (record) =>
           this.toPublicAccount(
             this.store.upsertAccount({
@@ -202,8 +202,10 @@ class DeviceSyncServiceController {
           return account ? this.toPublicAccount(account) : null;
         },
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
-        completeWebhookTrace: (provider, traceId) => this.store.completeWebhookTrace(provider, traceId),
-        releaseWebhookTrace: (provider, traceId) => this.store.releaseWebhookTrace(provider, traceId),
+        completeWebhookTrace: (provider, traceId, claimToken) =>
+          this.store.completeWebhookTrace(provider, traceId, claimToken),
+        releaseWebhookTrace: (provider, traceId, claimToken) =>
+          this.store.releaseWebhookTrace(provider, traceId, claimToken),
         markWebhookReceived: (accountId, now) => this.store.markWebhookReceived(accountId, now),
       },
       hooks: {
@@ -211,11 +213,12 @@ class DeviceSyncServiceController {
           this.enqueueJobs(account, connection.initialJobs ?? []);
           await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
         },
-        onWebhookAccepted: async ({ account, traceId, webhook }) => {
+        onWebhookAccepted: async ({ account, claimToken, traceId, webhook }) => {
           this.store.enqueueJobsAndCompleteWebhookTrace({
             accountId: account.id,
             provider: account.provider,
             traceId,
+            claimToken,
             jobs: webhook.jobs,
           });
           return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;

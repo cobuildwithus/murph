@@ -149,7 +149,12 @@ export class SqliteDeviceSyncStore {
     return deleteExpiredOAuthStates(this.database, now);
   }
 
-  consumeOAuthState(state: string, now: string, expectedProvider?: string): ConsumeOAuthStateResult {
+  consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    _expectedOwnerId?: string,
+  ): ConsumeOAuthStateResult {
     return consumeOAuthState(this.database, state, now, expectedProvider);
   }
 
@@ -268,6 +273,7 @@ export class SqliteDeviceSyncStore {
     accountId: string;
     provider: string;
     traceId: string;
+    claimToken: string;
     jobs: readonly DeviceSyncJobInput[];
   }): DeviceSyncJobRecord[] {
     return withImmediateTransaction(this.database, () => {
@@ -284,7 +290,15 @@ export class SqliteDeviceSyncStore {
         }),
       );
 
-      completeDeviceSyncWebhookTrace(this.database, input.provider, input.traceId);
+      const completed = completeDeviceSyncWebhookTrace(
+        this.database,
+        input.provider,
+        input.traceId,
+        input.claimToken,
+      );
+      if (!completed) {
+        throw new Error("Device sync webhook trace claim was lost before job enqueue completed.");
+      }
       return queuedJobs;
     });
   }
@@ -364,12 +378,12 @@ export class SqliteDeviceSyncStore {
     return claimDeviceSyncWebhookTrace(this.database, input);
   }
 
-  completeWebhookTrace(provider: string, traceId: string): void {
-    completeDeviceSyncWebhookTrace(this.database, provider, traceId);
+  completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean {
+    return completeDeviceSyncWebhookTrace(this.database, provider, traceId, claimToken);
   }
 
-  releaseWebhookTrace(provider: string, traceId: string): void {
-    releaseDeviceSyncWebhookTrace(this.database, provider, traceId);
+  releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void {
+    releaseDeviceSyncWebhookTrace(this.database, provider, traceId, claimToken);
   }
 }
 

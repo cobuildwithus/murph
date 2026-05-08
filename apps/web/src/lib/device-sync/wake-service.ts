@@ -297,6 +297,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     id: string;
     provider: string;
   };
+  claimToken: string;
   now: string;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
@@ -333,6 +334,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     provider: input.account.provider,
     resourceCategory,
     store: input.store,
+    claimToken: input.claimToken,
     traceId,
     userId: ownerId,
   });
@@ -442,6 +444,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   provider: string;
   resourceCategory?: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
+  claimToken: string;
   traceId: string | null;
   userId: string;
 }): Promise<void> {
@@ -474,7 +477,15 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
     runnerWakeRequested = dirty.shouldRequestWake;
 
     if (input.traceId) {
-      await input.store.completeWebhookTrace(input.provider, input.traceId, tx);
+      const completed = await input.store.completeWebhookTrace(input.provider, input.traceId, input.claimToken, tx);
+      if (!completed) {
+        throw deviceSyncError({
+          code: "WEBHOOK_TRACE_CLAIM_LOST",
+          message: "Webhook trace claim was lost before durable acceptance completed.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      }
     }
   });
 

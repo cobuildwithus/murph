@@ -156,15 +156,17 @@ const deviceConnectResultBaseSchema = z.object({
   provider: z.string().min(1),
   providerLabel: z.string().min(1).optional(),
   expiresAt: isoTimestampSchema,
-  authorizationUrl: httpUrlSchema,
 })
 
 const hostedDeviceConnectResultSchema = deviceConnectResultBaseSchema.extend({
   backend: z.literal('hosted'),
+  authorizationUrl: httpUrlSchema.optional(),
+  connectUrl: httpUrlSchema,
 }).strict()
 
 const localDaemonDeviceConnectResultSchema = deviceConnectResultBaseSchema.extend({
   backend: z.literal('local-daemon'),
+  authorizationUrl: httpUrlSchema,
   baseUrl: deviceSyncBaseUrlSchema,
   state: z.string().min(1),
   openedBrowser: z.boolean(),

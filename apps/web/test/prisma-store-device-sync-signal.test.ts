@@ -330,6 +330,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         provider: "oura",
         traceId: "trace-new",
         externalAccountId: "acct-new",
+        claimToken: "claim-token",
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:02:00.000Z",
         processingExpiresAt: "2026-03-27T00:07:00.000Z",
@@ -340,6 +341,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         provider: "oura",
         traceId: "trace-processed",
         externalAccountId: "acct-processed-2",
+        claimToken: "claim-token",
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:02:00.000Z",
         processingExpiresAt: "2026-03-27T00:07:00.000Z",
@@ -350,6 +352,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         provider: "oura",
         traceId: "trace-processing",
         externalAccountId: "acct-processing-2",
+        claimToken: "claim-token",
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:06:00.000Z",
         processingExpiresAt: "2026-03-27T00:11:00.000Z",
@@ -360,14 +363,15 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         provider: "oura",
         traceId: "trace-expired",
         externalAccountId: "acct-reclaimed",
+        claimToken: "claim-token",
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:06:00.000Z",
         processingExpiresAt: "2026-03-27T00:11:00.000Z",
       }),
     ).toBe("claimed");
 
-    await store.completeWebhookTrace("oura", "trace-new");
-    await store.releaseWebhookTrace("oura", "trace-expired");
+    await store.completeWebhookTrace("oura", "trace-new", "claim-token");
+    await store.releaseWebhookTrace("oura", "trace-expired", "claim-token");
 
     expect(traces.get("oura:trace-new")).toMatchObject({
       status: "processed",
@@ -392,6 +396,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
         provider: "oura",
         traceId: "trace-raced",
         externalAccountId: "acct-raced",
+        claimToken: "claim-token",
         eventType: "sleep.updated",
         receivedAt: "2026-03-27T00:02:00.000Z",
         processingExpiresAt: "2026-03-27T00:07:00.000Z",

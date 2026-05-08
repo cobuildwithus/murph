@@ -28,6 +28,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       }),
     ).toEqual({
       authorizationUrl: "https://sync.example.test/oauth",
+      connectUrl: "https://sync.example.test/oauth",
       expiresAt: "2026-04-07T00:00:00.000Z",
       provider: "oura",
       providerLabel: "Oura",

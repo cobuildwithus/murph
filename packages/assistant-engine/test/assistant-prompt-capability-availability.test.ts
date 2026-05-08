@@ -16,6 +16,7 @@ describe('assistant prompt capability availability', () => {
         ],
         issueDeviceConnectLink: async ({ provider }) => ({
           authorizationUrl: `https://connect.example.test/${provider}`,
+          connectUrl: `https://connect.example.test/${provider}`,
           expiresAt: '2026-04-30T00:05:00.000Z',
           provider,
           providerLabel: 'WHOOP',

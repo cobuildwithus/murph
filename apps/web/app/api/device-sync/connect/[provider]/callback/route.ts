@@ -8,6 +8,8 @@ import {
   resolveDecodedRouteParam,
 } from "@/src/lib/device-sync/http";
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 export async function GET(
   request: Request,
@@ -17,8 +19,11 @@ export async function GET(
 
   try {
     providerName = await resolveDecodedRouteParam(context.params, "provider");
+    const session = await requireActiveHostedAppSessionFromRequest(request);
     const controlPlane = createHostedDeviceSyncControlPlane(request);
-    const result = await controlPlane.handleConnectionCallback(providerName);
+    const result = await controlPlane.handleConnectionCallback(providerName, {
+      expectedOwnerId: session.member.id,
+    });
     const redirect = providerCallbackRedirect({
       returnTo: result.returnTo,
       provider: result.account.provider,
@@ -58,6 +63,10 @@ export async function GET(
         "The device connection callback URL was invalid.",
         400,
       );
+    }
+
+    if (isHostedOnboardingError(error)) {
+      return callbackHtml("Device connection failed", error.message, error.httpStatus);
     }
 
     console.error("Hosted device-sync connection callback failed unexpectedly.", {

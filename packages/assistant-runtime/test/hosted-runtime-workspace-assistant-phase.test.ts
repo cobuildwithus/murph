@@ -493,6 +493,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         connectLinkRequests.push(request);
         return {
           authorizationUrl: `https://connect.example.test/${request.connectTarget}`,
+          connectUrl: `https://connect.example.test/${request.connectTarget}`,
           expiresAt: "2026-04-29T00:05:00.000Z",
           provider: request.connectTarget,
           providerLabel: "WHOOP",
@@ -545,6 +546,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     ).resolves.toEqual({
       authorizationUrl: "https://connect.example.test/whoop",
+      connectUrl: "https://connect.example.test/whoop",
       expiresAt: "2026-04-29T00:05:00.000Z",
       provider: "whoop",
       providerLabel: "WHOOP",

@@ -201,7 +201,8 @@ test('device connect uses hosted CLI bridge in hosted runtime without local daem
       requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({
-        authorizationUrl: 'https://connect.example.test/whoop?state=opaque_state',
+        authorizationUrl: 'https://withmurph.ai/device/connect/dc_opaque',
+        connectUrl: 'https://withmurph.ai/device/connect/dc_opaque',
         expiresAt: '2026-05-03T20:15:00.000Z',
         provider: 'whoop',
         providerLabel: 'WHOOP',
@@ -225,6 +226,7 @@ test('device connect uses hosted CLI bridge in hosted runtime without local daem
         provider: string
         providerLabel: string
         authorizationUrl: string
+        connectUrl: string
         expiresAt: string
         baseUrl?: string
         state?: string
@@ -254,7 +256,8 @@ test('device connect uses hosted CLI bridge in hosted runtime without local daem
     assert.equal(result.backend, 'hosted')
     assert.equal(result.provider, 'whoop')
     assert.equal(result.providerLabel, 'WHOOP')
-    assert.equal(result.authorizationUrl, 'https://connect.example.test/whoop?state=opaque_state')
+    assert.equal(result.authorizationUrl, 'https://withmurph.ai/device/connect/dc_opaque')
+    assert.equal(result.connectUrl, 'https://withmurph.ai/device/connect/dc_opaque')
     assert.equal(result.baseUrl, undefined)
     assert.equal(result.state, undefined)
     assert.equal(result.openedBrowser, undefined)

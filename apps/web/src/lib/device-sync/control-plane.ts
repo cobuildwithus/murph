@@ -102,12 +102,12 @@ export class HostedDeviceSyncControlPlane {
     return this.connections.startConnection(userId, provider, returnTo, options);
   }
 
-  async handleOAuthCallback(provider: string) {
-    return this.handleConnectionCallback(provider);
+  async handleOAuthCallback(provider: string, options: { expectedOwnerId?: string | null } = {}) {
+    return this.handleConnectionCallback(provider, options);
   }
 
-  async handleConnectionCallback(provider: string) {
-    return this.connections.handleConnectionCallback(provider);
+  async handleConnectionCallback(provider: string, options: { expectedOwnerId?: string | null } = {}) {
+    return this.connections.handleConnectionCallback(provider, options);
   }
 
   async readWebhookRawBody() {

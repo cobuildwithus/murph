@@ -130,20 +130,24 @@ export function markConnectionSetupFailed(
   code: string,
   message: string,
 ) {
-  const existing = getAccountById(database, accountId);
-  if (!existing) {
+  if (!getAccountById(database, accountId)) {
     return null;
   }
 
   return withImmediateTransaction(database, () => {
-    database.prepare(`
+    const connectionResult = database.prepare(`
       update device_connection
       set status = 'reauthorization_required',
           setup_phase = 'failed',
           setup_expires_at = null,
           updated_at = ?
       where id = ?
-    `).run(now, accountId);
+        and status <> 'disconnected'
+    `).run(now, accountId) as { changes: number };
+
+    if ((connectionResult.changes ?? 0) === 0) {
+      return getAccountById(database, accountId);
+    }
 
     database.prepare(`
       update device_credential_state
@@ -168,16 +172,14 @@ export function markConnectionSetupFailed(
           last_error_code = ?,
           last_error_message = ?,
           next_reconcile_at = null,
-          local_connection_revision = ?,
-          local_token_revision = ?,
+          local_connection_revision = local_connection_revision + 1,
+          local_token_revision = local_token_revision + 1,
           updated_at = ?
       where account_id = ?
     `).run(
       now,
       code,
       message,
-      existing.localConnectionRevision + 1,
-      existing.localTokenRevision + 1,
       now,
       accountId,
     );

@@ -6,10 +6,15 @@ import { createRouteContext } from "./route-test-helpers";
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   handleConnectionCallback: vi.fn(),
+  requireActiveHostedAppSessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
 }));
 
 type CallbackRouteModule = typeof import("../app/api/device-sync/oauth/[provider]/callback/route");
@@ -28,6 +33,12 @@ describe("hosted device-sync callback route", () => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       handleConnectionCallback: mocks.handleConnectionCallback,
+    });
+    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
+      member: {
+        id: "member_123",
+      },
+      sessionId: "hws_test",
     });
     mocks.handleConnectionCallback.mockResolvedValue({
       account: {
@@ -75,7 +86,9 @@ describe("hosted device-sync callback route", () => {
     );
 
     expect(response.status).toBe(302);
-    expect(mocks.handleConnectionCallback).toHaveBeenCalledWith("junction");
+    expect(mocks.handleConnectionCallback).toHaveBeenCalledWith("junction", {
+      expectedOwnerId: "member_123",
+    });
     const location = response.headers.get("location");
     expect(location).toContain("deviceSyncStatus=connected");
     expect(location).toContain("deviceSyncProvider=junction");

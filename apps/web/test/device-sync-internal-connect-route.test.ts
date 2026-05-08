@@ -3,13 +3,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
-  createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceConnectIntent: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  startConnection: vi.fn(),
 }));
 
-vi.mock("@/src/lib/device-sync/control-plane", () => ({
-  createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+vi.mock("@/src/lib/device-sync/connect-intents", () => ({
+  createHostedDeviceConnectIntent: mocks.createHostedDeviceConnectIntent,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -42,14 +41,10 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("STRAVA_CLIENT_ID", "");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      startConnection: mocks.startConnection,
-    });
-    mocks.startConnection.mockResolvedValue({
-      authorizationUrl: "https://provider.example.test/oauth/start",
+    mocks.createHostedDeviceConnectIntent.mockResolvedValue({
+      claim: "dc_opaque",
+      connectUrl: "https://join.example.test/device/connect/dc_opaque",
       expiresAt: "2026-04-04T12:00:00.000Z",
-      provider: "whoop",
-      state: "opaque-state",
     });
   });
 
@@ -74,18 +69,17 @@ describe("device sync internal connect-link route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_123",
-      "whoop",
-      "/device-sync/connect/complete?source=assistant&connectSource=whoop&connectTarget=whoop",
-      {
-        connectSourceId: "whoop",
-        connectTarget: "whoop",
-        sourceProviderSlug: null,
-      },
-    );
+    expect(mocks.createHostedDeviceConnectIntent).toHaveBeenCalledWith({
+      connectSourceId: "whoop",
+      connectTarget: "whoop",
+      memberId: "member_123",
+      provider: "whoop",
+      request: expect.any(Request),
+      sourceProviderSlug: null,
+    });
     await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://provider.example.test/oauth/start",
+      authorizationUrl: "https://join.example.test/device/connect/dc_opaque",
+      connectUrl: "https://join.example.test/device/connect/dc_opaque",
       expiresAt: "2026-04-04T12:00:00.000Z",
       provider: "whoop",
       providerLabel: "WHOOP",
@@ -100,7 +94,7 @@ describe("device sync internal connect-link route", () => {
         status: "issued",
       },
     );
-    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("provider.example.test");
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("join.example.test/device/connect");
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
   });
 
@@ -112,11 +106,10 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("JUNCTION_ENV", "sandbox");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit,whoop");
     vi.stubEnv("JUNCTION_REGION", "us");
-    mocks.startConnection.mockResolvedValueOnce({
-      authorizationUrl: "https://link.junction.example.test/session/link-token",
+    mocks.createHostedDeviceConnectIntent.mockResolvedValueOnce({
+      claim: "dc_fitbit_opaque",
+      connectUrl: "https://join.example.test/device/connect/dc_fitbit_opaque",
       expiresAt: "2026-04-04T12:00:00.000Z",
-      provider: "junction",
-      state: "opaque-state",
     });
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
@@ -131,18 +124,17 @@ describe("device sync internal connect-link route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_123",
-      "junction",
-      "/device-sync/connect/complete?source=assistant&connectSource=fitbit&connectTarget=fitbit",
-      {
-        connectSourceId: "fitbit",
-        connectTarget: "fitbit",
-        sourceProviderSlug: "fitbit",
-      },
-    );
+    expect(mocks.createHostedDeviceConnectIntent).toHaveBeenCalledWith({
+      connectSourceId: "fitbit",
+      connectTarget: "fitbit",
+      memberId: "member_123",
+      provider: "junction",
+      request: expect.any(Request),
+      sourceProviderSlug: "fitbit",
+    });
     await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://link.junction.example.test/session/link-token",
+      authorizationUrl: "https://join.example.test/device/connect/dc_fitbit_opaque",
+      connectUrl: "https://join.example.test/device/connect/dc_fitbit_opaque",
       expiresAt: "2026-04-04T12:00:00.000Z",
       provider: "fitbit",
       providerLabel: "Fitbit",
@@ -157,7 +149,7 @@ describe("device sync internal connect-link route", () => {
       messagingReturnTarget: "telegram",
     },
   ] as const)(
-    "keeps $messagingReturnTarget as an optional diagnostic hint only",
+    "accepts $messagingReturnTarget as an optional diagnostic hint only",
     async ({ messagingReturnTarget }) => {
       const response = await internalDeviceSyncConnectLinkRoute.POST(
         new Request("https://join.example.test/api/internal/device-sync/connect-targets/whoop/connect-link", {
@@ -175,16 +167,14 @@ describe("device sync internal connect-link route", () => {
       );
 
       expect(response.status).toBe(200);
-      expect(mocks.startConnection).toHaveBeenCalledWith(
-        "member_123",
-        "whoop",
-        "/device-sync/connect/complete?source=assistant&connectSource=whoop&connectTarget=whoop",
-        {
-          connectSourceId: "whoop",
-          connectTarget: "whoop",
-          sourceProviderSlug: null,
-        },
-      );
+      expect(mocks.createHostedDeviceConnectIntent).toHaveBeenCalledWith({
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        memberId: "member_123",
+        provider: "whoop",
+        request: expect.any(Request),
+        sourceProviderSlug: null,
+      });
     },
   );
 
@@ -207,7 +197,7 @@ describe("device sync internal connect-link route", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET",
@@ -263,7 +253,7 @@ describe("device sync internal connect-link route", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
@@ -313,8 +303,7 @@ describe("device sync internal connect-link route", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
-    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "INVALID_REQUEST",
@@ -358,8 +347,7 @@ describe("device sync internal connect-link route", () => {
     );
 
     expect(response.status).toBe(503);
-    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
-    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
@@ -407,7 +395,7 @@ describe("device sync internal connect-link route", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    mocks.createHostedDeviceSyncControlPlane.mockImplementation(() => {
+    mocks.createHostedDeviceConnectIntent.mockImplementation(() => {
       throw new TypeError("Provider configuration is incomplete.");
     });
 
@@ -424,7 +412,7 @@ describe("device sync internal connect-link route", () => {
 
     expect(response.status).toBe(503);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceConnectIntent).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
@@ -484,7 +472,7 @@ describe("device sync internal connect-link route", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted internal device-sync connect-link diagnostic.",
       expect.objectContaining({
