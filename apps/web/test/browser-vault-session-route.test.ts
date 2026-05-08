@@ -94,7 +94,11 @@ describe("browser vault session route", () => {
   it("returns an empty session when the workspace does not publish a replica ref", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+    const scheduleBrowserVaultRefresh = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
+    });
 
     const response = await browserVaultSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
@@ -110,6 +114,7 @@ describe("browser vault session route", () => {
       prisma: mocks.prismaClient,
     });
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       encryptedReplica: null,
       replicaAad: null,

@@ -10,6 +10,7 @@ export {
   type HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
 export * from "./contracts.ts";
+export * from "./dashboard-replica.ts";
 export * from "./cli-runtime-bridge.ts";
 export * from "./email-ingress.ts";
 export * from "./env.ts";

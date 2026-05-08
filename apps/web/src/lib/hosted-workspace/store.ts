@@ -23,10 +23,12 @@ import type {
 import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
-  readHostedBrowserVaultSourceStateHash,
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
 } from "@murphai/hosted-execution/parsers";
+import {
+  readDashboardReplicaSourceStateHash,
+} from "@murphai/hosted-execution/dashboard-replica";
 import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionSnapshotRef,
@@ -431,7 +433,7 @@ async function publishHostedBrowserVaultReplicaRefAgainstCurrentWorkspace(input:
     input.current.snapshotRef,
     "Hosted browser-vault replica publish current snapshotRef",
   );
-  const currentSourceStateHash = readHostedBrowserVaultSourceStateHash(snapshotRef);
+  const currentSourceStateHash = readDashboardReplicaSourceStateHash(snapshotRef);
   if (currentSourceStateHash !== input.expectedSourceStateHash) {
     return {
       status: "stale_source",

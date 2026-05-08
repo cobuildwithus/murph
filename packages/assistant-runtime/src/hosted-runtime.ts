@@ -7,8 +7,8 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  readHostedBrowserVaultSourceStateHash,
-} from "@murphai/hosted-execution/parsers";
+  readDashboardReplicaSourceStateHash,
+} from "@murphai/hosted-execution/dashboard-replica";
 import {
   notifyAssistantActiveTurnInputsAvailableForVault,
 } from "@murphai/assistant-engine";
@@ -612,7 +612,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
     await writeHostedBrowserVaultWarmSourceStateHashBestEffort({
-      sourceStateHash: readHostedBrowserVaultSourceStateHash(committedWorkspace?.snapshotRef ?? null),
+      sourceStateHash: readDashboardReplicaSourceStateHash(committedWorkspace?.snapshotRef ?? null),
       vaultRoot: restored.vaultRoot,
     });
     if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {

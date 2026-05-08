@@ -33,6 +33,11 @@ import {
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
 import {
+  getDashboardReplicaFreshness,
+  readDashboardReplicaSourceStateHash,
+  shouldScheduleDashboardReplicaRefresh,
+} from "../src/dashboard-replica.ts";
+import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -191,6 +196,67 @@ describe("hosted execution coverage gaps", () => {
     })).toThrow(/Hosted execution snapshot ref\.base/u);
   });
 
+  it("centralizes dashboard replica source hash and freshness decisions", () => {
+    const base = {
+      hash: "a".repeat(64),
+      key: "cloudflare-workspace-snapshots/base.bundle",
+      size: 100,
+      updatedAt: "2026-05-04T00:00:00.000Z",
+    };
+    const delta = {
+      hash: "c".repeat(64),
+      key: "cloudflare-workspace-deltas/delta.bundle",
+      size: 50,
+      updatedAt: "2026-05-04T00:02:00.000Z",
+    };
+    const working = buildHostedExecutionWorkingSnapshotRef({
+      base,
+      delta,
+    });
+    const freshReplica = {
+      byteLength: 128,
+      dataVersion: "browser-data-v1",
+      generatedAt: "2026-05-04T00:03:00.000Z",
+      keyId: "browser-vault-replica:key",
+      objectKey: "users/browser-vault-replicas/user/replica.json",
+      replicaSchema: "murph.browser-vault-replica",
+      runtimeRootKeyId: "udrk:runtime:test-root",
+      schema: "murph.hosted-browser-vault-replica-ref.v1",
+      sourceBundleHash: delta.hash,
+    } satisfies HostedBrowserVaultReplicaRef;
+
+    expect(readDashboardReplicaSourceStateHash(working)).toBe(delta.hash);
+    expect(readDashboardReplicaSourceStateHash(base)).toBe(base.hash);
+    expect(getDashboardReplicaFreshness({
+      replicaRef: freshReplica,
+      snapshotRef: working,
+    })).toBe("fresh");
+    expect(getDashboardReplicaFreshness({
+      replicaRef: { ...freshReplica, sourceBundleHash: base.hash },
+      snapshotRef: working,
+    })).toBe("stale");
+    expect(shouldScheduleDashboardReplicaRefresh({
+      currentReplicaRef: null,
+      currentSnapshotRef: working,
+      previousSnapshotRef: base,
+    })).toEqual({
+      sourceStateHash: delta.hash,
+    });
+    expect(shouldScheduleDashboardReplicaRefresh({
+      currentReplicaRef: null,
+      currentSnapshotRef: working,
+      previousSnapshotRef: working,
+    })).toBeNull();
+    expect(shouldScheduleDashboardReplicaRefresh({
+      currentReplicaRef: freshReplica,
+      currentSnapshotRef: working,
+    })).toBeNull();
+    expect(shouldScheduleDashboardReplicaRefresh({
+      currentReplicaRef: null,
+      currentSnapshotRef: null,
+    })).toBeNull();
+  });
+
   it("parses hosted AI usage billing mode with a disabled default", () => {
     expect(readHostedAiUsageBillingMode({})).toBe("disabled");
     expect(readHostedAiUsageBillingMode({
@@ -343,6 +409,7 @@ describe("hosted execution coverage gaps", () => {
       "./bundles",
       "./cli-runtime-bridge",
       "./contracts",
+      "./dashboard-replica",
       "./env",
       "./hosted-email",
       "./parsers",
@@ -360,6 +427,8 @@ describe("hosted execution coverage gaps", () => {
     const assistantUsageModule =
       await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
     const browserVaultModule = await import("../src/browser-vault.ts") as Record<string, unknown>;
+    const dashboardReplicaModule =
+      await import("../src/dashboard-replica.ts") as Record<string, unknown>;
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
       string,
@@ -379,6 +448,8 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);
     expect(typeof browserVaultModule.getHostedBrowserVaultReplicaStorageKeyId).toBe("function");
     expect(typeof browserVaultModule.parseHostedBrowserVaultReplicaRef).toBe("function");
+    expect(typeof dashboardReplicaModule.getDashboardReplicaFreshness).toBe("function");
+    expect(typeof dashboardReplicaModule.shouldScheduleDashboardReplicaRefresh).toBe("function");
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
