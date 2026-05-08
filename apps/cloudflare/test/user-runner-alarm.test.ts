@@ -2930,6 +2930,42 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
   });
 
+  it("clears pending browser-vault refresh when the generated replica is too large", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("refresh-too-large"),
+      version: "4",
+    });
+    const browserVaultPublish = vi.fn();
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async (input) => ({
+      byteLength: 51 * 1024 * 1024,
+      maxBytes: 50 * 1024 * 1024,
+      sourceStateHash: input.sourceStateHash,
+      status: "refresh_failed_too_large",
+      userId: input.userId,
+    }));
+    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
+      workspace,
+      {
+        browserVaultPublish,
+        refreshBrowserVaultReplica,
+      },
+    );
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      sourceStateHash: "refresh-too-large-base_hash",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      immediateRefreshStarted: true,
+    });
+
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
+    expect(browserVaultPublish).not.toHaveBeenCalled();
+  });
+
 	  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
 	    vi.useFakeTimers();
 	    vi.setSystemTime(new Date(FIXED_NOW));

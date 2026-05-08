@@ -230,21 +230,21 @@ queued only after terminal handling evidence is durable under
 drained through the hosted provider-cleanup retry state after the next workspace
 checkpoint.
 
-The hosted workspace checkpoint ref may be a full/base workspace bundle or a
-layered `{base, hot}` ref. Full/base bundles carry a portable workspace manifest
-generated from the same hosted snapshot inclusion/exclusion policy used to write
-the bundle. Live correctness barriers do not scan the current portable
-workspace: mailbox import, active-turn acceptance, `canonical_runtime_commit`,
-assistant-runtime commits, provider cleanup, system-mailbox receipts, and
-pre-delivery outbox state write only a bounded hot-state bundle containing
-assistant runtime resume state, required Codex continuity, and outbox/receipt
-state. `canonical_runtime_commit` stores exact hosted canonical write receipts
-in supervisor-owned artifacts and checkpoints the authoritative receipt-log ref
-on the workspace state; restore does not replay assistant-local receipt files.
-`activation_bootstrap` and
-`idle_shutdown` are the only full/base snapshot producers. Live checkpoints fail
-closed when the current workspace pointer cannot be read or when the hot-state
-budget is exceeded; they must not fall back to broad workspace snapshots.
+The hosted workspace checkpoint ref may be a full/base workspace bundle, a
+working `{base, delta}` ref, or a legacy layered `{base, hot}` ref. Full/base
+bundles carry a portable workspace manifest generated from the same hosted
+snapshot inclusion/exclusion policy used to write the bundle. Live correctness
+barriers scan the effective portable workspace and write a replacement working
+delta against the current base: mailbox import, active-turn acceptance,
+`canonical_runtime_commit`, assistant-runtime commits, provider cleanup,
+system-mailbox receipts, and pre-delivery outbox state all commit the effective
+portable workspace rather than an assistant-only subset. `canonical_runtime_commit`
+stores exact hosted canonical write receipts in supervisor-owned artifacts and
+checkpoints the authoritative receipt-log ref on the workspace state; restore
+does not replay assistant-local receipt files. Bootstrap without a base writes a
+full seed, and `idle_shutdown` is the full/base compaction producer. Live
+checkpoints fail closed when the current workspace pointer cannot be read; they
+must not fall back to broad foreground full snapshots or legacy hot producers.
 `idle_shutdown` is the compaction boundary for warm-runner wind-down: it maps to
 a full/base snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
@@ -256,28 +256,29 @@ repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
 cache/tmp, and rebuildable projections. Codex provider continuity is the exact
 active rollout JSONL referenced by live assistant session resume state, not the
-whole `.codex-hosted` tree. Restore applies the base bundle when present, clears
-the hot assistant runtime state, applies the latest hot bundle, and treats any
-local restore cache as a performance cache only. Legacy working `{base, delta}`
-refs remain restorable during migration, but new live checkpoint producers must
-not emit them.
+whole `.codex-hosted` tree. Restore applies the base bundle when present, then
+applies either the working delta or the legacy hot bundle according to the
+snapshot ref shape, and treats any local restore cache as a performance cache
+only. Legacy layered `{base, hot}` refs remain restorable during migration, but
+new correctness-barrier producers emit working refs instead.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
-state. Full/base checkpoints may publish a fresh `browserVaultReplicaRef` keyed
-to the full snapshot hash. Live hot checkpoints omit the browser-vault field
-instead of clearing an existing pointer because a hot-state bundle is not a
-dashboard read model.
+state. Foreground working commits do not generate or publish browser-vault
+replicas inline. They may leave an existing `browserVaultReplicaRef` in place as
+stale derived data, then schedule an async refresh keyed by the committed
+browser-vault source-state hash (`delta.hash` for working refs, otherwise
+`base.hash`). Full/base compaction may publish a fresh browser-vault replica
+off-path.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint
 from an older or partially deployed runner when `browserVaultReplicaRef` is
 absent or explicitly null. Missing browser-vault replica continuity is
 recoverable dashboard state and must not stop mailbox import, assistant
-admission, outbox checkpointing, or the runner's ability to reach idle. When a
-replica ref is supplied with a full/base snapshot, web still validates that it
-matches the snapshot hash; legacy working refs validate against the delta hash.
-Stale or mismatched
-replica metadata may be rejected because that indicates an internally
+admission, outbox checkpointing, or the runner's ability to reach idle. Browser
+session reads compare any existing replica against the current source-state hash
+and return stale data only to clients that explicitly opt in. Stale or
+mismatched replica metadata may be rejected because that indicates an internally
 inconsistent sidecar, not a recoverable omission. Future
 checkpoint fields that are not required to answer user messages must follow the
 same compatibility rule: old deployed runners may omit them without blocking

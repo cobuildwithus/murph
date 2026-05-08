@@ -185,7 +185,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   }, [cancelActiveLoad, load]);
 
   useEffect(() => {
-    if (!authenticated || status === "error" || (freshness === "fresh" && !refreshPending)) {
+    if (!authenticated || status === "error" || !refreshPending) {
       return;
     }
 
@@ -221,7 +221,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     }
 
     const onFocus = () => {
-      if (freshness === "stale" || refreshPending) {
+      if (refreshPending) {
         void pollStaleReplica();
       }
     };
@@ -244,7 +244,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   const showSyncIndicator =
     authenticated
     && status !== "error"
-    && (freshness === "stale" || refreshPending);
+    && refreshPending;
 
   return (
     <BrowserVaultContext.Provider value={value}>
