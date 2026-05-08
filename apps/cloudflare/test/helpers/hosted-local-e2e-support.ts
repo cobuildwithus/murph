@@ -11,7 +11,7 @@ import {
 
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
-const hostedLocalE2eRunnerTimeoutMs = "240000";
+const hostedLocalE2eRunnerTimeoutMs = "120000";
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
 ] as const;

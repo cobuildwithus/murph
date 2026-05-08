@@ -1,6 +1,6 @@
 import { constants as fsConstants } from "node:fs";
 import { access } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,8 @@ const preparedRunnerBundleDir = path.join(
   resolveCloudflareDeployPaths(appDir).deployDir,
   runnerBundleDirectoryName,
 );
+export const hostedLocalRunnerBaseImageTag =
+  "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en";
 
 export function normalizePnpmScriptArgs(argv: readonly string[]): string[] {
   return argv[0] === "--" ? [...argv.slice(1)] : [...argv];
@@ -20,6 +22,10 @@ export function normalizePnpmScriptArgs(argv: readonly string[]): string[] {
 
 export function shouldSkipRunnerBundle(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.MURPH_DEV_SKIP_RUNNER_BUNDLE === "1";
+}
+
+export function shouldSkipRunnerDockerBase(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE === "1";
 }
 
 export function resolveWorkerDevPnpmCommands(
@@ -32,7 +38,9 @@ export function resolveWorkerDevPnpmCommands(
     commands.push(["runner:bundle"]);
   }
 
-  commands.push(["runner:docker:base"]);
+  if (!shouldSkipRunnerDockerBase(env)) {
+    commands.push(["runner:docker:base"]);
+  }
   commands.push(["exec", "wrangler", "dev", ...normalizePnpmScriptArgs(argv)]);
   return commands;
 }
@@ -41,10 +49,31 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   if (shouldSkipRunnerBundle(process.env)) {
     await assertPreparedRunnerBundleAvailable();
   }
+  if (shouldSkipRunnerDockerBase(process.env)) {
+    assertPreparedRunnerBaseImageAvailable();
+  }
 
   for (const commandArgs of resolveWorkerDevPnpmCommands(argv, process.env)) {
     await runPnpm(commandArgs);
   }
+}
+
+function assertPreparedRunnerBaseImageAvailable(): void {
+  const result = spawnSync("docker", ["image", "inspect", hostedLocalRunnerBaseImageTag], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "MURPH_DEV_SKIP_RUNNER_DOCKER_BASE=1 requires a prepared Cloudflare runner base image.",
+      `Missing image: ${hostedLocalRunnerBaseImageTag}.`,
+      "Run `pnpm --dir apps/cloudflare runner:docker:base` before starting the hosted local dev lane.",
+    ].join(" "),
+  );
 }
 
 async function runPnpm(args: string[]): Promise<void> {

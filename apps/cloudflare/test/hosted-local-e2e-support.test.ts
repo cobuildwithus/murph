@@ -165,6 +165,17 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     expect(env.OPENAI_API_KEY).toBe("stub-local-openai-key");
   });
 
+  it("uses a bounded local stub runner timeout by default", () => {
+    const env = resolveHostedAssistantLocalDevEnv(
+      {},
+      "stub",
+      "http://127.0.0.1:1234/v1",
+      "Hosted local test",
+    );
+
+    expect(env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("120000");
+  });
+
   it("clears device-sync provider env that would otherwise leak into scenarios", () => {
     const env = buildHostedLocalDeviceSyncProviderEnvClearances();
 

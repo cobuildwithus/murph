@@ -1006,6 +1006,7 @@ describe("buildWranglerVarArgs", () => {
           "http://127.0.0.1:4222/v1",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
         NODE_ENV: "test",
+        HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS: "30000",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         IGNORED_SECRET: "secret",
       }),
@@ -1026,6 +1027,8 @@ describe("buildWranglerVarArgs", () => {
       "NODE_ENV:test",
       "--var",
       "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:http://127.0.0.1:8787",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS:30000",
       "--var",
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS:60000",
       "--var",
@@ -1165,6 +1168,9 @@ describe("buildWranglerLocalDevConfig", () => {
 
     expect(config.main).toBe("../src/index.ts");
     expect(config.name).toBe("murph-hosted");
+    expect(config.vars).toMatchObject({
+      HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS: "30000",
+    });
     expect(containers.map((entry) => entry.class_name)).toEqual([
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
@@ -1248,6 +1254,16 @@ describe("buildWranglerLocalDevConfig", () => {
 
     expect(config.vars).toMatchObject({
       NODE_ENV: "test",
+    });
+  });
+
+  it("passes the hosted-local e2e isolation flag through local worker vars", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+    });
+
+    expect(config.vars).toMatchObject({
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
     });
   });
 

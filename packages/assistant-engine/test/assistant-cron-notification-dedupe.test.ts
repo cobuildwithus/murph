@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildAssistantCronNotificationDedupeToken } from '../src/assistant/cron/notification-delivery.js'
+import {
+  buildAssistantCronHostedDeliveryIdempotency,
+  buildAssistantCronNotificationDedupeToken,
+} from '../src/assistant/cron/notification-delivery.js'
 
 describe('buildAssistantCronNotificationDedupeToken', () => {
   const baseJob = {
@@ -63,5 +66,36 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
         trigger: 'manual',
       }),
     ).toBeNull()
+  })
+
+  it('returns hosted delivery idempotency context for scheduled runs', () => {
+    expect(
+      buildAssistantCronHostedDeliveryIdempotency({
+        job: baseJob,
+        trigger: 'scheduled',
+      }),
+    ).toEqual({
+      assistantTurnOrdinal: 'assistant-cron:1',
+      conversationId: JSON.stringify([
+        'telegram',
+        null,
+        'user_123',
+        'thread_123',
+      ]),
+      inboundMailboxItemIds: [
+        JSON.stringify([
+          'assistant-cron',
+          'cron_walk_reminder',
+          '2026-04-14T08:00:00.000Z',
+        ]),
+      ],
+      recipientKey: JSON.stringify([
+        'telegram',
+        null,
+        null,
+        'user_123',
+        'thread_123',
+      ]),
+    })
   })
 })

@@ -22,12 +22,20 @@ interface CleanupInputForTest {
 }
 
 const spawnMock = vi.hoisted(() => vi.fn<SpawnForTest>());
+const spawnSyncMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    status: 0,
+    stderr: "",
+    stdout: "",
+  })),
+);
 const cleanupHostedRunnerContainersMock = vi.hoisted(() =>
   vi.fn<(input: CleanupInputForTest) => Promise<void>>(async () => {}),
 );
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
+  spawnSync: spawnSyncMock,
 }));
 
 vi.mock("../../../scripts/dev-hosted-local/runtime.ts", () => ({
@@ -51,6 +59,7 @@ describe("run-hosted-local-e2e", () => {
     }
 
     spawnMock.mockReset();
+    spawnSyncMock.mockClear();
     cleanupHostedRunnerContainersMock.mockReset();
     vi.resetModules();
     vi.restoreAllMocks();
@@ -72,7 +81,9 @@ describe("run-hosted-local-e2e", () => {
   });
 
   it("cleans up when the hosted-local vitest process fails", async () => {
-    spawnMock.mockImplementation(() => createExitingChild(1));
+    spawnMock
+      .mockImplementationOnce(() => createExitingChild(0))
+      .mockImplementationOnce(() => createExitingChild(1));
 
     await expect(import("../scripts/run-hosted-local-e2e.ts"))
       .rejects
@@ -93,8 +104,13 @@ function createExitingChild(exitCode: number): EventEmitter {
 }
 
 function expectVitestSpawnCall(): void {
-  expect(spawnMock).toHaveBeenCalledTimes(1);
-  const [command, args, options] = spawnMock.mock.calls[0] ?? [];
+  expect(spawnMock).toHaveBeenCalledTimes(2);
+  const [baseCommand, baseArgs, baseOptions] = spawnMock.mock.calls[0] ?? [];
+  expect(baseCommand).toBe("pnpm");
+  expect(baseArgs).toEqual(["--dir", "apps/cloudflare", "runner:docker:base"]);
+  expect(baseOptions?.stdio).toBe("inherit");
+
+  const [command, args, options] = spawnMock.mock.calls[1] ?? [];
   expect(command).toBe("pnpm");
   expect(args).toEqual([
     "exec",
@@ -114,6 +130,7 @@ function expectVitestSpawnCall(): void {
   expect(typeof options?.cwd).toBe("string");
   expect(options?.env === process.env).toBe(false);
   expect(options?.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
+  expect(options?.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("120000");
   expect(options?.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("1");
   expect(options?.env.MURPH_HOSTED_LOCAL_RUN_ID).toEqual(expect.any(String));
   expect(options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID).toBe(
@@ -123,13 +140,14 @@ function expectVitestSpawnCall(): void {
   expect(options?.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL).toBe("0");
   expect(options?.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBe("1");
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_BUNDLE).toBe("1");
+  expect(options?.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE).toBe("1");
   expect(options?.stdio).toBe("inherit");
 }
 
 function expectSingleCleanupCall(): void {
   expect(cleanupHostedRunnerContainersMock).toHaveBeenCalledTimes(1);
   const [cleanupInput] = cleanupHostedRunnerContainersMock.mock.calls[0] ?? [];
-  const [, , spawnOptions] = spawnMock.mock.calls[0] ?? [];
+  const [, , spawnOptions] = spawnMock.mock.calls[1] ?? [];
   expect(typeof cleanupInput?.cwd).toBe("string");
   expect(cleanupInput?.env).toBe(spawnOptions?.env);
   expect(cleanupInput?.ignoreErrors).toBe(true);

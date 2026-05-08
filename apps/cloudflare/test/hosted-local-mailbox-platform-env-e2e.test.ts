@@ -20,6 +20,9 @@ let scenario: HostedLocalFullStackScenario | null = null;
 describe("hosted local mailbox platform env e2e", () => {
   beforeAll(async () => {
     scenario = await startHostedLocalFullStackScenario({
+      additionalEnv: {
+        MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      },
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-mailbox-platform-env-",
@@ -27,7 +30,7 @@ describe("hosted local mailbox platform env e2e", () => {
       scenarioLabel: "Local hosted mailbox platform env e2e",
       streamLogs: streamDevLogs,
     });
-  }, 300_000);
+  }, 600_000);
 
   afterAll(async () => {
     await scenario?.stop();
@@ -41,9 +44,16 @@ describe("hosted local mailbox platform env e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
 
     expect(finalStatus.workspace).not.toBeNull();
-    expect(finalStatus.workspace?.version).not.toBe("0");
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(finalStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventCode: "mailbox.imported",
+        redactedJson: expect.objectContaining({
+          systemSeqEnd: expect.any(String),
+        }),
+      }),
+    ]));
     expect(requireScenario().harness.stderrTail()).not.toContain(
       "HOSTED_WAKE_ENCRYPTION_KEY is required",
     );

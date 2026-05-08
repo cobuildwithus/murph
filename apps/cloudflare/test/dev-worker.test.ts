@@ -1,15 +1,21 @@
 import * as fsPromises from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs/promises", () => ({
   access: vi.fn(async () => {}),
 }));
+vi.mock("node:child_process", () => ({
+  spawn: vi.fn(),
+  spawnSync: vi.fn(() => ({ status: 0 })),
+}));
 
 import {
   normalizePnpmScriptArgs,
   resolveWorkerDevPnpmCommands,
   shouldSkipRunnerBundle,
+  shouldSkipRunnerDockerBase,
 } from "../scripts/dev-worker.ts";
 
 describe("cloudflare dev-worker script", () => {
@@ -42,6 +48,27 @@ describe("cloudflare dev-worker script", () => {
     ]);
   });
 
+  it("skips the base image step when the caller prebuilt it", () => {
+    const env = { MURPH_DEV_SKIP_RUNNER_DOCKER_BASE: "1" } satisfies NodeJS.ProcessEnv;
+
+    expect(shouldSkipRunnerDockerBase(env)).toBe(true);
+    expect(resolveWorkerDevPnpmCommands(["--", "--port", "8787"], env)).toEqual([
+      ["runner:bundle"],
+      ["exec", "wrangler", "dev", "--port", "8787"],
+    ]);
+  });
+
+  it("can skip both runner preparation steps for hosted-local e2e", () => {
+    const env = {
+      MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
+      MURPH_DEV_SKIP_RUNNER_DOCKER_BASE: "1",
+    } satisfies NodeJS.ProcessEnv;
+
+    expect(resolveWorkerDevPnpmCommands(["--", "--port", "8787"], env)).toEqual([
+      ["exec", "wrangler", "dev", "--port", "8787"],
+    ]);
+  });
+
   it("fails closed before wrangler dev when skip mode is set but the prepared bundle is missing", async () => {
     const accessMock = vi.mocked(fsPromises.access).mockRejectedValueOnce(
       Object.assign(new Error("missing"), { code: "ENOENT" }),
@@ -54,5 +81,23 @@ describe("cloudflare dev-worker script", () => {
       "MURPH_DEV_SKIP_RUNNER_BUNDLE=1 requires a prepared Cloudflare runner bundle.",
     );
     expect(accessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before wrangler dev when base image skip mode is set but the image is missing", async () => {
+    vi.mocked(spawnSync).mockReturnValueOnce({
+      status: 1,
+    } as ReturnType<typeof spawnSync>);
+    const { main } = await import("../scripts/dev-worker.ts");
+
+    vi.stubEnv("MURPH_DEV_SKIP_RUNNER_DOCKER_BASE", "1");
+
+    await expect(main([])).rejects.toThrow(
+      "MURPH_DEV_SKIP_RUNNER_DOCKER_BASE=1 requires a prepared Cloudflare runner base image.",
+    );
+    expect(spawnSync).toHaveBeenCalledWith(
+      "docker",
+      ["image", "inspect", "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en"],
+      expect.any(Object),
+    );
   });
 });

@@ -28,7 +28,6 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const linqWebhookSecret = "linq-local-webhook-secret";
-const hostedLinqVoiceNoteTranscriptText = "Remember to log the voice note";
 const hostedLinqVoiceNoteAssistantReplyText = "Logged the voice note.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const linqWebhookRunId = Date.now();
@@ -59,6 +58,7 @@ describe("hosted local Linq webhook e2e", () => {
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
       LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
+      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
       WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
     }));
@@ -169,91 +169,7 @@ describe("hosted local Linq webhook e2e", () => {
     );
   }, 300_000);
 
-  it("transcribes generic iMessage audio media and delivers the assistant reply", async () => {
-    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
-      await createActiveLinqWebhookMember("voice");
-    const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
-    const attachmentId = `att_voice_${userId}`;
-    const expectedAttachmentDownloadPath =
-      `/attachment-downloads/${encodeURIComponent(attachmentId)}.wav`;
-    const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
-      expectedMethod: "GET",
-      expectedPath: expectedAttachmentDownloadPath,
-    });
-    const expectedInboundDeletePath =
-      `/messages/${encodeURIComponent(`msg_voice_memo_${userId}`)}`;
-    const inboundDeleteCountBeforeReply = requireLinqStub().countObservedRequests({
-      expectedMethod: "DELETE",
-      expectedPath: expectedInboundDeletePath,
-    });
-    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
-
-    requireScenario().queueAssistantResponses([hostedLinqVoiceNoteAssistantReplyText]);
-    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      materializedChatId,
-      {
-        eventId: `evt_voice_memo_${userId}`,
-        messageId: `msg_voice_memo_${userId}`,
-        parts: [
-          {
-            attachmentId,
-            fileName: "Audio Message.m4a",
-            mimeType: "audio/mp4",
-            size: 23_000,
-            type: "media",
-            url: `${requireLinqStub().attachmentDownloadContainerBaseUrl}/${encodeURIComponent(attachmentId)}.m4a`,
-          },
-        ],
-      },
-    ));
-    expect(webhookResponse.status).toBe(202);
-    await expect(webhookResponse.json()).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-
-    await requireScenario().waitForLatestPendingWake(userId);
-    await requireLinqStub().waitForAdditionalRequest({
-      baselineCount: attachmentDownloadCountBeforeReply,
-      expectedMethod: "GET",
-      expectedPath: expectedAttachmentDownloadPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    await requireLinqStub().waitForAdditionalRequest({
-      baselineCount: inboundDeleteCountBeforeReply,
-      expectedMethod: "DELETE",
-      expectedPath: expectedInboundDeletePath,
-      scenario: requireScenario(),
-      userId,
-    });
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.inFlight).toBe(false);
-    expect(finalStatus.workspace).not.toBeNull();
-
-    const replySend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeReply,
-      expectedPath: expectedReplyChatPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
-      hostedLinqVoiceNoteAssistantReplyText,
-    );
-    const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
-      assistantProviderCountBeforeReply,
-    );
-    expect(assistantProviderRequests).toHaveLength(1);
-    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
-    expect(assistantProviderBody).toContain(hostedLinqVoiceNoteTranscriptText);
-    expect(assistantProviderBody).not.toContain(attachmentId);
-    expect(assistantProviderBody).not.toContain(expectedAttachmentDownloadPath);
-  }, 300_000);
-
-  it("keeps PDF-only iMessage media replyable by exposing bounded local PDF evidence", async () => {
+  it("keeps PDF-only iMessage media replyable with bounded attachment context", async () => {
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
       await createActiveLinqWebhookMember("pdf");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
@@ -265,12 +181,6 @@ describe("hosted local Linq webhook e2e", () => {
     const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
       expectedMethod: "GET",
       expectedPath: expectedAttachmentDownloadPath,
-    });
-    const expectedInboundDeletePath =
-      `/messages/${encodeURIComponent(`msg_pdf_${userId}`)}`;
-    const inboundDeleteCountBeforeReply = requireLinqStub().countObservedRequests({
-      expectedMethod: "DELETE",
-      expectedPath: expectedInboundDeletePath,
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
@@ -304,13 +214,6 @@ describe("hosted local Linq webhook e2e", () => {
       baselineCount: attachmentDownloadCountBeforeReply,
       expectedMethod: "GET",
       expectedPath: expectedAttachmentDownloadPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    await requireLinqStub().waitForAdditionalRequest({
-      baselineCount: inboundDeleteCountBeforeReply,
-      expectedMethod: "DELETE",
-      expectedPath: expectedInboundDeletePath,
       scenario: requireScenario(),
       userId,
     });
@@ -349,16 +252,90 @@ describe("hosted local Linq webhook e2e", () => {
         : [];
     });
     expect(inputFiles).toEqual([]);
-    expect(assistantProviderRequests[0]?.body).toContain("raw/assistant-input/");
-    expect(assistantProviderRequests[0]?.body).toContain("attachments/001.pdf");
-    expect(assistantProviderRequests[0]?.body).toContain("storedPath");
+    expect(assistantProviderRequests[0]?.body).toContain("Attachment context:");
+    expect(assistantProviderRequests[0]?.body).toContain("fileName: lab-results.pdf");
+    expect(assistantProviderRequests[0]?.body).toContain("raw evidence: not_attempted");
     expectNoNativeAttachmentLeaks(assistantProviderRequests[0]?.body, [
       attachmentId,
       expectedAttachmentDownloadPath,
       expectedAttachmentDownloadUrl,
-      "pdfEvidencePath:",
       "stub-local-openai-key",
       "OPENAI_API_KEY",
+    ]);
+  }, 300_000);
+
+  it("keeps audio-only iMessage media replyable with bounded attachment context", async () => {
+    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
+      await createActiveLinqWebhookMember("voice");
+    const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
+    const attachmentId = `att_voice_${userId}`;
+    const expectedAttachmentDownloadPath =
+      `/attachment-downloads/${encodeURIComponent(attachmentId)}.wav`;
+    const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+    });
+    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+
+    requireScenario().queueAssistantResponses([hostedLinqVoiceNoteAssistantReplyText]);
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      materializedChatId,
+      {
+        eventId: `evt_voice_memo_${userId}`,
+        messageId: `msg_voice_memo_${userId}`,
+        parts: [
+          {
+            attachmentId,
+            fileName: "Audio Message.m4a",
+            mimeType: "audio/mp4",
+            size: 23_000,
+            type: "media",
+            url: `${requireLinqStub().attachmentDownloadContainerBaseUrl}/${encodeURIComponent(attachmentId)}.m4a`,
+          },
+        ],
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: attachmentDownloadCountBeforeReply,
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(finalStatus.inFlight).toBe(false);
+    expect(finalStatus.workspace).not.toBeNull();
+
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: expectedReplyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      hostedLinqVoiceNoteAssistantReplyText,
+    );
+    const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
+      assistantProviderCountBeforeReply,
+    );
+    expect(assistantProviderRequests).toHaveLength(1);
+    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
+    expect(assistantProviderBody).toContain("Attachment context:");
+    expect(assistantProviderBody).toContain("fileName: Audio Message.m4a");
+    expect(assistantProviderBody).toContain("raw evidence: not_attempted");
+    expectNoNativeAttachmentLeaks(assistantProviderBody, [
+      attachmentId,
+      expectedAttachmentDownloadPath,
     ]);
   }, 300_000);
 });
@@ -504,7 +481,7 @@ async function startLinqScenario(
 }
 
 function buildLinqWebhookLocalInboundAllowlist(): string {
-  return ["reply", "rapid", "voice", "pdf"]
+  return ["reply", "rapid", "pdf", "voice"]
     .map((label, index) =>
       buildLinqRecipientPhoneNumber(
         `member_local_linq_webhook_${label}_${linqWebhookRunId}_${index + 1}`,

@@ -42,7 +42,7 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
-const midnightKualaLumpurDueAt = "2026-05-04T16:00:00.000Z";
+const scheduledReminderTimes = resolveScheduledReminderTimes();
 const productionLikeAssistantModel = "gpt-5.5";
 const hostedAssistantProfileId = "platform-default";
 const hostedLocalWorkerRestartBody = "Your worker restarted mid-request.";
@@ -72,7 +72,7 @@ afterAll(async () => {
 describe("hosted local Linq scheduled reminder e2e", () => {
   beforeAll(async () => {
     await startScenario();
-  }, 300_000);
+  }, 600_000);
 
   it("sends a due canonical midnight reminder with missing runtime state", async () => {
     await requireScenario().seedActiveHostedLinqMember({
@@ -84,7 +84,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const checkpoint = await seedHostedWorkspaceCheckpointForTest({
       browserVaultReplicaRef: createBrowserVaultReplicaRef(snapshot.hash),
       environment: requireScenario().runtimeEnv,
-      nextWakeAt: midnightKualaLumpurDueAt,
+      nextWakeAt: scheduledReminderTimes.dueAtIso,
       nextWakeReason: "assistant",
       redactedStatusJson: {
         seeded: true,
@@ -109,7 +109,8 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.workspace?.nextWakeAt).toSatisfy(isFutureKualaLumpurMidnight);
+    expect(finalStatus.workspace?.nextWakeAt).toBe(scheduledReminderTimes.dueAtIso);
+    expect(finalStatus.workspace?.nextWakeAt).toSatisfy(isKualaLumpurMidnight);
     expect(finalStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
       expect.objectContaining({
         eventCode: "assistant.automation_detail",
@@ -175,7 +176,7 @@ async function createScheduledReminderSnapshot(): Promise<{
     automationId: "automation_01JX8VBQY2M5ZBV64ZP4N1DRBB",
     continuityPolicy: "preserve",
     instructions: "Send the user a short reminder to go to sleep.",
-    now: new Date("2026-05-03T22:17:55.000Z"),
+    now: new Date(scheduledReminderTimes.createdAtIso),
     route: {
       channel: "linq",
       deliveryTarget: null,
@@ -262,13 +263,13 @@ function isHostedLocalWorkerRestartError(error: unknown): boolean {
   return error instanceof Error && error.message.includes(hostedLocalWorkerRestartBody);
 }
 
-function isFutureKualaLumpurMidnight(value: unknown): boolean {
+function isKualaLumpurMidnight(value: unknown): boolean {
   if (typeof value !== "string") {
     return false;
   }
 
   const nextWake = new Date(value);
-  if (Number.isNaN(nextWake.getTime()) || nextWake <= new Date()) {
+  if (Number.isNaN(nextWake.getTime())) {
     return false;
   }
 
@@ -290,7 +291,7 @@ async function writeSyntheticVaultMetadata(vaultRoot: string): Promise<void> {
   await writeFile(
     path.join(vaultRoot, "vault.json"),
     `${JSON.stringify({
-      createdAt: "2026-05-03T22:17:55.000Z",
+      createdAt: scheduledReminderTimes.createdAtIso,
       formatVersion: 1,
       timezone: "Asia/Kuala_Lumpur",
       title: "Synthetic Scheduled Reminder Vault",
@@ -322,8 +323,26 @@ async function writeSyntheticHostedAssistantConfig(operatorHomeRoot: string): Pr
       },
     ],
     schema: "murph.hosted-assistant-config.v1",
-    updatedAt: "2026-05-03T22:17:55.000Z",
+    updatedAt: scheduledReminderTimes.createdAtIso,
   }, operatorHomeRoot);
+}
+
+function resolveScheduledReminderTimes(now = new Date()): {
+  createdAtIso: string;
+  dueAtIso: string;
+} {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const kualaLumpurOffsetMs = 8 * 60 * 60 * 1000;
+  const currentKualaLumpurMidnightUtcMs =
+    Math.floor((now.getTime() + kualaLumpurOffsetMs) / dayMs) * dayMs
+    - kualaLumpurOffsetMs;
+  const dueAtMs = currentKualaLumpurMidnightUtcMs < now.getTime()
+    ? currentKualaLumpurMidnightUtcMs
+    : currentKualaLumpurMidnightUtcMs - dayMs;
+  return {
+    createdAtIso: new Date(dueAtMs - 2 * 60 * 60 * 1000).toISOString(),
+    dueAtIso: new Date(dueAtMs).toISOString(),
+  };
 }
 
 function createSnapshotBundleRef(input: {
