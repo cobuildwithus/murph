@@ -160,6 +160,55 @@ describe("runtime-state locks", () => {
     expect(existsSync(options.lockPath)).toBe(false);
   });
 
+  it("rejects same-owner reentry for a different lock path without cleaning the held lock", async () => {
+    const tempRoot = createTempRoot();
+    const options = createLockOptions(tempRoot);
+    const handle = await acquireDirectoryLock(options);
+    const otherLockPath = path.join(tempRoot, "locks", "other-state.lock");
+
+    try {
+      await expect(
+        acquireDirectoryLock({
+          ...options,
+          lockPath: otherLockPath,
+          metadataPath: path.join(otherLockPath, "metadata.json"),
+          metadata: { owner: "owner-2" },
+        }),
+      ).rejects.toThrow("different lock identity");
+
+      expect(existsSync(options.lockPath)).toBe(true);
+      expect(existsSync(otherLockPath)).toBe(false);
+    } finally {
+      await handle.release();
+    }
+
+    expect(existsSync(options.lockPath)).toBe(false);
+  });
+
+  it("rejects same-owner reentry for a different metadata path without cleaning the held lock", async () => {
+    const tempRoot = createTempRoot();
+    const options = createLockOptions(tempRoot);
+    const handle = await acquireDirectoryLock(options);
+    const otherMetadataPath = path.join(options.lockPath, "nested", "metadata.json");
+
+    try {
+      await expect(
+        acquireDirectoryLock({
+          ...options,
+          metadataPath: otherMetadataPath,
+          metadata: { owner: "owner-2" },
+        }),
+      ).rejects.toThrow("different lock identity");
+
+      expect(existsSync(options.lockPath)).toBe(true);
+      expect(existsSync(otherMetadataPath)).toBe(false);
+    } finally {
+      await handle.release();
+    }
+
+    expect(existsSync(options.lockPath)).toBe(false);
+  });
+
   it("clears stale lock directories by default before acquiring a new handle", async () => {
     const tempRoot = createTempRoot();
     const options = createLockOptions(tempRoot);

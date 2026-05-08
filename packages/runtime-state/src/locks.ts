@@ -12,6 +12,8 @@ interface ProcessDirectoryLockState {
   depth: number;
   metadata: unknown;
   lockPath: string;
+  metadataPath: string;
+  lockIdentity: LockPathIdentity;
   cleanupRetries: number | undefined;
   cleanupRetryDelayMs: number | undefined;
 }
@@ -100,6 +102,7 @@ export async function acquireDirectoryLock<TMetadata>(
 ): Promise<DirectoryLockHandle<TMetadata>> {
   const existing = processDirectoryLocks.get(options.ownerKey);
   if (existing) {
+    await assertSameProcessDirectoryLock(options, existing);
     existing.depth += 1;
     let released = false;
 
@@ -115,7 +118,7 @@ export async function acquireDirectoryLock<TMetadata>(
 
         if (existing.depth <= 0) {
           processDirectoryLocks.delete(options.ownerKey);
-          await cleanupLockDirectory(options.lockPath, existing);
+          await cleanupLockDirectory(existing.lockPath, existing);
         }
       },
     };
@@ -151,6 +154,8 @@ export async function acquireDirectoryLock<TMetadata>(
     depth: 1,
     metadata: options.metadata,
     lockPath: options.lockPath,
+    metadataPath: options.metadataPath,
+    lockIdentity: await readRequiredPathIdentity(options.lockPath),
     cleanupRetries: options.cleanupRetries,
     cleanupRetryDelayMs: options.cleanupRetryDelayMs,
   };
@@ -175,6 +180,23 @@ export async function acquireDirectoryLock<TMetadata>(
       await cleanupLockDirectory(options.lockPath, state);
     },
   };
+}
+
+async function assertSameProcessDirectoryLock(
+  options: AcquireDirectoryLockOptions<unknown>,
+  existing: ProcessDirectoryLockState,
+): Promise<void> {
+  const currentIdentity = await readPathIdentity(options.lockPath);
+
+  if (
+    path.resolve(options.lockPath) !== path.resolve(existing.lockPath) ||
+    path.resolve(options.metadataPath) !== path.resolve(existing.metadataPath) ||
+    !samePathIdentity(currentIdentity, existing.lockIdentity)
+  ) {
+    throw new Error(
+      "Directory lock owner key is already active for a different lock identity.",
+    );
+  }
 }
 
 async function cleanupLockDirectory(
