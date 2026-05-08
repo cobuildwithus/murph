@@ -535,6 +535,7 @@ export async function processDueAssistantCronJobsLocal(
       summary.failed += 1
     }
     emitAssistantCronJobCompletedEvent({
+      errorPresent: result.run.error !== null,
       job: result.job,
       onEvent: input.onEvent,
       runStatus: result.run.status,
@@ -628,6 +629,7 @@ async function emitAssistantCronScanEvents(input: {
 }
 
 function emitAssistantCronJobCompletedEvent(input: {
+  errorPresent: boolean
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   runStatus: AssistantCronRunRecord['status']
@@ -644,6 +646,7 @@ function emitAssistantCronJobCompletedEvent(input: {
     details: 'scheduled job run completed',
     safeDetails: safeDetailsByStatus[input.runStatus],
     failureContext: {
+      errorPresent: input.errorPresent,
       routeConfigured: assistantCronJobHasDeliveryRoute(input.job),
       runStatus: input.runStatus,
       scheduleKind: input.job.schedule.kind,

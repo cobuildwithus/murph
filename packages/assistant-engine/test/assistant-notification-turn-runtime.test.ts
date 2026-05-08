@@ -56,6 +56,7 @@ afterEach(() => {
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
   const persistedBeforeOutbound: string[] = []
   const traceEvents: unknown[] = []
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
   const stopTyping = vi.fn(async () => undefined)
   const startTelegramTyping = vi.fn(async () => undefined)
   const startTypingIndicator = vi.fn<
@@ -138,7 +139,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
         deliverMessage,
       },
       status: {
-        refreshSnapshot: vi.fn(async () => undefined),
+        refreshSnapshot: vi.fn(async () => {
+          throw new Error('status refresh failed')
+        }),
       },
       turns: {
         createReceipt: vi.fn(async () => undefined),
@@ -286,6 +289,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   )
   assert.equal(result.response, 'Raw notification text')
   assert.deepEqual(result.session, deliveredSession)
+  expect(warnSpy).toHaveBeenCalledWith(
+    'Assistant best-effort status snapshot refresh failed (Error).',
+  )
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(
     startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping,

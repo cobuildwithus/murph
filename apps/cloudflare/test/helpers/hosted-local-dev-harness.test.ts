@@ -99,8 +99,8 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
     lastErrorCode: "configuration_error",
     mailboxLag: [
       {
-        importedSeq: "0",
-        lag: "1",
+        importedSeq: "1",
+        lag: "0",
         lane: "system",
         maxSeq: "1",
       },
@@ -128,6 +128,83 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
     })).rejects.toThrow(/terminal error[\s\S]*configuration_error/u);
 
     expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    await harness.stop();
+  }
+});
+
+it("keeps nudging when a runner error still has mailbox lag", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const laggedErrorStatus = {
+    inFlight: false,
+    lastErrorCode: "TimeoutError",
+    mailboxLag: [
+      {
+        importedSeq: "0",
+        lag: "1",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [],
+    userId: "member_retryable_error",
+    workspace: null,
+  } satisfies HostedRunnerStatusResponse;
+  const completedStatus = {
+    ...laggedErrorStatus,
+    lastErrorCode: null,
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:00.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:00.000Z",
+      userId: "member_retryable_error",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const statuses = [laggedErrorStatus, completedStatus];
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).includes("/nudge")) {
+      return Response.json({ accepted: true });
+    }
+    return Response.json(statuses.shift() ?? completedStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_retryable_error", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      lastErrorCode: null,
+      userId: "member_retryable_error",
+    });
+
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_retryable_error/nudge"
+      && init?.method === "POST"
+    )).toBe(true);
   } finally {
     await harness.stop();
   }

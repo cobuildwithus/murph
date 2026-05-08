@@ -44,7 +44,11 @@ import {
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
-import { normalizeNullableString, normalizeRequiredText } from './shared.js'
+import {
+  normalizeNullableString,
+  normalizeRequiredText,
+  warnAssistantBestEffortFailure,
+} from './shared.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -315,7 +319,12 @@ export async function sendAssistantNotificationLocal(
             vault: input.vault,
           })
         }
-        await state.status.refreshSnapshot()
+        await state.status.refreshSnapshot().catch((error) => {
+          warnAssistantBestEffortFailure({
+            error,
+            operation: 'status snapshot refresh',
+          })
+        })
 
         if (deliveryOutcome.kind === 'failed') {
           throw annotateAssistantNotificationError(

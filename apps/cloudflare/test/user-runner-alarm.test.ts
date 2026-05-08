@@ -3562,6 +3562,45 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
   });
 
+  it("skips post-foreground browser-vault refresh in hosted-local e2e isolation", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-local-e2e-skip"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      workspace.version = String(Number(workspace.version) + 1);
+      return {
+        nextWakeAt: null,
+        status: "idle",
+      };
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
+      workspace,
+      {
+        invoke,
+        refreshBrowserVaultReplica,
+        runnerRuntimeEnvSource: {
+          ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+          MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        },
+      },
+    );
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
+  });
+
   it("keeps foreground nudges ahead of a pending post-reply browser-vault refresh", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-nudge-wins"),
@@ -4105,6 +4144,7 @@ function createRunnerCryptoContextHarness(
     onStoragePut?(input: { key: string; value: unknown }): void | Promise<void>;
     onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
     refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
+    runnerRuntimeEnvSource?: typeof TEST_RUNNER_RUNTIME_ENV_SOURCE & Record<string, string>;
     runnerTimeoutMs?: number;
     usageGateResponse?: Record<string, unknown>;
     usageGateStatus?: number;
@@ -4156,6 +4196,7 @@ function createRunnerCryptoContextHarness(
   const destroyInstance = options.destroyInstance ?? vi.fn(async () => {});
   const destroyInstanceNames: string[] = [];
   const runnerContainerNames: string[] = [];
+  const runnerRuntimeEnvSource = options.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE;
   let cryptoContextStatus = options.cryptoContextStatus ?? 200;
   let workspaceReadCount = 0;
 
@@ -4225,17 +4266,17 @@ function createRunnerCryptoContextHarness(
       idleShutdownCheckpointsEnabled: true,
     },
     new MemoryEncryptedR2Bucket(),
-    TEST_RUNNER_RUNTIME_ENV_SOURCE,
+    runnerRuntimeEnvSource,
     {
       getByName(name: string) {
         runnerContainerNames.push(name);
         expect([
           resolveHostedExecutionRunnerContainerName({
-            source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+            source: runnerRuntimeEnvSource,
             userId: "member_123",
           }),
           resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
-            source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+            source: runnerRuntimeEnvSource,
             userId: "member_123",
           }),
         ]).toContain(name);

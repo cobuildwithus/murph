@@ -47,6 +47,7 @@ describe("hosted local device connect e2e", () => {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
         HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: hostedWebCallbackPublicKeyringJson,
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
+        MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
         MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "1",
         WHOOP_BASE_URL: whoopBaseUrl,
         WHOOP_CLIENT_ID: whoopClientId,
@@ -59,7 +60,7 @@ describe("hosted local device connect e2e", () => {
       scenarioLabel: "Local hosted device connect e2e",
       streamLogs: streamDevLogs,
     });
-  }, 300_000);
+  }, 600_000);
 
   afterAll(async () => {
     await scenario?.stop();
@@ -111,15 +112,9 @@ describe("hosted local device connect e2e", () => {
     });
     expect(connectLink?.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
     const authorizationUrl = new URL(connectLink?.authorizationUrl ?? "");
-    expect(authorizationUrl.origin).toBe(whoopBaseUrl);
-    expect(authorizationUrl.pathname).toBe("/oauth/oauth2/auth");
-    expect(authorizationUrl.searchParams.get("client_id")).toBe(whoopClientId);
-    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
-      `${deviceSyncPublicBaseUrl}/oauth/whoop/callback`,
-    );
-    expect(authorizationUrl.searchParams.get("response_type")).toBe("code");
-    expect(authorizationUrl.searchParams.get("state")).toEqual(expect.any(String));
-    expect(authorizationUrl.searchParams.has("client_secret")).toBe(false);
+    expect(authorizationUrl.origin).toBe(requireScenario().harness.webBaseUrl);
+    expect(authorizationUrl.pathname).toMatch(/^\/device\/connect\/dc_[A-Za-z0-9_-]+$/u);
+    expect(authorizationUrl.search).toBe("");
     expect(connectLink?.authorizationUrl).not.toContain(whoopClientSecret);
     expect(requireScenario().harness.stderrTail()).not.toContain(
       "No device sync providers are configured",

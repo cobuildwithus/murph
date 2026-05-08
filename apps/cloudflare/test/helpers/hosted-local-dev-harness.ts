@@ -361,7 +361,9 @@ function hostedStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean 
 }
 
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {
-  return !status.inFlight && Boolean(status.lastErrorCode);
+  return !status.inFlight
+    && Boolean(status.lastErrorCode)
+    && !hostedStatusHasMailboxLag(status);
 }
 
 function resolveHostedLocalHarnessDistDir(

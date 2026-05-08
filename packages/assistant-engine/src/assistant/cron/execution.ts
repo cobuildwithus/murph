@@ -14,7 +14,10 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import { errorMessage } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
-import { buildAssistantCronNotificationDedupeToken } from './notification-delivery.js'
+import {
+  buildAssistantCronHostedDeliveryIdempotency,
+  buildAssistantCronNotificationDedupeToken,
+} from './notification-delivery.js'
 import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -258,6 +261,10 @@ export async function executeClaimedAssistantCronJob(input: {
         vault: input.vault,
         instructions: buildAssistantCronExecutionInstructions(claimedJob),
         deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
+          job: claimedJob,
+          trigger: input.trigger,
+        }),
+        hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
           job: claimedJob,
           trigger: input.trigger,
         }),

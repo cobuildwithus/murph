@@ -1683,6 +1683,16 @@ export class HostedUserRunner {
   private scheduleBrowserVaultRefreshAfterForegroundInvocation(input: {
     userId: string;
   }): void {
+    if (this.shouldSkipBrowserVaultRefreshAfterForegroundInvocation()) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        message: "Hosted runner skipped browser-vault refresh after foreground invocation for local e2e isolation.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return;
+    }
+
     const schedule = this.browserVaultRefreshCoordinator
       .schedulePending({ userId: input.userId })
       .catch((error) => {
@@ -1709,6 +1719,10 @@ export class HostedUserRunner {
       });
     }
     void schedule;
+  }
+
+  private shouldSkipBrowserVaultRefreshAfterForegroundInvocation(): boolean {
+    return this.readWorkerStringEnvSource().MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1";
   }
 
   private async preflightIdleShutdownCheckpoint(input: {

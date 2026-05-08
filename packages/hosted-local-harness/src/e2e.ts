@@ -148,6 +148,7 @@ export async function runHostedLocalE2eSuite(
     if (prepareRunnerBundle) {
       await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
     }
+    await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
     await runHostedLocalVitest({ env: suiteEnv, scenarios });
   } finally {
     await cleanupHostedRunnerContainers({
@@ -180,6 +181,19 @@ async function prepareHostedLocalRunnerBundle(input: {
   });
 }
 
+async function prepareHostedLocalRunnerBaseImage(input: {
+  env: NodeJS.ProcessEnv;
+}): Promise<void> {
+  await runForegroundCommand({
+    args: ["--dir", "apps/cloudflare", "runner:docker:base"],
+    command: "pnpm",
+    cwd: repoRoot,
+    env: input.env,
+    label: "Hosted local runner base image preparation",
+  });
+  input.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE = "1";
+}
+
 async function runHostedLocalVitest(input: {
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
@@ -207,6 +221,8 @@ function buildHostedLocalE2eSuiteEnv(input: {
 }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...input.env,
+    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS:
+      input.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || "120000",
     MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]:
       input.env[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim()
