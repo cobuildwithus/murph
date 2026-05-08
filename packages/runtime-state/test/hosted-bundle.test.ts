@@ -39,6 +39,7 @@ import {
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
   snapshotHostedExecutionContextUnsafeForFixture,
+  snapshotHostedPortableWorkspaceDelta,
   verifyRestoredHostedCodexContinuityManifest,
   writeHostedBundleTextFile,
 } from "../src/node/index.ts";
@@ -1447,6 +1448,202 @@ test("hosted workspace working deltas preserve portable edits, deletes, runtime 
     );
     assert.equal(await readFile(path.join(restored.vaultRoot, "raw", "captures", "added.pdf"), "utf8"), addedRawBytes.toString("utf8"));
     assert.equal(await readFile(path.join(restored.vaultRoot, "raw", "captures", "base.pdf"), "utf8"), baseRawBytes.toString("utf8"));
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted workspace working deltas tombstone deleted materialized non-eager artifacts", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-working-delta-materialized-delete-"));
+  const artifacts = new Map<string, Uint8Array>();
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "captures", "report.pdf");
+    const rawAttachmentBytes = Buffer.concat([
+      Buffer.from("%PDF-materialized-delete\n", "utf8"),
+      Buffer.alloc(300 * 1024, "d"),
+    ]);
+
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "base\n");
+    await writeFile(rawAttachmentPath, rawAttachmentBytes);
+
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      vaultRoot,
+    });
+    const baseManifest = readHostedPortableWorkspaceManifestFromBundle(baseSnapshot.bundle);
+    assert.ok(baseManifest);
+    const baseArtifactRefs = listHostedBundleArtifacts({
+      bytes: baseSnapshot.bundle,
+      expectedKind: "vault",
+    });
+    assert.equal(baseArtifactRefs.some((artifact) =>
+      artifact.root === "vault" && artifact.path === "raw/captures/report.pdf"
+    ), true);
+
+    await writeFile(path.join(vaultRoot, "note.md"), "changed\n");
+    await rm(rawAttachmentPath);
+
+    const delta = await snapshotHostedPortableWorkspaceDelta({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      materializedArtifactPaths: new Set(["vault:raw/captures/report.pdf"]),
+      preservedArtifacts: baseArtifactRefs,
+      vaultRoot,
+    });
+    assert.equal(delta.kind, "changed");
+    const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(delta.bundle);
+    assert.ok(deltaManifest);
+    assert.equal(
+      deltaManifest.tombstones.some((file) => file.root === "vault" && file.path === "raw/captures/report.pdf"),
+      true,
+    );
+
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const artifact = artifacts.get(ref.sha256);
+        assert.ok(artifact);
+        return artifact;
+      },
+      bundle: baseSnapshot.bundle,
+      shouldRestoreArtifact: () => true,
+      workspaceRoot: restoreRoot,
+    });
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"),
+      rawAttachmentBytes.toString("utf8"),
+    );
+
+    await restoreHostedWorkspaceWorkingDelta({
+      artifactResolver: async ({ ref }) => {
+        const artifact = artifacts.get(ref.sha256);
+        assert.ok(artifact);
+        return artifact;
+      },
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      bundle: delta.bundle,
+      roots: {
+        vault: restored.vaultRoot,
+      },
+      shouldRestoreArtifact: () => true,
+    });
+
+    await assert.rejects(readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"));
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted workspace working deltas carry forward unmaterialized non-eager artifacts", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-working-delta-unmaterialized-carry-"));
+  const artifacts = new Map<string, Uint8Array>();
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "captures", "report.pdf");
+    const rawAttachmentBytes = Buffer.concat([
+      Buffer.from("%PDF-unmaterialized-carry\n", "utf8"),
+      Buffer.alloc(300 * 1024, "c"),
+    ]);
+
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "base\n");
+    await writeFile(rawAttachmentPath, rawAttachmentBytes);
+
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      vaultRoot,
+    });
+    const baseManifest = readHostedPortableWorkspaceManifestFromBundle(baseSnapshot.bundle);
+    assert.ok(baseManifest);
+    const baseArtifactRefs = listHostedBundleArtifacts({
+      bytes: baseSnapshot.bundle,
+      expectedKind: "vault",
+    });
+    assert.equal(baseArtifactRefs.some((artifact) =>
+      artifact.root === "vault" && artifact.path === "raw/captures/report.pdf"
+    ), true);
+
+    await writeFile(path.join(vaultRoot, "note.md"), "changed\n");
+    await rm(rawAttachmentPath);
+
+    const delta = await snapshotHostedPortableWorkspaceDelta({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      preservedArtifacts: baseArtifactRefs,
+      vaultRoot,
+    });
+    assert.equal(delta.kind, "changed");
+    const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(delta.bundle);
+    assert.ok(deltaManifest);
+    assert.equal(
+      deltaManifest.tombstones.some((file) => file.root === "vault" && file.path === "raw/captures/report.pdf"),
+      false,
+    );
+    assert.equal(
+      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "raw/captures/report.pdf"),
+      false,
+    );
+
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const artifact = artifacts.get(ref.sha256);
+        assert.ok(artifact);
+        return artifact;
+      },
+      bundle: baseSnapshot.bundle,
+      shouldRestoreArtifact: () => false,
+      workspaceRoot: restoreRoot,
+    });
+    await assert.rejects(readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"));
+
+    await restoreHostedWorkspaceWorkingDelta({
+      artifactResolver: async ({ ref }) => {
+        const artifact = artifacts.get(ref.sha256);
+        assert.ok(artifact);
+        return artifact;
+      },
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      bundle: delta.bundle,
+      roots: {
+        vault: restored.vaultRoot,
+      },
+      shouldRestoreArtifact: () => false,
+    });
+    await assert.rejects(readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"));
+
+    await materializeHostedExecutionArtifacts({
+      artifactResolver: async ({ ref }) => {
+        const artifact = artifacts.get(ref.sha256);
+        assert.ok(artifact);
+        return artifact;
+      },
+      bundle: baseSnapshot.bundle,
+      shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+        root === "vault" && artifactPath === "raw/captures/report.pdf"
+      ),
+      workspaceRoot: restoreRoot,
+    });
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, "raw", "captures", "report.pdf"), "utf8"),
+      rawAttachmentBytes.toString("utf8"),
+    );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
