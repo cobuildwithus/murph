@@ -89,7 +89,9 @@ Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS=0`
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000`
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000` for the Durable
+  Object-owned idle checkpoint/shutdown window; the native container shell adds
+  fallback grace before its own activity expiry
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000`
@@ -119,10 +121,11 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
 invocations that finish idle schedule one lease-scoped idle-shutdown base
-checkpoint at the configured idle window. The container's own `sleepAfter`
-lifecycle is a later fallback so the Durable Object owns checkpoint-before-
-shutdown ordering. New user activity clears that pending checkpoint and pushes
-the idle window forward.
+checkpoint at the configured idle window. That Durable Object alarm owns the
+checkpoint-before-shutdown sequence. The container's own `sleepAfter` lifecycle
+is only a later warm-shell fallback, with grace beyond the checkpoint window, so
+there are not two independent idle owners. New user activity clears that
+pending checkpoint and pushes the idle window forward.
 Each invocation still runs through an isolated child process with fresh
 invocation-local cache/temp roots and a fresh outbound worker-proxy token.
 
