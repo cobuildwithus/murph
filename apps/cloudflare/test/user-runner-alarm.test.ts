@@ -1360,6 +1360,71 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("preempts a persisted lower-priority invocation when a foreground nudge arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const {
+      destroyInstanceNames,
+      runner,
+      sql,
+    } = createRunnerCryptoContextHarness(null, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-26T23:59:59.500Z",
+      "alarm",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+      inFlight: false,
+    });
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    await flushDetachedRunnerDrive();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(destroyInstanceNames).toEqual(["member_123"]);
+    expect(
+      sql.exec(
+        `SELECT
+          active_invocation_id,
+          active_invocation_reason,
+          in_flight,
+          pending_nudge
+        FROM runner_meta
+        WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      active_invocation_id: null,
+      active_invocation_reason: null,
+      in_flight: 0,
+      pending_nudge: 0,
+    }]);
+  });
+
   it("moves persisted pending nudges to recovery while another isolate is active", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
