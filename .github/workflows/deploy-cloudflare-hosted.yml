@@ -297,7 +297,7 @@ jobs:
       - linq-delivery-gate
       - linq-scheduled-reminder-gate
     if: ${{ !cancelled() && (inputs.skip_predeploy_e2e || (needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success')) }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
     concurrency:
@@ -437,14 +437,13 @@ jobs:
             exit 1
           fi
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+
+      - name: Enable pnpm
+        run: corepack enable pnpm
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
@@ -486,18 +485,13 @@ jobs:
         if: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle
 
-      - name: Setup Blacksmith Builder
-        if: ${{ inputs.deploy_worker }}
-        uses: useblacksmith/setup-docker-builder@722e97d12b1d06a961800dd6c05d79d951ad3c80 # v1
-
       - name: Prepare runner base image
         if: ${{ inputs.deploy_worker }}
-        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
-        with:
-          context: .
-          file: Dockerfile.cloudflare-hosted-runner-base
-          load: true
-          tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en
+        run: |
+          docker build \
+            --file Dockerfile.cloudflare-hosted-runner-base \
+            --tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \
+            .
 
       - name: Render Worker secrets
         if: ${{ inputs.deploy_worker && inputs.sync_worker_secrets }}
