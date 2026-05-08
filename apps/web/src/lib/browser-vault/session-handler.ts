@@ -60,7 +60,7 @@ export function createBrowserVaultSessionRoute(input: {
       : "stale" as const;
 
     if (!replicaRef) {
-      await scheduleBrowserVaultRefreshBestEffort({
+      void scheduleBrowserVaultRefreshBestEffort({
         sourceStateHash,
         userId: auth.member.id,
       });
@@ -71,7 +71,7 @@ export function createBrowserVaultSessionRoute(input: {
     }
 
     if (freshness === "stale") {
-      await scheduleBrowserVaultRefreshBestEffort({
+      void scheduleBrowserVaultRefreshBestEffort({
         sourceStateHash,
         userId: auth.member.id,
       });
@@ -144,16 +144,16 @@ async function scheduleBrowserVaultRefreshBestEffort(input: {
   sourceStateHash: string | null;
   userId: string;
 }): Promise<void> {
-  if (!input.sourceStateHash) {
-    return;
-  }
-
-  const client = readHostedExecutionControlClientIfConfigured();
-  if (!client) {
-    return;
-  }
-
   try {
+    if (!input.sourceStateHash) {
+      return;
+    }
+
+    const client = readHostedExecutionControlClientIfConfigured();
+    if (!client) {
+      return;
+    }
+
     await client.scheduleBrowserVaultRefresh({
       sourceStateHash: input.sourceStateHash,
       userId: input.userId,
