@@ -2945,7 +2945,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "refresh_failed_too_large",
       userId: input.userId,
     }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
       workspace,
       {
         browserVaultPublish,
@@ -2963,7 +2963,10 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
+    await flushDetachedRunnerDrive();
     expect(browserVaultPublish).not.toHaveBeenCalled();
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([]);
   });
 
 	  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
