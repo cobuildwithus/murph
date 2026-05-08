@@ -2,7 +2,6 @@ import path from "node:path";
 
 import type {
   HostedWorkspaceCheckpointRequest,
-  HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -37,8 +36,6 @@ import type {
 } from "./hosted-runtime/mailbox-import.ts";
 import {
   createEmptyHostedMailboxImportState,
-  readHostedMailboxImportState,
-  type HostedMailboxImportState,
 } from "./hosted-runtime/mailbox-state.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
@@ -498,24 +495,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
     }
 
-    if (restored.appliedWorkingDelta) {
-      const bootstrapCheckpoint = await checkpointRestoredAppliedWorkingDelta({
-        assertRuntimeLiveness,
-        checkpointRequestBuilder,
-        expectedUserId: input.request.userId,
-        livenessAbortSignal: livenessAbortController.signal,
-        redactedStatus: workspaceRead.workspace?.redactedStatus ?? null,
-        vaultRoot: restored.vaultRoot,
-        workspacePort: cacheRecordingWorkspacePort,
-      });
-      workspaceRead = {
-        ...workspaceRead,
-        workspace: bootstrapCheckpoint.workspace,
-      };
-      checkpointRequestBuilder =
-        createCheckpointRequestBuilderForWorkspace(bootstrapCheckpoint.workspace);
-    }
-
     const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;
     if (!runnerMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
@@ -723,60 +702,6 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
       : {}),
     status: "idle",
   };
-}
-
-async function checkpointRestoredAppliedWorkingDelta(input: {
-  assertRuntimeLiveness: () => void;
-  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
-  expectedUserId: string;
-  livenessAbortSignal: AbortSignal;
-  redactedStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
-  vaultRoot: string;
-  workspacePort: HostedRuntimePlatform["workspacePort"];
-}): Promise<HostedWorkspaceCheckpointResponse> {
-  if (!input.workspacePort) {
-    throw new TypeError("Hosted working delta bootstrap requires workspace port support.");
-  }
-
-  input.assertRuntimeLiveness();
-  const state = await raceHostedRuntimeLiveness(
-    readHostedMailboxImportState({ vaultRoot: input.vaultRoot }),
-    input.livenessAbortSignal,
-  );
-  input.assertRuntimeLiveness();
-  const checkpointRequest = await raceHostedRuntimeLiveness(
-    Promise.resolve(input.checkpointRequestBuilder.createRequest({
-      importResult: {
-        blocked: [],
-        fetchedCount: 0,
-        importedCount: 0,
-        state,
-      },
-      previousState: state,
-      reason: "activation_bootstrap",
-      redactedStatus: input.redactedStatus ?? null,
-      state,
-    })),
-    input.livenessAbortSignal,
-  );
-  input.assertRuntimeLiveness();
-  const checkpoint = await raceHostedRuntimeLiveness(
-    input.workspacePort.checkpoint(checkpointRequest),
-    input.livenessAbortSignal,
-  );
-  input.assertRuntimeLiveness();
-
-  if (checkpoint.workspace.userId !== input.expectedUserId) {
-    throw new HostedMailboxImportCheckpointUserMismatchError({
-      actualUserId: checkpoint.workspace.userId,
-      expectedUserId: input.expectedUserId,
-    });
-  }
-  if (!checkpoint.checkpointed) {
-    throw new HostedMailboxImportCheckpointConflictError(checkpoint);
-  }
-
-  return checkpoint;
 }
 
 function shouldDeferInitialMailboxImportCheckpoint(

@@ -69,6 +69,17 @@ export type HostedBundleArtifactRestoreFilter = (
   input: HostedBundleArtifactRestoreInput,
 ) => boolean | Promise<boolean>;
 
+export interface HostedBundleInlineRestoreInput {
+  path: string;
+  root: string;
+  sha256: string;
+  size: number;
+}
+
+export type HostedBundleInlineRestoreFilter = (
+  input: HostedBundleInlineRestoreInput,
+) => boolean | Promise<boolean>;
+
 export interface HostedBundleSnapshotRootInput {
   explicitFiles?: readonly string[];
   optional?: boolean;
@@ -341,8 +352,10 @@ export async function restoreHostedBundleRoots(input: {
   bytes: Uint8Array | ArrayBuffer;
   expectedKind: HostedExecutionBundleKind;
   ignoredRoots?: readonly string[];
+  onSkippedInlineFile?: (input: HostedBundleInlineRestoreInput) => Promise<void> | void;
   roots: HostedBundleRestoreRootMap;
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+  shouldRestoreInlineFile?: HostedBundleInlineRestoreFilter;
 }): Promise<void> {
   await restoreHostedBundleArchiveFiles({
     ...input,
@@ -369,8 +382,10 @@ async function restoreHostedBundleArchiveFiles(input: {
   bytes: Uint8Array | ArrayBuffer;
   expectedKind: HostedExecutionBundleKind;
   ignoredRoots?: readonly string[];
+  onSkippedInlineFile?: (input: HostedBundleInlineRestoreInput) => Promise<void> | void;
   roots: HostedBundleRestoreRootMap;
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+  shouldRestoreInlineFile?: HostedBundleInlineRestoreFilter;
   includeInlineFiles: boolean;
 }): Promise<void> {
   const archive = parseHostedBundleArchive(input.bytes);
@@ -386,6 +401,11 @@ async function restoreHostedBundleArchiveFiles(input: {
   }
 
   for (const file of archive.files) {
+    const isArtifact = isHostedBundleArtifactEntry(file);
+    if (!isArtifact && !input.includeInlineFiles) {
+      continue;
+    }
+
     const root = input.roots[file.root];
 
     if (!root) {
@@ -396,14 +416,10 @@ async function restoreHostedBundleArchiveFiles(input: {
       throw new Error(`Hosted bundle root "${file.root}" is not mapped for restore.`);
     }
 
-    if (!isHostedBundleArtifactEntry(file) && !input.includeInlineFiles) {
-      continue;
-    }
-
     const absolutePath = resolveHostedBundleRestorePath(root, file.path);
     await assertHostedBundleRestorePathHasNoSymlinks(root, absolutePath, file.path);
 
-    if (isHostedBundleArtifactEntry(file)) {
+    if (isArtifact) {
       const shouldRestore = input.shouldRestoreArtifact
         ? await input.shouldRestoreArtifact({
             path: file.path,
@@ -443,9 +459,28 @@ async function restoreHostedBundleArchiveFiles(input: {
       continue;
     }
 
+    if (!input.includeInlineFiles) {
+      continue;
+    }
+
+    const inlineBytes = Buffer.from(file.contentsBase64, "base64");
+    const inlineFile = {
+      path: file.path,
+      root: file.root,
+      sha256: createHash("sha256").update(inlineBytes).digest("hex"),
+      size: inlineBytes.byteLength,
+    };
+    const shouldRestoreInline = input.shouldRestoreInlineFile
+      ? await input.shouldRestoreInlineFile(inlineFile)
+      : true;
+    if (!shouldRestoreInline) {
+      await input.onSkippedInlineFile?.(inlineFile);
+      continue;
+    }
+
     await writeHostedBundleRestoredFile({
       absolutePath,
-      bytes: Buffer.from(file.contentsBase64, "base64"),
+      bytes: inlineBytes,
       mappedRoot: root,
       path: file.path,
       root: file.root,

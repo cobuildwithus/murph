@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { createReadStream, type Stats } from "node:fs";
 import path from "node:path";
-import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -32,6 +32,8 @@ import {
   type HostedBundleArtifactRestoreFilter,
   type HostedBundleArtifactRestoreInput,
   type HostedBundleArtifactSnapshotInput,
+  type HostedBundleInlineRestoreFilter,
+  type HostedBundleInlineRestoreInput,
 } from "./hosted-bundle-node.ts";
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
@@ -51,6 +53,10 @@ export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH =
   "hosted-portable-workspace-delta.json";
 export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_SCHEMA =
   "murph.portable-workspace-delta.v1";
+const HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_RELATIVE_PATH =
+  `${RUNTIME_CACHE_ROOT_RELATIVE_PATH}/hosted-skipped-inline-files.json`;
+const HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_SCHEMA =
+  "murph.hosted-workspace-skipped-inline-files.v1";
 const HOSTED_CODEX_ROLLOUT_RELATIVE_PATH_PATTERN =
   /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/u;
 const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
@@ -204,6 +210,7 @@ interface HostedExecutionContextSnapshotInput {
   materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot?: string | null;
   prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
+  preservedInlineManifestFiles?: readonly HostedPortableWorkspaceManifestFile[];
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
   workspaceSnapshotSizeDiagnosticsSink?: (
@@ -248,6 +255,13 @@ export async function snapshotHostedExecutionContextUnsafeForFixture(
 
 export interface HostedPortableWorkspaceManifestFile {
   artifact?: HostedBundleArtifactRef;
+  path: string;
+  root: string;
+  sha256: string;
+  size: number;
+}
+
+export interface HostedWorkspaceSkippedInlineFile {
   path: string;
   root: string;
   sha256: string;
@@ -339,6 +353,7 @@ export async function snapshotHostedPortableWorkspaceDelta(input: Omit<
     codexContinuity: hostedCodexContinuity,
     materializedArtifactPaths: input.materializedArtifactPaths,
     operatorHomeRoot,
+    preservedInlineManifestFiles: input.preservedInlineManifestFiles,
     preservedArtifacts: input.preservedArtifacts,
     vaultRoot,
     workspaceSnapshotSizeDiagnostics,
@@ -571,6 +586,116 @@ function writeHostedPortableWorkspaceManifestToBundle(
   });
 }
 
+export async function writeHostedWorkspaceSkippedInlineFiles(input: {
+  files: readonly HostedWorkspaceSkippedInlineFile[];
+  vaultRoot: string;
+}): Promise<void> {
+  const manifestPath = resolveHostedWorkspaceSkippedInlineFilesPath(input.vaultRoot);
+  if (input.files.length === 0) {
+    await rm(manifestPath, { force: true });
+    return;
+  }
+
+  const files = input.files
+    .map(canonicalizeHostedWorkspaceSkippedInlineFile)
+    .sort(compareHostedWorkspaceSkippedInlineFiles);
+  await mkdir(path.dirname(manifestPath), { mode: 0o700, recursive: true });
+  await writeFile(
+    manifestPath,
+    JSON.stringify({
+      files,
+      schema: HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_SCHEMA,
+    }) + "\n",
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await chmod(manifestPath, 0o600);
+}
+
+export async function readHostedWorkspaceSkippedInlineFiles(input: {
+  vaultRoot: string;
+}): Promise<HostedWorkspaceSkippedInlineFile[]> {
+  const manifestPath = resolveHostedWorkspaceSkippedInlineFilesPath(input.vaultRoot);
+  let text: string;
+  try {
+    text = await readFile(manifestPath, "utf8");
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const parsed: unknown = JSON.parse(text);
+  if (!isPlainRecord(parsed) || parsed.schema !== HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_SCHEMA) {
+    throw new Error("Hosted workspace skipped-inline manifest schema is invalid.");
+  }
+  if (!Array.isArray(parsed.files)) {
+    throw new Error("Hosted workspace skipped-inline manifest files must be an array.");
+  }
+  return parsed.files
+    .map(parseHostedWorkspaceSkippedInlineFile)
+    .sort(compareHostedWorkspaceSkippedInlineFiles);
+}
+
+function resolveHostedWorkspaceSkippedInlineFilesPath(vaultRoot: string): string {
+  return path.join(
+    path.resolve(vaultRoot),
+    ...HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_RELATIVE_PATH.split(path.posix.sep),
+  );
+}
+
+function parseHostedWorkspaceSkippedInlineFile(value: unknown): HostedWorkspaceSkippedInlineFile {
+  if (!isPlainRecord(value)) {
+    throw new Error("Hosted workspace skipped-inline manifest file must be an object.");
+  }
+  const size = value.size;
+  if (
+    typeof value.path !== "string" ||
+    typeof value.root !== "string" ||
+    !isSha256Hex(value.sha256) ||
+    typeof size !== "number" ||
+    !Number.isSafeInteger(size) ||
+    size < 0
+  ) {
+    throw new Error("Hosted workspace skipped-inline manifest file fields are invalid.");
+  }
+  return canonicalizeHostedWorkspaceSkippedInlineFile({
+    path: value.path,
+    root: value.root,
+    sha256: value.sha256,
+    size,
+  });
+}
+
+function canonicalizeHostedWorkspaceSkippedInlineFile(
+  file: HostedWorkspaceSkippedInlineFile,
+): HostedWorkspaceSkippedInlineFile {
+  return {
+    path: normalizeWorkspaceSnapshotRelativePath(file.path),
+    root: file.root,
+    sha256: file.sha256,
+    size: file.size,
+  };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSha256Hex(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function compareHostedWorkspaceSkippedInlineFiles(
+  left: HostedWorkspaceSkippedInlineFile,
+  right: HostedWorkspaceSkippedInlineFile,
+): number {
+  return `${left.root}:${left.path}`.localeCompare(`${right.root}:${right.path}`);
+}
+
 async function collectHostedPortableWorkspaceDeltaFiles(input: {
   artifactRefProvider?: (
     input: HostedBundleArtifactSnapshotInput,
@@ -582,6 +707,7 @@ async function collectHostedPortableWorkspaceDeltaFiles(input: {
   codexContinuity: HostedCodexContinuityCollection;
   materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot: string | null;
+  preservedInlineManifestFiles?: readonly HostedPortableWorkspaceManifestFile[];
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
   workspaceSnapshotSizeDiagnostics: ReturnType<typeof createHostedWorkspaceSnapshotSizeDiagnosticsCollector>;
@@ -654,6 +780,7 @@ async function collectHostedPortableWorkspaceDeltaFiles(input: {
     archiveFiles,
     files,
     materializedArtifactPaths: input.materializedArtifactPaths,
+    preservedInlineManifestFiles: input.preservedInlineManifestFiles,
     preservedArtifacts: input.preservedArtifacts,
   });
 
@@ -882,6 +1009,7 @@ function carryForwardUnmaterializedHostedWorkspaceArtifacts(input: {
   archiveFiles: Map<string, HostedBundleArchiveFile>;
   files: Map<string, HostedPortableWorkspaceManifestFile>;
   materializedArtifactPaths?: ReadonlySet<string>;
+  preservedInlineManifestFiles?: readonly HostedPortableWorkspaceManifestFile[];
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
 }): void {
   const materializedArtifactPathKeys = new Set(
@@ -909,6 +1037,22 @@ function carryForwardUnmaterializedHostedWorkspaceArtifacts(input: {
       path: normalizedPath,
       root: artifact.root,
     });
+  }
+
+  for (const manifestFile of input.preservedInlineManifestFiles ?? []) {
+    const normalizedPath = normalizeWorkspaceSnapshotRelativePath(manifestFile.path);
+    const key = `${manifestFile.root}:${normalizedPath}`;
+    if (input.files.has(key) || materializedArtifactPathKeys.has(key)) {
+      continue;
+    }
+    const file = canonicalizeHostedPortableWorkspaceManifestFile({
+      ...manifestFile,
+      path: normalizedPath,
+    });
+    if (file.artifact) {
+      throw new Error("Preserved inline hosted workspace manifest files cannot be artifact refs.");
+    }
+    input.files.set(key, file);
   }
 }
 
@@ -1578,11 +1722,13 @@ export async function restoreHostedWorkspaceWorkingDelta(input: {
   baseManifest: HostedPortableWorkspaceManifest;
   baseSnapshotHash: string;
   bundle: Uint8Array | ArrayBuffer;
+  onSkippedInlineFile?: (input: HostedBundleInlineRestoreInput) => Promise<void> | void;
   roots: {
     [WORKSPACE_OPERATOR_HOME_ROOT]?: string;
     vault: string;
   };
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+  shouldRestoreInlineFile?: HostedBundleInlineRestoreFilter;
 }): Promise<HostedPortableWorkspaceDeltaManifest> {
   const manifest = readHostedPortableWorkspaceDeltaManifestFromBundle(input.bundle);
   if (!manifest) {
@@ -1623,16 +1769,23 @@ export async function restoreHostedWorkspaceWorkingDelta(input: {
     restoreRoots[WORKSPACE_OPERATOR_HOME_ROOT] = input.roots[WORKSPACE_OPERATOR_HOME_ROOT];
   }
 
+  const skippedInlineFiles = new Set<string>();
   await restoreHostedBundleRoots({
     artifactResolver: input.artifactResolver,
     bytes: input.bundle,
     expectedKind: "vault",
+    onSkippedInlineFile: async (file) => {
+      skippedInlineFiles.add(`${file.root}:${file.path}`);
+      await input.onSkippedInlineFile?.(file);
+    },
     roots: restoreRoots,
     shouldRestoreArtifact: input.shouldRestoreArtifact,
+    shouldRestoreInlineFile: input.shouldRestoreInlineFile,
   });
   await verifyHostedWorkspaceWorkingDeltaUpserts({
     manifest,
     roots: input.roots,
+    skippedInlineFiles,
   });
   return manifest;
 }
@@ -1719,9 +1872,13 @@ async function verifyHostedWorkspaceWorkingDeltaUpserts(input: {
     [WORKSPACE_OPERATOR_HOME_ROOT]?: string;
     vault: string;
   };
+  skippedInlineFiles?: ReadonlySet<string>;
 }): Promise<void> {
   for (const upsert of input.manifest.upserts) {
     if (upsert.artifact) {
+      continue;
+    }
+    if (input.skippedInlineFiles?.has(`${upsert.root}:${upsert.path}`)) {
       continue;
     }
     const root = input.roots[upsert.root as keyof typeof input.roots];
