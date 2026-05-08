@@ -3140,7 +3140,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
   })
   const queuedError = {
     code: 'ASSISTANT_DELIVERY_DEFERRED',
-    message: 'delivery queued for retry',
+    message: 'delivery deferred for background retry',
     retryable: true,
   }
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
