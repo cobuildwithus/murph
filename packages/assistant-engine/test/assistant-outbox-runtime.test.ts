@@ -1398,6 +1398,74 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('abandons Telegram transport ambiguity without retrying when no provider ids are known', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-telegram-transport-')
+
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      message: 'telegram transport ambiguity',
+      sessionId: 'session-telegram-transport',
+      turnId: 'turn-telegram-transport',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('socket closed after sendMessage'), {
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: null,
+        providerMessageIds: [],
+        target: '123',
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:25:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.delivery).toBeNull()
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('threads abort signals through outbox drain delivery dependencies', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-signal-')
+    const controller = new AbortController()
+
+    await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:00:00.000Z',
+      message: 'abortable delivery',
+      sessionId: 'session-signal',
+      turnId: 'turn-signal',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        providerMessageId: 'provider-signal',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    await drainAssistantOutboxLocal({
+      now: new Date('2026-04-08T00:01:00.000Z'),
+      signal: controller.signal,
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(mockedDeliverAssistantMessageOverBinding.mock.calls[0]?.[1]).toEqual({
+      signal: controller.signal,
+    })
+  })
+
   it('drains only due intents and summarizes mixed outbox states', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-drain-')
     vi.useFakeTimers()

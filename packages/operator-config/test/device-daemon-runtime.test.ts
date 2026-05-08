@@ -60,6 +60,11 @@ const TEST_WHOOP_PROVIDER_ENV = {
   WHOOP_CLIENT_SECRET: 'whoop-secret',
 } as const
 
+function firstLivePid(livePids: Set<number>): number | null {
+  const pids = [...livePids]
+  return pids.length === 1 ? pids[0] ?? null : null
+}
+
 afterEach(async () => {
   vi.restoreAllMocks()
   vi.resetModules()
@@ -1228,6 +1233,8 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
       killProcess: (pid) => {
         livePids.delete(pid)
       },
+      findUnmanagedDeviceSyncDaemonPid: async () => managedPid,
+      resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
     },
   })
   assert.equal(stopped.stopped, true)
@@ -1307,6 +1314,9 @@ test('managed device-sync daemon keeps encryption secret stable across stop and 
     isProcessAlive: (pid: number) => livePids.has(pid),
     killProcess: (pid: number) => {
       livePids.delete(pid)
+    },
+    findUnmanagedDeviceSyncDaemonPid: async () => {
+      return firstLivePid(livePids)
     },
     resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
     spawnProcess: async (input: { env: NodeJS.ProcessEnv }) => {
@@ -1598,6 +1608,48 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
   assert.equal(staleStopResult.managed, false)
   assert.match(staleStopResult.message ?? '', /Removed stale device sync daemon launcher state/u)
 
+  const mismatchedStopVault = await createTempVault('operator-config-device-daemon-stop-mismatched-')
+  const mismatchedStopPaths = resolveDeviceDaemonPaths(mismatchedStopVault)
+  await writeDeviceDaemonState(
+    mismatchedStopPaths,
+    {
+      pid: 9401,
+      baseUrl: 'http://127.0.0.1:4318',
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+    createFileDependencies(),
+  )
+  await writeManagedControlToken(mismatchedStopPaths, 'managed-token', createFileDependencies())
+  const mismatchedKilledPids: number[] = []
+
+  await assert.rejects(
+    () =>
+      stopManagedDeviceSyncDaemon({
+        vault: mismatchedStopVault,
+        baseUrl: 'http://127.0.0.1:4318',
+        dependencies: {
+          isProcessAlive: () => true,
+          killProcess: (pid) => {
+            mismatchedKilledPids.push(pid)
+          },
+          findUnmanagedDeviceSyncDaemonPid: async () => 9402,
+          resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_DAEMON_IDENTITY_UNVERIFIED',
+  )
+  assert.deepEqual(mismatchedKilledPids, [])
+  assert.deepEqual(
+    await readDeviceDaemonState(mismatchedStopPaths, createFileDependencies()),
+    {
+      pid: 9401,
+      baseUrl: 'http://127.0.0.1:4318',
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+  )
+
   await assert.rejects(
     () =>
       stopManagedDeviceSyncDaemon({
@@ -1634,6 +1686,8 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
           },
           isProcessAlive: () => true,
           killProcess: () => undefined,
+          findUnmanagedDeviceSyncDaemonPid: async () => 9300,
+          resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
         },
       }),
     (error) =>
@@ -1738,6 +1792,8 @@ test('device-daemon management also covers explicit spawn tokens and default kil
     baseUrl: 'http://127.0.0.1:4318',
     dependencies: {
       isProcessAlive: () => !stopped,
+      findUnmanagedDeviceSyncDaemonPid: async () => 9400,
+      resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
     },
   })
   await vi.advanceTimersByTimeAsync(100)

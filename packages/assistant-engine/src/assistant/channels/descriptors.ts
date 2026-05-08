@@ -58,13 +58,23 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     })) ?? null
   },
   async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
-    const send = dependencies.sendTelegram ?? sendTelegramMessage
-    const delivered = await send({
-      idempotencyKey: idempotencyKey ?? null,
-      target: candidate.target,
-      message,
-      replyToMessageId: replyToMessageId ?? null,
-    })
+    const delivered = dependencies.sendTelegram
+      ? await dependencies.sendTelegram({
+          idempotencyKey: idempotencyKey ?? null,
+          target: candidate.target,
+          message,
+          replyToMessageId: replyToMessageId ?? null,
+          signal: dependencies.signal,
+        })
+      : await sendTelegramMessage(
+          {
+            idempotencyKey: idempotencyKey ?? null,
+            target: candidate.target,
+            message,
+            replyToMessageId: replyToMessageId ?? null,
+          },
+          { signal: dependencies.signal },
+        )
     return {
       cleanupMessages: readDeliveredCleanupMessages(delivered),
       cleanupTargetAliases: readDeliveredCleanupTargetAliases(delivered),

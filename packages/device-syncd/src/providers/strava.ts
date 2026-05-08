@@ -267,7 +267,8 @@ function hasAcceptedActivityScope(scopes: readonly string[]): boolean {
 }
 
 function resolveAccountScopes(callbackGrantedScopes: readonly string[], tokenScopePayload: unknown): string[] {
-  const scopes = normalizeStravaScopes(callbackGrantedScopes.length > 0 ? callbackGrantedScopes : tokenScopePayload);
+  const tokenScopes = normalizeStravaScopes(tokenScopePayload);
+  const scopes = tokenScopes.length > 0 ? tokenScopes : normalizeStravaScopes(callbackGrantedScopes);
 
   if (!hasAcceptedActivityScope(scopes)) {
     throw buildRequiredActivityScopeError();
@@ -896,52 +897,57 @@ export function createStravaDeviceSyncProvider(
         code,
       });
       const tokens = tokenResponseToAuthTokens(tokenPayload);
-      tokens.refreshToken = requireRefreshToken(tokens.refreshToken, () =>
-        deviceSyncError({
-          code: "STRAVA_REFRESH_TOKEN_MISSING",
-          message: "Strava token response did not include a refresh token.",
-          retryable: false,
-          httpStatus: 502,
-        })
-      );
-      let athlete = coerceRecord(tokenPayload.athlete);
-      let externalAccountId = normalizeIdentifier(athlete.id);
+      try {
+        tokens.refreshToken = requireRefreshToken(tokens.refreshToken, () =>
+          deviceSyncError({
+            code: "STRAVA_REFRESH_TOKEN_MISSING",
+            message: "Strava token response did not include a refresh token.",
+            retryable: false,
+            httpStatus: 502,
+          })
+        );
+        let athlete = coerceRecord(tokenPayload.athlete);
+        let externalAccountId = normalizeIdentifier(athlete.id);
 
-      if (!externalAccountId) {
-        athlete = await fetchAthleteProfile(tokens.accessToken);
-        externalAccountId = normalizeIdentifier(athlete.id);
-      }
+        if (!externalAccountId) {
+          athlete = await fetchAthleteProfile(tokens.accessToken);
+          externalAccountId = normalizeIdentifier(athlete.id);
+        }
 
-      if (!externalAccountId) {
-        throw deviceSyncError({
-          code: "STRAVA_ATHLETE_INVALID",
-          message: "Strava token response did not include a stable athlete identifier.",
-          retryable: false,
-          httpStatus: 502,
-        });
-      }
+        if (!externalAccountId) {
+          throw deviceSyncError({
+            code: "STRAVA_ATHLETE_INVALID",
+            message: "Strava token response did not include a stable athlete identifier.",
+            retryable: false,
+            httpStatus: 502,
+          });
+        }
 
-      const grantedScopes = resolveAccountScopes(context.grantedScopes, tokenPayload.scope);
+        const grantedScopes = resolveAccountScopes(context.grantedScopes, tokenPayload.scope);
 
-      return {
-        externalAccountId,
-        displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
-        scopes: grantedScopes,
-        tokens,
-        initialJobs: [
-          {
-            kind: "backfill",
-            priority: 100,
-            payload: buildWindowJobPayload({
-              now: context.now,
-              windowDays: backfillDays,
-              includeAthlete: true,
+        return {
+          externalAccountId,
+          displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
+          scopes: grantedScopes,
+          tokens,
+          initialJobs: [
+            {
               kind: "backfill",
-            }),
-          },
-        ],
-        nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-      };
+              priority: 100,
+              payload: buildWindowJobPayload({
+                now: context.now,
+                windowDays: backfillDays,
+                includeAthlete: true,
+                kind: "backfill",
+              }),
+            },
+          ],
+          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+        };
+      } catch (error) {
+        await deauthorize(tokens.accessToken).catch(() => undefined);
+        throw error;
+      }
     },
     async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
       return refreshOAuthTokens({

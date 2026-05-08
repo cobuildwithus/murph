@@ -842,6 +842,7 @@ export async function runAssistantAutomationPass(
     ? await drainAssistantOutbox({
         vault: input.vault,
         limit: input.maxPerScan,
+        ...(input.signal ? { signal: input.signal } : {}),
       })
     : {
         attempted: 0,
@@ -930,6 +931,7 @@ export async function runAssistantAutomationPass(
     ? await drainAssistantOutbox({
         vault: input.vault,
         limit: input.maxPerScan,
+        ...(input.signal ? { signal: input.signal } : {}),
       })
     : {
         attempted: 0,

@@ -135,6 +135,16 @@ describe('assistant cron schedule helpers', () => {
       'ASSISTANT_CRON_INVALID_SCHEDULE',
       /Invalid cron month field/u,
     )
+    expectVaultCliError(
+      () => validateAssistantCronExpression('5junk 0 * * *'),
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      /Invalid cron minute field/u,
+    )
+    expectVaultCliError(
+      () => validateAssistantCronExpression('*/2/ignored 0 * * *'),
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      /Invalid cron minute field/u,
+    )
   })
 
   it('computes deterministic next-run timestamps across schedule kinds', () => {

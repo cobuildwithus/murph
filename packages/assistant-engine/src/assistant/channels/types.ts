@@ -35,6 +35,7 @@ export interface LinqRuntimeDependencies {
 }
 
 export interface AssistantChannelDependencies {
+  signal?: AbortSignal
   startLinqTyping?: (input: {
     target: string
   }) => Promise<AssistantChannelActivityHandle | void>
@@ -45,6 +46,7 @@ export interface AssistantChannelDependencies {
     idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
+    signal?: AbortSignal
     target: string
   }) => Promise<
     | {

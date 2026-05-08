@@ -1,4 +1,7 @@
-import type { CanonicalWearableRecord } from "@murphai/importers/device-providers/canonical-wearable-records";
+import type {
+  CanonicalWearableRecord,
+  CanonicalWearableSource,
+} from "@murphai/importers/device-providers/canonical-wearable-records";
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { buildActivitySessionAggregates, matchesDateFilters } from "./candidates.ts";
@@ -44,7 +47,7 @@ export function collectCanonicalWearableDataset(
     }
 
     const resourceKey = tombstoneKey(
-      provider,
+      record.source,
       record.source.providerResourceType,
       record.source.providerResourceId,
     );
@@ -219,14 +222,22 @@ function normalizeExternalRef(value: CanonicalWearableRecord["source"]["external
 
 function collectCanonicalTombstoneKeys(records: readonly CanonicalWearableRecord[]): Set<string> {
   return new Set(records.flatMap((record) => record.kind === "tombstone"
-    ? [tombstoneKey(record.source.provider.toLowerCase(), record.providerResourceType, record.providerResourceId)]
+    ? [tombstoneKey(record.source, record.providerResourceType, record.providerResourceId)]
     : []));
 }
 
 function tombstoneKey(
-  provider: string,
+  source: CanonicalWearableSource,
   resourceType: string | null | undefined,
   resourceId: string | null | undefined,
 ): string {
-  return [provider, resourceType ?? "", resourceId ?? ""].join(":");
+  return JSON.stringify([
+    source.provider.toLowerCase(),
+    source.dataSourceId,
+    source.connectionId ?? "",
+    source.providerAccountIdHash ?? "",
+    wearableDataOriginKey(source.origin),
+    resourceType ?? "",
+    resourceId ?? "",
+  ]);
 }

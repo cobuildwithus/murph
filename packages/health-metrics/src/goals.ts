@@ -23,6 +23,23 @@ export function selectMetricGoalProgress(input: {
   target: GoalMetricTarget;
 }): MetricGoalProgress {
   const metricKey = resolveMetricInputKey(input.target.metricKey);
+  if (!metricKey) {
+    const definition = createCustomMetricDefinition("unknown", input.target.unit);
+    return {
+      currentValue: null,
+      currentValueLabel: null,
+      deltaToTarget: null,
+      goalId: input.goalId,
+      metricKey: definition.key,
+      selectedPointIds: [],
+      status: "no_data",
+      targetId: input.target.targetId,
+      targetValueLabel: formatTargetValue(input.target, definition),
+      unit: input.target.unit,
+      warnings: [],
+    };
+  }
+
   const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.target.unit);
   const targetValueLabel = formatTargetValue(input.target, definition);
   const current = selectGoalMetricTargetValue({

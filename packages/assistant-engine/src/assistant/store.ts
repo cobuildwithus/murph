@@ -445,6 +445,23 @@ export async function saveAssistantAutomationState(
   })
 }
 
+export async function updateAssistantAutomationState(
+  vault: string,
+  update: (
+    state: AssistantAutomationState,
+  ) => AssistantAutomationState | Promise<AssistantAutomationState>,
+): Promise<AssistantAutomationState> {
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAutomationState(paths)
+    const updated = await update(current)
+    if (updated === current) {
+      return current
+    }
+    return writeAutomationState(paths, assistantAutomationStateSchema.parse(updated))
+  })
+}
+
 async function saveAssistantSessionAtPaths(
   paths: AssistantStatePaths,
   session: AssistantSession,

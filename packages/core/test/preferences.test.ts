@@ -148,6 +148,23 @@ test("rejects legacy preference documents that still carry the removed distance 
   assert.equal(validation.valid, false);
 });
 
+test("rejects invalid workout preference updates before writing", async () => {
+  const vaultRoot = await createTempVault();
+
+  await assert.rejects(() =>
+    updateWorkoutUnitPreferences({
+      vaultRoot,
+      preferences: {
+        distance: "mi",
+      } as never,
+      updatedAt: "2026-04-08T10:00:00.000Z",
+    }),
+  );
+
+  const after = await readPreferencesDocument(vaultRoot);
+  assert.equal(after.exists, false);
+});
+
 test("defaults updatedAt when writing new preferences without an explicit timestamp", async () => {
   const vaultRoot = await createTempVault();
 

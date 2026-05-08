@@ -197,7 +197,13 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     failedAt: input.failedAt,
     sending: input.sending,
   })
-  const deliveryError = ambiguousDelivery
+  const abandonedAmbiguousDelivery = Boolean(ambiguousDelivery) ||
+    isTelegramAmbiguousDeliveryWithoutProviderIds({
+      deliveryMayHaveSucceeded: input.deliveryMayHaveSucceeded,
+      error: input.error,
+      sending: input.sending,
+    })
+  const deliveryError = abandonedAmbiguousDelivery
     ? sanitizeAssistantDeliveryErrorForPersistence(
         createAssistantDeliveryAmbiguousError(input.error),
       )!
@@ -208,7 +214,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       : sanitizeAssistantDeliveryErrorForPersistence(
           normalizeAssistantDeliveryError(input.error),
         )!
-  const retryable = ambiguousDelivery
+  const retryable = abandonedAmbiguousDelivery
     ? false
     : input.deliveryMayHaveSucceeded || isAssistantOutboxRetryableError(input.error)
 
@@ -227,11 +233,11 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
         ...(current ?? input.sending),
         delivery: ambiguousDelivery ?? current?.delivery ?? input.sending.delivery,
         deliveryConfirmationPending: input.deliveryMayHaveSucceeded
-          ? ambiguousDelivery
+          ? abandonedAmbiguousDelivery
             ? false
             : input.deliveryTransportIdempotent
           : false,
-        deliveryTransportIdempotent: ambiguousDelivery
+        deliveryTransportIdempotent: abandonedAmbiguousDelivery
           ? false
           : input.deliveryMayHaveSucceeded
             ? input.deliveryTransportIdempotent
@@ -239,7 +245,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
                 input.sending.deliveryTransportIdempotent),
         updatedAt: failedAt,
         nextAttemptAt,
-        status: ambiguousDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
+        status: abandonedAmbiguousDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
         lastError: deliveryError,
       }),
     )
@@ -271,6 +277,33 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     })
     return failedIntent
   })
+}
+
+function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {
+  deliveryMayHaveSucceeded: boolean
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (!input.deliveryMayHaveSucceeded || input.sending.channel !== 'telegram') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+  if (code !== 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS') {
+    return false
+  }
+
+  const providerMessageIds =
+    readNonEmptyStringArray(errorRecord?.providerMessageIds) ??
+    readNonEmptyStringArray(context?.providerMessageIds) ??
+    null
+
+  return providerMessageIds === null
 }
 
 function readTelegramAmbiguousDeliveryFromError(input: {

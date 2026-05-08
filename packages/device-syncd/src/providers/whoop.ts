@@ -408,8 +408,34 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         buildWhoopApiError("WHOOP_API_REQUEST_FAILED", `WHOOP API request failed for ${input.path}.`, response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
-        }),
+      }),
     });
+  }
+
+  async function revokeWhoopAccessToken(accessToken: string): Promise<void> {
+    const response = await fetchImpl(`${baseUrl}${WHOOP_API_PREFIX}/v2/user/access`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (response.status === 401 || response.status === 404 || response.status === 204) {
+      return;
+    }
+
+    if (!response.ok) {
+      throw buildWhoopApiError(
+        "WHOOP_REVOKE_FAILED",
+        "WHOOP revoke access request failed.",
+        response,
+        await parseResponseBody(response),
+        {
+          retryable: response.status === 429 || response.status >= 500,
+        },
+      );
+    }
   }
 
   async function fetchPagedCollection(
@@ -672,41 +698,46 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           }),
       });
 
-      const profile = await fetchWhoopJson<Record<string, unknown>>({
-        path: "/v2/user/profile/basic",
-        accessToken: tokens.accessToken,
-      });
-      const externalAccountId = normalizeIdentifier(profile?.user_id ?? profile?.id);
-
-      if (!externalAccountId) {
-        throw deviceSyncError({
-          code: "WHOOP_PROFILE_INVALID",
-          message: "WHOOP profile response did not include a user identifier.",
-          retryable: false,
-          httpStatus: 502,
+      try {
+        const profile = await fetchWhoopJson<Record<string, unknown>>({
+          path: "/v2/user/profile/basic",
+          accessToken: tokens.accessToken,
         });
-      }
+        const externalAccountId = normalizeIdentifier(profile?.user_id ?? profile?.id);
 
-      const grantedScopes = splitScopes(tokenPayload.scope);
-      const effectiveScopes = grantedScopes.length > 0 ? grantedScopes : [...scopes];
+        if (!externalAccountId) {
+          throw deviceSyncError({
+            code: "WHOOP_PROFILE_INVALID",
+            message: "WHOOP profile response did not include a user identifier.",
+            retryable: false,
+            httpStatus: 502,
+          });
+        }
 
-      return {
-        externalAccountId,
-        displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
-        scopes: effectiveScopes,
-        tokens,
-        initialJobs: [
-          {
-            kind: "backfill",
-            priority: 100,
-            payload: {
-              windowStart: subtractDays(context.now, backfillDays),
-              windowEnd: context.now,
+        const grantedScopes = splitScopes(tokenPayload.scope);
+        const effectiveScopes = grantedScopes.length > 0 ? grantedScopes : [...scopes];
+
+        return {
+          externalAccountId,
+          displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
+          scopes: effectiveScopes,
+          tokens,
+          initialJobs: [
+            {
+              kind: "backfill",
+              priority: 100,
+              payload: {
+                windowStart: subtractDays(context.now, backfillDays),
+                windowEnd: context.now,
+              },
             },
-          },
-        ],
-        nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-      };
+          ],
+          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+        };
+      } catch (error) {
+        await revokeWhoopAccessToken(tokens.accessToken).catch(() => undefined);
+        throw error;
+      }
     },
     async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
       return refreshOAuthTokens({
@@ -733,29 +764,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         return;
       }
 
-      const response = await fetchImpl(`${baseUrl}${WHOOP_API_PREFIX}/v2/user/access`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${tokens.accessToken}`,
-        },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-
-      if (response.status === 401 || response.status === 404 || response.status === 204) {
-        return;
-      }
-
-      if (!response.ok) {
-        throw buildWhoopApiError(
-          "WHOOP_REVOKE_FAILED",
-          "WHOOP revoke access request failed.",
-          response,
-          await parseResponseBody(response),
-          {
-            retryable: response.status === 429 || response.status >= 500,
-          },
-        );
-      }
+      await revokeWhoopAccessToken(tokens.accessToken);
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
       return buildScheduledReconcileJobs({

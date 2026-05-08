@@ -303,6 +303,7 @@ export async function dispatchAssistantOutboxIntent(input: {
   force?: boolean
   intentId: string
   now?: Date
+  signal?: AbortSignal
   vault: string
 }): Promise<DispatchAssistantOutboxIntentResult> {
   const now = input.now ?? new Date()
@@ -493,7 +494,7 @@ export async function dispatchAssistantOutboxIntent(input: {
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
     const delivered = await sendAssistantOutboxPayload({
-      dependencies: input.dependencies,
+      dependencies: withAssistantOutboxSignal(input.dependencies, input.signal),
       payload: dispatchIntent,
       vault: input.vault,
     })
@@ -599,6 +600,7 @@ export async function deliverAssistantOutboxMessage(input: {
   message: string
   subject?: string | null
   replyToMessageId?: string | null
+  signal?: AbortSignal
   sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
@@ -649,6 +651,7 @@ export async function deliverAssistantOutboxMessage(input: {
     dispatchHooks: input.dispatchHooks,
     force: true,
     intentId: intent.intentId,
+    signal: input.signal,
     vault: input.vault,
   })
   if (dispatched.intent.status === 'sent' && dispatched.intent.delivery) {
@@ -730,6 +733,20 @@ export async function sendAssistantOutboxPayload(input: {
   })
 }
 
+function withAssistantOutboxSignal(
+  dependencies: AssistantChannelDependencies | undefined,
+  signal: AbortSignal | undefined,
+): AssistantChannelDependencies | undefined {
+  if (!signal) {
+    return dependencies
+  }
+
+  return {
+    ...dependencies,
+    signal,
+  }
+}
+
 async function materializeAssistantOutboxDeliveredSession(input: {
   delivered: Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>
   payload: AssistantOutboxDispatchPayload
@@ -785,6 +802,7 @@ export async function drainAssistantOutbox(input: {
   dispatchHooks?: AssistantOutboxDispatchHooks
   limit?: number
   now?: Date
+  signal?: AbortSignal
   vault: string
 }): Promise<{
   attempted: number
@@ -800,6 +818,7 @@ export async function drainAssistantOutboxLocal(input: {
   dispatchHooks?: AssistantOutboxDispatchHooks
   limit?: number
   now?: Date
+  signal?: AbortSignal
   vault: string
 }): Promise<{
   attempted: number
@@ -840,6 +859,7 @@ export async function drainAssistantOutboxLocal(input: {
       vault: input.vault,
       intentId: intent.intentId,
       now,
+      signal: input.signal,
     })
     switch (dispatched.intent.status) {
       case 'sent':

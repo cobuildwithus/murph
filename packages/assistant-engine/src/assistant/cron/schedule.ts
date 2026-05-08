@@ -247,9 +247,14 @@ function parseCronField(
       throw invalidCronFieldError(label, field)
     }
 
-    const [base, stepText] = part.split('/')
+    const segments = part.split('/')
+    if (segments.length > 2) {
+      throw invalidCronFieldError(label, field)
+    }
+
+    const [base, stepText] = segments
     const step =
-      typeof stepText === 'string' ? Number.parseInt(stepText, 10) : 1
+      typeof stepText === 'string' && /^\d+$/u.test(stepText) ? Number(stepText) : typeof stepText === 'string' ? Number.NaN : 1
 
     if (!Number.isInteger(step) || step <= 0) {
       throw invalidCronFieldError(label, field)
@@ -288,9 +293,14 @@ function resolveCronFieldRange(
   }
 
   if (base.includes('-')) {
-    const [startText, endText] = base.split('-', 2)
-    const start = Number.parseInt(startText ?? '', 10)
-    const end = Number.parseInt(endText ?? '', 10)
+    const range = base.split('-')
+    if (range.length !== 2 || !/^\d+$/u.test(range[0] ?? '') || !/^\d+$/u.test(range[1] ?? '')) {
+      throw invalidCronFieldError(label, base)
+    }
+
+    const [startText, endText] = range
+    const start = Number(startText)
+    const end = Number(endText)
 
     if (
       !Number.isInteger(start) ||
@@ -308,7 +318,11 @@ function resolveCronFieldRange(
     }
   }
 
-  const value = Number.parseInt(base, 10)
+  if (!/^\d+$/u.test(base)) {
+    throw invalidCronFieldError(label, base)
+  }
+
+  const value = Number(base)
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
     throw invalidCronFieldError(label, base)
   }

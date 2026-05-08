@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import {
   DEVICE_CONNECT_SOURCES,
   listConfiguredDeviceSyncConnectTargets,
+  normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncProviderConfigs,
   resolveJunctionConnectTargetForSourceId,
@@ -268,7 +269,7 @@ export default async function ConnectPage({
 
       <ConnectSourcesGrid
         authenticated={Boolean(auth.authenticatedMember)}
-        initialCallback={resolveInitialConnectCallback(resolvedSearchParams)}
+        initialCallback={resolveVerifiedInitialConnectCallback(resolvedSearchParams, sources)}
         initialLoadError={initialLoadError}
         sources={sources}
       />
@@ -426,6 +427,54 @@ function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): C
     provider: readSearchParamString(searchParams, "deviceSyncProvider"),
     status,
   };
+}
+
+function resolveVerifiedInitialConnectCallback(
+  searchParams: ConnectPageSearchParams,
+  sources: readonly ConnectSource[],
+): ConnectCallbackInput {
+  const callback = resolveInitialConnectCallback(searchParams);
+
+  if (callback?.status !== "connected") {
+    return callback;
+  }
+
+  const callbackSourceId = findCallbackSourceId({
+    connectSource: callback.connectSource,
+    connectTarget: callback.connectTarget,
+    provider: callback.provider,
+    sources,
+  });
+  const confirmed = callbackSourceId
+    ? sources.some((source) => source.id === callbackSourceId && source.connected === true)
+    : false;
+
+  return confirmed ? callback : null;
+}
+
+function findCallbackSourceId(input: {
+  connectSource: string | null;
+  connectTarget: string | null;
+  provider: string | null;
+  sources: readonly ConnectSource[];
+}): string | null {
+  const source = normalizeDeviceConnectSourceId(input.connectSource);
+  const target = input.connectTarget ? normalizeDeviceSyncConnectTargetKey(input.connectTarget) : null;
+  const provider = input.provider ? normalizeDeviceSyncConnectTargetKey(input.provider) : null;
+
+  return input.sources.find((candidate) => {
+    const sourceTarget = candidate.connectTarget
+      ? normalizeDeviceSyncConnectTargetKey(candidate.connectTarget)
+      : null;
+    const sourceId = normalizeDeviceSyncConnectTargetKey(candidate.id);
+    const normalizedSourceId = normalizeDeviceConnectSourceId(candidate.id);
+
+    return Boolean(
+      (source && normalizedSourceId === source)
+      || (target && (sourceTarget === target || sourceId === target))
+      || (provider && (sourceTarget === provider || sourceId === provider)),
+    );
+  })?.id ?? null;
 }
 
 function readSearchParamString(

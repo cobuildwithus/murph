@@ -66,6 +66,45 @@ function decodePermissionRow(row: SqliteRow): GatewayPermissionRow {
   }
 }
 
+function permissionRequestFromRow(
+  row: GatewayPermissionRow,
+): GatewayPermissionRequest {
+  return gatewayPermissionRequestSchema.parse({
+    schema: 'murph.gateway-permission-request.v1',
+    requestId: row.requestId,
+    sessionKey: row.sessionKey,
+    action: row.action,
+    description: row.description,
+    status: row.status,
+    requestedAt: row.requestedAt,
+    resolvedAt: row.resolvedAt,
+    note: row.note,
+  })
+}
+
+function readPermissionRowByRequestId(
+  database: DatabaseSync,
+  requestId: string,
+): GatewayPermissionRow | null {
+  const row = database
+    .prepare(`
+      SELECT
+        request_id AS requestId,
+        session_key AS sessionKey,
+        action,
+        description,
+        status,
+        requested_at AS requestedAt,
+        resolved_at AS resolvedAt,
+        note
+      FROM gateway_permissions
+      WHERE request_id = ?
+    `)
+    .get(requestId)
+
+  return row ? decodePermissionRow(row) : null
+}
+
 export function readPermissionRows(database: DatabaseSync): GatewayPermissionRow[] {
   return database.prepare(`
     SELECT
@@ -87,19 +126,7 @@ export function listOpenPermissionsFromDatabase(
   sessionKey: string | null,
 ): GatewayPermissionRequest[] {
   return readPermissionRows(database)
-    .map((row) =>
-      gatewayPermissionRequestSchema.parse({
-        schema: 'murph.gateway-permission-request.v1',
-        requestId: row.requestId,
-        sessionKey: row.sessionKey,
-        action: row.action,
-        description: row.description,
-        status: row.status,
-        requestedAt: row.requestedAt,
-        resolvedAt: row.resolvedAt,
-        note: row.note,
-      }),
-    )
+    .map((row) => permissionRequestFromRow(row))
     .filter((permission) => permission.status === 'open')
     .filter(
       (permission) =>
@@ -118,49 +145,41 @@ export function respondToPermissionInDatabase(
     previousState: GatewaySnapshotState,
   ) => void,
 ): GatewayPermissionRequest | null {
-  const existing = database
-    .prepare(`
-      SELECT
-        request_id AS requestId,
-        session_key AS sessionKey,
-        action,
-        description,
-        status,
-        requested_at AS requestedAt,
-        resolved_at AS resolvedAt,
-        note
-      FROM gateway_permissions
-      WHERE request_id = ?
-    `)
-    .get(input.requestId)
-
+  const existing = readPermissionRowByRequestId(database, input.requestId)
   if (!existing) {
     return null
   }
 
-  const decodedExisting = decodePermissionRow(existing)
+  if (existing.status !== 'open') {
+    return permissionRequestFromRow(existing)
+  }
 
   const resolvedAt = new Date().toISOString()
   const status = input.decision === 'approve' ? 'approved' : 'denied'
   const previousState = readSnapshotState(database)
-  database.prepare(`
+  const updateResult = database.prepare(`
     UPDATE gateway_permissions
        SET status = ?,
            resolved_at = ?,
            note = ?
      WHERE request_id = ?
+       AND status = 'open'
   `).run(status, resolvedAt, normalizeNullableString(input.note), input.requestId)
+  if (updateResult.changes === 0) {
+    const current = readPermissionRowByRequestId(database, input.requestId)
+    return current ? permissionRequestFromRow(current) : null
+  }
 
   rebuildSnapshotStateFrom(database, previousState)
 
   return gatewayPermissionRequestSchema.parse({
     schema: 'murph.gateway-permission-request.v1',
-    requestId: decodedExisting.requestId,
-    sessionKey: decodedExisting.sessionKey,
-    action: decodedExisting.action,
-    description: decodedExisting.description,
+    requestId: existing.requestId,
+    sessionKey: existing.sessionKey,
+    action: existing.action,
+    description: existing.description,
     status,
-    requestedAt: decodedExisting.requestedAt,
+    requestedAt: existing.requestedAt,
     resolvedAt,
     note: normalizeNullableString(input.note),
   })

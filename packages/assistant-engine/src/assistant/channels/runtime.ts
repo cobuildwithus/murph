@@ -39,6 +39,7 @@ import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
+const TELEGRAM_MAX_RETRY_DELAY_MS = 30_000
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const LINQ_TYPING_REFRESH_MS = 4_000
 
@@ -493,6 +494,7 @@ async function sendTelegramMessageDetailed(
         baseUrl,
         fetchImplementation,
         replyToMessageId,
+        signal: dependencies.signal,
         target,
         targetLabel,
         text: chunk,
@@ -691,6 +693,7 @@ async function sendTelegramTextChunk(input: {
   baseUrl: string
   fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
+  signal?: AbortSignal
   target: TelegramParsedTarget
   targetLabel: string
   text: string
@@ -712,6 +715,7 @@ async function sendTelegramTextChunk(input: {
         baseUrl: input.baseUrl,
         fetchImplementation: input.fetchImplementation,
         replyToMessageId: input.replyToMessageId,
+        signal: input.signal,
         target,
         targetLabel,
         text: input.text,
@@ -748,7 +752,14 @@ async function sendTelegramTextChunk(input: {
       throw outcome.failure
     }
 
-    await waitForTelegramRetryDelay(retryCount, outcome.retryAfterSeconds)
+    await waitForTelegramRetryDelay(
+      retryCount,
+      outcome.retryAfterSeconds,
+      input.signal,
+    )
+    if (input.signal?.aborted) {
+      throw outcome.failure
+    }
     retryCount += 1
   }
 }
@@ -926,11 +937,20 @@ function extractTelegramRetryAfter(value: Record<string, unknown>): number | nul
 async function waitForTelegramRetryDelay(
   attempt: number,
   retryAfterSeconds: number | null,
+  signal?: AbortSignal,
 ): Promise<void> {
   const retryAfterMs =
     typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds)
-      ? Math.max(retryAfterSeconds * 1000, 1)
+      ? Math.min(
+          Math.max(retryAfterSeconds * 1000, 1),
+          TELEGRAM_MAX_RETRY_DELAY_MS,
+        )
       : Math.min(250 * 2 ** attempt, 2000)
+
+  if (signal) {
+    await waitForAssistantChannelActivityRefresh(retryAfterMs, signal)
+    return
+  }
 
   await new Promise((resolve) => setTimeout(resolve, retryAfterMs))
 }
@@ -962,6 +982,7 @@ async function sendTelegramTextChunkOnce(input: {
   baseUrl: string
   fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
+  signal?: AbortSignal
   target: TelegramParsedTarget
   targetLabel: string
   text: string
@@ -978,6 +999,7 @@ async function sendTelegramTextChunkOnce(input: {
         reply_to_message_id: input.replyToMessageId ? Number.parseInt(input.replyToMessageId, 10) : undefined,
         text: input.text,
       },
+      signal: input.signal,
       token: input.token,
     })
 
@@ -989,11 +1011,19 @@ async function sendTelegramTextChunkOnce(input: {
   } catch (error) {
     return {
       kind: 'request-error',
-      failure: new VaultCliError(
-        'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
-        'Outbound Telegram delivery failed while calling the Bot API.',
+      failure: Object.assign(
+        new VaultCliError(
+          'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+          'Outbound Telegram delivery could not be confirmed after calling the Bot API.',
+          {
+            error: describeUnknownError(error),
+            target: input.targetLabel,
+          },
+        ),
         {
-          error: describeUnknownError(error),
+          deliveryMayHaveSucceeded: true as const,
+          providerMessageId: null,
+          providerMessageIds: [],
           target: input.targetLabel,
         },
       ),
@@ -1008,9 +1038,8 @@ function resolveTelegramSendAttemptOutcome(input: {
 }): TelegramSendAttemptOutcome {
   if (input.result.kind === 'request-error') {
     return {
-      kind: 'retry',
+      kind: 'failed',
       failure: input.result.failure,
-      retryAfterSeconds: null,
     }
   }
 

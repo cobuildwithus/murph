@@ -42,6 +42,10 @@ describe("resolveHealthCommonsMeasurementMethodDetail", () => {
     expect(method?.catalogHash).toMatch(/^sha256:/u);
   });
 
+  it("returns null for malformed percent-encoded route ids", () => {
+    expect(resolveHealthCommonsMeasurementMethodDetail("%E0%A4%A")).toBeNull();
+  });
+
   it("maps output biomarker labels through active biomarker pages", () => {
     const reader = createHealthCommonsCatalogReader(createFixtureCatalog({
       mapsToBiomarkerKey: "biomarker:skin-texture-roughness-score",

@@ -5,6 +5,9 @@ import type {
   WorkoutTemplate,
   WorkoutTemplateSet,
 } from '@murphai/contracts'
+import { activityStrengthExerciseSchema } from '@murphai/contracts'
+
+const MAX_STRENGTH_EXERCISES = 60
 
 interface StrengthExerciseSummary {
   setCount: number
@@ -121,6 +124,20 @@ function buildWorkoutSetsFromStrengthExercise(
   }))
 }
 
+function normalizeStrengthExercisesForExpansion(
+  exercises: readonly ActivityStrengthExercise[] | null | undefined,
+): ActivityStrengthExercise[] {
+  if (!exercises) {
+    return []
+  }
+
+  if (exercises.length > MAX_STRENGTH_EXERCISES) {
+    throw new Error(`Workout strength exercise count must be ${MAX_STRENGTH_EXERCISES} or fewer.`)
+  }
+
+  return exercises.map((exercise) => activityStrengthExerciseSchema.parse(exercise))
+}
+
 function buildWorkoutTemplateSetFromStrengthExercise(
   exercise: ActivityStrengthExercise,
 ): WorkoutTemplateSet[] {
@@ -173,6 +190,8 @@ export function buildWorkoutSessionFromSummary(input: {
   routineId?: string
   routineName?: string
 }): WorkoutSession {
+  const strengthExercises = normalizeStrengthExercisesForExpansion(input.strengthExercises)
+
   return {
     ...(input.sourceApp ? { sourceApp: input.sourceApp } : {}),
     ...(input.sourceWorkoutId ? { sourceWorkoutId: input.sourceWorkoutId } : {}),
@@ -181,7 +200,7 @@ export function buildWorkoutSessionFromSummary(input: {
     ...(input.routineId ? { routineId: input.routineId } : {}),
     ...(input.routineName ? { routineName: input.routineName } : {}),
     ...(input.note ? { sessionNote: input.note } : {}),
-    exercises: (input.strengthExercises ?? []).map((exercise, index) => ({
+    exercises: strengthExercises.map((exercise, index) => ({
       name: exercise.exercise,
       order: index + 1,
       mode: modeFromStrengthExercise(exercise),
@@ -195,9 +214,11 @@ export function buildWorkoutTemplateFromSummary(input: {
   note?: string
   strengthExercises?: readonly ActivityStrengthExercise[] | null
 }): WorkoutTemplate {
+  const strengthExercises = normalizeStrengthExercisesForExpansion(input.strengthExercises)
+
   return {
     ...(input.note ? { routineNote: input.note } : {}),
-    exercises: (input.strengthExercises ?? []).map((exercise, index) => ({
+    exercises: strengthExercises.map((exercise, index) => ({
       name: exercise.exercise,
       order: index + 1,
       mode: modeFromStrengthExercise(exercise),

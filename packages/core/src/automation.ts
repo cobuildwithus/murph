@@ -1,9 +1,11 @@
 import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
+  automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationScheduleKindValues,
   automationStatusValues,
+  isValidAutomationCronExpression,
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
@@ -146,11 +148,17 @@ function normalizeAutomationSchedule(
   }
 
   switch (kind) {
-    case "at":
+    case "at": {
+      const at = requireString(object.at, "schedule.at", 64);
+      if (Number.isNaN(Date.parse(at))) {
+        throw new VaultError("VAULT_INVALID_INPUT", "schedule.at must be a valid ISO timestamp.");
+      }
+
       return {
         kind,
-        at: requireString(object.at, "schedule.at", 64),
+        at,
       };
+    }
     case "every":
       if (typeof object.everyMs !== "number" || !Number.isInteger(object.everyMs) || object.everyMs <= 0) {
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.everyMs must be a positive integer.");
@@ -159,12 +167,18 @@ function normalizeAutomationSchedule(
         kind,
         everyMs: object.everyMs,
       };
-    case "cron":
+    case "cron": {
       rejectRecurringScheduleTimeZone(object);
+      const expression = requireString(object.expression, "schedule.expression", 400);
+      if (!isValidAutomationCronExpression(expression)) {
+        throw new VaultError("VAULT_INVALID_INPUT", "schedule.expression must be a valid five-field cron expression.");
+      }
+
       return {
         kind,
-        expression: requireString(object.expression, "schedule.expression", 400),
+        expression,
       };
+    }
     case "dailyLocal": {
       const localTime = requireString(object.localTime, "schedule.localTime", 5);
       if (!dailyLocalTimePattern.test(localTime)) {
@@ -244,7 +258,7 @@ function normalizeAutomationSummary(value: unknown): string | null {
 
 function buildAutomationMarkdown(record: AutomationRecord): string {
   return stringifyFrontmatterDocument({
-    attributes: buildAutomationFrontmatter(record),
+    attributes: automationFrontmatterSchema.parse(buildAutomationFrontmatter(record)),
     body: record.instructions,
   });
 }
@@ -294,7 +308,7 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     slug: record.slug,
     title: record.title,
     status: record.status,
-    summary: record.summary,
+    ...(record.summary === null ? {} : { summary: record.summary }),
     schedule: buildAutomationScheduleFrontmatter(record.schedule),
     route: buildAutomationRouteFrontmatter(record.route),
     continuityPolicy: record.continuityPolicy,

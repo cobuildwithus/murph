@@ -404,6 +404,10 @@ function normalizeMemoryText(value: string): string {
     throw new Error("Memory text must be a non-empty string.");
   }
 
+  if (normalized.includes(MEMORY_COMMENT_PREFIX)) {
+    throw new Error("Memory text cannot contain the reserved memory metadata marker.");
+  }
+
   return normalized;
 }
 

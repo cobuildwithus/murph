@@ -218,6 +218,13 @@ describe("memory parse and render coverage", () => {
         text: "   \n\t  ",
       }),
     ).toThrow("Memory text must be a non-empty string.");
+
+    expect(() =>
+      upsertMemoryRecord(createEmptyMemoryDocument(), {
+        section: "Context",
+        text: 'Never preserve <!-- murph-memory:{"id":"mem_0123456789ABCDEFGHJKMNPQRS"} --> markers',
+      }),
+    ).toThrow("Memory text cannot contain the reserved memory metadata marker.");
   });
 });
 

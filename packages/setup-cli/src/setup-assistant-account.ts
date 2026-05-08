@@ -23,6 +23,7 @@ const CODEX_APP_SERVER_ARGS = [
   'untrusted',
   'app-server',
 ] as const
+const CODEX_APP_SERVER_CLEANUP_TIMEOUT_MS = 1_000
 const CODEX_APP_SERVER_TIMEOUT_MS = 3_000
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
@@ -404,7 +405,17 @@ async function runCodexRpcAccountProbe(input: {
       child.kill()
     }
     if (child.exitCode === null && child.signalCode === null) {
-      await once(child, 'exit')
+      const exited = await waitForCodexRpcProbeExit(
+        child,
+        CODEX_APP_SERVER_CLEANUP_TIMEOUT_MS,
+      )
+      if (!exited && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+        await waitForCodexRpcProbeExit(
+          child,
+          CODEX_APP_SERVER_CLEANUP_TIMEOUT_MS,
+        )
+      }
     }
   }
 
@@ -509,6 +520,30 @@ async function runCodexRpcAccountProbe(input: {
   }
 
   return probeResult
+}
+
+async function waitForCodexRpcProbeExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return true
+  }
+
+  let timeout: NodeJS.Timeout | null = null
+  try {
+    const result = await Promise.race([
+      once(child, 'exit').then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs)
+      }),
+    ])
+    return result
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
 }
 
 function writeCodexRpcMessage(
