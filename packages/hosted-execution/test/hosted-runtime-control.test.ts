@@ -37,6 +37,7 @@ import {
   parseHostedMailboxPayload,
   parseHostedMailboxPayloadFetchRequest,
   parseHostedMailboxPayloadFetchResponse,
+  parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
@@ -574,6 +575,13 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       checkpointed: true,
       workspace,
+    });
+    expect(parseHostedBrowserVaultReplicaPublishResponse({
+      published: false,
+      workspace: null,
+    })).toEqual({
+      published: false,
+      workspace: null,
     });
 
     expect(() => parseHostedWorkspaceCheckpointRequest({

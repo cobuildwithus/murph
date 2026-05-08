@@ -22,7 +22,10 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   if (!result.workspace) {
-    throw new TypeError("Hosted browser-vault replica publish requires an existing workspace row.");
+    return jsonOk(parseHostedBrowserVaultReplicaPublishResponse({
+      published: false,
+      workspace: null,
+    }), 404);
   }
 
   return jsonOk(parseHostedBrowserVaultReplicaPublishResponse({

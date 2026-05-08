@@ -602,7 +602,7 @@ export function parseHostedBrowserVaultReplicaPublishResponse(
       record.published,
       "Hosted browser-vault replica publish response published",
     ),
-    workspace: parseHostedWorkspaceState(record.workspace),
+    workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
 }
 

@@ -386,6 +386,36 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("treats missing workspace browser-vault publishes as stale work", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
+    mocks.publishHostedBrowserVaultReplicaRef.mockResolvedValue({
+      status: "missing",
+      workspace: null,
+    });
+
+    const response = await browserVaultReplicaRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/browser-vault-replica",
+      {
+        expectedSourceStateHash: "snapshot_2_hash",
+        replicaRef,
+      },
+    ));
+    const payload = parseHostedBrowserVaultReplicaPublishResponse(
+      await response.json(),
+    );
+
+    expect(response.status).toBe(404);
+    expect(payload).toEqual({
+      published: false,
+      workspace: null,
+    });
+    expect(mocks.publishHostedBrowserVaultReplicaRef).toHaveBeenCalledWith({
+      expectedSourceStateHash: "snapshot_2_hash",
+      replicaRef,
+      userId: "member_routes_1",
+    });
+  });
+
   it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
     mocks.recordHostedRuntimeLog.mockResolvedValue({
       at: FIXED_NOW,

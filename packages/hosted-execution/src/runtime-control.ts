@@ -368,7 +368,7 @@ export interface HostedBrowserVaultReplicaPublishRequest {
 
 export interface HostedBrowserVaultReplicaPublishResponse {
   published: boolean;
-  workspace: HostedWorkspaceState;
+  workspace: HostedWorkspaceState | null;
 }
 
 export const HOSTED_RUNTIME_LOG_LEVELS = [
