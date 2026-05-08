@@ -15,6 +15,9 @@ import type {
 import type {
   AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
+import type {
+  HostedWorkspaceArtifactMaterializer,
+} from "./models.ts";
 
 import {
   buildHostedMailboxImportRedactedStatus,
@@ -120,6 +123,7 @@ export interface HostedWorkspaceRunnerPlatform
 
 export interface HostedWorkspaceRunnerAssistantPhaseInput {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
   workspace: HostedWorkspaceState | null;
@@ -154,6 +158,7 @@ export interface HostedWorkspaceRunnerInput {
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   limitPerLane: number;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimeLogContext?: HostedRuntimeLogContext | null;
@@ -297,6 +302,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   });
   const assistantPhaseInput = {
     initialMailboxImport,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform,
     workspace: input.workspace,

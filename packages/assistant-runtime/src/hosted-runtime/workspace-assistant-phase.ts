@@ -251,17 +251,20 @@ export async function runHostedWorkspaceAssistantPhase(
   }
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
-      hosted: {
-        channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-          effectsPort: input.runtime.platform.effectsPort,
-          forwardedEnv: input.runtime.forwardedEnv,
-          platformEnv: input.runtime.platformEnv,
-          signal: typingAbortController.signal,
-          userEnv: input.runtime.userEnv,
-        }),
-        deviceConnectProviders,
-        ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
-        memberId: input.request.userId,
+        hosted: {
+          channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+            effectsPort: input.runtime.platform.effectsPort,
+            forwardedEnv: input.runtime.forwardedEnv,
+            platformEnv: input.runtime.platformEnv,
+            signal: typingAbortController.signal,
+            userEnv: input.runtime.userEnv,
+          }),
+          deviceConnectProviders,
+          ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
+          ...(input.materializeWorkspaceArtifacts
+            ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
+            : {}),
+          memberId: input.request.userId,
         ...(input.runtime.platform.usageRecordPort
           ? {
               usageRecorder: {

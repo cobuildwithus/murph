@@ -16,6 +16,7 @@ import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
 import type {
+  HostedAiUsageAllowDecision,
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -81,7 +82,10 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
-  nudgeUserRunner(userId: string): Promise<HostedRunnerNudgeResult>;
+  nudgeUserRunner(
+    userId: string,
+    input?: { aiUsageAllowDecision?: HostedAiUsageAllowDecision | null },
+  ): Promise<HostedRunnerNudgeResult>;
   scheduleBrowserVaultRefresh(input: { userId: string }): Promise<CloudflareHostedControlBrowserVaultRefreshResult>;
 }
 
@@ -194,8 +198,13 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    nudgeUserRunner(userId) {
+    nudgeUserRunner(userId, input) {
       const expectedUserId = requireCloudflareHostedControlUserId(userId);
+      const body = JSON.stringify({
+        ...(input?.aiUsageAllowDecision
+          ? { aiUsageAllowDecision: input.aiUsageAllowDecision }
+          : {}),
+      });
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -206,7 +215,7 @@ export function createCloudflareHostedControlClient(
         parse: parseHostedRunnerNudgeResult,
         path: buildCloudflareHostedControlUserRunnerNudgePath(expectedUserId),
         request: {
-          body: "{}",
+          body,
           headers: {
             "content-type": "application/json; charset=utf-8",
           },

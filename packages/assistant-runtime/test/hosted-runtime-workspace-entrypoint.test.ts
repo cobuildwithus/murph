@@ -2967,12 +2967,13 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("restores raw inbox artifacts from workspace snapshots before mailbox import", async () => {
+  test("defers raw and derived snapshot artifacts before mailbox import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-artifact-"));
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-source-artifact-"));
     const artifactGetCalls: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const artifactLabelsByHash = new Map<string, string>();
     const artifactSpecs = [
       {
         bytes: Buffer.from("pdf-binary-artifact\n", "utf8"),
@@ -2999,6 +3000,9 @@ describe("hosted workspace runtime entrypoint", () => {
     }
 
     const artifactHashes = artifactSpecs.map((spec) => sha256HostedBundleHex(spec.bytes));
+    artifactHashes.forEach((hash, index) => {
+      artifactLabelsByHash.set(hash, `restored-artifact-${index}`);
+    });
     const sourceBundle = await snapshotHostedBundleRoots({
       externalizeFile: async (file) => {
         const spec = artifactSpecs.find((entry) => entry.path === file.path);
@@ -3021,6 +3025,7 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     assert.ok(sourceBundle);
     const bundleHash = sha256HostedBundleHex(sourceBundle);
+    artifactLabelsByHash.set(bundleHash, "workspace-bundle");
     const artifactBytesByHash = new Map<string, Uint8Array>(
       artifactSpecs.map((spec, index) => [artifactHashes[index]!, spec.bytes]),
     );
@@ -3046,13 +3051,14 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem() {
             for (const spec of artifactSpecs) {
               const restoredArtifactPath = path.join(vaultRoot, spec.path);
-              assert.equal(await readFile(restoredArtifactPath, "utf8"), spec.bytes.toString("utf8"));
+              await assert.rejects(readFile(restoredArtifactPath, "utf8"));
             }
             return { status: "imported" };
           },
           platform: createPlatform({
             artifactBytesByHash,
             artifactGetCalls,
+            artifactLabelsByHash,
             mailboxPort: createMailboxPort({
               events,
               items: [
@@ -3079,10 +3085,11 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      expect(artifactGetCalls).toHaveLength(artifactSpecs.length + 1);
-      expect(artifactGetCalls).toEqual(
-        expect.arrayContaining([bundleHash, ...artifactHashes]),
-      );
+      requireEventIndex(events, "mailbox.fetch");
+      for (const [index] of artifactHashes.entries()) {
+        assert.equal(events.includes(`artifact.get:restored-artifact-${index}`), false);
+      }
+      assert.deepEqual(artifactGetCalls, [bundleHash]);
       assert.equal(checkpointRequests.length, 0);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -3274,10 +3281,7 @@ describe("hosted workspace runtime entrypoint", () => {
               events.push(`import:${item.item.laneSeq}`);
               if (importedSeqs.length === 1) {
                 for (const spec of artifactSpecs) {
-                  assert.equal(
-                    await readFile(path.join(vaultRoot, spec.path), "utf8"),
-                    Buffer.from(spec.bytes).toString("utf8"),
-                  );
+                  await assert.rejects(readFile(path.join(vaultRoot, spec.path), "utf8"));
                 }
                 for (const spec of inlineFileSpecs) {
                   assert.equal(await readFile(path.join(vaultRoot, spec.path), "utf8"), spec.text);
@@ -3304,14 +3308,20 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(events[0], "workspace.read");
       assert.ok(firstArtifactFetchIndex < mailboxFetchIndex);
-      assert.equal(artifactGetCalls.length, externalArtifactCount + 1);
+      assert.deepEqual(artifactGetCalls, [bundleHash]);
+      for (const artifactHash of artifactHashes) {
+        assert.equal(
+          events.includes(`artifact.get:${artifactLabelsByHash.get(artifactHash)}`),
+          false,
+        );
+      }
       assert.equal(importedEvents.length, mailboxItemCount);
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
       assert.equal(artifactPutCalls.length, 0);
       assert.ok(mailboxFetchIndex < mailboxImportedLogIndex);
       assert.ok(mailboxImportedLogIndex < sidecarIndex);
       assert.equal(stageSummary["workspace.read"]?.count, 1);
-      assert.equal(stageSummary["artifact.get"]?.count, externalArtifactCount + 1);
+      assert.equal(stageSummary["artifact.get"]?.count, 1);
       assert.equal(stageSummary["mailbox.fetch"]?.count, 1);
       assert.equal(stageSummary["mailbox.importItem"]?.count, mailboxItemCount);
       assert.equal(stageSummary["snapshot.create"]?.count ?? 0, 0);

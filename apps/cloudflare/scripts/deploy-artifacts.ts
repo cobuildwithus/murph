@@ -120,10 +120,12 @@ export async function assertPreparedDeployArtifacts(input: {
   secretsFilePath: string;
   source?: EnvSource;
 }): Promise<void> {
-  const appDir = input.appDir ?? defaultAppDir;
-  const repoRoot = input.repoRoot ?? defaultRepoRoot;
   const source = input.source ?? process.env;
-  const manifest = await readRunnerBundleManifest(input.runnerBundleDir);
+  const manifest = await assertPreparedRunnerBundle({
+    ...(input.appDir ? { appDir: input.appDir } : {}),
+    ...(input.repoRoot ? { repoRoot: input.repoRoot } : {}),
+    runnerBundleDir: input.runnerBundleDir,
+  });
   const manifestGeneratedAtMs = parseManifestGeneratedAt(manifest.generatedAt);
 
   const generatedConfig = await readJsonObjectFile(
@@ -148,6 +150,17 @@ export async function assertPreparedDeployArtifacts(input: {
       source,
     );
   }
+
+}
+
+export async function assertPreparedRunnerBundle(input: {
+  appDir?: string;
+  repoRoot?: string;
+  runnerBundleDir: string;
+}): Promise<RunnerBundleManifest> {
+  const appDir = input.appDir ?? defaultAppDir;
+  const repoRoot = input.repoRoot ?? defaultRepoRoot;
+  const manifest = await readRunnerBundleManifest(input.runnerBundleDir);
 
   await assertRunnerBundleShape(input.runnerBundleDir, manifest);
 
@@ -212,6 +225,8 @@ export async function assertPreparedDeployArtifacts(input: {
   }
 
   await assertRunnerBundleHealthCommonsCatalog(input.runnerBundleDir);
+
+  return manifest;
 }
 
 async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {

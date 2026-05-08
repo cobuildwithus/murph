@@ -48,6 +48,8 @@
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
     "runner:bundle:hosted-local": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
     "runner:bundle:assemble-only": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
+    "runner:bundle:manifest:refresh": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/refresh-runner-bundle-manifest.ts",
+    "runner:bundle:manifest:validate": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-runner-bundle-manifest.ts",
     "runner:docker:base": "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-base -t murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en ../..",
     "runner:docker:build": "pnpm runner:bundle && pnpm runner:docker:base && docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     "runner:docker:control-token": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-control-token-e2e.ts",

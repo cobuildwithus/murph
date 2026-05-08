@@ -5,6 +5,9 @@ import type {
   AssistantInputAttachmentEvidence,
   AssistantInputAttachmentEvidenceItem,
 } from './input-store.js'
+import type {
+  AssistantWorkspaceArtifactMaterializer,
+} from './execution-context.js'
 import { ASSISTANT_INPUT_EVENT_ATTACHMENT_DESCRIPTOR_MAX_COUNT } from './input-store.js'
 import { normalizeAssistantInputFileName } from './attachment-file-name.js'
 
@@ -198,6 +201,7 @@ function createAssistantInputAttachmentEvidenceItemFromInboxAttachment(input: {
 export async function materializeAssistantInputAttachmentRawArtifactRefs(input: {
   attachments: readonly InboxCaptureAttachmentLike[]
   inputId: string
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
 }): Promise<Map<number, string>> {
   const refs = new Map<number, string>()
@@ -221,6 +225,7 @@ export async function materializeAssistantInputAttachmentRawArtifactRefs(input: 
 
     try {
       if (sourcePath !== targetPath) {
+        await input.materializeWorkspaceArtifacts?.([sourcePath])
         const sourceAbsolutePath = await resolveAssistantVaultPath(
           input.vaultRoot,
           sourcePath,

@@ -8,6 +8,9 @@ import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import type {
   AssistantInputAttachmentEvidenceItem,
 } from './input-store.js'
+import type {
+  AssistantWorkspaceArtifactMaterializer,
+} from './execution-context.js'
 import {
   type AssistantUserMessageContentPart,
 } from './content-types.js'
@@ -68,6 +71,7 @@ export interface AssistantInputAttachmentEvidenceReadFailure {
 
 export async function buildAssistantInputAttachmentModelBundle(input: {
   attachment: AssistantInputAttachmentEvidenceItem
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
 }): Promise<AssistantInputAttachmentModelBundle> {
   const rawPath = normalizeAssistantInputRawArtifactPath(input.attachment.raw?.path ?? null)
@@ -79,6 +83,7 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
     ...buildInlineTextSources(input.attachment),
     ...(await buildDerivedTextSources({
       attachment: input.attachment,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       vaultRoot: input.vaultRoot,
     })),
   ]
@@ -119,12 +124,14 @@ export async function buildAssistantInputAttachmentModelBundle(input: {
 
 export async function buildAssistantInputAttachmentModelBundles(input: {
   attachments: readonly AssistantInputAttachmentEvidenceItem[]
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
 }): Promise<AssistantInputAttachmentModelBundle[]> {
   return Promise.all(
     input.attachments.map((attachment) =>
       buildAssistantInputAttachmentModelBundle({
         attachment,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         vaultRoot: input.vaultRoot,
       }),
     ),
@@ -155,6 +162,7 @@ export function hasAssistantInputAttachmentEvidenceCandidate(
 export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   attachmentSources: readonly AssistantInputAttachmentModelBundleSource[]
   fallbackContextLabel?: string
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   prompt: string
   vaultRoot: string
@@ -180,6 +188,7 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
   const routingEvidence = await readPreparedRoutingEvidence({
     attachmentSources,
     fallbackContextLabel: input.fallbackContextLabel,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
     onEvidenceReadFailure: input.onEvidenceReadFailure,
     vaultRoot: input.vaultRoot,
   })
@@ -310,6 +319,7 @@ function buildInlineTextSources(
 
 async function buildDerivedTextSources(input: {
   attachment: AssistantInputAttachmentEvidenceItem
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
 }): Promise<ModelEvidenceSource[]> {
   const derived = input.attachment.derived
@@ -325,6 +335,7 @@ async function buildDerivedTextSources(input: {
     return []
   }
 
+  await input.materializeWorkspaceArtifacts?.([normalizedManifestPath])
   const manifest = await readParserManifest(input.vaultRoot, normalizedManifestPath)
   if (!manifest) {
     return []
@@ -336,7 +347,11 @@ async function buildDerivedTextSources(input: {
     derived.allowedRoot,
   )
   const plainText = plainTextPath
-    ? await readRelativeTextFile(input.vaultRoot, plainTextPath)
+    ? await readMaterializedRelativeTextFile({
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        relativePath: plainTextPath,
+        vaultRoot: input.vaultRoot,
+      })
     : null
   if (plainText) {
     sources.push({
@@ -352,7 +367,11 @@ async function buildDerivedTextSources(input: {
     derived.allowedRoot,
   )
   const markdown = markdownPath
-    ? await readRelativeTextFile(input.vaultRoot, markdownPath)
+    ? await readMaterializedRelativeTextFile({
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        relativePath: markdownPath,
+        vaultRoot: input.vaultRoot,
+      })
     : null
   if (markdown) {
     sources.push({
@@ -368,7 +387,11 @@ async function buildDerivedTextSources(input: {
     derived.allowedRoot,
   )
   if (tablesPath) {
-    const tables = await readRelativeTextFile(input.vaultRoot, tablesPath)
+    const tables = await readMaterializedRelativeTextFile({
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      relativePath: tablesPath,
+      vaultRoot: input.vaultRoot,
+    })
     if (tables) {
       sources.push({
         kind: 'derived_tables',
@@ -385,6 +408,7 @@ async function buildDerivedTextSources(input: {
 async function readPreparedRoutingEvidence(input: {
   attachmentSources: readonly NormalizedAssistantInputAttachmentModelBundleSource[]
   fallbackContextLabel?: string
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   vaultRoot: string
 }): Promise<{
@@ -403,6 +427,7 @@ async function readPreparedRoutingEvidence(input: {
     }
 
     try {
+      await input.materializeWorkspaceArtifacts?.([rawPath])
       const absolutePath = await resolveAssistantVaultPath(
         input.vaultRoot,
         rawPath,
@@ -545,4 +570,13 @@ async function readRelativeTextFile(
   } catch {
     return null
   }
+}
+
+async function readMaterializedRelativeTextFile(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  relativePath: string
+  vaultRoot: string
+}): Promise<string | null> {
+  await input.materializeWorkspaceArtifacts?.([input.relativePath])
+  return await readRelativeTextFile(input.vaultRoot, input.relativePath)
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
+import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
 
 import {
   type CloudflareHostedControlClientOptions,
@@ -544,6 +545,44 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.method).toBe("POST");
     expect(request.init?.body).toBe("{}");
     expectNoRunContractFields(result);
+  });
+
+  it("can attach a signed AI usage allow decision to runner nudge requests", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const result = createRunnerNudgeResult({
+      accepted: true,
+    });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(result);
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+    const aiUsageAllowDecision: HostedAiUsageAllowDecision = {
+      allowed: true,
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      nonce: "0123456789abcdef0123456789abcdef",
+      schema: "murph.hosted-ai-usage-allow-decision.v1" as const,
+      signature: {
+        alg: "HMAC-SHA256" as const,
+        keyId: "test",
+        signature: "signature",
+      },
+      userId: "user_123",
+    };
+
+    await expect(client.nudgeUserRunner("user_123", {
+      aiUsageAllowDecision,
+    })).resolves.toEqual(result);
+
+    const request = requireObservedRequest(observedRequest);
+    expect(JSON.parse(String(request.init?.body))).toEqual({
+      aiUsageAllowDecision,
+    });
   });
 
   it("schedules browser vault refreshes without a workspace source hash", async () => {

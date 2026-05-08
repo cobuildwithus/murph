@@ -357,6 +357,8 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - alarm/nudge coalescing
 - container invocation
 - signed web usage-gate enforcement before container invocation
+- short-lived signed web allow-decision validation on foreground nudges; missing,
+  stale, mismatched, or invalid decisions fall back to the live web usage gate
 - encrypted bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
 - verification of signed ingress/runtime root envelopes plus Cloudflare P-256

@@ -157,6 +157,7 @@ export async function runAssistantAutomation(
             ) {
               stageImportedCaptureAssistantInputEvent({
                 capture: event.capture,
+                executionContext: input.executionContext,
                 onEvent: input.onEvent,
                 persisted: event.persisted,
                 vault: input.vault,
@@ -189,6 +190,7 @@ export async function runAssistantAutomation(
             } else if (event.type === 'parser.jobs.drained') {
               refreshAssistantInputAttachmentEvidenceForParserDrain({
                 captureIds: event.parser?.captureIds ?? [],
+                executionContext: input.executionContext,
                 inboxServices,
                 onEvent: input.onEvent,
                 requestId: input.requestId ?? null,
@@ -326,6 +328,7 @@ export async function runAssistantAutomation(
 
 async function stageImportedCaptureAssistantInputEvent(input: {
   capture: NonNullable<InboxRunEvent['capture']>
+  executionContext?: AssistantExecutionContext | null
   onEvent?: (event: AssistantRunEvent) => void
   persisted: NonNullable<InboxRunEvent['persisted']>
   vault: string
@@ -421,8 +424,9 @@ async function stageImportedCaptureAssistantInputEvent(input: {
           input.capture.source,
           attachment.externalId,
           `attachment_${index}`,
-        ),
+      ),
       inputId: stored.inputId,
+      executionContext: input.executionContext,
       source: 'local-inbox-import',
       vault: input.vault,
     }),
@@ -449,6 +453,7 @@ async function stageImportedCaptureAssistantInputEvent(input: {
 
 async function refreshAssistantInputAttachmentEvidenceForParserDrain(input: {
   captureIds: readonly string[]
+  executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
   requestId: string | null
@@ -502,6 +507,7 @@ async function refreshAssistantInputAttachmentEvidenceForParserDrain(input: {
               descriptorAttachmentIdForAttachment: (_attachment, index) =>
                 event.content.attachmentDescriptors[index]?.attachmentId ?? null,
               inputId: event.inputId,
+              executionContext: input.executionContext,
               source: 'local-parser-drain',
               vault: input.vault,
             })
@@ -544,12 +550,19 @@ async function createAssistantInputAttachmentEvidenceFromInboxCaptureWithRawRefs
     index: number,
   ) => string | null
   inputId: string
+  executionContext?: AssistantExecutionContext | null
   source: NonNullable<AssistantInputAttachmentEvidence['source']>
   vault: string
 }): Promise<AssistantInputAttachmentEvidence> {
   const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
     attachments: input.attachments,
     inputId: input.inputId,
+    ...(input.executionContext?.hosted?.materializeWorkspaceArtifacts
+      ? {
+          materializeWorkspaceArtifacts:
+            input.executionContext.hosted.materializeWorkspaceArtifacts,
+        }
+      : {}),
     vaultRoot: input.vault,
   })
   return createAssistantInputAttachmentEvidenceFromInboxCapture({

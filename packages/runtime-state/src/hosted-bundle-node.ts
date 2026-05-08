@@ -69,6 +69,10 @@ export type HostedBundleArtifactRestoreFilter = (
   input: HostedBundleArtifactRestoreInput,
 ) => boolean | Promise<boolean>;
 
+export interface HostedBundleMaterializationResult {
+  materializedArtifactPaths: ReadonlySet<string>;
+}
+
 export interface HostedBundleInlineRestoreInput {
   path: string;
   root: string;
@@ -356,8 +360,8 @@ export async function restoreHostedBundleRoots(input: {
   roots: HostedBundleRestoreRootMap;
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
   shouldRestoreInlineFile?: HostedBundleInlineRestoreFilter;
-}): Promise<void> {
-  await restoreHostedBundleArchiveFiles({
+}): Promise<HostedBundleMaterializationResult> {
+  return await restoreHostedBundleArchiveFiles({
     ...input,
     includeInlineFiles: true,
   });
@@ -370,10 +374,25 @@ export async function materializeHostedBundleArtifacts(input: {
   ignoredRoots?: readonly string[];
   roots: HostedBundleRestoreRootMap;
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
-}): Promise<void> {
-  await restoreHostedBundleArchiveFiles({
+}): Promise<HostedBundleMaterializationResult> {
+  return await restoreHostedBundleArchiveFiles({
     ...input,
     includeInlineFiles: false,
+  });
+}
+
+export async function materializeHostedBundleFiles(input: {
+  artifactResolver: (input: HostedBundleArtifactRestoreInput) => Promise<Uint8Array | ArrayBuffer>;
+  bytes: Uint8Array | ArrayBuffer;
+  expectedKind: HostedExecutionBundleKind;
+  ignoredRoots?: readonly string[];
+  roots: HostedBundleRestoreRootMap;
+  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+  shouldRestoreInlineFile?: HostedBundleInlineRestoreFilter;
+}): Promise<HostedBundleMaterializationResult> {
+  return await restoreHostedBundleArchiveFiles({
+    ...input,
+    includeInlineFiles: true,
   });
 }
 
@@ -387,12 +406,13 @@ async function restoreHostedBundleArchiveFiles(input: {
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
   shouldRestoreInlineFile?: HostedBundleInlineRestoreFilter;
   includeInlineFiles: boolean;
-}): Promise<void> {
+}): Promise<HostedBundleMaterializationResult> {
   const archive = parseHostedBundleArchive(input.bytes);
   const ignoredRoots = new Set([
     HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
     ...(input.ignoredRoots ?? []),
   ]);
+  const materializedArtifactPaths = new Set<string>();
 
   if (archive.kind !== input.expectedKind) {
     throw new Error(
@@ -456,6 +476,7 @@ async function restoreHostedBundleArchiveFiles(input: {
         path: file.path,
         root: file.root,
       });
+      materializedArtifactPaths.add(`${file.root}:${file.path}`);
       continue;
     }
 
@@ -485,7 +506,12 @@ async function restoreHostedBundleArchiveFiles(input: {
       path: file.path,
       root: file.root,
     });
+    materializedArtifactPaths.add(`${file.root}:${file.path}`);
   }
+
+  return {
+    materializedArtifactPaths,
+  };
 }
 
 async function writeHostedBundleRestoredFile(input: {

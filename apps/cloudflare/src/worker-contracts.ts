@@ -82,6 +82,8 @@ export interface WorkerEnvironmentContract<
     timestamp?: string;
   };
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
+  HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID?: string;
+  HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET?: string;
   ALLOW_LOCAL_INTERNAL_PROXY?: string;
   HOSTED_ASSISTANT_APPROVAL_POLICY?: string;
   HOSTED_ASSISTANT_MODEL?: string;

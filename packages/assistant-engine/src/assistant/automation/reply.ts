@@ -379,6 +379,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   const decision = await evaluateAssistantAutoReplyGroup({
     allowSelfAuthored: input.allowSelfAuthored,
     enabledChannels: input.enabledChannels,
+    executionContext: input.executionContext,
     group: context,
     onEvent: input.onEvent,
     receiptFallbackEnabled: shouldUseAssistantAutoReplyReceiptFallback({
@@ -855,6 +856,7 @@ function createAssistantAutoReplyOutcomeSummary(
 async function evaluateAssistantAutoReplyGroup(input: {
   allowSelfAuthored: boolean
   enabledChannels: readonly string[]
+  executionContext?: AssistantExecutionContext | null
   group: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
   receiptFallbackEnabled: boolean
@@ -970,13 +972,12 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return createAdvancingSkipDecision(autoReplySkipReason)
   }
 
-  const preparedInput = await (
-    input.onEvent
-      ? prepareAssistantAutoReplyInput(promptInputs, input.vault, {
-          onEvent: input.onEvent,
-        })
-      : prepareAssistantAutoReplyInput(promptInputs, input.vault)
-  )
+  const preparedInput = await prepareAssistantAutoReplyInputWithContext({
+    executionContext: input.executionContext,
+    inputs: promptInputs,
+    onEvent: input.onEvent,
+    vault: input.vault,
+  })
   if (preparedInput.kind === 'defer') {
     return createDeferredSkipDecision(preparedInput.reason)
   }
@@ -1162,6 +1163,23 @@ function stringifyHostedAutoReplyDeliveryKeyParts(
   parts: readonly (boolean | null | string | undefined)[],
 ): string {
   return JSON.stringify(parts.map((part) => part ?? null))
+}
+
+async function prepareAssistantAutoReplyInputWithContext(input: {
+  executionContext?: AssistantExecutionContext | null
+  inputs: readonly AssistantAutoReplyPromptInput[]
+  onEvent?: ((event: AssistantRunEvent) => void) | null
+  vault: string
+}): Promise<Awaited<ReturnType<typeof prepareAssistantAutoReplyInput>>> {
+  const materializeWorkspaceArtifacts =
+    input.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null
+  const options = {
+    ...(materializeWorkspaceArtifacts ? { materializeWorkspaceArtifacts } : {}),
+    ...(input.onEvent ? { onEvent: input.onEvent } : {}),
+  }
+  return Object.keys(options).length > 0
+    ? await prepareAssistantAutoReplyInput(input.inputs, input.vault, options)
+    : await prepareAssistantAutoReplyInput(input.inputs, input.vault)
 }
 
 async function executeAssistantAutoReply(input: {
@@ -1371,13 +1389,12 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     const shownAcceptedInput = await loadAssistantAutoReplyPromptInputs({
       group: acceptedInputContext,
     })
-    const preparedInput = await (
-      input.onEvent
-        ? prepareAssistantAutoReplyInput(shownAcceptedInput, input.vault, {
-            onEvent: input.onEvent,
-          })
-        : prepareAssistantAutoReplyInput(shownAcceptedInput, input.vault)
-    )
+    const preparedInput = await prepareAssistantAutoReplyInputWithContext({
+      executionContext: input.executionContext,
+      inputs: shownAcceptedInput,
+      onEvent: input.onEvent,
+      vault: input.vault,
+    })
     if (preparedInput.kind !== 'ready') {
       throw new AssistantActiveTurnInputBudgetExceededError(
         preparedInput.reason,

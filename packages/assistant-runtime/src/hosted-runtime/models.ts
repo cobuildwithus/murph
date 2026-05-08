@@ -175,9 +175,14 @@ export interface HostedMaintenanceMetrics {
   totalElapsedMs?: number | null;
 }
 
+export interface HostedWorkspaceArtifactMaterializationResult {
+  materializedArtifactPaths: ReadonlySet<string>;
+  missingArtifactPaths: ReadonlySet<string>;
+}
+
 export type HostedWorkspaceArtifactMaterializer = (
   relativePaths: readonly string[],
-) => Promise<void>;
+) => Promise<HostedWorkspaceArtifactMaterializationResult>;
 
 export interface HostedRestoredExecutionContext {
   assistantStateRoot: string;

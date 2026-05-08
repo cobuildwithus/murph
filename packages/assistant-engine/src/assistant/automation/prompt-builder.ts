@@ -1,5 +1,8 @@
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
+  AssistantWorkspaceArtifactMaterializer,
+} from '../execution-context.js'
+import type {
   AssistantInputAttachmentEvidence,
   AssistantInputAttachmentEvidenceItem,
   AssistantInputAttachmentDescriptor,
@@ -127,6 +130,7 @@ export async function prepareAssistantAutoReplyInput(
   inputs: readonly AssistantAutoReplyPromptInput[],
   vaultRoot: string,
   options: {
+    materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
     onEvent?: (event: AssistantRunEvent) => void
   } = {},
 ): Promise<AssistantAutoReplyPreparedInput> {
@@ -135,6 +139,7 @@ export async function prepareAssistantAutoReplyInput(
       ...entry,
       attachmentBundles: await buildPromptAttachmentBundlesBestEffort({
         entry,
+        materializeWorkspaceArtifacts: options.materializeWorkspaceArtifacts,
         onEvent: options.onEvent,
         vaultRoot,
       }),
@@ -178,6 +183,7 @@ export async function prepareAssistantAutoReplyInput(
   const preparedMultimodalInput =
     await prepareAssistantInputMultimodalUserMessageContent({
       attachmentSources,
+      materializeWorkspaceArtifacts: options.materializeWorkspaceArtifacts,
       onEvidenceReadFailure(failure) {
         options.onEvent?.({
           type: 'input.reply-progress',
@@ -547,6 +553,7 @@ function buildPreparedAttachmentSources(
 
 async function buildPromptAttachmentBundlesBestEffort(input: {
   entry: AssistantAutoReplyPromptInput
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   onEvent?: (event: AssistantRunEvent) => void
   vaultRoot: string
 }): Promise<AssistantInputAttachmentModelBundle[]> {
@@ -563,6 +570,7 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
   try {
     return await buildAssistantInputAttachmentModelBundles({
       attachments: input.entry.attachmentEvidence.attachments,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       vaultRoot: input.vaultRoot,
     })
   } catch {
