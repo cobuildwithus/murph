@@ -1,11 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import {
-  createHostedBrowserVaultReplicaForSourceState,
-  readHostedBrowserVaultWarmSourceStateHash,
-  restoreHostedWorkspaceRuntimeJobWorkspace,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedAssistantRuntimeConfig,
   type HostedAssistantWorkspaceRuntimeJobResult,
@@ -25,7 +20,6 @@ import {
 } from "./runner-native-parser-toolchain.ts";
 import {
   runHostedWorkspaceInvocationIsolatedDetailed,
-  resolveHostedRunnerWarmWorkspaceVaultRoot,
   type HostedExecutionIsolatedRunnerInput,
 } from "./node-runner-isolated.ts";
 import {
@@ -53,15 +47,9 @@ import {
   LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
 } from "./web-control-plane.ts";
 import {
-  readDashboardReplicaSourceStateHash,
-} from "@murphai/hosted-execution/dashboard-replica";
-import type {
-  HostedBrowserVaultReplicaRef,
-} from "@murphai/hosted-execution/contracts";
-import {
-  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
-  measureHostedBrowserVaultReplicaBytes,
-} from "./browser-vault-limits.ts";
+  refreshDashboardReplicaFromCommittedWorkspace,
+  type DashboardReplicaRefreshResult,
+} from "./dashboard-replica/refresher.ts";
 
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
@@ -102,20 +90,7 @@ export interface HostedBrowserVaultReplicaRefreshInput {
   userId: string;
 }
 
-export type HostedBrowserVaultReplicaRefreshResult =
-  | {
-      byteLength: number;
-      replicaRef: HostedBrowserVaultReplicaRef;
-      status: "written";
-    }
-  | {
-      byteLength: number;
-      maxBytes: number;
-      status: "refresh_failed_too_large";
-    }
-  | {
-      status: "already_fresh" | "stale_source" | "workspace_missing";
-    };
+export type HostedBrowserVaultReplicaRefreshResult = DashboardReplicaRefreshResult;
 
 export function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
@@ -274,116 +249,11 @@ export async function refreshHostedBrowserVaultReplica(
     browserVaultRefreshSourceStateHash: input.sourceStateHash,
     workspaceCheckpointBridge: null,
   });
-  const workspacePort = platform.workspacePort;
-  if (!workspacePort?.read) {
-    throw new TypeError("Hosted browser-vault refresh requires a workspace read port.");
-  }
-  if (!platform.browserVaultReplicaPort?.write) {
-    throw new TypeError("Hosted browser-vault refresh requires a browser-vault replica write port.");
-  }
-
-  const workspaceRead = await workspacePort.read();
-  const workspace = workspaceRead.workspace;
-  if (!workspace) {
-    return {
-      status: "workspace_missing",
-    };
-  }
-
-  const currentSourceStateHash = readDashboardReplicaSourceStateHash(workspace.snapshotRef);
-  if (currentSourceStateHash !== input.sourceStateHash) {
-    return {
-      status: "stale_source",
-    };
-  }
-
-  if (workspace.browserVaultReplicaRef?.sourceBundleHash === input.sourceStateHash) {
-    return {
-      status: "already_fresh",
-    };
-  }
-
-  const warmResult = await tryRefreshHostedBrowserVaultReplicaFromWarmRoot({
+  return await refreshDashboardReplicaFromCommittedWorkspace({
     platform,
     sourceStateHash: input.sourceStateHash,
     userId: input.userId,
   });
-  if (warmResult) {
-    return warmResult;
-  }
-
-  const refreshRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
-  try {
-    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-      platform,
-      vaultRoot: refreshRoot,
-      workspace,
-    });
-    return await createAndWriteHostedBrowserVaultReplica({
-      platform,
-      sourceStateHash: input.sourceStateHash,
-      userId: input.userId,
-      vaultRoot: restored.vaultRoot,
-    });
-  } finally {
-    await rm(refreshRoot, {
-      force: true,
-      recursive: true,
-    });
-  }
-}
-
-async function tryRefreshHostedBrowserVaultReplicaFromWarmRoot(input: {
-  platform: ReturnType<typeof buildHostedExecutionRuntimePlatform>;
-  sourceStateHash: string;
-  userId: string;
-}): Promise<HostedBrowserVaultReplicaRefreshResult | null> {
-  const warmVaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(input.userId);
-  const warmSourceStateHash = await readHostedBrowserVaultWarmSourceStateHash({
-    vaultRoot: warmVaultRoot,
-  });
-  if (warmSourceStateHash !== input.sourceStateHash) {
-    return null;
-  }
-
-  try {
-    return await createAndWriteHostedBrowserVaultReplica({
-      platform: input.platform,
-      sourceStateHash: input.sourceStateHash,
-      userId: input.userId,
-      vaultRoot: warmVaultRoot,
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function createAndWriteHostedBrowserVaultReplica(input: {
-  platform: ReturnType<typeof buildHostedExecutionRuntimePlatform>;
-  sourceStateHash: string;
-  userId: string;
-  vaultRoot: string;
-}): Promise<Extract<HostedBrowserVaultReplicaRefreshResult, { status: "written" | "refresh_failed_too_large" }>> {
-  const replica = await createHostedBrowserVaultReplicaForSourceState({
-    generatedAt: new Date().toISOString(),
-    sourceStateHash: input.sourceStateHash,
-    vaultRoot: input.vaultRoot,
-  });
-  const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
-  if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
-    return {
-      byteLength,
-      maxBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
-      status: "refresh_failed_too_large",
-    };
-  }
-
-  const replicaRef = await input.platform.browserVaultReplicaPort!.write({ replica });
-  return {
-    byteLength: replicaRef.byteLength,
-    replicaRef,
-    status: "written",
-  };
 }
 
 function resolveHostedWorkspaceInProcessVaultRoot(): string {

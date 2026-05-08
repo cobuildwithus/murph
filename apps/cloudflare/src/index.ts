@@ -345,6 +345,13 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.nudgeHostedRunnerForUser(userId);
   }
 
+  async scheduleDashboardReplicaRefreshForUser(input: {
+    sourceStateHash: string;
+    userId: string;
+  }): ReturnType<HostedUserRunner["scheduleDashboardReplicaRefreshForUser"]> {
+    return this.runner.scheduleDashboardReplicaRefreshForUser(input);
+  }
+
   async scheduleBrowserVaultRefreshForUser(input: {
     sourceStateHash: string;
     userId: string;
@@ -982,13 +989,19 @@ async function handleBrowserVaultRefreshRoute(
   }
 
   const stub = context.env.USER_RUNNER.getByName(userId);
-  if (!stub.scheduleBrowserVaultRefreshForUser) {
-    throw new Error("Hosted user runner does not support browser-vault refresh scheduling.");
+  if (stub.scheduleDashboardReplicaRefreshForUser) {
+    return json(await stub.scheduleDashboardReplicaRefreshForUser({
+      sourceStateHash: body.sourceStateHash,
+      userId,
+    }));
   }
-  return json(await stub.scheduleBrowserVaultRefreshForUser({
-    sourceStateHash: body.sourceStateHash,
-    userId,
-  }));
+  if (stub.scheduleBrowserVaultRefreshForUser) {
+    return json(await stub.scheduleBrowserVaultRefreshForUser({
+      sourceStateHash: body.sourceStateHash,
+      userId,
+    }));
+  }
+  throw new Error("Hosted user runner does not support dashboard replica refresh scheduling.");
 }
 
 function parseJsonValue(value: string): unknown {

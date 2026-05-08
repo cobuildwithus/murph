@@ -140,11 +140,20 @@ export class RunnerStateStore {
     deduped: boolean;
     sourceStateHash: string;
   }> {
+    return this.scheduleDashboardReplicaRefresh(input);
+  }
+
+  async scheduleDashboardReplicaRefresh(input: {
+    sourceStateHash: string;
+  }): Promise<{
+    deduped: boolean;
+    sourceStateHash: string;
+  }> {
     const sourceStateHash = requireRunnerStateNonEmptyString(
       input.sourceStateHash,
-      "Hosted browser-vault refresh sourceStateHash",
+      "Hosted dashboard replica refresh sourceStateHash",
     );
-    const current = await this.readPendingBrowserVaultRefresh();
+    const current = await this.readPendingDashboardReplicaRefresh();
     if (current?.sourceStateHash === sourceStateHash) {
       return {
         deduped: true,
@@ -170,6 +179,12 @@ export class RunnerStateStore {
   async readPendingBrowserVaultRefresh(): Promise<{
     sourceStateHash: string;
   } | null> {
+    return this.readPendingDashboardReplicaRefresh();
+  }
+
+  async readPendingDashboardReplicaRefresh(): Promise<{
+    sourceStateHash: string;
+  } | null> {
     const value = await this.state.storage.get<unknown>(
       PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
     );
@@ -189,7 +204,13 @@ export class RunnerStateStore {
   async clearPendingBrowserVaultRefresh(input: {
     sourceStateHash: string;
   }): Promise<boolean> {
-    const current = await this.readPendingBrowserVaultRefresh();
+    return this.clearPendingDashboardReplicaRefresh(input);
+  }
+
+  async clearPendingDashboardReplicaRefresh(input: {
+    sourceStateHash: string;
+  }): Promise<boolean> {
+    const current = await this.readPendingDashboardReplicaRefresh();
     if (!current || current.sourceStateHash !== input.sourceStateHash) {
       return false;
     }

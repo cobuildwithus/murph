@@ -230,38 +230,38 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("keeps one replaceable pending browser-vault refresh source hash", async () => {
+  it("keeps one replaceable pending dashboard replica refresh source hash", async () => {
     const { store } = createRunnerStateStoreHarness();
 
-    await expect(store.scheduleBrowserVaultRefresh({
+    await expect(store.scheduleDashboardReplicaRefresh({
       sourceStateHash: "a".repeat(64),
     })).resolves.toEqual({
       deduped: false,
       sourceStateHash: "a".repeat(64),
     });
-    await expect(store.scheduleBrowserVaultRefresh({
+    await expect(store.scheduleDashboardReplicaRefresh({
       sourceStateHash: "a".repeat(64),
     })).resolves.toEqual({
       deduped: true,
       sourceStateHash: "a".repeat(64),
     });
-    await expect(store.readPendingBrowserVaultRefresh()).resolves.toEqual({
+    await expect(store.readPendingDashboardReplicaRefresh()).resolves.toEqual({
       sourceStateHash: "a".repeat(64),
     });
 
-    await expect(store.scheduleBrowserVaultRefresh({
+    await expect(store.scheduleDashboardReplicaRefresh({
       sourceStateHash: "b".repeat(64),
     })).resolves.toEqual({
       deduped: false,
       sourceStateHash: "b".repeat(64),
     });
-    await expect(store.clearPendingBrowserVaultRefresh({
+    await expect(store.clearPendingDashboardReplicaRefresh({
       sourceStateHash: "a".repeat(64),
     })).resolves.toBe(false);
-    await expect(store.clearPendingBrowserVaultRefresh({
+    await expect(store.clearPendingDashboardReplicaRefresh({
       sourceStateHash: "b".repeat(64),
     })).resolves.toBe(true);
-    await expect(store.readPendingBrowserVaultRefresh()).resolves.toBeNull();
+    await expect(store.readPendingDashboardReplicaRefresh()).resolves.toBeNull();
   });
 
   it("ignores stale invocation completion and failure metadata", async () => {
