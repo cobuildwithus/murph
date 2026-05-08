@@ -220,13 +220,22 @@ test("canonical resource lock scopes serialize sibling acquisitions while a high
     "@murphai/runtime-state/node",
   );
   let delayHigherLock = true;
+  let markHigherAcquisitionDelayStarted!: () => void;
+  const higherAcquisitionDelayStarted = new Promise<void>((resolve) => {
+    markHigherAcquisitionDelayStarted = resolve;
+  });
+  let releaseHigherAcquisitionDelay!: () => void;
+  const higherAcquisitionDelay = new Promise<void>((resolve) => {
+    releaseHigherAcquisitionDelay = resolve;
+  });
   vi.doMock("@murphai/runtime-state/node", async () => ({
     ...actualRuntimeState,
     acquireDirectoryLock: async (input: Parameters<typeof actualRuntimeState.acquireDirectoryLock>[0]) => {
       const metadata = input.metadata as { resourceKey?: string } | null;
       if (delayHigherLock && metadata?.resourceKey === "path:derived/knowledge/index.md") {
         delayHigherLock = false;
-        await sleep(75);
+        markHigherAcquisitionDelayStarted();
+        await higherAcquisitionDelay;
       }
 
       return await actualRuntimeState.acquireDirectoryLock(input);
@@ -243,6 +252,10 @@ test("canonical resource lock scopes serialize sibling acquisitions while a high
   const higherResource = canonicalPathResource("derived/knowledge/index.md");
   const lowerResource = canonicalPathResource("bank/preferences.json");
   let higherAcquired = false;
+  let markHigherAcquired!: () => void;
+  const higherAcquiredPromise = new Promise<void>((resolve) => {
+    markHigherAcquired = resolve;
+  });
   let releaseHigher!: () => void;
   const holdHigher = new Promise<void>((resolve) => {
     releaseHigher = resolve;
@@ -254,14 +267,15 @@ test("canonical resource lock scopes serialize sibling acquisitions while a high
     run: async () => {
       const higherLock = withCanonicalResourceLocks({
         vaultRoot,
-        resources: [higherResource],
-        run: async () => {
-          higherAcquired = true;
-          await holdHigher;
-        },
-      });
+          resources: [higherResource],
+          run: async () => {
+            higherAcquired = true;
+            markHigherAcquired();
+            await holdHigher;
+          },
+        });
 
-      await sleep(10);
+      await higherAcquisitionDelayStarted;
 
       let lowerResourceAcquired = false;
       let lowerLockSettled = false;
@@ -284,20 +298,23 @@ test("canonical resource lock scopes serialize sibling acquisitions while a high
         lowerLockSettled = true;
       });
 
-      await sleep(40);
-      assert.equal(higherAcquired, false);
-      assert.equal(lowerResourceAcquired, false);
-      assert.equal(lowerLockSettled, false);
+      try {
+        await sleep(10);
+        assert.equal(higherAcquired, false);
+        assert.equal(lowerResourceAcquired, false);
+        assert.equal(lowerLockSettled, false);
 
-      await sleep(60);
-      assert.equal(higherAcquired, true);
-      const lowerResult = await lowerLockResult;
-      assert.equal(lowerResourceAcquired, false);
-      assert.equal(lowerResult.status, "rejected");
-      assert.equal((lowerResult.error as { code?: string }).code, "CANONICAL_RESOURCE_LOCK_ORDER");
-
-      releaseHigher();
-      await higherLock;
+        releaseHigherAcquisitionDelay();
+        await higherAcquiredPromise;
+        const lowerResult = await lowerLockResult;
+        assert.equal(lowerResourceAcquired, false);
+        assert.equal(lowerResult.status, "rejected");
+        assert.equal((lowerResult.error as { code?: string }).code, "CANONICAL_RESOURCE_LOCK_ORDER");
+      } finally {
+        releaseHigherAcquisitionDelay();
+        releaseHigher();
+        await higherLock;
+      }
     },
   });
 });
