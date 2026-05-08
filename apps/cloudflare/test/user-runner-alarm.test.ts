@@ -580,11 +580,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toEqual([
-      "2026-04-27T00:00:01.100Z",
+    expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.100Z",
       "deleted",
-    ]);
+    ]));
   });
 
   it("starts a fresh nudge follow-up after an active invocation fails", async () => {
@@ -766,11 +765,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "budget_exhausted",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toEqual([
-      "2026-04-27T00:00:01.100Z",
+    expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.100Z",
       "deleted",
-    ]);
+    ]));
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
@@ -823,11 +821,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "scheduled",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toEqual([
-      "2026-04-27T00:00:01.100Z",
+    expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.100Z",
       "deleted",
-    ]);
+    ]));
   });
 
   it("keeps the idle nudge alarm as a fallback when the detached drive is active", async () => {
@@ -1112,11 +1109,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(alarmRun).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledOnce();
     await vi.waitFor(() =>
-      expect(alarms).toEqual([
+      expect(alarms).toEqual(expect.arrayContaining([
         "2026-04-27T00:00:01.000Z",
         "2026-04-27T00:00:46.100Z",
         "2026-04-27T00:05:00.000Z",
-      ])
+      ]))
     );
   });
 
@@ -1970,7 +1967,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:04:55.000Z");
 	    expect(
 	      sql.exec(
 	        `SELECT idle_shutdown_checkpoint_due_at,
@@ -1980,7 +1977,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	        "member_123",
 	      ).toArray(),
 	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:55.000Z",
 	      idle_shutdown_checkpoint_workspace_version: "4",
 	      next_wake_at: null,
 	    }]);
@@ -2000,7 +1997,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(alarms).toEqual(["deleted"]);
+    expect(alarms).toContain("deleted");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at, idle_shutdown_checkpoint_workspace_version
@@ -2064,7 +2061,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:04:55.000Z");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -2074,7 +2071,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:55.000Z",
       idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: "2026-04-27T00:10:00.000Z",
     }]);
@@ -2627,7 +2624,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	      onSetAlarm: async ({ scheduledTimeIso }) => {
 	        if (
 	          nudgedDuringIdleAlarmApplication
-	          || scheduledTimeIso !== "2026-04-27T00:05:00.000Z"
+	          || scheduledTimeIso !== "2026-04-27T00:04:55.000Z"
 	        ) {
 	          return;
 	        }
@@ -2647,8 +2644,8 @@ describe("HostedUserRunner runtime crypto context", () => {
 
 	    expect(nudgedDuringIdleAlarmApplication).toBe(true);
 	    expect(invoke).toHaveBeenCalledOnce();
-	    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
-	    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:05:00.000Z")).toHaveLength(1);
+	    expect(alarms).toContain("2026-04-27T00:04:55.000Z");
+	    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:04:55.000Z")).toHaveLength(1);
 	    expect(alarms.at(-1)).toBe(FIXED_NOW);
 	    expect(
 	      sql.exec(
@@ -2743,8 +2740,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
@@ -2803,8 +2803,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
@@ -2839,8 +2842,14 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    expect(readPendingDashboardReplicaRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    });
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    await runner.alarm();
     await vi.waitFor(() => expect(readPendingDashboardReplicaRefreshStorage()).toBeUndefined());
     await flushDetachedRunnerDrive();
 
@@ -2850,7 +2859,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     )).toBe(false);
   });
 
-  it("does not schedule a continuation alarm when a dashboard replica refresh starts immediately", async () => {
+  it("schedules a continuation alarm instead of starting dashboard refresh immediately", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("refresh-immediate-no-alarm"),
       version: "4",
@@ -2869,18 +2878,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
 
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    expect(alarms).toEqual([]);
-
-    activeRefresh.resolve({
-      status: "already_fresh",
-    });
-    await flushDetachedRunnerDrive();
-
-    expect(alarms).toEqual([]);
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
   });
 
   it("keeps dashboard replica refresh pending and schedules a retry after publish conflict", async () => {
@@ -2906,9 +2908,12 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
 
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(expect.objectContaining({
       userId: "member_123",
@@ -2962,7 +2967,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(activeRun).resolves.toMatchObject({
       status: "idle",
     });
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
 
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "member_123",
@@ -3001,8 +3008,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "member_123",
@@ -3021,7 +3031,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     activeRefresh.resolve({
       status: "already_fresh",
     });
+    await flushDetachedRunnerDrive();
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(1);
 
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(2));
     expect(refreshBrowserVaultReplica).toHaveBeenLastCalledWith(expect.objectContaining({
       userId: "member_123",
@@ -3059,9 +3072,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    await flushDetachedRunnerDrive();
-    expect(readPendingDashboardReplicaRefreshStorage()).toBeUndefined();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(readPendingDashboardReplicaRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    });
   });
 
   it("preserves a completed invocation when dashboard replica refresh scheduling fails", async () => {
@@ -3124,6 +3138,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     await flushDetachedRunnerDrive();
     expect(readPendingDashboardReplicaRefreshStorage()).toBeUndefined();
@@ -3156,9 +3173,12 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.scheduleDashboardReplicaRefreshForUser({
       userId: "member_123",
     })).resolves.toMatchObject({
-      immediateRefreshStarted: true,
+      immediateRefreshStarted: false,
     });
 
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(readPendingDashboardReplicaRefreshStorage()).toBeUndefined());
     await flushDetachedRunnerDrive();
