@@ -429,7 +429,7 @@ export class HostedUserRunner {
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
     const nowMs = Date.now();
     const preferredWakeAt = alreadyRunning
-      ? resolvePendingNudgeWakeAt({
+      ? resolvePendingNudgeDrainContinuationWakeAt({
           nowMs,
           record: runningRecord,
           runnerTimeoutMs: this.env.runnerTimeoutMs,
@@ -912,7 +912,7 @@ export class HostedUserRunner {
 
     const nowMs = Date.now();
     return await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: resolvePendingNudgeWakeAt({
+      preferredWakeAt: resolvePendingNudgeDrainContinuationWakeAt({
         nowMs,
         record,
         runnerTimeoutMs: this.env.runnerTimeoutMs,
@@ -923,9 +923,12 @@ export class HostedUserRunner {
   private async syncInvocationRecoveryAlarm(
     record: RunnerStateRecord,
   ): Promise<RunnerStateRecord> {
+    const nowMs = Date.now();
     return await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: resolvePendingNudgeWakeAt({
-        nowMs: Date.now(),
+      preferredWakeAt: (record.pendingNudge
+        ? resolvePendingNudgeDrainContinuationWakeAt
+        : resolvePendingNudgeWakeAt)({
+        nowMs,
         record,
         runnerTimeoutMs: this.env.runnerTimeoutMs,
       }),
@@ -1965,6 +1968,18 @@ function resolvePendingNudgeWakeAt(input: {
       ? orphanObservedAtMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS
       : input.nowMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS;
   return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, orphanDeadlineMs))).toISOString();
+}
+
+function resolvePendingNudgeDrainContinuationWakeAt(input: {
+  nowMs: number;
+  record: RunnerStateRecord;
+  runnerTimeoutMs: number;
+}): string {
+  const recoveryWakeAt = resolvePendingNudgeWakeAt(input);
+  const continuationWakeAt = new Date(
+    input.nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
+  ).toISOString();
+  return earliestIsoDate(recoveryWakeAt, continuationWakeAt) ?? continuationWakeAt;
 }
 
 function resolveHostedRunnerFailureRetryDelayMs(input: {
