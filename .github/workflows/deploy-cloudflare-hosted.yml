@@ -423,7 +423,7 @@ jobs:
       - cloudflare-runner-smoke-gate
       - immediate-build-prep-gate
     if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker) || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
     concurrency:
@@ -665,6 +665,10 @@ jobs:
           mv "${restore_staging}/runner-bundle" apps/cloudflare/.deploy/runner-bundle
           gzip -dc .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz | docker load
 
+      - name: Validate immediate runner bundle manifest
+        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
+        run: pnpm --dir apps/cloudflare runner:bundle:manifest:validate
+
       - name: Validate required deploy environment
         env:
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
@@ -682,7 +686,7 @@ jobs:
 
       - name: Render deploy config for immediate handoff
         if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
-        run: pnpm --dir apps/cloudflare runner:bundle:manifest:validate && pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh
+        run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh
 
       - name: Prepare runner base image
         if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}

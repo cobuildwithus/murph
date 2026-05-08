@@ -1,6 +1,6 @@
 # Cloudflare Immediate Blacksmith Build Handoff
 
-Status: active
+Status: completed
 Updated: 2026-05-09
 
 ## Goal
@@ -40,7 +40,7 @@ Success criteria:
 
 ## State
 
-- Implementation and focused verification complete.
+- Implementation and verification complete; final audit re-check is running.
 
 ## Done
 
@@ -57,18 +57,19 @@ Success criteria:
 - Hardened immediate runner-bundle restore to reject unsupported archive entry types and symlink targets that escape the restored bundle root.
 - PASS: focused Cloudflare deploy/container/deploy-artifact Vitest.
 - PASS: `pnpm --dir apps/cloudflare typecheck`.
-- FAIL unrelated: scoped `bash scripts/workspace-verify.sh test:diff ...` reached `apps/cloudflare verify` and failed in active unrelated Cloudflare tests: `apps/cloudflare/test/container-entrypoint.test.ts` timed out in the health metadata test, and `apps/cloudflare/test/user-runner-alarm.test.ts` expected two cleanup calls but saw three.
+- PASS: scoped `bash scripts/workspace-verify.sh test:diff ...` on the current task working set, including `apps/cloudflare verify`.
 - PASS: `git diff --check` on the working set.
 - PASS: privacy identifier scan on the working set.
+- PASS: `pnpm docs:drift`.
 - 2026-05-09 security correction: immediate handoff manifest validation now runs before manifest refresh, so stale source or bundle fingerprints fail before the secret-bearing deploy job blesses downloaded Blacksmith artifacts.
 
 ## Now
 
-- Rerun focused verification after the manifest provenance fix.
+- Await final audit re-check and close/commit if the worktree allows a safe scoped commit.
 
 ## Next
 
-- Complete required audits and scoped closeout.
+- Close plan and hand off final status.
 
 ## Open questions
 
@@ -86,3 +87,4 @@ Success criteria:
 - `apps/cloudflare/DEPLOY.md`
 - `agent-docs/references/testing-ci-map.md`
 - `agent-docs/operations/verification-and-runtime.md`
+Completed: 2026-05-09

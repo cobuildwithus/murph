@@ -544,7 +544,7 @@ describe("hosted deploy automation helpers", () => {
       "--publish 5432:5432",
       "docker exec \"${postgres_container}\" pg_isready -U postgres -d murph_test",
       "name: Stop Postgres",
-      "runs-on: ubuntu-24.04",
+      "runs-on: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}",
       "uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6",
       "uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5",
       "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
@@ -560,6 +560,7 @@ describe("hosted deploy automation helpers", () => {
       "cloudflare-hosted-immediate-build-${{ github.sha }}",
       "name: Download immediate build handoff",
       "name: Restore immediate build handoff",
+      "name: Validate immediate runner bundle manifest",
       'bundle_archive=".artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz"',
       "done < <(tar -tzf \"${bundle_archive}\")",
       "done < <(tar -tvzf \"${bundle_archive}\")",
@@ -593,7 +594,8 @@ describe("hosted deploy automation helpers", () => {
       "name: Show generated artifact paths",
       "run: pnpm --dir apps/cloudflare verify:parallel",
       "run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle",
-      "run: pnpm --dir apps/cloudflare runner:bundle:manifest:validate && pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh",
+      "run: pnpm --dir apps/cloudflare runner:bundle:manifest:validate",
+      "run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh",
     ]) {
       expect(workflow).toContain(expectedLine);
     }
@@ -631,6 +633,9 @@ describe("hosted deploy automation helpers", () => {
     const immediateManifestRefreshStepIndex = workflow.indexOf(
       "- name: Render deploy config for immediate handoff",
     );
+    const immediateManifestValidateStepIndex = workflow.indexOf(
+      "- name: Validate immediate runner bundle manifest",
+    );
     const immediateManifestValidateCommandIndex = workflow.indexOf(
       "runner:bundle:manifest:validate",
     );
@@ -651,6 +656,7 @@ describe("hosted deploy automation helpers", () => {
     expect(immediateUploadHandoffStepIndex).toBeGreaterThanOrEqual(0);
     expect(immediateDownloadHandoffStepIndex).toBeGreaterThanOrEqual(0);
     expect(immediateManifestRefreshStepIndex).toBeGreaterThanOrEqual(0);
+    expect(immediateManifestValidateStepIndex).toBeGreaterThanOrEqual(0);
     expect(immediateManifestValidateCommandIndex).toBeGreaterThanOrEqual(0);
     expect(immediateManifestRefreshCommandIndex).toBeGreaterThanOrEqual(0);
     expect(validateGeneratedDeployBundleStepIndex).toBeGreaterThanOrEqual(0);
@@ -660,6 +666,7 @@ describe("hosted deploy automation helpers", () => {
     expect(hostedCodexAuthGuardStepIndex).toBeLessThan(validateDeployEnvStepIndex);
     expect(immediateBuildPrepJobStartIndex).toBeLessThan(validateDeployEnvStepIndex);
     expect(immediateDownloadHandoffStepIndex).toBeLessThan(validateDeployEnvStepIndex);
+    expect(immediateManifestValidateStepIndex).toBeLessThan(validateDeployEnvStepIndex);
     expect(prepareArtifactsStepIndex).toBeLessThan(prepareRunnerBaseImageStepIndex);
     expect(immediateManifestRefreshStepIndex).toBeLessThan(validateGeneratedDeployBundleStepIndex);
     expect(immediateManifestValidateCommandIndex).toBeLessThan(
