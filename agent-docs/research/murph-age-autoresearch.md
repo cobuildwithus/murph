@@ -194,6 +194,8 @@ R179 added a local partner aggregate receipt validator stub. It checks the R178-
 
 R180 materialized the lawful public-source inventory from the R166 source-strategy consensus. It ranks 10 source lanes, including immediate NCHS public-use lanes, label-review candidates such as MIDUS, CRELES, and MHAS, modern workbench or application lanes such as All of Us, PLCO, HRS, and UK Biobank, and deprioritized lanes such as ELSA when mortality linkage is not externally available. The next concrete source work is MIDUS and CRELES metadata-only label review plus partner aggregate validation; NHANES-family data remains useful for engineering/sensitivity, not external proof.
 
+R181 filled the first MIDUS/CRELES external-candidate label sheet. MIDUS is the strongest near-term non-NHANES candidate if biomarker and mortality files can be lawfully joined after terms/access review. CRELES is the strongest transport-stress candidate if terms allow local public-use analysis. Both remain metadata-label only: no row downloads, codebook body storage, row joins, metrics, external validation scoring, model mutation, product claims, recommendations, or protocol claims.
+
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
