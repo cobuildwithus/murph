@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import path from "node:path";
 
 import {
@@ -10,7 +9,6 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
-  buildHostedExecutionWorkingSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
@@ -40,7 +38,6 @@ import {
   readHostedPortableWorkspaceManifestFromBundle,
   readHostedWorkspaceSkippedInlineFiles,
   sha256HostedBundleHex,
-  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedExecutionContext,
   type HostedBundleArtifactRef,
   type HostedBundleArtifactRestoreInput,
@@ -95,6 +92,8 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
   ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 >;
+type HostedWorkspaceIdleShutdownCheckpointRequest =
+  HostedWorkspaceCheckpointRequest & { reason: "idle_shutdown" };
 
 export type HostedWorkspaceMailboxPayloadDecodeInput = HostedMailboxPayloadDecodeInput;
 export type HostedWorkspaceMailboxPayloadDecodeResult = HostedMailboxPayloadDecodeResult;
@@ -258,55 +257,68 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
 }): Promise<{
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
-  const currentRefs = input.platform.workspacePort?.read
-    ? await readHostedWorkspaceCurrentCheckpointRefs(input)
-    : {
-        baseSnapshotRef: null,
-        snapshotRef: null,
-      };
-  const commitKind = resolveHostedWorkspaceCommitKind({
-    currentSnapshotRef: currentRefs.snapshotRef,
-    reason: input.request.reason,
-  });
-
-  if (commitKind === "working_commit") {
-    return await createWorkingCommitSnapshot({
-      ...input,
-      currentRefs,
-    });
-  }
+  const request = requireHostedWorkspaceBridgeIdleShutdownCheckpointRequest(input.request);
 
   try {
-    const preservedState = input.request.reason === "idle_shutdown"
-      ? await readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(input)
-      : await readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input);
-    return commitKind === "full_compaction"
+    const currentRefs = input.platform.workspacePort?.read
+      ? await readHostedWorkspaceCurrentCheckpointRefs(input)
+      : {
+          baseSnapshotRef: null,
+          snapshotRef: null,
+        };
+    const preservedState = currentRefs.snapshotRef
+      ? await readHostedWorkspaceEffectivePreservedState({
+          platform: input.platform,
+          snapshotRef: currentRefs.snapshotRef,
+        })
+      : null;
+    return currentRefs.baseSnapshotRef
       ? await createFullCompactionSnapshot({
           ...input,
           preservedState,
+          request,
         })
       : await createFullSeedSnapshot({
           ...input,
           preservedState,
+          request,
         });
   } catch (error) {
-    if (
-      input.request.reason === "idle_shutdown"
-      && isHostedWorkspaceIdleShutdownCheckpointSkippableError(error)
-    ) {
+    if (error instanceof HostedWorkspaceCommittedStateUnavailableError) {
+      return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
+        ...input,
+        error: new HostedWorkspaceIdleCompactionPreservedStateUnavailableError(),
+        request,
+      });
+    }
+    if (isHostedWorkspaceIdleShutdownCheckpointSkippableError(error)) {
       return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
         ...input,
         error,
+        request,
       });
     }
     throw error;
   }
 }
 
-class HostedWorkspaceWorkingCheckpointBaseUnavailableError extends Error {
+function requireHostedWorkspaceBridgeIdleShutdownCheckpointRequest(
+  request: HostedWorkspaceCheckpointRequest,
+): HostedWorkspaceIdleShutdownCheckpointRequest {
+  if (request.reason !== "idle_shutdown") {
+    throw new Error("Hosted workspace checkpoint snapshots are idle-shutdown only.");
+  }
+
+  return {
+    ...request,
+    reason: "idle_shutdown",
+  };
+}
+
+class HostedWorkspaceCommittedStateUnavailableError extends Error {
   constructor() {
-    super("Hosted workspace working checkpoint base bundle is missing.");
-    this.name = "HostedWorkspaceWorkingCheckpointBaseUnavailableError";
+    super("Hosted workspace committed snapshot state is missing.");
+    this.name = "HostedWorkspaceCommittedStateUnavailableError";
   }
 }
 
@@ -330,10 +342,9 @@ function isHostedWorkspaceIdleShutdownCheckpointSkippableError(
   );
 }
 
-type HostedWorkspaceFullCheckpointCommitKind = Exclude<
-  HostedWorkspaceCommitKind,
-  "working_commit"
->;
+type HostedWorkspaceFullCheckpointCommitKind =
+  | "full_compaction"
+  | "full_seed";
 async function createFullSeedSnapshot(
   input: HostedWorkspaceBridgeFullSnapshotInput,
 ): Promise<{
@@ -361,7 +372,7 @@ interface HostedWorkspaceBridgeFullSnapshotInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   preservedState?: HostedWorkspaceEffectivePreservedState | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceCheckpointRequest;
+  request: HostedWorkspaceIdleShutdownCheckpointRequest;
   userId: string;
   vaultRoot: string;
 }
@@ -417,7 +428,6 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
             workspaceSnapshotSizeDiagnostics = diagnostics;
             await writeHostedCheckpointSnapshotSizeDiagnosticLog({
               diagnostics,
-              mode: "full",
               platform: input.platform,
               request: input.request,
             });
@@ -428,7 +438,6 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
           error,
           platform: input.platform,
           request: input.request,
-          snapshotMode: "full",
         });
         throw error;
       }
@@ -470,12 +479,10 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
     bundlePutCount: 1,
-    browserVaultReplicaState: "omitted",
     commitKind: input.commitKind,
     externalArtifactPutBytes,
     externalArtifactPutCount,
     leaseCheckCount,
-    mode: "full",
     platform: input.platform,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
@@ -484,196 +491,6 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
 
   return {
     snapshotRef,
-  };
-}
-
-async function createWorkingCommitSnapshot(input: {
-  codexHomeSnapshotHashSecret: string | null;
-  currentRefs: {
-    baseSnapshotRef: HostedExecutionBundleRef | null;
-    snapshotRef: HostedExecutionSnapshotRef | null;
-  };
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceCheckpointRequest;
-  userId: string;
-  vaultRoot: string;
-}): Promise<{
-  snapshotRef: HostedExecutionSnapshotRef;
-}> {
-  const baseSnapshotRef = input.currentRefs.baseSnapshotRef;
-  if (!baseSnapshotRef) {
-    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
-  }
-  const baseBundle = await input.platform.artifactStore.get(baseSnapshotRef.hash);
-  if (!baseBundle) {
-    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
-  }
-  const baseManifest =
-    readHostedPortableWorkspaceManifestFromBundle(baseBundle)
-      ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
-  const preservedState = input.currentRefs.snapshotRef
-    ? await readHostedWorkspaceEffectivePreservedState({
-        includeInlineFiles: false,
-        platform: input.platform,
-        snapshotRef: input.currentRefs.snapshotRef,
-      })
-    : createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest);
-  const skippedInlineFiles = await readHostedWorkspaceSkippedInlineFilesBestEffort({
-    vaultRoot: input.vaultRoot,
-  });
-
-  const startedAt = Date.now();
-  let externalArtifactPutBytes = 0;
-  let externalArtifactPutCount = 0;
-  let bundlePutBytes = 0;
-  let leaseCheckCount = 0;
-  let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
-  let workingDeltaDiagnostics: HostedWorkingDeltaDiagnostics | null = null;
-  let workingDeltaUpsertCount = 0;
-  let workingDeltaTombstoneCount = 0;
-  const pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[] = [];
-
-  leaseCheckCount += 1;
-  assertHostedWorkspaceBridgeCheckpointLease({
-    lease: await input.readCurrentLease(),
-    request: input.request,
-    userId: input.userId,
-    stage: "before_snapshot",
-  });
-
-  let snapshot: Awaited<ReturnType<typeof snapshotHostedPortableWorkspaceDelta>>;
-  try {
-    snapshot = await snapshotHostedPortableWorkspaceDelta({
-      artifactRefProvider: preservedState.artifactRefProvider,
-      artifactSink: async (artifact) => {
-        pendingArtifactPuts.push(artifact);
-      },
-      baseManifest,
-      baseSnapshotHash: baseSnapshotRef.hash,
-      codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
-      materializedArtifactPaths: createHostedWorkspaceBridgeMaterializedArtifactPathSet(
-        preservedState.preservedArtifacts,
-      ),
-      operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-      preservedInlineManifestFiles: createHostedWorkspaceBridgePreservedInlineManifestFiles({
-        effectiveManifest: preservedState.manifest,
-        skippedInlineFiles,
-      }),
-      preservedArtifacts: preservedState.preservedArtifacts,
-      vaultRoot: input.vaultRoot,
-      workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
-        workspaceSnapshotSizeDiagnostics = diagnostics;
-        await writeHostedCheckpointSnapshotSizeDiagnosticLog({
-          diagnostics,
-          mode: "working",
-          platform: input.platform,
-          request: input.request,
-        });
-      },
-    });
-  } catch (error) {
-    await writeHostedCodexHomeSnapshotFailureLog({
-      error,
-      platform: input.platform,
-      request: input.request,
-      snapshotMode: "working",
-    });
-    throw error;
-  }
-
-  await writeHostedCodexHomeSnapshotDiagnosticLog({
-    diagnostics: snapshot.codexHomeSnapshotDiagnostics,
-    platform: input.platform,
-    request: input.request,
-  });
-  workspaceSnapshotSizeDiagnostics = snapshot.workspaceSnapshotSizeDiagnostics;
-
-  if (snapshot.kind === "unchanged") {
-    await writeHostedCheckpointSnapshotMetricLog({
-      bundlePutBytes,
-      bundlePutCount: 0,
-      browserVaultReplicaState: "omitted",
-      commitKind: "working_commit",
-      externalArtifactPutBytes,
-      externalArtifactPutCount,
-      leaseCheckCount,
-      mode: "working",
-      platform: input.platform,
-      request: input.request,
-      snapshotElapsedMs: Date.now() - startedAt,
-      workingDeltaTombstoneCount,
-      workingDeltaUpsertCount,
-      workingDeltaDiagnostics,
-      workspaceSnapshotSizeDiagnostics,
-    });
-
-    return {
-      snapshotRef: input.currentRefs.snapshotRef ?? baseSnapshotRef,
-    };
-  }
-
-  workingDeltaUpsertCount = snapshot.manifest.upserts.length;
-  workingDeltaTombstoneCount = snapshot.manifest.tombstones.length;
-  workingDeltaDiagnostics = createHostedWorkingDeltaDiagnostics({
-    baseManifest,
-    deltaManifest: snapshot.manifest,
-    hashSecret: input.codexHomeSnapshotHashSecret,
-    previousEffectiveManifest: preservedState.manifest,
-  });
-
-  leaseCheckCount += 1;
-  assertHostedWorkspaceBridgeCheckpointLease({
-    lease: await input.readCurrentLease(),
-    request: input.request,
-    userId: input.userId,
-    stage: "before_bundle_write",
-  });
-
-  const deltaHash = sha256HostedBundleHex(snapshot.bundle);
-  bundlePutBytes = snapshot.bundle.byteLength;
-  for (const artifact of pendingArtifactPuts) {
-    externalArtifactPutCount += 1;
-    externalArtifactPutBytes += artifact.bytes.byteLength;
-    await input.platform.artifactStore.put({
-      bytes: artifact.bytes,
-      sha256: artifact.ref.sha256,
-    });
-  }
-  await input.platform.artifactStore.put({
-    bytes: snapshot.bundle,
-    sha256: deltaHash,
-  });
-  const deltaRef: HostedExecutionBundleRef = {
-    hash: deltaHash,
-    key: `cloudflare-workspace-deltas/${deltaHash}.bundle`,
-    size: snapshot.bundle.byteLength,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await writeHostedCheckpointSnapshotMetricLog({
-    bundlePutBytes,
-    bundlePutCount: 1,
-    browserVaultReplicaState: "omitted",
-    commitKind: "working_commit",
-    externalArtifactPutBytes,
-    externalArtifactPutCount,
-    leaseCheckCount,
-    mode: "working",
-    platform: input.platform,
-    request: input.request,
-    snapshotElapsedMs: Date.now() - startedAt,
-    workingDeltaTombstoneCount,
-    workingDeltaUpsertCount,
-    workingDeltaDiagnostics,
-    workspaceSnapshotSizeDiagnostics,
-  });
-
-  return {
-    snapshotRef: buildHostedExecutionWorkingSnapshotRef({
-      base: baseSnapshotRef,
-      delta: deltaRef,
-    }),
   };
 }
 
@@ -712,16 +529,6 @@ function createBaseManifestPreservedArtifacts(
           root: file.root,
         }]
       : []);
-}
-
-function createHostedWorkspaceBridgeMaterializedArtifactPathSet(
-  artifacts: readonly HostedBundleArtifactRestoreInput[],
-): Set<string> {
-  return new Set(
-    artifacts
-      .filter((artifact) => shouldRestoreHostedRuntimeBridgeEagerArtifact(artifact))
-      .map((artifact) => `${artifact.root}:${artifact.path}`),
-  );
 }
 
 async function readHostedWorkspaceSkippedInlineFilesBestEffort(input: {
@@ -846,51 +653,10 @@ interface HostedWorkspaceEffectivePreservedState {
   preservedArtifacts: HostedBundleArtifactRestoreInput[];
 }
 
-async function readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-}): Promise<HostedWorkspaceEffectivePreservedState | null> {
-  try {
-    const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
-    if (!currentRefs.snapshotRef) {
-      return null;
-    }
-    return await readHostedWorkspaceEffectivePreservedState({
-      includeInlineFiles: false,
-      ...input,
-      snapshotRef: currentRefs.snapshotRef,
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-}): Promise<HostedWorkspaceEffectivePreservedState | null> {
-  if (!input.platform.workspacePort?.read) {
-    return null;
-  }
-  const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
-  if (!currentRefs.snapshotRef) {
-    return null;
-  }
-  try {
-    return await readHostedWorkspaceEffectivePreservedState({
-      includeInlineFiles: true,
-      ...input,
-      snapshotRef: currentRefs.snapshotRef,
-    });
-  } catch {
-    throw new HostedWorkspaceIdleCompactionPreservedStateUnavailableError();
-  }
-}
-
 async function readHostedWorkspaceEffectivePreservedState(input: {
-  includeInlineFiles?: boolean;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   snapshotRef: HostedExecutionSnapshotRef | null;
 }): Promise<HostedWorkspaceEffectivePreservedState> {
-  const includeInlineFiles = input.includeInlineFiles === true;
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
   if (!baseSnapshotRef) {
     return createHostedWorkspaceEffectivePreservedStateFromManifest(
@@ -900,32 +666,28 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
 
   const baseBundle = await input.platform.artifactStore.get(baseSnapshotRef.hash);
   if (!baseBundle) {
-    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+    throw new HostedWorkspaceCommittedStateUnavailableError();
   }
   const baseManifest =
     readHostedPortableWorkspaceManifestFromBundle(baseBundle)
       ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
-  const baseInlineFiles = includeInlineFiles
-    ? listHostedBundleInlineFiles({
-        bytes: baseBundle,
-        expectedKind: "vault",
-      })
-    : [];
+  const baseInlineFiles = listHostedBundleInlineFiles({
+    bytes: baseBundle,
+    expectedKind: "vault",
+  });
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(input.snapshotRef);
   if (!deltaSnapshotRef) {
     const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
     if (hotSnapshotRef) {
       const hotBundle = await input.platform.artifactStore.get(hotSnapshotRef.hash);
       if (!hotBundle) {
-        throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+        throw new HostedWorkspaceCommittedStateUnavailableError();
       }
       const hotManifest = createHostedPortableWorkspaceManifestFromBundle(hotBundle);
-      const hotInlineFiles = includeInlineFiles
-        ? listHostedBundleInlineFiles({
-            bytes: hotBundle,
-            expectedKind: "vault",
-          })
-        : [];
+      const hotInlineFiles = listHostedBundleInlineFiles({
+        bytes: hotBundle,
+        expectedKind: "vault",
+      });
       return createHostedWorkspaceEffectivePreservedStateFromManifest(
         createHostedWorkspaceBridgeOverlayManifest({
           baseManifest,
@@ -942,11 +704,11 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
 
   const deltaBundle = await input.platform.artifactStore.get(deltaSnapshotRef.hash);
   if (!deltaBundle) {
-    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+    throw new HostedWorkspaceCommittedStateUnavailableError();
   }
   const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(deltaBundle);
   if (!deltaManifest) {
-    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+    throw new HostedWorkspaceCommittedStateUnavailableError();
   }
 
   return createHostedWorkspaceEffectivePreservedStateFromManifest(
@@ -954,13 +716,11 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
       baseManifest,
       deltaManifest,
     }),
-    includeInlineFiles
-      ? createHostedWorkspaceBridgeWorkingInlineFiles({
-          baseInlineFiles,
-          deltaBundle,
-          deltaManifest,
-        })
-      : [],
+    createHostedWorkspaceBridgeWorkingInlineFiles({
+      baseInlineFiles,
+      deltaBundle,
+      deltaManifest,
+    }),
   );
 }
 
@@ -1030,7 +790,7 @@ function createHostedWorkspaceEffectiveManifestFromDelta(input: {
   deltaManifest: HostedPortableWorkspaceDeltaManifest;
 }): HostedPortableWorkspaceManifest {
   if (input.deltaManifest.baseManifestHash !== input.baseManifest.manifestHash) {
-    throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
+    throw new HostedWorkspaceCommittedStateUnavailableError();
   }
   const files = new Map(input.baseManifest.files.map((file) => [
     `${file.root}:${file.path}`,
@@ -1127,7 +887,7 @@ async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
   error: HostedWorkspaceIdleShutdownCheckpointSkipError;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceCheckpointRequest;
+  request: HostedWorkspaceIdleShutdownCheckpointRequest;
   userId: string;
   vaultRoot: string;
 }): Promise<{
@@ -1152,7 +912,7 @@ async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
 async function writeHostedCheckpointIdleShutdownSkippedLog(params: {
   error: HostedWorkspaceIdleShutdownCheckpointSkipError;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
+  request: HostedWorkspaceIdleShutdownCheckpointRequest;
 }): Promise<void> {
   const continuityError = params.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError
     ? params.error
@@ -1207,8 +967,7 @@ async function writeHostedCheckpointIdleShutdownSkippedLog(params: {
 async function writeHostedCodexHomeSnapshotFailureLog(input: {
   error: unknown;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
-  snapshotMode: HostedWorkspaceCheckpointSnapshotMode;
+  request: HostedWorkspaceIdleShutdownCheckpointRequest;
 }): Promise<void> {
   if (!(input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError)) {
     return;
@@ -1216,11 +975,10 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
   const diagnostics = input.error.codexHomeSnapshotDiagnostics;
   const errorMessage = redactHostedRuntimeDiagnosticText(readHostedSnapshotErrorMessage(input.error));
   const errorName = input.error.name;
-  const { snapshotMode } = input;
 
   console.warn("Hosted Codex home snapshot failed.", {
     errorName,
-    snapshotMode,
+    snapshotMode: "full",
   });
   if (!input.platform.logPort) {
     return;
@@ -1230,7 +988,7 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
     checkpointReason: input.request.reason,
     errorMessage,
     errorName,
-    snapshotMode,
+    snapshotMode: "full",
   };
   appendHostedCodexHomeSnapshotDiagnostics(redactedJson, diagnostics);
 
@@ -1257,71 +1015,16 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
   }
 }
 
-type HostedWorkspaceCommitKind =
-  | "full_compaction"
-  | "full_seed"
-  | "working_commit";
-type HostedWorkspaceCheckpointSnapshotMode = "full" | "working";
-
-interface HostedWorkingDeltaDiagnostics {
-  workingDeltaBaseFileCount: number;
-  workingDeltaCurrentFileCount: number;
-  workingDeltaLargestUpserts: string[];
-  workingDeltaTombstoneClassSummary: string[];
-  workingDeltaUpsertBytes: number;
-  workingDeltaUpsertExternalArtifactCount: number;
-  workingDeltaUpsertPreviousStateSummary: string[];
-  workingDeltaUpsertReasonSummary: string[];
-}
-
-interface HostedWorkingDeltaGroupMetrics {
-  bytes: number;
-  externalCount: number;
-  files: number;
-}
-
-interface HostedWorkingDeltaLargestUpsertMetric {
-  bytes: number;
-  className: string;
-  depth: number;
-  externalized: boolean;
-  extension: string;
-  relHash: string;
-  root: string;
-}
-
-const HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT = 16;
-
-function resolveHostedWorkspaceCommitKind(input: {
-  currentSnapshotRef: HostedExecutionSnapshotRef | null;
-  reason: HostedWorkspaceCheckpointRequest["reason"];
-}): HostedWorkspaceCommitKind {
-  if (!readHostedExecutionSnapshotBaseRef(input.currentSnapshotRef)) {
-    return "full_seed";
-  }
-
-  if (input.reason === "idle_shutdown") {
-    return "full_compaction";
-  }
-
-  return "working_commit";
-}
-
 async function writeHostedCheckpointSnapshotMetricLog(input: {
-  browserVaultReplicaState: "degraded" | "omitted" | "written";
   bundlePutBytes: number;
   bundlePutCount: number;
-  commitKind: HostedWorkspaceCommitKind;
+  commitKind: HostedWorkspaceFullCheckpointCommitKind;
   externalArtifactPutBytes: number;
   externalArtifactPutCount: number;
   leaseCheckCount: number;
-  mode: HostedWorkspaceCheckpointSnapshotMode;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
+  request: HostedWorkspaceIdleShutdownCheckpointRequest;
   snapshotElapsedMs: number;
-  workingDeltaDiagnostics?: HostedWorkingDeltaDiagnostics | null;
-  workingDeltaTombstoneCount?: number;
-  workingDeltaUpsertCount?: number;
   workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
 }): Promise<void> {
   if (!input.platform.logPort) {
@@ -1329,27 +1032,18 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   }
 
   const redactedJson: HostedRuntimeRedactedJson = {
-    browserVaultReplicaState: input.browserVaultReplicaState,
+    browserVaultReplicaState: "omitted",
     bundlePutBytes: input.bundlePutBytes,
     bundlePutCount: input.bundlePutCount,
-    checkpointPolicy: input.mode,
+    checkpointPolicy: "full",
     checkpointReason: input.request.reason,
     commitKind: input.commitKind,
     externalArtifactPutBytes: input.externalArtifactPutBytes,
     externalArtifactPutCount: input.externalArtifactPutCount,
     leaseCheckCount: input.leaseCheckCount,
     snapshotElapsedMs: input.snapshotElapsedMs,
-    snapshotMode: input.mode,
+    snapshotMode: "full",
   };
-  if (input.workingDeltaTombstoneCount !== undefined) {
-    redactedJson.workingDeltaTombstoneCount = input.workingDeltaTombstoneCount;
-  }
-  if (input.workingDeltaUpsertCount !== undefined) {
-    redactedJson.workingDeltaUpsertCount = input.workingDeltaUpsertCount;
-  }
-  if (input.workingDeltaDiagnostics) {
-    appendHostedWorkingDeltaDiagnostics(redactedJson, input.workingDeltaDiagnostics);
-  }
   if (input.workspaceSnapshotSizeDiagnostics) {
     appendHostedWorkspaceSnapshotSizeDiagnostics(
       redactedJson,
@@ -1380,368 +1074,19 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   }
 }
 
-function createHostedWorkingDeltaDiagnostics(input: {
-  baseManifest: HostedPortableWorkspaceManifest;
-  deltaManifest: HostedPortableWorkspaceDeltaManifest;
-  hashSecret: string | null;
-  previousEffectiveManifest: HostedPortableWorkspaceManifest;
-}): HostedWorkingDeltaDiagnostics {
-  const baseFiles = createHostedPortableWorkspaceManifestFileMap(input.baseManifest);
-  const previousEffectiveFiles = createHostedPortableWorkspaceManifestFileMap(
-    input.previousEffectiveManifest,
-  );
-  const reasonMetrics = new Map<string, HostedWorkingDeltaGroupMetrics>();
-  const previousStateMetrics = new Map<string, HostedWorkingDeltaGroupMetrics>();
-  const tombstoneMetrics = new Map<string, HostedWorkingDeltaGroupMetrics>();
-  const largestUpserts: HostedWorkingDeltaLargestUpsertMetric[] = [];
-  const newPathUpsertCount = input.deltaManifest.upserts.filter((upsert) =>
-    !baseFiles.has(createHostedWorkingDeltaManifestFileKey(upsert))
-  ).length;
-  let upsertBytes = 0;
-  let upsertExternalArtifactCount = 0;
-
-  for (const upsert of input.deltaManifest.upserts) {
-    const key = createHostedWorkingDeltaManifestFileKey(upsert);
-    const className = classifyHostedWorkingDeltaPath(upsert.root, upsert.path);
-    const reason = classifyHostedWorkingDeltaUpsertReason({
-      baseFile: baseFiles.get(key) ?? null,
-      upsert,
-    });
-    const previousState = classifyHostedWorkingDeltaPreviousState({
-      previousFile: previousEffectiveFiles.get(key) ?? null,
-      upsert,
-    });
-    const externalized = Boolean(upsert.artifact);
-
-    upsertBytes += upsert.size;
-    if (externalized) {
-      upsertExternalArtifactCount += 1;
-    }
-    incrementHostedWorkingDeltaGroup(reasonMetrics, reason, className, upsert);
-    incrementHostedWorkingDeltaGroup(
-      previousStateMetrics,
-      previousState,
-      className,
-      upsert,
-    );
-    recordHostedWorkingDeltaLargestUpsert(largestUpserts, {
-      bytes: upsert.size,
-      className,
-      depth: hostedWorkingDeltaPathDepth(upsert.path),
-      externalized,
-      extension: hostedWorkingDeltaSafeExtension(upsert.path),
-      relHash: fingerprintHostedWorkingDeltaPath({
-        hashSecret: input.hashSecret,
-        path: upsert.path,
-        root: upsert.root,
-      }),
-      root: sanitizeHostedWorkingDeltaRootForLog(upsert.root),
-    });
-  }
-
-  for (const tombstone of input.deltaManifest.tombstones) {
-    const key = createHostedWorkingDeltaManifestFileKey(tombstone);
-    const baseFile = baseFiles.get(key);
-    const className = classifyHostedWorkingDeltaPath(tombstone.root, tombstone.path);
-    incrementHostedWorkingDeltaGroup(
-      tombstoneMetrics,
-      "deleted_from_base",
-      className,
-      baseFile ?? {
-        path: tombstone.path,
-        root: tombstone.root,
-        sha256: "",
-        size: 0,
-      },
-    );
-  }
-
-  return {
-    workingDeltaBaseFileCount: input.baseManifest.files.length,
-    workingDeltaCurrentFileCount:
-      input.baseManifest.files.length
-      - input.deltaManifest.tombstones.length
-      + newPathUpsertCount,
-    workingDeltaLargestUpserts:
-      summarizeHostedWorkingDeltaLargestUpserts(largestUpserts),
-    workingDeltaTombstoneClassSummary:
-      summarizeHostedWorkingDeltaGroups(tombstoneMetrics, "reason"),
-    workingDeltaUpsertBytes: upsertBytes,
-    workingDeltaUpsertExternalArtifactCount: upsertExternalArtifactCount,
-    workingDeltaUpsertPreviousStateSummary:
-      summarizeHostedWorkingDeltaGroups(previousStateMetrics, "state"),
-    workingDeltaUpsertReasonSummary:
-      summarizeHostedWorkingDeltaGroups(reasonMetrics, "reason"),
-  };
-}
-
-function recordHostedWorkingDeltaLargestUpsert(
-  largestUpserts: HostedWorkingDeltaLargestUpsertMetric[],
-  metric: HostedWorkingDeltaLargestUpsertMetric,
-): void {
-  largestUpserts.push(metric);
-  largestUpserts.sort((left, right) => right.bytes - left.bytes);
-  largestUpserts.splice(HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT);
-}
-
-function appendHostedWorkingDeltaDiagnostics(
-  redactedJson: HostedRuntimeRedactedJson,
-  diagnostics: HostedWorkingDeltaDiagnostics,
-): void {
-  redactedJson.workingDeltaBaseFileCount = diagnostics.workingDeltaBaseFileCount;
-  redactedJson.workingDeltaCurrentFileCount = diagnostics.workingDeltaCurrentFileCount;
-  redactedJson.workingDeltaLargestUpserts = diagnostics.workingDeltaLargestUpserts;
-  redactedJson.workingDeltaTombstoneClassSummary =
-    diagnostics.workingDeltaTombstoneClassSummary;
-  redactedJson.workingDeltaUpsertBytes = diagnostics.workingDeltaUpsertBytes;
-  redactedJson.workingDeltaUpsertExternalArtifactCount =
-    diagnostics.workingDeltaUpsertExternalArtifactCount;
-  redactedJson.workingDeltaUpsertPreviousStateSummary =
-    diagnostics.workingDeltaUpsertPreviousStateSummary;
-  redactedJson.workingDeltaUpsertReasonSummary =
-    diagnostics.workingDeltaUpsertReasonSummary;
-}
-
-function createHostedPortableWorkspaceManifestFileMap(
-  manifest: HostedPortableWorkspaceManifest,
-): Map<string, HostedPortableWorkspaceManifestFile> {
-  return new Map(manifest.files.map((file) => [
-    createHostedWorkingDeltaManifestFileKey(file),
-    file,
-  ]));
-}
-
-function createHostedWorkingDeltaManifestFileKey(
-  file: Pick<HostedPortableWorkspaceManifestFile, "path" | "root">,
-): string {
-  return `${file.root}:${file.path}`;
-}
-
-function classifyHostedWorkingDeltaUpsertReason(input: {
-  baseFile: HostedPortableWorkspaceManifestFile | null;
-  upsert: HostedPortableWorkspaceManifestFile;
-}): string {
-  if (!input.baseFile) {
-    return "new_path";
-  }
-  const hashChanged = input.baseFile.sha256 !== input.upsert.sha256;
-  const sizeChanged = input.baseFile.size !== input.upsert.size;
-  if (hashChanged && sizeChanged) {
-    return "content_hash_and_size_changed";
-  }
-  if (hashChanged) {
-    return "content_hash_changed";
-  }
-  if (sizeChanged) {
-    return "size_changed";
-  }
-  if (!hostedWorkingDeltaManifestFileArtifactsEqual(
-    input.baseFile.artifact ?? null,
-    input.upsert.artifact ?? null,
-  )) {
-    return "representation_changed";
-  }
-  return "metadata_changed";
-}
-
-function classifyHostedWorkingDeltaPreviousState(input: {
-  previousFile: HostedPortableWorkspaceManifestFile | null;
-  upsert: HostedPortableWorkspaceManifestFile;
-}): string {
-  if (!input.previousFile) {
-    return "new_since_previous_effective";
-  }
-  return hostedWorkingDeltaManifestFilesEqual(input.previousFile, input.upsert)
-    ? "carried_forward_from_previous"
-    : "changed_since_previous";
-}
-
-function hostedWorkingDeltaManifestFilesEqual(
-  left: HostedPortableWorkspaceManifestFile,
-  right: HostedPortableWorkspaceManifestFile,
-): boolean {
-  return left.root === right.root
-    && left.path === right.path
-    && left.sha256 === right.sha256
-    && left.size === right.size
-    && hostedWorkingDeltaManifestFileArtifactsEqual(left.artifact ?? null, right.artifact ?? null);
-}
-
-function hostedWorkingDeltaManifestFileArtifactsEqual(
-  left: HostedBundleArtifactRef | null,
-  right: HostedBundleArtifactRef | null,
-): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-  return left.sha256 === right.sha256 && left.byteSize === right.byteSize;
-}
-
-function incrementHostedWorkingDeltaGroup(
-  metrics: Map<string, HostedWorkingDeltaGroupMetrics>,
-  group: string,
-  className: string,
-  file: Pick<HostedPortableWorkspaceManifestFile, "artifact" | "size">,
-): void {
-  const key = `${group}\0${className}`;
-  const current = metrics.get(key) ?? {
-    bytes: 0,
-    externalCount: 0,
-    files: 0,
-  };
-  current.bytes += file.size;
-  current.externalCount += file.artifact ? 1 : 0;
-  current.files += 1;
-  metrics.set(key, current);
-}
-
-function summarizeHostedWorkingDeltaGroups(
-  metrics: ReadonlyMap<string, HostedWorkingDeltaGroupMetrics>,
-  groupLabel: "reason" | "state",
-): string[] {
-  return [...metrics.entries()]
-    .map(([key, entry]) => {
-      const [group, className] = key.split("\0", 2);
-      return {
-        bytes: entry.bytes,
-        className: className ?? "unknown",
-        externalCount: entry.externalCount,
-        files: entry.files,
-        group: group ?? "unknown",
-      };
-    })
-    .sort((left, right) =>
-      right.files - left.files
-      || right.bytes - left.bytes
-      || left.group.localeCompare(right.group)
-      || left.className.localeCompare(right.className))
-    .slice(0, HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT)
-    .map((entry) =>
-      [
-        `${groupLabel}=${entry.group}`,
-        `class=${entry.className}`,
-        `files=${entry.files}`,
-        `bytes=${entry.bytes}`,
-        `externalCount=${entry.externalCount}`,
-      ].join(","));
-}
-
-function summarizeHostedWorkingDeltaLargestUpserts(
-  upserts: readonly HostedWorkingDeltaLargestUpsertMetric[],
-): string[] {
-  return upserts
-    .slice(0, HOSTED_WORKING_DELTA_DIAGNOSTIC_LIST_LIMIT)
-    .map((entry) =>
-      [
-        `class=${entry.className}`,
-        `root=${entry.root}`,
-        `bytes=${entry.bytes}`,
-        `external=${entry.externalized ? 1 : 0}`,
-        `ext=${entry.extension}`,
-        `depth=${entry.depth}`,
-        `relHash=${entry.relHash}`,
-      ].join(","));
-}
-
-function classifyHostedWorkingDeltaPath(root: string, relativePath: string): string {
-  const normalizedPath = normalizeHostedWorkingDeltaRelativePath(relativePath);
-
-  if (root === "operator-home") {
-    if (hasHostedWorkingDeltaPathPrefix(normalizedPath, ".codex-hosted")) {
-      return "operator-codex-home";
-    }
-
-    return "operator-home-other";
-  }
-
-  if (root !== "vault") {
-    return "unknown-root";
-  }
-
-  if (hasHostedWorkingDeltaPathPrefix(normalizedPath, ".runtime/operations/assistant")) {
-    return "runtime-assistant";
-  }
-
-  if (hasHostedWorkingDeltaPathPrefix(normalizedPath, ".runtime")) {
-    return "runtime-other";
-  }
-
-  const firstSegment = normalizedPath.split(path.posix.sep).filter(Boolean)[0] ?? "root";
-  switch (firstSegment) {
-    case "bank":
-    case "derived":
-    case "journal":
-    case "ledger":
-    case "raw":
-      return firstSegment;
-    default:
-      return "vault-canonical";
-  }
-}
-
-function sanitizeHostedWorkingDeltaRootForLog(root: string): string {
-  switch (root) {
-    case "operator-home":
-    case "vault":
-      return root;
-    default:
-      return "unknown-root";
-  }
-}
-
-function fingerprintHostedWorkingDeltaPath(input: {
-  hashSecret: string | null;
-  path: string;
-  root: string;
-}): string {
-  if (!input.hashSecret) {
-    return "disabled";
-  }
-  const normalizedPath = normalizeHostedWorkingDeltaRelativePath(input.path);
-  const hash = createHmac("sha256", input.hashSecret)
-    .update(`workspace_snapshot_rel:${input.root}:${normalizedPath}`, "utf8")
-    .digest("hex");
-  return `h1_${hash.slice(0, 24)}`;
-}
-
-function hasHostedWorkingDeltaPathPrefix(relativePath: string, prefix: string): boolean {
-  return relativePath === prefix || relativePath.startsWith(`${prefix}/`);
-}
-
-function hostedWorkingDeltaPathDepth(relativePath: string): number {
-  return normalizeHostedWorkingDeltaRelativePath(relativePath)
-    .split(path.posix.sep)
-    .filter(Boolean)
-    .length;
-}
-
-function hostedWorkingDeltaSafeExtension(relativePath: string): string {
-  const extension = path.posix.extname(normalizeHostedWorkingDeltaRelativePath(relativePath))
-    .toLowerCase();
-  return extension && /^[.][a-z0-9]{1,12}$/u.test(extension) ? extension : "none";
-}
-
-function normalizeHostedWorkingDeltaRelativePath(relativePath: string): string {
-  return relativePath
-    .split(/[\\/]+/u)
-    .filter((segment) => segment.length > 0 && segment !== ".")
-    .join(path.posix.sep);
-}
-
 async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
   diagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
-  mode: HostedWorkspaceCheckpointSnapshotMode;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
+  request: HostedWorkspaceIdleShutdownCheckpointRequest;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
   }
 
   const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointPolicy: input.mode,
+    checkpointPolicy: "full",
     checkpointReason: input.request.reason,
-    snapshotMode: input.mode,
+    snapshotMode: "full",
   };
   appendHostedWorkspaceSnapshotSizeDiagnostics(redactedJson, input.diagnostics);
 
@@ -1821,7 +1166,7 @@ function appendHostedCodexHomeSnapshotDiagnostics(
 async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
   diagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceCheckpointRequest;
+  request: HostedWorkspaceIdleShutdownCheckpointRequest;
 }): Promise<void> {
   if (!input.diagnostics || !input.platform.logPort) {
     return;
