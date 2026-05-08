@@ -10,6 +10,8 @@ Murph Age is a research effort toward a calibrated, interpretable health-age sig
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
 
+ReviewGPT is a senior scientific reviewer and idea generator, not a mandatory approval stop for every local step. Use it to check aggregate results, poke holes in the model, suggest better research directions, and review meaningful transitions. Do not stop the workflow to ask whether Codex may perform a simple handoff checklist, file readback, queue cleanup, validator rerun, or other local implementation chore that follows an already-decided rule.
+
 Use ReviewGPT for high-leverage judgment:
 
 - generating or ranking research directions
