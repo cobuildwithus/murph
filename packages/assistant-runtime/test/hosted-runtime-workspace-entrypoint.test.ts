@@ -1176,6 +1176,96 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("defers alarm mailbox import when an active alarm absorbs pending conversation work", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            reason: "alarm",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}:${requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import" ? "3".repeat(64) : "4".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`import:${item.item.laneSeq}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_alarm_absorbed_pending_work",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assert.equal(
+              (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+              "1",
+            );
+            events.push("assistant");
+            return {
+              checkpointReason: "outbox_sending",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "import:1",
+        "assistant",
+        "snapshot:outbox_sending:1",
+        "workspace.checkpoint",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "outbox_sending",
+      ]);
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedAssistantProgressed: true,
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("checkpoints exact hosted canonical writes without a full workspace snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
