@@ -1,5 +1,7 @@
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -147,6 +149,50 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
 
     expect(cwdValues).toHaveLength(2);
     expect(cwdValues[1]).toBe(cwdValues[0]);
+  });
+
+  it("clears stale warm browser-vault source markers before starting a new child", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+    const assistantRuntime = await import("@murphai/assistant-runtime");
+    const userId = "member_123";
+    const vaultRoot = module.resolveHostedRunnerWarmWorkspaceVaultRoot(userId);
+    await assistantRuntime.writeHostedBrowserVaultWarmSourceStateHashBestEffort({
+      sourceStateHash: "a".repeat(64),
+      vaultRoot,
+    });
+
+    spawnMock.mockImplementation(() => createSuccessfulChildProcess(module));
+
+    await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_clear_stale_browser_vault_marker"),
+    });
+
+    await expect(assistantRuntime.readHostedBrowserVaultWarmSourceStateHash({
+      vaultRoot,
+    })).resolves.toBeNull();
+  });
+
+  it("fails closed before child launch when stale warm marker cleanup fails", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+    const userId = "member_123";
+    const vaultRoot = module.resolveHostedRunnerWarmWorkspaceVaultRoot(userId);
+    const markerPath = resolveWarmBrowserVaultMarkerPath(vaultRoot);
+    await rm(markerPath, {
+      force: true,
+      recursive: true,
+    });
+    await mkdir(markerPath, {
+      mode: 0o700,
+      recursive: true,
+    });
+
+    await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_browser_vault_marker_clear_failed"),
+    })).rejects.toThrow();
+
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it("passes only the normalized runtime env into the isolated child env", async () => {
@@ -590,6 +636,15 @@ function createFailedChildProcess(
   });
 
   return child;
+}
+
+function resolveWarmBrowserVaultMarkerPath(vaultRoot: string): string {
+  return path.join(
+    vaultRoot,
+    ".runtime",
+    "cache",
+    "hosted-browser-vault-source-state.json",
+  );
 }
 
 function createMockChildProcess(pid: number) {
