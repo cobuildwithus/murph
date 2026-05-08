@@ -375,7 +375,11 @@ describe("runner bundle runtime artifact staging", () => {
     );
 
     const tarballs = await packWorkspacePackageArtifacts(
-      ["@murphai/health-commons"],
+      [
+        "@murphai/health-commons",
+        "@murphai/contracts",
+        "@murphai/health-metrics",
+      ],
       tarballsDir,
       { repoRoot },
     );
@@ -424,11 +428,16 @@ describe("runner bundle runtime artifact staging", () => {
   it("packs the runner CLI without its public bundled dependency payload", async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-cli-pack-"));
     const packageDir = path.join(rootDir, "packages", "cli");
+    const assistantEngineDir = path.join(rootDir, "packages", "assistant-engine");
+    const healthCommonsDir = path.join(rootDir, "packages", "health-commons");
     const tarballsDir = path.join(rootDir, "tarballs");
 
     temporaryDirectories.push(rootDir);
     await mkdir(path.join(rootDir, "apps"), { recursive: true });
     await mkdir(path.join(packageDir, "dist"), { recursive: true });
+    await mkdir(assistantEngineDir, { recursive: true });
+    await mkdir(path.join(healthCommonsDir, "dist"), { recursive: true });
+    await mkdir(path.join(healthCommonsDir, "generated"), { recursive: true });
     await mkdir(tarballsDir, { recursive: true });
     await writeFile(path.join(packageDir, "dist", "bin.js"), "#!/usr/bin/env node\n", "utf8");
     await writeFile(path.join(packageDir, "README.md"), "readme\n", "utf8");
@@ -467,9 +476,34 @@ describe("runner bundle runtime artifact staging", () => {
       )}\n`,
       "utf8",
     );
+    await writeFile(
+      path.join(assistantEngineDir, "package.json"),
+      `${JSON.stringify({
+        name: "@murphai/assistant-engine",
+        version: "1.0.0",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(healthCommonsDir, "package.json"),
+      `${JSON.stringify({
+        name: "@murphai/health-commons",
+        version: "1.0.0",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(path.join(healthCommonsDir, "dist", "index.js"), "export const ok = true;\n", "utf8");
+    await writeFile(path.join(healthCommonsDir, "dist", "runtime.js"), "export const runtime = true;\n", "utf8");
+    await writeFile(path.join(healthCommonsDir, "generated", "catalog.json"), "{\"entities\":[]}\n", "utf8");
+    await writeFile(path.join(healthCommonsDir, "README.md"), "readme\n", "utf8");
+    await writeFile(path.join(healthCommonsDir, "LICENSE"), "license\n", "utf8");
 
     const tarballs = await packWorkspacePackageArtifacts(
-      ["@murphai/murph"],
+      [
+        "@murphai/murph",
+        "@murphai/assistant-engine",
+        "@murphai/health-commons",
+      ],
       tarballsDir,
       {
         repoRoot: rootDir,
@@ -500,6 +534,159 @@ describe("runner bundle runtime artifact staging", () => {
     await expect(
       readFile(path.join(extractDir, "package", "node_modules", "@murphai", "health-commons", "package.json"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rewrites transitive workspace dependency specs inside packed runner packages", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-transitive-pack-"));
+    const runtimePackageDir = path.join(rootDir, "packages", "assistant-runtime");
+    const enginePackageDir = path.join(rootDir, "packages", "assistant-engine");
+    const gatewayPackageDir = path.join(rootDir, "packages", "gateway-core");
+    const bundleDir = path.join(rootDir, "bundle");
+    const tarballsDir = path.join(rootDir, "tarballs");
+
+    temporaryDirectories.push(rootDir);
+    await mkdir(path.join(rootDir, "apps"), { recursive: true });
+    await mkdir(bundleDir, { recursive: true });
+    await mkdir(path.join(runtimePackageDir, "dist"), { recursive: true });
+    await mkdir(enginePackageDir, { recursive: true });
+    await mkdir(gatewayPackageDir, { recursive: true });
+    await mkdir(tarballsDir, { recursive: true });
+    await writeFile(
+      path.join(runtimePackageDir, "dist", "index.js"),
+      "export const ok = true;\n",
+      "utf8",
+    );
+    await writeFile(path.join(runtimePackageDir, "README.md"), "readme\n", "utf8");
+    await writeFile(
+      path.join(runtimePackageDir, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "@murphai/assistant-runtime",
+          version: "1.0.0",
+          type: "module",
+          files: ["dist", "README.md"],
+          dependencies: {
+            "@murphai/assistant-engine": "workspace:*",
+          },
+          optionalDependencies: {
+            "@murphai/gateway-core": "workspace:*",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(enginePackageDir, "package.json"),
+      `${JSON.stringify({
+        name: "@murphai/assistant-engine",
+        version: "1.2.3",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(gatewayPackageDir, "package.json"),
+      `${JSON.stringify({
+        name: "@murphai/gateway-core",
+        version: "2.3.4",
+      })}\n`,
+      "utf8",
+    );
+
+    const tarballs = await packWorkspacePackageArtifacts(
+      [
+        "@murphai/assistant-runtime",
+        "@murphai/assistant-engine",
+        "@murphai/gateway-core",
+      ],
+      tarballsDir,
+      {
+        dependencySpecRoot: bundleDir,
+        repoRoot: rootDir,
+        skipPreflights: true,
+      },
+    );
+    const runtimeTarball = tarballs.get("@murphai/assistant-runtime");
+
+    if (!runtimeTarball) {
+      throw new Error("Assistant runtime tarball was not packed.");
+    }
+
+    const extractDir = path.join(rootDir, "extract");
+    await mkdir(extractDir, { recursive: true });
+    await execFileAsync("tar", ["-xzf", runtimeTarball, "-C", extractDir]);
+    const packedPackageJson = JSON.parse(
+      await readFile(path.join(extractDir, "package", "package.json"), "utf8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+
+    expect(packedPackageJson.dependencies).toEqual({
+      "@murphai/assistant-engine":
+        "file:../tarballs/02-_murphai_assistant-engine/murphai-assistant-engine-1.2.3.tgz",
+    });
+    expect(packedPackageJson.optionalDependencies).toEqual({
+      "@murphai/gateway-core":
+        "file:../tarballs/03-_murphai_gateway-core/murphai-gateway-core-2.3.4.tgz",
+    });
+  });
+
+  it("fails closed when a packed runner package depends on a workspace package without a sibling tarball", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-missing-transitive-pack-"));
+    const runtimePackageDir = path.join(rootDir, "packages", "assistant-runtime");
+    const enginePackageDir = path.join(rootDir, "packages", "assistant-engine");
+    const bundleDir = path.join(rootDir, "bundle");
+    const tarballsDir = path.join(rootDir, "tarballs");
+
+    temporaryDirectories.push(rootDir);
+    await mkdir(path.join(rootDir, "apps"), { recursive: true });
+    await mkdir(bundleDir, { recursive: true });
+    await mkdir(path.join(runtimePackageDir, "dist"), { recursive: true });
+    await mkdir(enginePackageDir, { recursive: true });
+    await mkdir(tarballsDir, { recursive: true });
+    await writeFile(path.join(runtimePackageDir, "dist", "index.js"), "export const ok = true;\n");
+    await writeFile(path.join(runtimePackageDir, "README.md"), "readme\n", "utf8");
+    await writeFile(
+      path.join(runtimePackageDir, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "@murphai/assistant-runtime",
+          version: "1.0.0",
+          files: ["dist", "README.md"],
+          dependencies: {
+            "@murphai/assistant-engine": "workspace:*",
+            "@murphai/missing-private": "workspace:*",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(enginePackageDir, "package.json"),
+      `${JSON.stringify({
+        name: "@murphai/assistant-engine",
+        version: "1.2.3",
+      })}\n`,
+      "utf8",
+    );
+
+    await expect(
+      packWorkspacePackageArtifacts(
+        ["@murphai/assistant-runtime", "@murphai/assistant-engine"],
+        tarballsDir,
+        {
+          dependencySpecRoot: bundleDir,
+          repoRoot: rootDir,
+          skipPreflights: true,
+        },
+      ),
+    ).rejects.toThrow(
+      "@murphai/assistant-runtime depends on workspace package @murphai/missing-private, but no sibling runner tarball was prepared for that dependency.",
+    );
   });
 
   it("packs the Contracts runtime entrypoint for hosted runner installs", async () => {
