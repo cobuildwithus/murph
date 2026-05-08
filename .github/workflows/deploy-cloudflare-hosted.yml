@@ -642,30 +642,47 @@ jobs:
           }
           trap cleanup_restore_staging EXIT
 
-          while IFS= read -r entry; do
-            if [[ -z "${entry}" || "${entry}" == /* ]]; then
-              echo "Unsafe runner bundle archive entry." >&2
-              exit 1
-            fi
-            if [[ "${entry}" != "runner-bundle" && "${entry}" != runner-bundle/* ]]; then
-              echo "Unexpected runner bundle archive entry." >&2
-              exit 1
-            fi
-            IFS='/' read -r -a entry_parts <<< "${entry}"
-            for entry_part in "${entry_parts[@]}"; do
-              if [[ "${entry_part}" == ".." ]]; then
-                echo "Unsafe runner bundle archive traversal entry." >&2
-                exit 1
-              fi
-            done
-          done < <(tar -tzf "${bundle_archive}")
-          while IFS= read -r metadata_line; do
-            entry_type="${metadata_line:0:1}"
-            if [[ "${entry_type}" != "-" && "${entry_type}" != "d" && "${entry_type}" != "l" ]]; then
-              echo "Unsupported runner bundle archive entry type." >&2
-              exit 1
-            fi
-          done < <(tar -tvzf "${bundle_archive}")
+          BUNDLE_ARCHIVE="${bundle_archive}" python3 <<'PY'
+          import os
+          import posixpath
+          import sys
+          import tarfile
+
+          archive_path = os.environ["BUNDLE_ARCHIVE"]
+
+          def fail(message: str) -> None:
+              print(message, file=sys.stderr)
+              raise SystemExit(1)
+
+          def normalize_bundle_path(path: str, label: str) -> str:
+              if not path or path.startswith("/"):
+                  fail(f"Unsafe runner bundle {label}.")
+              parts = path.split("/")
+              if any(part == ".." for part in parts):
+                  fail(f"Unsafe runner bundle {label}.")
+              normalized = posixpath.normpath(path)
+              if normalized == ".":
+                  fail(f"Unsafe runner bundle {label}.")
+              if normalized != "runner-bundle" and not normalized.startswith("runner-bundle/"):
+                  fail(f"Unexpected runner bundle {label}.")
+              return normalized
+
+          with tarfile.open(archive_path, "r:gz") as archive:
+              for member in archive.getmembers():
+                  member_path = normalize_bundle_path(member.name, "archive entry")
+                  if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+                      fail("Unsupported runner bundle archive entry type.")
+                  if member.islnk():
+                      normalize_bundle_path(member.linkname, "hardlink target")
+                  if member.issym():
+                      link_target = member.linkname
+                      if not link_target or link_target.startswith("/"):
+                          fail("Unsafe runner bundle symlink target.")
+                      resolved_target = posixpath.normpath(
+                          posixpath.join(posixpath.dirname(member_path), link_target),
+                      )
+                      normalize_bundle_path(resolved_target, "symlink target")
+          PY
 
           mkdir -p apps/cloudflare/.deploy
           tar --no-same-owner --no-same-permissions -xzf "${bundle_archive}" \
