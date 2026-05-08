@@ -251,6 +251,7 @@ export async function refreshHostedBrowserVaultReplica(
   });
   return await refreshDashboardReplicaFromCommittedWorkspace({
     platform,
+    signal: options?.signal,
     sourceStateHash: input.sourceStateHash,
     userId: input.userId,
   });

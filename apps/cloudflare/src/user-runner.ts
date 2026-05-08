@@ -1,5 +1,4 @@
 import type {
-  HostedBrowserVaultReplicaPublishResponse,
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedRuntimeWebStatusResponse,
@@ -12,7 +11,6 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceReadResponse,
   readHostedExecutionSnapshotDeltaRef,
@@ -23,7 +21,6 @@ import {
   shouldScheduleDashboardReplicaRefresh,
 } from "@murphai/hosted-execution/dashboard-replica";
 import {
-  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -76,9 +73,6 @@ import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
-import {
-  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
-} from "./browser-vault-limits.ts";
 import {
   DashboardReplicaCoordinator,
   type HostedDashboardReplicaRefreshScheduleResult,
@@ -1819,6 +1813,7 @@ export class HostedUserRunner {
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
       runtime: runtimeConfig,
+      signal: input.signal,
       sourceStateHash: pending.sourceStateHash,
       timeoutMs: this.env.runnerTimeoutMs,
       userId: input.userId,
@@ -1847,90 +1842,20 @@ export class HostedUserRunner {
       return;
     }
 
-    if (generated.status !== "written") {
+    if (generated.status === "publish_conflict") {
+      throw new Error("Hosted browser-vault replica publish lost the workspace version guard.");
+    }
+
+    if (generated.status !== "published") {
       await this.stateStore.clearPendingDashboardReplicaRefresh({
         sourceStateHash: pending.sourceStateHash,
       });
       return;
     }
-    assertHostedBrowserVaultRefreshWriteResult({
-      byteLength: generated.byteLength,
-      expectedSourceStateHash: pending.sourceStateHash,
-      replicaRef: generated.replicaRef,
+
+    await this.stateStore.clearPendingDashboardReplicaRefresh({
+      sourceStateHash: pending.sourceStateHash,
     });
-
-    record = await this.stateStore.readState();
-    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
-      return;
-    }
-
-    workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
-    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
-    workspace = workspaceRead.workspace;
-    if (
-      readDashboardReplicaSourceStateHash(workspace?.snapshotRef ?? null)
-        !== pending.sourceStateHash
-    ) {
-      await this.stateStore.clearPendingDashboardReplicaRefresh({
-        sourceStateHash: pending.sourceStateHash,
-      });
-      return;
-    }
-    if (workspace?.browserVaultReplicaRef?.sourceBundleHash === pending.sourceStateHash) {
-      await this.stateStore.clearPendingDashboardReplicaRefresh({
-        sourceStateHash: pending.sourceStateHash,
-      });
-      return;
-    }
-
-    record = await this.stateStore.readState();
-    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
-      return;
-    }
-
-    const publish = await this.publishBrowserVaultReplicaRef({
-      expectedSourceStateHash: pending.sourceStateHash,
-      replicaRef: generated.replicaRef,
-      userId: input.userId,
-    });
-
-    if (
-      publish.published
-      || !publish.workspace
-      || readDashboardReplicaSourceStateHash(publish.workspace.snapshotRef) !== pending.sourceStateHash
-    ) {
-      await this.stateStore.clearPendingDashboardReplicaRefresh({
-        sourceStateHash: pending.sourceStateHash,
-      });
-    }
-  }
-
-  private async publishBrowserVaultReplicaRef(input: {
-    expectedSourceStateHash: string;
-    replicaRef: NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]>;
-    userId: string;
-  }): Promise<HostedBrowserVaultReplicaPublishResponse> {
-    const response = await fetchHostedExecutionWebControlPlaneResponse({
-      ...(this.env.hostedWebAllowHttpHosts
-        ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
-        : {}),
-      baseUrl: this.readHostedWebControlBaseUrl(),
-      body: JSON.stringify({
-        expectedSourceStateHash: input.expectedSourceStateHash,
-        replicaRef: input.replicaRef,
-      }),
-      boundUserId: input.userId,
-      callbackSigning: this.env.webCallbackSigning,
-      method: "POST",
-      path: HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-      timeoutMs: this.env.webControlTimeoutMs,
-    });
-
-    if (!response.ok && response.status !== 404 && response.status !== 409) {
-      throw new Error(`Hosted browser-vault replica publish failed with HTTP ${response.status}.`);
-    }
-
-    return parseHostedBrowserVaultReplicaPublishResponse(await response.json());
   }
 
   private startDetachedRunnerDrive(input: {
@@ -2103,23 +2028,6 @@ export class HostedUserRunner {
     }
   }
 
-}
-
-function assertHostedBrowserVaultRefreshWriteResult(input: {
-  byteLength: number;
-  expectedSourceStateHash: string;
-  replicaRef: NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]>;
-}): void {
-  if (input.replicaRef.sourceBundleHash !== input.expectedSourceStateHash) {
-    throw new Error("Hosted browser-vault refresh returned a stale replica ref.");
-  }
-
-  if (
-    input.byteLength !== input.replicaRef.byteLength
-    || input.byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES
-  ) {
-    throw new Error("Hosted browser-vault refresh returned invalid replica size metadata.");
-  }
 }
 
 function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecision {

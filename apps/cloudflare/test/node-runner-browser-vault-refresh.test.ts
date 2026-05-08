@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createReplica: vi.fn(),
   measureReplicaBytes: vi.fn((replica: unknown) => JSON.stringify(replica).length),
+  publishReplica: vi.fn(),
   readWarmSourceStateHash: vi.fn(),
   restoreWorkspace: vi.fn(),
   warmVaultRoot: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock("../src/runtime-platform.ts", async () => {
     ...actual,
     buildHostedExecutionRuntimePlatform: vi.fn(() => ({
       browserVaultReplicaPort: {
+        publishRef: mocks.publishReplica,
         write: mocks.writeReplica,
       },
       workspacePort: {
@@ -65,6 +67,19 @@ vi.mock("../src/runtime-platform.ts", async () => {
 });
 
 describe("refreshHostedBrowserVaultReplica", () => {
+  beforeEach(() => {
+    mocks.measureReplicaBytes.mockImplementation(() => 256);
+    mocks.publishReplica.mockImplementation(async (input: {
+      replicaRef: ReturnType<typeof createReplicaRef>;
+    }) => ({
+      published: true,
+      workspace: {
+        ...createWorkspace(input.replicaRef.sourceBundleHash),
+        browserVaultReplicaRef: input.replicaRef,
+      },
+    }));
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
   });
@@ -92,7 +107,11 @@ describe("refreshHostedBrowserVaultReplica", () => {
 
     expect(result).toMatchObject({
       replicaRef: createReplicaRef(sourceStateHash),
-      status: "written",
+      status: "published",
+    });
+    expect(mocks.publishReplica).toHaveBeenCalledWith({
+      expectedSourceStateHash: sourceStateHash,
+      replicaRef: createReplicaRef(sourceStateHash),
     });
     expect(mocks.createReplica).toHaveBeenCalledWith(expect.objectContaining({
       sourceStateHash,
@@ -127,7 +146,7 @@ describe("refreshHostedBrowserVaultReplica", () => {
 
     expect(result).toMatchObject({
       replicaRef: createReplicaRef(sourceStateHash),
-      status: "written",
+      status: "published",
     });
     expect(mocks.restoreWorkspace).toHaveBeenCalledTimes(1);
     expect(mocks.createReplica).toHaveBeenCalledWith(expect.objectContaining({
@@ -164,7 +183,7 @@ describe("refreshHostedBrowserVaultReplica", () => {
 
     expect(result).toMatchObject({
       replicaRef: createReplicaRef(sourceStateHash),
-      status: "written",
+      status: "published",
     });
     expect(mocks.restoreWorkspace).toHaveBeenCalledTimes(1);
     expect(mocks.createReplica).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -205,6 +224,82 @@ describe("refreshHostedBrowserVaultReplica", () => {
       status: "refresh_failed_too_large",
     });
     expect(mocks.writeReplica).not.toHaveBeenCalled();
+    expect(mocks.publishReplica).not.toHaveBeenCalled();
+  });
+
+  it("keeps same-source publish conflicts retryable after writing", async () => {
+    const sourceStateHash = "e".repeat(64);
+    mocks.workspaceRead.mockResolvedValue({
+      workspace: createWorkspace(sourceStateHash),
+    });
+    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
+    mocks.readWarmSourceStateHash.mockResolvedValue(null);
+    mocks.restoreWorkspace.mockResolvedValue({
+      vaultRoot: "/restored/vault",
+    });
+    mocks.createReplica.mockResolvedValue(createReplica(sourceStateHash));
+    mocks.writeReplica.mockResolvedValue(createReplicaRef(sourceStateHash));
+    mocks.publishReplica.mockResolvedValue({
+      published: false,
+      workspace: createWorkspace(sourceStateHash),
+    });
+
+    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
+    const result = await refreshHostedBrowserVaultReplica({
+      runtime: {
+        forwardedEnv: {},
+        platformEnv: {},
+        userEnv: {},
+      },
+      sourceStateHash,
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      status: "publish_conflict",
+    });
+    expect(mocks.writeReplica).toHaveBeenCalledOnce();
+    expect(mocks.publishReplica).toHaveBeenCalledWith({
+      expectedSourceStateHash: sourceStateHash,
+      replicaRef: createReplicaRef(sourceStateHash),
+    });
+  });
+
+  it("does not write or publish when refresh is aborted before publish", async () => {
+    const sourceStateHash = "f".repeat(64);
+    const replicaReady = createDeferred<ReturnType<typeof createReplica>>();
+    const abortController = new AbortController();
+    mocks.workspaceRead.mockResolvedValue({
+      workspace: createWorkspace(sourceStateHash),
+    });
+    mocks.warmVaultRoot.mockReturnValue("/warm/vault");
+    mocks.readWarmSourceStateHash.mockResolvedValue(null);
+    mocks.restoreWorkspace.mockResolvedValue({
+      vaultRoot: "/restored/vault",
+    });
+    mocks.createReplica.mockImplementation(async () => await replicaReady.promise);
+    mocks.writeReplica.mockResolvedValue(createReplicaRef(sourceStateHash));
+
+    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
+    const refresh = refreshHostedBrowserVaultReplica({
+      runtime: {
+        forwardedEnv: {},
+        platformEnv: {},
+        userEnv: {},
+      },
+      sourceStateHash,
+      userId: "member_123",
+    }, {
+      signal: abortController.signal,
+    });
+    await vi.waitFor(() => expect(mocks.createReplica).toHaveBeenCalledOnce());
+
+    abortController.abort(new Error("foreground_invocation"));
+    replicaReady.resolve(createReplica(sourceStateHash));
+
+    await expect(refresh).rejects.toThrow("foreground_invocation");
+    expect(mocks.writeReplica).not.toHaveBeenCalled();
+    expect(mocks.publishReplica).not.toHaveBeenCalled();
   });
 });
 
@@ -248,5 +343,19 @@ function createReplicaRef(sourceStateHash: string) {
     runtimeRootKeyId: "runtime-root-v1",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash: sourceStateHash,
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return {
+    promise,
+    reject,
+    resolve,
   };
 }

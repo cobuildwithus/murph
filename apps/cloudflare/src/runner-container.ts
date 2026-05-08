@@ -88,6 +88,7 @@ type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest
 
 interface HostedExecutionContainerBrowserVaultRefreshRequest {
   runtime: HostedAssistantRuntimeConfig;
+  signal?: AbortSignal;
   sourceStateHash: string;
   timeoutMs: number;
   userId: string;
@@ -97,7 +98,7 @@ type HostedExecutionContainerBrowserVaultRefreshResult =
   | {
       byteLength: number;
       replicaRef: HostedBrowserVaultReplicaRef;
-      status: "written";
+      status: "published";
     }
   | {
       byteLength: number;
@@ -105,7 +106,7 @@ type HostedExecutionContainerBrowserVaultRefreshResult =
       status: "refresh_failed_too_large";
     }
   | {
-      status: "already_fresh" | "stale_source" | "workspace_missing";
+      status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing";
     };
 
 interface HostedExecutionContainerRunnerInput {
@@ -580,7 +581,10 @@ export class RunnerContainer extends Container {
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
-          signal: AbortSignal.timeout(remainingTimeoutMs),
+          signal: combineRunnerContainerAbortSignals(
+            input.signal ?? null,
+            AbortSignal.timeout(remainingTimeoutMs),
+          ),
         },
         RUNNER_PORT,
       );
@@ -1143,6 +1147,7 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   runtime: HostedAssistantRuntimeConfig;
+  signal?: AbortSignal;
   sourceStateHash: string;
   timeoutMs: number;
   userId: string;
@@ -1156,6 +1161,7 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
 
   return container.refreshBrowserVaultReplica({
     runtime: input.runtime,
+    signal: input.signal,
     sourceStateHash: input.sourceStateHash,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
@@ -1523,6 +1529,7 @@ function parseHostedExecutionContainerInvokeInput(
 function parseHostedExecutionContainerBrowserVaultRefreshInput(
   payload: {
     runtime?: unknown;
+    signal?: unknown;
     sourceStateHash?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
@@ -1530,10 +1537,49 @@ function parseHostedExecutionContainerBrowserVaultRefreshInput(
 ): HostedExecutionContainerBrowserVaultRefreshRequest {
   return {
     runtime: readHostedAssistantRuntimeConfig(payload.runtime),
+    ...(payload.signal === undefined
+      ? {}
+      : { signal: readAbortSignal(payload.signal, "payload.signal") }),
     sourceStateHash: requireString(payload.sourceStateHash, "payload.sourceStateHash"),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
+}
+
+function readAbortSignal(value: unknown, label: string): AbortSignal {
+  if (
+    value
+    && typeof value === "object"
+    && typeof (value as { aborted?: unknown }).aborted === "boolean"
+    && typeof (value as { addEventListener?: unknown }).addEventListener === "function"
+  ) {
+    return value as AbortSignal;
+  }
+
+  throw new TypeError(`${label} must be an AbortSignal.`);
+}
+
+function combineRunnerContainerAbortSignals(
+  first: AbortSignal | null,
+  second: AbortSignal,
+): AbortSignal {
+  if (!first) {
+    return second;
+  }
+
+  if (first.aborted) {
+    return first;
+  }
+
+  const controller = new AbortController();
+  const abort = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason);
+    }
+  };
+  first.addEventListener("abort", () => abort(first), { once: true });
+  second.addEventListener("abort", () => abort(second), { once: true });
+  return controller.signal;
 }
 
 function readHostedAssistantRuntimeConfig(value: unknown): HostedAssistantRuntimeConfig {
@@ -1550,7 +1596,7 @@ function parseHostedBrowserVaultRefreshContainerResult(
   const record = requireRecord(value, "Hosted browser-vault refresh container result");
   const status = requireString(record.status, "Hosted browser-vault refresh container result.status");
 
-  if (status === "written") {
+  if (status === "published") {
     const replicaRef = parseHostedBrowserVaultReplicaRef(
       record.replicaRef,
       "Hosted browser-vault refresh container result.replicaRef",
@@ -1583,14 +1629,19 @@ function parseHostedBrowserVaultRefreshContainerResult(
     };
   }
 
-  if (status === "already_fresh" || status === "stale_source" || status === "workspace_missing") {
+  if (
+    status === "already_fresh"
+    || status === "publish_conflict"
+    || status === "stale_source"
+    || status === "workspace_missing"
+  ) {
     return {
       status,
     };
   }
 
   throw new TypeError(
-    "Hosted browser-vault refresh container result.status must be written, refresh_failed_too_large, already_fresh, stale_source, or workspace_missing.",
+    "Hosted browser-vault refresh container result.status must be published, refresh_failed_too_large, already_fresh, publish_conflict, stale_source, or workspace_missing.",
   );
 }
 
