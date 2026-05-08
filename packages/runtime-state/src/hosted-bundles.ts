@@ -572,110 +572,6 @@ function writeHostedPortableWorkspaceManifestToBundle(
   });
 }
 
-export function createHostedWorkspaceWorkingDeltaBundle(input: {
-  baseManifest: HostedPortableWorkspaceManifest;
-  baseSnapshotHash: string;
-  currentBundle: Uint8Array | ArrayBuffer;
-  preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
-}): {
-  bundle: Uint8Array;
-  manifest: HostedPortableWorkspaceDeltaManifest;
-} {
-  const currentManifest =
-    readHostedPortableWorkspaceManifestFromBundle(input.currentBundle)
-      ?? createHostedPortableWorkspaceManifestFromBundle(input.currentBundle);
-  if (
-    input.baseManifest.policyVersion !== HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION
-    || currentManifest.policyVersion !== HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION
-  ) {
-    throw new Error("Hosted workspace working delta requires matching portable manifest policy versions.");
-  }
-
-  const archive = parseHostedBundleArchive(input.currentBundle);
-  if (archive.kind !== "vault") {
-    throw new Error(`Hosted workspace working delta requires a vault bundle, got ${archive.kind}.`);
-  }
-
-  const baseFiles = new Map(input.baseManifest.files.map((file) => [
-    hostedPortableWorkspaceManifestFileKey(file),
-    file,
-  ]));
-  const currentFiles = new Map(currentManifest.files.map((file) => [
-    hostedPortableWorkspaceManifestFileKey(file),
-    file,
-  ]));
-  for (const artifact of input.preservedArtifacts ?? []) {
-    const key = `${artifact.root}:${normalizeWorkspaceSnapshotRelativePath(artifact.path)}`;
-    if (currentFiles.has(key)) {
-      continue;
-    }
-    currentFiles.set(key, {
-      artifact: artifact.ref,
-      path: normalizeWorkspaceSnapshotRelativePath(artifact.path),
-      root: artifact.root,
-      sha256: artifact.ref.sha256,
-      size: artifact.ref.byteSize,
-    });
-  }
-  const effectiveCurrentFiles = [...currentFiles.values()]
-    .sort(compareHostedPortableWorkspaceManifestFiles);
-  const effectiveCurrentManifest = finalizeHostedPortableWorkspaceManifest(effectiveCurrentFiles);
-  const upserts = effectiveCurrentManifest.files.filter((file) => {
-    const baseFile = baseFiles.get(hostedPortableWorkspaceManifestFileKey(file));
-    return !baseFile || !hostedPortableWorkspaceManifestFilesEqual(baseFile, file);
-  });
-  const tombstones = input.baseManifest.files
-    .filter((file) => !currentFiles.has(hostedPortableWorkspaceManifestFileKey(file)))
-    .map((file): HostedPortableWorkspaceDeltaTombstone => ({
-      path: file.path,
-      root: file.root,
-    }))
-    .sort(compareHostedPortableWorkspaceDeltaTombstones);
-  const archiveFiles = new Map(archive.files.map((file) => [
-    hostedPortableWorkspaceArchiveFileKey(file),
-    file,
-  ]));
-  const deltaFiles: HostedBundleArchiveFile[] = upserts.map((upsert) => {
-    const key = hostedPortableWorkspaceManifestFileKey(upsert);
-    const archiveFile = archiveFiles.get(key);
-    if (archiveFile) {
-      return archiveFile;
-    }
-    if (upsert.artifact) {
-      return {
-        artifact: upsert.artifact,
-        path: upsert.path,
-        root: upsert.root,
-      };
-    }
-    throw new Error(`Hosted workspace working delta upsert "${key}" is missing from the current bundle.`);
-  });
-  const manifest = finalizeHostedPortableWorkspaceDeltaManifest({
-    baseManifestHash: input.baseManifest.manifestHash,
-    baseSnapshotHash: input.baseSnapshotHash,
-    effectiveManifestHash: effectiveCurrentManifest.manifestHash,
-    tombstones,
-    upserts,
-  });
-
-  const deltaBundle = serializeHostedBundleArchive({
-    files: deltaFiles,
-    kind: "vault",
-    schema: archive.schema,
-  });
-
-  return {
-    bundle: writeHostedBundleTextFile({
-      bytes: deltaBundle,
-      kind: "vault",
-      path: HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH,
-      root: HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
-      text: JSON.stringify(manifest) + "\n",
-    }),
-    manifest,
-  };
-}
-
 async function collectHostedPortableWorkspaceDeltaFiles(input: {
   artifactRefProvider?: (
     input: HostedBundleArtifactSnapshotInput,
@@ -765,7 +661,7 @@ async function collectHostedPortableWorkspaceDeltaFiles(input: {
   const currentManifest = finalizeHostedPortableWorkspaceManifest(
     [...files.values()].sort(compareHostedPortableWorkspaceManifestFiles),
   );
-  const delta = createHostedWorkspaceWorkingDeltaBundleFromManifestFiles({
+  const delta = createHostedPortableWorkspaceDeltaBundleFromManifestFiles({
     archiveFiles,
     baseManifest: input.baseManifest,
     baseSnapshotHash: input.baseSnapshotHash,
@@ -1017,7 +913,7 @@ function carryForwardUnmaterializedHostedWorkspaceArtifacts(input: {
   }
 }
 
-function createHostedWorkspaceWorkingDeltaBundleFromManifestFiles(input: {
+function createHostedPortableWorkspaceDeltaBundleFromManifestFiles(input: {
   archiveFiles: ReadonlyMap<string, HostedBundleArchiveFile>;
   baseManifest: HostedPortableWorkspaceManifest;
   baseSnapshotHash: string;

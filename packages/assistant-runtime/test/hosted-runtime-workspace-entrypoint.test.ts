@@ -14,7 +14,7 @@ import {
   resolveRuntimePaths,
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
-  createHostedWorkspaceWorkingDeltaBundle,
+  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
   writeHostedBundleTextFile,
@@ -1684,6 +1684,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
       const baseState = createEmptyHostedMailboxImportState();
       baseState.watermarks.conversation = "2";
+      await writeMailboxImportStateFile(sourceBaseVaultRoot, baseState);
       const baseSourceBundle = await snapshotHostedBundleRoots({
         kind: "vault",
         roots: [
@@ -1693,28 +1694,21 @@ describe("hosted workspace runtime entrypoint", () => {
           },
         ],
       });
-      const baseBundle = writeMailboxImportStateToBundle(baseSourceBundle, baseState);
+      assert.ok(baseSourceBundle);
+      const baseBundle = baseSourceBundle;
       const baseHash = sha256HostedBundleHex(baseBundle);
       const baseManifest = createHostedPortableWorkspaceManifestFromBundle(baseBundle);
 
       await writeFile(path.join(sourceCurrentVaultRoot, "note.md"), "current note\n", "utf8");
       const currentState = createEmptyHostedMailboxImportState();
       currentState.watermarks.conversation = "3";
-      const currentSourceBundle = await snapshotHostedBundleRoots({
-        kind: "vault",
-        roots: [
-          {
-            root: sourceCurrentVaultRoot,
-            rootKey: "vault",
-          },
-        ],
-      });
-      const currentBundle = writeMailboxImportStateToBundle(currentSourceBundle, currentState);
-      const delta = createHostedWorkspaceWorkingDeltaBundle({
+      await writeMailboxImportStateFile(sourceCurrentVaultRoot, currentState);
+      const delta = await snapshotHostedPortableWorkspaceDelta({
         baseManifest,
         baseSnapshotHash: baseHash,
-        currentBundle,
+        vaultRoot: sourceCurrentVaultRoot,
       });
+      assert.equal(delta.kind, "changed");
       const deltaHash = sha256HostedBundleHex(delta.bundle);
       const artifactBytesByHash = new Map([
         [baseHash, baseBundle],
@@ -3542,6 +3536,22 @@ function writeMailboxImportStateToBundle(
       value: input,
     }),
   });
+}
+
+async function writeMailboxImportStateFile(
+  vaultRoot: string,
+  input: HostedMailboxImportState,
+): Promise<void> {
+  const statePath = path.join(vaultRoot, HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH);
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(
+    statePath,
+    JSON.stringify({
+      schema: HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
+      schemaVersion: HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
+      value: input,
+    }),
+  );
 }
 
 function createMailboxPort(input: {

@@ -23,7 +23,6 @@ import {
   listHostedBundleArtifacts,
   clearHostedAssistantRuntimeHotState,
   materializeHostedExecutionArtifacts,
-  createHostedWorkspaceWorkingDeltaBundle,
   readHostedPortableWorkspaceDeltaManifestFromBundle,
   readHostedPortableWorkspaceManifestFromBundle,
   readHostedBundleTextFile,
@@ -1375,20 +1374,17 @@ test("hosted workspace working deltas preserve portable edits, deletes, runtime 
     await writeFile(path.join(vaultRoot, "raw", "captures", "added.pdf"), addedRawBytes);
     await rm(baseRawPath);
 
-    const currentSnapshot = await snapshotHostedExecutionContext({
+    const delta = await snapshotHostedPortableWorkspaceDelta({
       artifactSink: async (artifact) => {
         artifacts.set(artifact.ref.sha256, artifact.bytes);
       },
-      preservedArtifacts: baseArtifactRefs,
-      vaultRoot,
-    });
-    assert.equal(artifacts.size, artifactCountAfterBase + 1);
-    const delta = createHostedWorkspaceWorkingDeltaBundle({
       baseManifest,
       baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
-      currentBundle: currentSnapshot.bundle,
+      vaultRoot,
       preservedArtifacts: baseArtifactRefs,
     });
+    assert.equal(artifacts.size, artifactCountAfterBase + 1);
+    assert.equal(delta.kind, "changed");
     const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(delta.bundle);
     assert.ok(deltaManifest);
     assert.equal(deltaManifest.baseManifestHash, baseManifest.manifestHash);
@@ -1664,14 +1660,12 @@ test("hosted workspace working delta tombstones reject symlink traversal", async
     assert.ok(baseManifest);
 
     await rm(path.join(vaultRoot, "bank", "deleted.md"));
-    const currentSnapshot = await snapshotHostedExecutionContext({
-      vaultRoot,
-    });
-    const delta = createHostedWorkspaceWorkingDeltaBundle({
+    const delta = await snapshotHostedPortableWorkspaceDelta({
       baseManifest,
       baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
-      currentBundle: currentSnapshot.bundle,
+      vaultRoot,
     });
+    assert.equal(delta.kind, "changed");
 
     const restoreVaultRoot = path.join(workspaceRoot, "restore-vault");
     const outsideRoot = path.join(workspaceRoot, "outside");
