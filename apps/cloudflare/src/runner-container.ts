@@ -42,6 +42,8 @@ const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
+const RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY = "runner-container-activity-liveness:v1";
+const RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION = 1;
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -129,6 +131,13 @@ interface HostedExecutionContainerSmokeHealthResult {
 
 interface RunnerActivityTimeoutRenewable {
   renewActivityTimeout(): void;
+}
+
+interface RunnerActivityLivenessRecord {
+  activeInvocationCount: number;
+  lastActivityAt: number;
+  schemaVersion: typeof RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION;
+  updatedAt: number;
 }
 
 // Cloudflare rolls Worker code ahead of container instances, so keep the
@@ -222,17 +231,42 @@ export class RunnerContainer extends Container {
   override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
       const idleTtlMs = readRunnerIdleTtlMs(this.environment);
-      const idleElapsedMs = this.lastRunnerActivityAt > 0
-        ? Math.max(0, Date.now() - this.lastRunnerActivityAt)
+      const now = Date.now();
+      const durableLiveness = await this.readRunnerActivityLivenessRecord();
+      const durableLastActivityAt = durableLiveness?.lastActivityAt ?? 0;
+      const durableLivenessAgeMs = durableLastActivityAt > 0
+        ? Math.max(0, now - durableLastActivityAt)
+        : null;
+      const durableActiveInvocationCount =
+        durableLivenessAgeMs !== null
+          && durableLivenessAgeMs <= computeRunnerActivityLivenessFreshMs(idleTtlMs)
+          ? durableLiveness?.activeInvocationCount ?? 0
+          : 0;
+      const effectiveActiveInvocationCount = Math.max(
+        this.activeInvocationCount,
+        durableActiveInvocationCount,
+      );
+      const effectiveLastActivityAt = Math.max(this.lastRunnerActivityAt, durableLastActivityAt);
+      const idleElapsedMs = effectiveLastActivityAt > 0
+        ? Math.max(0, now - effectiveLastActivityAt)
         : null;
 
-      if (this.activeInvocationCount > 0 || (idleElapsedMs !== null && idleElapsedMs < idleTtlMs)) {
+      if (
+        effectiveActiveInvocationCount > 0
+        || (idleElapsedMs !== null && idleElapsedMs < idleTtlMs)
+      ) {
         const activityTimeoutRenewed = this.noteRunnerActivity("activity-expired-stale");
+        await this.writeRunnerActivityLivenessRecord({
+          activeInvocationCount: effectiveActiveInvocationCount,
+          lastActivityAt: this.lastRunnerActivityAt,
+        });
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             activeInvocationCount: this.activeInvocationCount,
             activityTimeoutRenewed,
+            durableActiveInvocationCount,
+            durableLivenessAgeMs,
             idleElapsedMs,
             runnerIdleTtlMs: idleTtlMs,
           },
@@ -329,7 +363,7 @@ export class RunnerContainer extends Container {
     this.currentLogContext = logContext;
     this.activeInvocationCount += 1;
     const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
-    this.noteRunnerActivity("invoke-started");
+    await this.noteRunnerActivityDurably("invoke-started");
 
     try {
       const startTime = Date.now();
@@ -351,12 +385,12 @@ export class RunnerContainer extends Container {
         userId: routeUserId,
       });
       const runnerControlToken = await this.ensureContainerReady(input);
-      this.noteRunnerActivity("container-ready");
+      await this.noteRunnerActivityDurably("container-ready");
       this.runnerOutboundProxyState = outboundProxyState;
       await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
-      this.noteRunnerActivity("runner-request-starting");
+      await this.noteRunnerActivityDurably("runner-request-starting");
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -386,7 +420,7 @@ export class RunnerContainer extends Container {
         },
         RUNNER_PORT,
       );
-      this.noteRunnerActivity("runner-response-received");
+      await this.noteRunnerActivityDurably("runner-response-received");
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -424,9 +458,9 @@ export class RunnerContainer extends Container {
           });
         }
       } finally {
-        this.noteRunnerActivity("invoke-finished");
         stopRunnerActivityRenewal();
         this.activeInvocationCount = Math.max(0, this.activeInvocationCount - 1);
+        await this.noteRunnerActivityDurably("invoke-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
@@ -791,22 +825,33 @@ export class RunnerContainer extends Container {
     this.runnerControlToken = null;
     this.runnerOutboundProxyState = null;
     this.installedRunnerOutboundProxyState = null;
+    await this.clearRunnerActivityLivenessRecord();
     await this.destroyIfRunning({ failClosed });
   }
 
   private startRunnerActivityRenewal(): () => void {
     const idleTtlMs = readRunnerIdleTtlMs(this.environment);
-    const intervalMs = Math.max(
-      MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS,
-      Math.min(RUNNER_ACTIVITY_RENEW_INTERVAL_MS, Math.floor(idleTtlMs / 2)),
-    );
+    const intervalMs = computeRunnerActivityRenewIntervalMs(idleTtlMs);
     const interval = setInterval(() => {
       this.noteRunnerActivity("invoke-heartbeat");
+      this.deferRunnerActivityLivenessWrite({
+        activeInvocationCount: this.activeInvocationCount,
+        lastActivityAt: this.lastRunnerActivityAt,
+      });
     }, intervalMs);
 
     return () => {
       clearInterval(interval);
     };
+  }
+
+  private async noteRunnerActivityDurably(stage: string): Promise<boolean> {
+    const activityTimeoutRenewed = this.noteRunnerActivity(stage);
+    await this.writeRunnerActivityLivenessRecord({
+      activeInvocationCount: this.activeInvocationCount,
+      lastActivityAt: this.lastRunnerActivityAt,
+    });
+    return activityTimeoutRenewed;
   }
 
   private noteRunnerActivity(stage: string): boolean {
@@ -835,6 +880,70 @@ export class RunnerContainer extends Container {
       });
       return false;
     }
+  }
+
+  private async readRunnerActivityLivenessRecord(): Promise<RunnerActivityLivenessRecord | null> {
+    try {
+      const value = await this.ctx.storage.get<unknown>(RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY);
+      return parseRunnerActivityLivenessRecord(value);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not read activity liveness.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+      return null;
+    }
+  }
+
+  private async writeRunnerActivityLivenessRecord(input: {
+    activeInvocationCount: number;
+    lastActivityAt: number;
+  }): Promise<void> {
+    const record: RunnerActivityLivenessRecord = {
+      activeInvocationCount: Math.max(0, input.activeInvocationCount),
+      lastActivityAt: input.lastActivityAt,
+      schemaVersion: RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION,
+      updatedAt: Date.now(),
+    };
+
+    try {
+      await this.ctx.storage.put(RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY, record);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not write activity liveness.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+    }
+  }
+
+  private async clearRunnerActivityLivenessRecord(): Promise<void> {
+    try {
+      await this.ctx.storage.delete(RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not clear activity liveness.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+    }
+  }
+
+  private deferRunnerActivityLivenessWrite(input: {
+    activeInvocationCount: number;
+    lastActivityAt: number;
+  }): void {
+    void this.writeRunnerActivityLivenessRecord(input);
   }
 
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
@@ -1401,6 +1510,44 @@ function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
   }
 
   return parsed;
+}
+
+function computeRunnerActivityRenewIntervalMs(idleTtlMs: number): number {
+  return Math.max(
+    MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS,
+    Math.min(RUNNER_ACTIVITY_RENEW_INTERVAL_MS, Math.floor(idleTtlMs / 2)),
+  );
+}
+
+function computeRunnerActivityLivenessFreshMs(idleTtlMs: number): number {
+  return Math.max(1_000, computeRunnerActivityRenewIntervalMs(idleTtlMs) * 3);
+}
+
+function parseRunnerActivityLivenessRecord(value: unknown): RunnerActivityLivenessRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    record.schemaVersion !== RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION
+    || !isSafeNonNegativeInteger(record.activeInvocationCount)
+    || !isSafeNonNegativeInteger(record.lastActivityAt)
+    || !isSafeNonNegativeInteger(record.updatedAt)
+  ) {
+    return null;
+  }
+
+  return {
+    activeInvocationCount: record.activeInvocationCount,
+    lastActivityAt: record.lastActivityAt,
+    schemaVersion: RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function isSafeNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {
