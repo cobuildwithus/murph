@@ -33,7 +33,16 @@ The current anchor is the calibrated regularized non-CRP clinical-core model. It
 
 ## Current Blocker
 
-The next meaningful scientific step is external validation, not more NHANES-only tuning.
+The next meaningful scientific step is still external validation, not more NHANES-only tuning. The current practical blocker is lawful access to true-external biomarker/outcome data without institutional backing.
+
+The active workaround is lawful and staged:
+
+- use NHANES III public linked mortality only as a same-family historical sanity lane
+- build label-only inventories for public, free-registered, and application-light sources, with MIDUS now the best next non-NHANES public biomarker-mortality label target
+- use partner aggregate validation as the main clever path around row-level access barriers: a lawful data holder runs a frozen evaluator locally and returns only aggregate metrics
+- keep BioLINCC/MESA/ARIC, UK Biobank, and All of Us alive as human-admin, organization-access, or partner lanes, not as sources Codex can inspect or download by default
+
+Torrents, leaks, unauthorized mirrors, credential sharing, and terms-violating controlled-data redistributions are not acceptable workarounds. They would invalidate source rights, benchmark provenance, and future product trust.
 
 ReviewGPT R99 froze the NHANES candidate-lock stage and recommended external-validation/source planning. ReviewGPT R118 then selected ARIC/MESA admin/access work as the next strategic lane by 3/3 consensus.
 
@@ -144,7 +153,22 @@ R162 created a true-external source feasibility handoff for UK Biobank and All o
 
 R163 asked three GPT-5.5 Extended Pro ReviewGPT lanes whether the R160 NHANES III endpoint/denominator policy scaffold was ready for a public row-cache execution-gate packet, or whether more policy cleanup or true-external source work should happen first. The reduced consensus was 3/3 `build_public_row_cache_execution_gate_packet`. The decision authorizes only a no-row, no-source-download gate packet. It does not authorize public-use data download, source document/codebook/dictionary storage, row parsing, row hydration, endpoint extraction, denominator construction, feature harmonization execution, metric computation, benchmark mutation, model mutation, product claims, recommendation claims, protocol claims, or embeddings.
 
-R164 executed that narrow local step. It created the NHANES III public row-cache execution-gate packet, blocker matrix, denial manifest, validator result, and reviewer packet. The validator passed with 9 active blockers, 23 denied effects, 8 future gate questions, and all authorization/storage flags false. R164's future question is whether a later executor should be allowed to download public NHANES III public-use files into ignored local cache and build a local aggregate-only same-family row-cache sanity lane, while keeping endpoint extraction, denominator construction, metric computation, benchmark mutation, model mutation, and claims separately gated. R164 still authorizes no data acquisition or execution.
+R164 executed that narrow local step. It created the NHANES III public row-cache execution-gate packet, blocker matrix, denial manifest, validator result, and reviewer packet. The validator passed with 9 active blockers, 23 denied effects, 8 future gate questions, and all authorization/storage flags false. R164's future question was whether a later executor should be allowed to download public NHANES III public-use files into ignored local cache and build a local aggregate-only same-family row-cache sanity lane, while keeping endpoint extraction, denominator construction, metric computation, benchmark mutation, model mutation, and claims separately gated.
+
+R165 asked three GPT-5.5 Extended Pro ReviewGPT lanes whether to allow only the next public NHANES III cache-preflight step. The reduced decision was 2/3 `approve_public_download_and_local_row_cache_preflight_only`, with one reviewer requesting endpoint/denominator policy cleanup but no hard blocker. The reducer marked `safe_to_execute_public_cache_preflight: true`. R165 authorized only official public-use file download into ignored local cache plus aggregate file-status preflight. It still authorized no source-body/codebook storage, row-value egress, endpoint extraction, denominator construction, feature harmonization execution, metric computation, scoring, benchmark mutation, model mutation, claims, or embeddings.
+
+R167 executed that public-cache preflight against official CDC/NCHS public files only. Four NHANES III public-use files are present in ignored local cache: adult, lab, examination, and public linked mortality. The validator passed with 4 public files, aggregate file sizes/hashes/line counts only, 9 downstream blockers, 17 denied effects, and zero issues. R167 is still not science execution: it proves lawful public cache presence and artifact boundaries only. Row parsing, endpoint extraction, denominator construction, feature harmonization, metric computation, scoring, benchmark/model mutation, and product claims remain blocked.
+
+R166 asked five GPT-5.5 Extended Pro ReviewGPT lanes the new-source strategy question after BioLINCC institutional access friction: how to get more useful data lawfully without a traditional research institution, and whether torrents or other unofficial redistributions should be considered. The reduced consensus was 5/5 `run_nhanes_iii_plus_public_inventory`, with no validation issues and `safe_to_build_public_source_inventory: true`. ReviewGPT's answer was clear: unauthorized torrents, leaks, mirrors, credential sharing, and terms-violating controlled-data redistributions are not clever paths; they would poison provenance, rights, and future product trust. The lawful strategy is to keep NHANES III moving as a same-family public sanity lane, build a rights-first inventory of public/free-registered/application-light sources, and pursue partner aggregate validation for high-value data we cannot lawfully receive row-level.
+
+R168 materialized that strategy into a metadata-only lawful source inventory. The validator passed with 13 source lanes and no storage or authorization issues. Highest-priority lawful lanes are: NHANES III/public NCHS linked mortality as same-family sanity; MIDUS/ICPSR as the best non-NHANES public biomarker-mortality lane to label next; HRS/RAND HRS sensitive biomarker and mortality data as a high-value older-adult registered/supplemental-agreement lane needing AI/LLM and use-policy labels; ELSA, SHARE, CHARLS, and Gateway-family aging studies as cross-national registered or study-specific terms lanes; PLCO/NCI CDAS and NACC as application-light stress lanes; PhysioNet MIMIC/eICU as hospital-domain stress only under credentialed DUA rules; CDC/NHIS/NVSS/WONDER as outcome-context rather than biomarker validation; and UK Biobank/All of Us as human-admin or partner aggregate lanes unless lawful organization-level access exists.
+
+The next safe local actions after R168 are:
+
+- continue NHANES III public-cache boundary cleanup and unresolved-blocker labels, still without row parsing or scoring
+- build a MIDUS label-only source packet from official URLs and non-quoting labels
+- build a partner aggregate validation handoff packet for data owners to run the frozen evaluator locally and return only aggregate metrics above suppression thresholds
+- keep UK Biobank and All of Us as access-feasibility or partner lanes unless lawful organization-level access appears
 
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
