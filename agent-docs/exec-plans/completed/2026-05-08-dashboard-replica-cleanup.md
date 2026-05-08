@@ -50,3 +50,6 @@ Finish the remaining `WORKSPACE_COMMIT.md` simplification by moving dashboard-re
 - Added a web dashboard-replica refresh client and kept browser-vault session compatibility.
 - Focused Cloudflare/web tests passed; `pnpm typecheck` passed.
 - `test:diff` still fails in CLI document/meal reverse-dependent tests outside this working set.
+Status: completed
+Updated: 2026-05-08
+Completed: 2026-05-08

@@ -1,12 +1,5 @@
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 
-export function scheduleDashboardReplicaRefreshAfterResponse(input: {
-  sourceStateHash: string | null;
-  userId: string;
-}): void {
-  void scheduleDashboardReplicaRefreshBestEffort(input);
-}
-
 export async function scheduleDashboardReplicaRefreshBestEffort(input: {
   sourceStateHash: string | null;
   userId: string;
