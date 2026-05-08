@@ -45,11 +45,31 @@ const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
+export interface CollectHostedAssistantDeliverySideEffectsInput {
+  includeBackgroundDueIntents?: boolean;
+  preferredIntentIds?: readonly string[];
+  vaultRoot: string;
+}
+
 export async function collectHostedAssistantDeliverySideEffects(
-  vaultRoot: string,
+  input: string | CollectHostedAssistantDeliverySideEffectsInput,
 ): Promise<HostedAssistantDeliveryEffect[]> {
+  const request = typeof input === "string"
+    ? {
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: input,
+      }
+    : {
+        includeBackgroundDueIntents: input.includeBackgroundDueIntents ?? true,
+        preferredIntentIds: input.preferredIntentIds ?? [],
+        vaultRoot: input.vaultRoot,
+      };
   const now = new Date();
-  const intents = await listAssistantOutboxIntents(vaultRoot);
+  const intents = await listAssistantOutboxIntents(request.vaultRoot);
+  const preferredIntentOrder = new Map(
+    request.preferredIntentIds.map((intentId, index) => [intentId, index] as const),
+  );
 
   const candidates: AssistantOutboxIntent[] = [];
   for (const intent of intents) {
@@ -58,7 +78,7 @@ export async function collectHostedAssistantDeliverySideEffects(
         intentId: intent.intentId,
         now,
         sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
-        vault: vaultRoot,
+        vault: request.vaultRoot,
       });
       if (!mirrorState.sendingPastGraceWindow) {
         continue;
@@ -83,8 +103,22 @@ export async function collectHostedAssistantDeliverySideEffects(
     candidates.push(intent);
   }
 
-  const effects = candidates
-    .sort(compareHostedAssistantDeliveryCandidateIntents)
+  const foregroundCandidates = candidates
+    .filter((intent) => preferredIntentOrder.has(intent.intentId))
+    .sort((left, right) =>
+      readPreferredHostedAssistantDeliveryIntentOrder(left, preferredIntentOrder)
+      - readPreferredHostedAssistantDeliveryIntentOrder(right, preferredIntentOrder)
+      || compareHostedAssistantDeliveryCandidateIntents(left, right)
+    );
+  const backgroundCandidates = request.includeBackgroundDueIntents
+    ? candidates
+        .filter((intent) => !preferredIntentOrder.has(intent.intentId))
+        .sort(compareHostedAssistantDeliveryCandidateIntents)
+    : [];
+  const effects = [
+    ...foregroundCandidates,
+    ...backgroundCandidates,
+  ]
     .map((intent) => buildHostedAssistantDeliveryEffect({
       dedupeKey: intent.dedupeKey,
       effectId: intent.intentId,
@@ -92,6 +126,13 @@ export async function collectHostedAssistantDeliverySideEffects(
     }));
 
   return effects.slice(0, HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS);
+}
+
+function readPreferredHostedAssistantDeliveryIntentOrder(
+  intent: AssistantOutboxIntent,
+  preferredIntentOrder: ReadonlyMap<string, number>,
+): number {
+  return preferredIntentOrder.get(intent.intentId) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function compareHostedAssistantDeliveryCandidateIntents(

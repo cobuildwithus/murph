@@ -215,6 +215,7 @@ interface AssistantAutoReplyGroupOutcome {
 export interface AssistantAutoReplyProcessResult {
   advanceCursor: boolean
   checkpointRequired?: true
+  currentTurnDeliveryIntentIds?: string[]
   failed: number
   lastInputCursor: AssistantInputCandidate['event']['cursor']
   nextWakeAt: string | null
@@ -486,6 +487,8 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     ...(input.outcome.checkpointRequired || artifactResult.checkpointRequired
       ? { checkpointRequired: true }
       : {}),
+    currentTurnDeliveryIntentIds:
+      collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome),
     failed: input.outcome.summary.failed,
     lastInputCursor: input.context.lastInputCursor,
     nextWakeAt: input.outcome.nextWakeAt,
@@ -493,6 +496,16 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     skipped: input.outcome.summary.skipped,
     stopScanning: input.outcome.stopScanning,
   }
+}
+
+function collectAssistantAutoReplyOutcomeDeliveryIntentIds(
+  outcome: AssistantAutoReplyGroupOutcome,
+): string[] {
+  const result =
+    outcome.artifact.kind === 'result' || outcome.artifact.kind === 'deferred'
+      ? outcome.artifact.result
+      : null
+  return result?.deliveryIntentId ? [result.deliveryIntentId] : []
 }
 
 async function writeAssistantAutoReplyOutcomeArtifacts(input: {
