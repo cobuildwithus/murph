@@ -559,7 +559,7 @@ function createCloudflareBrowserVaultReplicaPort(input: {
   };
 }
 
-async function createHostedBrowserVaultReplicaWriteHeaders(input: {
+export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
   browserVaultRefreshAuthority: boolean;
   dashboardReplicaSourceStateHash: string | null;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
@@ -583,7 +583,9 @@ async function createHostedBrowserVaultReplicaWriteHeaders(input: {
     return new Headers();
   }
 
-  throw new Error("Browser-vault replica write requires active lease or refresh authority.");
+  throw new Error(
+    "Hosted browser-vault replica write requires active lease or browser-vault refresh authority.",
+  );
 }
 
 function createCloudflareRuntimeLivenessPort(input: {

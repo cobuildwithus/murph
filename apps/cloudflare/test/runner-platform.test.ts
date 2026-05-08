@@ -19,7 +19,10 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-import { buildHostedExecutionRuntimePlatform } from "../src/runtime-platform.ts";
+import {
+  buildHostedExecutionRuntimePlatform,
+  createHostedBrowserVaultReplicaWriteHeaders,
+} from "../src/runtime-platform.ts";
 import {
   RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER,
 } from "../src/runner-outbound/browser-vault-refresh-authority.ts";
@@ -1432,6 +1435,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-runtime-attempt-id")).toBeNull();
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBeNull();
     await expect(request.json()).resolves.toEqual({ replica });
+  });
+
+  it("rejects browser-vault replica write headers without lease, source hash, or refresh authority", async () => {
+    await expect(
+      createHostedBrowserVaultReplicaWriteHeaders({
+        browserVaultRefreshAuthority: false,
+        dashboardReplicaSourceStateHash: null,
+        workspaceCheckpointBridge: null,
+      }),
+    ).rejects.toThrow(
+      "Hosted browser-vault replica write requires active lease or browser-vault refresh authority.",
+    );
   });
 
   it("rejects browser-vault replica writes when the workspace bridge has no active lease", async () => {
