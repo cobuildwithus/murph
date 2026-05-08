@@ -122,6 +122,7 @@ For the required `coverage-write` pass, also provide:
 ## Safety Rules
 
 - Do not overwrite, discard, or revert unrelated working-tree edits in the current checkout.
+- Do not create or switch git branches unless the user explicitly asks for that in the current task. Do not use branch changes as a workaround for dirty worktrees, deployment scope, or parallel work; preserve the current branch and stop/report the blocker instead.
 - Do not create, switch to, or land work in separate git worktrees or helper checkouts unless the user explicitly asks for that in the current task.
 - Do not use reset or checkout cleanup commands to prepare audit passes.
 - If an audit suggestion conflicts with pre-existing edits, leave the file untouched and escalate in handoff notes.

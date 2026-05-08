@@ -41,6 +41,7 @@ Then load only the task-relevant docs listed below.
 
 - Same-turn task completion counts as acceptance unless the user explicitly says `review first` or `do not commit`.
 - Preserve unrelated working-tree edits in the current checkout and never revert work you did not make.
+- Do not create or switch git branches unless the user explicitly asks for that in the current task. Do not use branch changes as a workaround for dirty worktrees, deployment scope, or parallel work; preserve the current branch and stop/report the blocker instead.
 - Do not create, switch to, or land work in separate git worktrees or helper checkouts unless the user explicitly asks for that in the current task. Use the current checkout plus this ledger/plan workflow for coordination instead.
 - Prefer narrow ledger rows and narrow plans.
 - Treat supplied patches as behavioral intent, not overwrite authority.

@@ -59,6 +59,7 @@ Always read these before repo code/docs/test/config work:
 - Do not weaken production runtime, auth, or env invariants for tests, smoke checks, or builds. Fix harnesses with test-only config or wrappers instead.
 - Follow the persisted-state placement gate in `agent-docs/operations/agent-workflow-routing.md` and `ARCHITECTURE.md`; user-facing or queryable product truth must not start in assistant runtime state.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
+- Do not create or switch git branches unless explicitly requested in the current task. Do not use branch changes as a workaround for dirty worktrees, deployment scope, or parallel work; preserve the current branch and stop/report the blocker instead.
 - Do not create, switch to, or land work in separate git worktrees or helper checkouts unless explicitly requested in the current task.
 
 ## Workflow Defaults
