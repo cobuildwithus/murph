@@ -605,6 +605,66 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
   })
 }
 
+export async function resetAssistantOutboxPreparedDispatch(input: {
+  deliveryIdempotencyKey?: string | null
+  deliveryTransportIdempotent: boolean
+  intent: AssistantOutboxIntent
+  intentPath: string
+  preparedAt?: string | null
+  resetAt: Date
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
+    if (
+      !current ||
+      (
+        current.status !== 'sending' &&
+        current.status !== 'retryable' &&
+        current.status !== 'failed'
+      )
+    ) {
+      return null
+    }
+    if (current.delivery || current.deliveryConfirmationPending) {
+      return null
+    }
+    if (!input.preparedAt || current.lastAttemptAt !== input.preparedAt) {
+      return null
+    }
+    if (current.deliveryTransportIdempotent !== input.deliveryTransportIdempotent) {
+      return null
+    }
+    const deliveryIdempotencyKey = input.deliveryIdempotencyKey ?? input.intent.deliveryIdempotencyKey
+    if (current.deliveryIdempotencyKey !== deliveryIdempotencyKey) {
+      return null
+    }
+
+    const resetAt = input.resetAt.toISOString()
+    const pendingIntent = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...current,
+        deliveryConfirmationPending: false,
+        updatedAt: resetAt,
+        nextAttemptAt: resetAt,
+        status: 'pending',
+        delivery: null,
+        lastError: null,
+      }),
+    )
+    await writeJsonFileAtomic(input.intentPath, pendingIntent)
+    await repairAssistantOutboxReceiptForIntent({
+      at: resetAt,
+      intent: pendingIntent,
+      vault: input.vault,
+    })
+    return pendingIntent
+  })
+}
+
 export async function markAssistantOutboxIntentMirrorRetryable(input: {
   error: unknown
   failedAt: Date

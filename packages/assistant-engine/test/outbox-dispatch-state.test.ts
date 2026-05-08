@@ -15,6 +15,7 @@ import {
   markAssistantOutboxIntentSent,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorTerminal,
+  resetAssistantOutboxPreparedDispatch,
   updateAssistantOutboxAfterDispatchFailure,
 } from '../src/assistant/outbox/dispatch-state.ts'
 import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
@@ -177,6 +178,163 @@ describe('assistant outbox dispatch-state', () => {
       expect(
         receipt?.timeline.filter((event) => event.kind === 'delivery.attempt.started'),
       ).toHaveLength(1)
+    })
+  })
+
+  it('resets prepared sending dispatches back to immediate pending when no delivery exists', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_reset',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_reset',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_reset',
+        vault,
+      })
+      const preparedAt = '2030-04-13T00:10:00.000Z'
+      const sending = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_reset',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: preparedAt,
+        vault,
+      })
+      expect(sending?.status).toBe('sending')
+
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
+      const resetAt = new Date('2030-04-13T00:10:03.000Z')
+      const reset = await resetAssistantOutboxPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_reset',
+        deliveryTransportIdempotent: false,
+        intent: sending!,
+        intentPath,
+        preparedAt,
+        resetAt,
+        vault,
+      })
+
+      expect(reset?.status).toBe('pending')
+      expect(reset?.delivery).toBe(null)
+      expect(reset?.deliveryConfirmationPending).toBe(false)
+      expect(reset?.lastError).toBe(null)
+      expect(reset?.nextAttemptAt).toBe(resetAt.toISOString())
+
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.status).toBe('pending')
+      expect(persisted?.nextAttemptAt).toBe(resetAt.toISOString())
+    })
+  })
+
+  it('does not reset prepared sending dispatches when the prepared attempt no longer matches', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_mismatch',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_mismatch',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_mismatch',
+        vault,
+      })
+      const sending = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_mismatch',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:10:00.000Z',
+        vault,
+      })
+
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
+      const reset = await resetAssistantOutboxPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_mismatch',
+        deliveryTransportIdempotent: false,
+        intent: sending!,
+        intentPath,
+        preparedAt: '2030-04-13T00:10:01.000Z',
+        resetAt: new Date('2030-04-13T00:10:03.000Z'),
+        vault,
+      })
+
+      expect(reset).toBe(null)
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.status).toBe('sending')
+      expect(persisted?.lastAttemptAt).toBe('2030-04-13T00:10:00.000Z')
+    })
+  })
+
+  it('resets matching prepared dispatch failure aftermath back to immediate pending', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_failed_reset',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_failed_reset',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_failed_reset',
+        vault,
+      })
+      const preparedAt = '2030-04-13T00:10:00.000Z'
+      const sending = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_failed_reset',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: preparedAt,
+        vault,
+      })
+      const failed = await saveAssistantOutboxIntent(vault, {
+        ...sending!,
+        lastError: assistantDeliveryErrorSchema.parse({
+          code: 'ASSISTANT_DELIVERY_ABORTED',
+          message: 'lease expired before provider dispatch',
+        }),
+        nextAttemptAt: null,
+        status: 'failed',
+        updatedAt: '2030-04-13T00:10:01.000Z',
+      })
+
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
+      const resetAt = new Date('2030-04-13T00:10:03.000Z')
+      const reset = await resetAssistantOutboxPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_failed_reset',
+        deliveryTransportIdempotent: false,
+        intent: failed,
+        intentPath,
+        preparedAt,
+        resetAt,
+        vault,
+      })
+
+      expect(reset?.status).toBe('pending')
+      expect(reset?.lastError).toBe(null)
+      expect(reset?.nextAttemptAt).toBe(resetAt.toISOString())
     })
   })
 

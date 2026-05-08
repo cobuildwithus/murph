@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
+  resetAssistantOutboxPreparedDispatchById: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
@@ -43,6 +44,8 @@ vi.mock("@murphai/assistant-engine", () => ({
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
+  resetAssistantOutboxPreparedDispatchById:
+    mocks.resetAssistantOutboxPreparedDispatchById,
   sendLinqMessage: mocks.sendLinqMessage,
   sendTelegramMessage: mocks.sendTelegramMessage,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
@@ -164,6 +167,7 @@ beforeEach(() => {
       status: "pending",
     }),
   );
+  mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValue(null);
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
 });
 
@@ -565,6 +569,207 @@ describe("hosted runtime callbacks", () => {
       }),
     ]);
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
+  it("resets a foreground prepared sending intent when abort happens before provider dispatch", async () => {
+    const abortController = new AbortController();
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_123",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_123",
+      payload: createPayload(),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_123",
+          deliveryTransportIdempotent: false,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    const sendTelegram = vi.fn();
+    const effectsPort = createHostedRuntimeEffectsPortStub({ sendTelegram });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      abortController.abort(new Error("lease expired before provider dispatch"));
+      try {
+        await request.dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "hello from hosted",
+          replyToMessageId: null,
+          target: "chat_123",
+        });
+      } catch {
+        return createDispatchResult(
+          {
+            lastError: {
+              code: "ASSISTANT_DELIVERY_ABORTED",
+              message: "lease expired before provider dispatch",
+            },
+            status: "retryable",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_ABORTED",
+            message: "lease expired before provider dispatch",
+          },
+        );
+      }
+      throw new Error("expected pre-provider abort");
+    });
+
+    await expect(
+      drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: [effect],
+        effectsPort,
+        signal: abortController.signal,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      }),
+    ).rejects.toThrow("lease expired before provider dispatch");
+
+    expect(sendTelegram).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      intentId: "intent_123",
+      preparedAt: "2026-04-08T00:00:05.000Z",
+      resetAt: expect.any(Date),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
+  it("keeps foreground sending state after abort once provider dispatch was entered", async () => {
+    const abortController = new AbortController();
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_123",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_123",
+      payload: createPayload(),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_123",
+          deliveryTransportIdempotent: false,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    const sendTelegram = vi.fn().mockImplementationOnce(async () => {
+      abortController.abort(new Error("lease expired after provider dispatch"));
+      return createDelivery();
+    });
+    const effectsPort = createHostedRuntimeEffectsPortStub({ sendTelegram });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      await request.dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: "chat_123",
+      });
+      return createDispatchResult({
+        delivery: createDelivery(),
+        status: "sent",
+      });
+    });
+
+    await expect(
+      drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: [effect],
+        effectsPort,
+        signal: abortController.signal,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      }),
+    ).rejects.toThrow("lease expired after provider dispatch");
+
+    expect(sendTelegram).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
+  it("keeps foreground Linq sending state after abort once provider dispatch was entered", async () => {
+    const abortController = new AbortController();
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_123",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_123",
+      payload: createPayload({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        explicitTarget: "linq_chat_123",
+        transportIdempotent: true,
+      }),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_123",
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    const sendLinq = vi.fn().mockImplementationOnce(async () => {
+      abortController.abort(new Error("lease expired after Linq provider dispatch"));
+      return createDelivery({
+        channel: "linq",
+        providerMessageId: "linq_message_123",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+    });
+    const effectsPort = createHostedRuntimeEffectsPortStub({ sendLinq });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      await request.dependencies.sendLinq({
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "linq" }),
+        status: "sent",
+      });
+    });
+
+    await expect(
+      drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: [effect],
+        effectsPort,
+        signal: abortController.signal,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      }),
+    ).rejects.toThrow("lease expired after Linq provider dispatch");
+
+    expect(sendLinq).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
   it("re-dispatches an idempotent stale sending mirror state instead of abandoning it", async () => {
