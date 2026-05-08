@@ -438,6 +438,116 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("does not wait for stale-replica refresh scheduling before returning the session response", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    let releaseSchedule: () => void = () => {};
+    const createBrowserVaultSession = vi.fn();
+    const scheduleBrowserVaultRefresh = vi.fn(() =>
+      new Promise<void>((resolve) => {
+        releaseSchedule = resolve;
+      }));
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: createReplicaRef(),
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
+    });
+
+    const responsePromise = browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+        sourceStateHash: "b".repeat(64),
+        userId: "member_123",
+      });
+    });
+    const responseOrBlocked = await Promise.race([
+      responsePromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
+    ]);
+    releaseSchedule();
+
+    expect(responseOrBlocked).toBeInstanceOf(Response);
+    const response = responseOrBlocked as Response;
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      freshness: "stale",
+      refreshPending: true,
+      state: "empty",
+      workspaceVersion: "1",
+    });
+  });
+
+  it("does not wait for missing-replica refresh scheduling before returning the empty session response", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    let releaseSchedule: () => void = () => {};
+    const createBrowserVaultSession = vi.fn();
+    const scheduleBrowserVaultRefresh = vi.fn(() =>
+      new Promise<void>((resolve) => {
+        releaseSchedule = resolve;
+      }));
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: null,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "2",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
+    });
+
+    const responsePromise = browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+        sourceStateHash: "b".repeat(64),
+        userId: "member_123",
+      });
+    });
+    const responseOrBlocked = await Promise.race([
+      responsePromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
+    ]);
+    releaseSchedule();
+
+    expect(responseOrBlocked).toBeInstanceOf(Response);
+    const response = responseOrBlocked as Response;
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      freshness: "stale",
+      refreshPending: true,
+      state: "empty",
+      workspaceVersion: "2",
+    });
+  });
+
   it("returns stale not_modified only to clients that opt in to stale replicas", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
