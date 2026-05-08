@@ -58,12 +58,11 @@ export class BrowserVaultRefreshCoordinator {
     };
   }
 
-  async schedulePending(input: { userId: string }): Promise<boolean> {
+  async schedulePending(input: { userId: string }): Promise<void> {
     await this.deps.stateStore.scheduleBrowserVaultRefresh();
     await this.scheduleContinuation({
       userId: input.userId,
     });
-    return false;
   }
 
   async tryStart(input: {
