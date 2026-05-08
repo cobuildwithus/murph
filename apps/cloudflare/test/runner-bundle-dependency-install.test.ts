@@ -166,6 +166,52 @@ describe("runner bundle lockfile policy", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("ignores named local tarball package keys in generated bundle lockfiles", async () => {
+    const tempDir = await createRuntimePackageRoot();
+    const bundleLockfilePath = path.join(tempDir, "bundle-pnpm-lock.yaml");
+    const rootLockfilePath = path.join(tempDir, "root-pnpm-lock.yaml");
+
+    await writeFile(
+      rootLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      bundleLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+        "  '@murphai/assistant-runtime@file:../tarballs/03-_murphai_assistant-runtime/murphai-assistant-runtime-1.0.0.tgz':",
+        "    resolution: {integrity: sha512-local-runtime}",
+        "",
+        "  'runner-helper@link:../local-helper':",
+        "    resolution: {integrity: sha512-local-helper}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      assertRunnerBundleLockfileUsesCommittedResolutions({
+        bundleLockfilePath,
+        rootLockfilePath,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("rejects generated bundle lockfiles with external package resolutions absent from the root lockfile", async () => {
     const tempDir = await createRuntimePackageRoot();
     const bundleLockfilePath = path.join(tempDir, "bundle-pnpm-lock.yaml");
@@ -250,6 +296,46 @@ describe("runner bundle lockfile policy", () => {
         rootLockfilePath,
       }),
     ).rejects.toThrow(/jose@6\.2\.2/u);
+  });
+
+  it("rejects external package keys that only include local peers in their suffix", async () => {
+    const tempDir = await createRuntimePackageRoot();
+    const bundleLockfilePath = path.join(tempDir, "bundle-pnpm-lock.yaml");
+    const rootLockfilePath = path.join(tempDir, "root-pnpm-lock.yaml");
+
+    await writeFile(
+      rootLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'react-helper@1.0.0(file:../tarballs/local-peer.tgz)':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      bundleLockfilePath,
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'react-helper@1.0.0(file:../tarballs/local-peer.tgz)':",
+        "    resolution: {integrity: sha512-drifted}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      assertRunnerBundleLockfileUsesCommittedResolutions({
+        bundleLockfilePath,
+        rootLockfilePath,
+      }),
+    ).rejects.toThrow(/react-helper@1\.0\.0/u);
   });
 });
 
