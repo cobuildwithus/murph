@@ -564,12 +564,12 @@ describe("HostedUserRunner runtime crypto context", () => {
       accepted: true,
       alreadyRunning: true,
       inFlight: true,
-      nextAlarmAt: "2026-04-27T00:00:45.100Z",
+      nextAlarmAt: "2026-04-27T00:00:01.100Z",
     });
-    expect(alarms).toEqual(["2026-04-27T00:00:45.100Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:01.100Z"]);
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toEqual(["2026-04-27T00:00:45.100Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:01.100Z"]);
 
     invocation.resolve({
       nextWakeAt: null,
@@ -580,7 +580,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
-      "2026-04-27T00:00:45.100Z",
+      "2026-04-27T00:00:01.100Z",
       "2026-04-27T00:00:01.100Z",
       "deleted",
     ]);
@@ -622,7 +622,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(activeRun).rejects.toThrow("active invocation failed");
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toContain("2026-04-27T00:00:45.100Z");
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
     expect(alarms).toContain("2026-04-27T00:00:30.100Z");
   });
 
@@ -652,7 +652,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       onSetAlarm: async ({ scheduledTimeIso }) => {
         if (
           releasedActiveDuringNudgeAlarm
-          || scheduledTimeIso !== "2026-04-27T00:00:45.100Z"
+          || scheduledTimeIso !== "2026-04-27T00:00:01.100Z"
         ) {
           return;
         }
@@ -677,7 +677,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(releasedActiveDuringNudgeAlarm).toBe(true);
     await expect(activeRun).rejects.toThrow("active invocation failed during nudge");
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toContain("2026-04-27T00:00:45.100Z");
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
     expect(alarms).toContain("2026-04-27T00:00:30.100Z");
   });
 
@@ -766,7 +766,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
-      "2026-04-27T00:00:45.100Z",
+      "2026-04-27T00:00:01.100Z",
       "2026-04-27T00:00:01.100Z",
       "deleted",
     ]);
@@ -823,7 +823,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(alarms).toEqual([
-      "2026-04-27T00:00:45.100Z",
+      "2026-04-27T00:00:01.100Z",
       "2026-04-27T00:00:01.100Z",
       "deleted",
     ]);
@@ -1208,7 +1208,94 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
   });
 
-  it("moves a pending nudge to the orphan check deadline when lease liveness clears orphan observation", async () => {
+  it("schedules a short drain continuation when a fresh nudge lands during a persisted active invocation in another isolate", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-26T23:59:59.500Z",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
+    expect(
+      sql.exec(
+        "SELECT in_flight, next_wake_at, pending_nudge FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 1,
+      next_wake_at: "2026-04-27T00:00:01.000Z",
+      pending_nudge: 1,
+    }]);
+  });
+
+  it("keeps persisted pending nudges on the short continuation alarm while another isolate is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        next_wake_at = ?,
+        pending_nudge = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-26T23:59:59.500Z",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
+    expect(
+      sql.exec(
+        "SELECT in_flight, next_wake_at, pending_nudge FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 1,
+      next_wake_at: "2026-04-27T00:00:01.000Z",
+      pending_nudge: 1,
+    }]);
+  });
+
+  it("moves a pending nudge to the drain continuation when lease liveness clears orphan observation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -1241,10 +1328,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       workspaceVersion: "0",
     })).resolves.toBe(true);
 
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
   });
 
-  it("moves a pending nudge to the orphan check deadline when checkpoint liveness clears orphan observation", async () => {
+  it("moves a pending nudge to the drain continuation when checkpoint liveness clears orphan observation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -1277,10 +1364,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       workspaceVersion: "1",
     })).resolves.toEqual({ recorded: true });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
   });
 
-  it("records heartbeat liveness and schedules pending work at the next orphan check deadline", async () => {
+  it("records heartbeat liveness and schedules pending work on the short drain continuation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -1312,12 +1399,12 @@ describe("HostedUserRunner runtime crypto context", () => {
       userId: "member_123",
     })).resolves.toEqual({
       inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
       ok: true,
       pendingNudge: true,
     });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
   });
 
   it("clears a persisted-only invocation after the last heartbeat grace and starts a replacement", async () => {
