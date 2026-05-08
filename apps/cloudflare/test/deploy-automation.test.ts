@@ -520,10 +520,12 @@ describe("hosted deploy automation helpers", () => {
       "description: Skip predeploy hosted-local E2E gates",
       "runner_idle_ttl_ms:",
       "description: Optional runner container idle TTL override in milliseconds",
-      "if: ${{ !inputs.skip_predeploy_e2e }}",
-      "if: ${{ !cancelled() && (inputs.skip_predeploy_e2e || (needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success')) }}",
+      "if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
+      "if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
+      "if: ${{ !cancelled() && (inputs.skip_predeploy_e2e || (needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}",
       "name: Linq delivery E2E gate",
       "name: Linq scheduled reminder E2E gate",
+      "name: Cloudflare verify and runner smoke gate",
       "pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live 2>&1 \\",
       "pnpm hosted-local e2e linq-delivery 2>&1 \\",
       "pnpm hosted-local e2e linq-scheduled-reminder 2>&1 \\",
@@ -532,6 +534,7 @@ describe("hosted deploy automation helpers", () => {
       "cloudflare-hosted-deploy-linq-scheduled-reminder-logs",
       "- linq-delivery-gate",
       "- linq-scheduled-reminder-gate",
+      "- cloudflare-runner-smoke-gate",
       "name: Start Postgres",
       "docker run \\",
       "--name \"${postgres_container}\"",
@@ -543,6 +546,8 @@ describe("hosted deploy automation helpers", () => {
       "uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5",
       "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
       "uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6",
+      "name: Prepare runner bundle and base image",
+      "run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base",
       "docker build \\",
       "--file Dockerfile.cloudflare-hosted-runner-base \\",
       "--tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \\",
@@ -581,6 +586,9 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT");
     expect(workflow).not.toContain("run: pnpm --dir apps/cloudflare deploy:artifacts");
     const prepareArtifactsStepIndex = workflow.indexOf("- name: Prepare deploy artifacts");
+    const blacksmithPrepareRunnerStepIndex = workflow.indexOf(
+      "- name: Prepare runner bundle and base image",
+    );
     const hostedCodexAuthGuardStepIndex = workflow.indexOf(
       "- name: Run hosted Codex auth deploy guard",
     );
@@ -591,20 +599,34 @@ describe("hosted deploy automation helpers", () => {
     const parallelChecksAndSmokeStepIndex = workflow.indexOf(
       "- name: Run focused Cloudflare checks and smoke runner container image",
     );
+    const validateGeneratedDeployBundleStepIndex = workflow.indexOf(
+      "- name: Validate generated Worker deploy bundle",
+    );
     const deployWorkerStepIndex = workflow.indexOf("- name: Deploy Worker");
     expect(prepareArtifactsStepIndex).toBeGreaterThanOrEqual(0);
+    expect(blacksmithPrepareRunnerStepIndex).toBeGreaterThanOrEqual(0);
     expect(hostedCodexAuthGuardStepIndex).toBeGreaterThanOrEqual(0);
     expect(validateDeployEnvStepIndex).toBeGreaterThanOrEqual(0);
     expect(prepareRunnerBaseImageStepIndex).toBeGreaterThanOrEqual(0);
     expect(parallelChecksAndSmokeStepIndex).toBeGreaterThanOrEqual(0);
+    expect(validateGeneratedDeployBundleStepIndex).toBeGreaterThanOrEqual(0);
     expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
+    expect(blacksmithPrepareRunnerStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
+    expect(parallelChecksAndSmokeStepIndex).toBeLessThan(hostedCodexAuthGuardStepIndex);
     expect(hostedCodexAuthGuardStepIndex).toBeLessThan(validateDeployEnvStepIndex);
-    expect(prepareArtifactsStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
-    expect(prepareRunnerBaseImageStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
-    expect(workflow.indexOf("- name: Validate generated Worker deploy bundle")).toBeLessThan(
-      parallelChecksAndSmokeStepIndex,
+    expect(prepareArtifactsStepIndex).toBeLessThan(prepareRunnerBaseImageStepIndex);
+    expect(prepareRunnerBaseImageStepIndex).toBeLessThan(validateGeneratedDeployBundleStepIndex);
+    expect(validateGeneratedDeployBundleStepIndex).toBeLessThan(deployWorkerStepIndex);
+    const cloudflareRunnerSmokeGateStartIndex = workflow.indexOf("  cloudflare-runner-smoke-gate:");
+    const deployJobStartIndex = workflow.indexOf("\n  deploy:", cloudflareRunnerSmokeGateStartIndex);
+    expect(cloudflareRunnerSmokeGateStartIndex).toBeGreaterThanOrEqual(0);
+    expect(deployJobStartIndex).toBeGreaterThan(cloudflareRunnerSmokeGateStartIndex);
+    expect(workflow.slice(cloudflareRunnerSmokeGateStartIndex, deployJobStartIndex)).not.toContain(
+      "\n    environment:",
     );
-    expect(parallelChecksAndSmokeStepIndex).toBeLessThan(deployWorkerStepIndex);
+    expect(workflow.slice(cloudflareRunnerSmokeGateStartIndex, deployJobStartIndex)).not.toContain(
+      "\n    secrets:",
+    );
     expect(workflow).toContain(
       "- name: Show generated artifact paths\n        if: ${{ inputs.deploy_worker }}\n        run: ls -lah apps/cloudflare/.deploy",
     );
@@ -613,7 +635,7 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
-    ]).toHaveLength(3);
+    ]).toHaveLength(4);
     expect([...workflow.matchAll(/runs-on: ubuntu-24\.04/gmu)]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
