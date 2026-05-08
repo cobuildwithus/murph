@@ -7,6 +7,7 @@ import {
   readDashboardReplicaSourceStateHash,
 } from "@murphai/hosted-execution/dashboard-replica";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
+import { after } from "next/server";
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
@@ -64,10 +65,12 @@ export function createBrowserVaultSessionRoute(input: {
     });
 
     if (!replicaRef) {
-      void scheduleDashboardReplicaRefreshBestEffort({
-        sourceStateHash,
-        userId: auth.member.id,
-      });
+      scheduleAfterResponseOrFireAndForget(() =>
+        scheduleDashboardReplicaRefreshBestEffort({
+          sourceStateHash,
+          userId: auth.member.id,
+        }),
+      );
       return emptyBrowserVaultSession({
         refreshPending: sourceStateHash !== null,
         workspaceVersion,
@@ -75,10 +78,12 @@ export function createBrowserVaultSessionRoute(input: {
     }
 
     if (freshness === "stale") {
-      void scheduleDashboardReplicaRefreshBestEffort({
-        sourceStateHash,
-        userId: auth.member.id,
-      });
+      scheduleAfterResponseOrFireAndForget(() =>
+        scheduleDashboardReplicaRefreshBestEffort({
+          sourceStateHash,
+          userId: auth.member.id,
+        }),
+      );
       if (!acceptStaleReplica) {
         return emptyBrowserVaultSession({
           refreshPending: sourceStateHash !== null,
@@ -142,6 +147,14 @@ export function createBrowserVaultSessionRoute(input: {
       throw error;
     }
   });
+}
+
+function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
 }
 
 function emptyBrowserVaultSession(input: {
