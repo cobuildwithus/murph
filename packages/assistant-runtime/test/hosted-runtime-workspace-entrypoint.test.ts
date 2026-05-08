@@ -47,7 +47,20 @@ import { describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   ensureHostedInboxSidecarReady: vi.fn(),
+  snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
+
+vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/runtime-state/node")>();
+
+  return {
+    ...actual,
+    snapshotHostedPortableWorkspaceDelta:
+      mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(
+        actual.snapshotHostedPortableWorkspaceDelta,
+      ),
+  };
+});
 
 vi.mock("../src/hosted-runtime/context.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/hosted-runtime/context.ts")>();
@@ -1450,19 +1463,31 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.equal(livenessTouches, 0);
   });
 
-  test("normal foreground turns complete even when checkpoint construction and checkpointing would fail", async () => {
+  test("normal foreground turns complete even when checkpoint construction or checkpointing would fail or hang", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const createCheckpointSnapshot = vi.fn(async () => {
       throw new Error("Foreground test should not build checkpoint snapshots.");
     });
-    const restoreBuilder =
-      mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.getMockImplementation();
-    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockClear();
-    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(() => {
+    const createRequest = vi.fn(() => {
       throw new Error("Foreground test should not build checkpoint requests.");
     });
+    const restoreBuilder =
+      mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.getMockImplementation();
+    const restorePortableSnapshot =
+      mocks.snapshotHostedPortableWorkspaceDelta.getMockImplementation();
+    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockClear();
+    mocks.snapshotHostedPortableWorkspaceDelta.mockClear();
+    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(() => {
+      return { createRequest };
+    });
+    mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(() => {
+      throw new Error("Foreground test should not snapshot portable workspace deltas.");
+    });
+    const checkpointStarted = createDeferred<void>();
+    const checkpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     const workspacePort = {
       async read(): Promise<HostedWorkspaceReadResponse> {
@@ -1475,47 +1500,72 @@ describe("hosted workspace runtime entrypoint", () => {
       async checkpoint(request: HostedWorkspaceCheckpointRequest): Promise<HostedWorkspaceCheckpointResponse> {
         events.push("workspace.checkpoint");
         checkpointRequests.push(request);
-        throw new Error("Foreground test should not call the real workspace checkpoint port.");
+        checkpointStarted.resolve();
+        return await checkpointResponse.promise;
       },
     };
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      await expect(
-        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
-          createCheckpointSnapshot,
-          async importItem() {
-            throw new Error("Import should not run without mailbox items.");
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        createCheckpointSnapshot,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({ events, items: [] }),
             workspacePort,
           }),
           async runAssistantPhase() {
+            events.push("assistant.phase");
             return {
               checkpointReason: "assistant_runtime_commit",
               progressed: true,
             };
-          },
-          vaultRoot,
-        }),
-      ).resolves.toMatchObject({
+        },
+        vaultRoot,
+      });
+
+      await expect(Promise.race([
+        resultPromise,
+        checkpointStarted.promise.then(() => ({
+          status: "checkpoint_called",
+        })),
+      ])).resolves.toMatchObject({
         status: "idle",
       });
 
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
+        "assistant.phase",
       ]);
       assert.deepEqual(checkpointRequests, []);
       expect(mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder).not.toHaveBeenCalled();
+      expect(createRequest).not.toHaveBeenCalled();
+      expect(mocks.snapshotHostedPortableWorkspaceDelta).not.toHaveBeenCalled();
       expect(createCheckpointSnapshot).not.toHaveBeenCalled();
     } finally {
       if (restoreBuilder) {
         mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(
           restoreBuilder,
         );
+      }
+      if (restorePortableSnapshot) {
+        mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(
+          restorePortableSnapshot,
+        );
+      }
+      checkpointResponse.resolve({
+        checkpointed: true,
+        workspace: createWorkspaceState({ version: "1" }),
+      });
+      if (resultPromise) {
+        await Promise.race([
+          resultPromise.catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 10)),
+        ]);
       }
       await rm(vaultRoot, { force: true, recursive: true });
     }

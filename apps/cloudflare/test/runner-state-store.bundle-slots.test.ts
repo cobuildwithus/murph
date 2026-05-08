@@ -267,7 +267,7 @@ describe("RunnerStateStore schema guard", () => {
     vi.useRealTimers();
   });
 
-  it("does not clear a newer pending dashboard refresh scheduled in the same millisecond", async () => {
+  it("does not clear a newer pending browser-vault refresh scheduled in the same millisecond", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
     const { store } = createRunnerStateStoreHarness();

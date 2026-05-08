@@ -151,6 +151,34 @@ describe("hosted browser vault replica store", () => {
     ).toThrow("Browser vault replica.schema must be murph.browser-vault-replica.");
   });
 
+  it("rejects invalid replica timestamps before writing encrypted objects", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const store = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey: createTestRootKey(40),
+      rootKeyId: "runtime-root-current",
+      userId: "user_123",
+    });
+    const replica = await createBrowserVaultReplica({
+      generatedAt: "2026-04-17T00:00:00.000Z",
+      sourceBundleHash: "a".repeat(64),
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+
+    await expect(store.writeBrowserVaultReplica({
+      replica: {
+        ...replica,
+        generatedAt: "not-a-date",
+      },
+      userId: "user_123",
+    })).rejects.toThrow("Browser vault replica generatedAt must be a valid ISO-8601 timestamp.");
+    expect(bucket.objects.size).toBe(0);
+  });
+
   it("derives browser-vault replica keys from the ref runtime root id across rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldRootKey = createTestRootKey(30);

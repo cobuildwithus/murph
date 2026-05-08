@@ -508,7 +508,22 @@ function isOlderBrowserVaultReplicaRef(input: {
     "Hosted browser-vault replica publish current generatedAt",
   );
 
-  return nextGeneratedAt < currentGeneratedAt;
+  if (nextGeneratedAt < currentGeneratedAt) {
+    return true;
+  }
+
+  if (nextGeneratedAt > currentGeneratedAt) {
+    return false;
+  }
+
+  return !browserVaultReplicaRefsMatch(current, input.next);
+}
+
+function browserVaultReplicaRefsMatch(
+  current: HostedBrowserVaultReplicaRef,
+  next: HostedBrowserVaultReplicaRef,
+): boolean {
+  return JSON.stringify(current) === JSON.stringify(next);
 }
 
 function parseBrowserVaultReplicaGeneratedAt(value: string, label: string): number {

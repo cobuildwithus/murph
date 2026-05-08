@@ -1889,7 +1889,7 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("passes AbortSignal values through browser-vault refresh container RPC", async () => {
+  it("keeps AbortSignal values local to browser-vault refresh container RPC", async () => {
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async () => ({ status: "already_fresh" }));
@@ -1923,9 +1923,52 @@ describe("RunnerContainer", () => {
 
     expect(getByName).toHaveBeenCalledWith("member_123");
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
-    expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).toMatchObject({
-      signal,
+    expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).not.toHaveProperty("signal");
+  });
+
+  it("rejects local browser-vault refresh waits when the caller aborts", async () => {
+    let resolveRefresh!: (value: { status: "already_fresh" }) => void;
+    const activeRefresh = new Promise<{ status: "already_fresh" }>((resolve) => {
+      resolveRefresh = resolve;
     });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => await activeRefresh);
+    const controller = new AbortController();
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      async destroyInstance() {},
+      async invoke() {
+        return createRunnerResult();
+      },
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      refreshBrowserVaultReplica,
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    const refresh = refreshHostedExecutionContainerBrowserVaultReplica({
+      runnerContainerNamespace: { getByName },
+      runtime: {},
+      signal: controller.signal,
+      timeoutMs: 45_000,
+      userId: "member_123",
+    });
+    controller.abort(new Error("refresh preempted"));
+
+    await expect(refresh).rejects.toThrow("refresh preempted");
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).not.toHaveProperty("signal");
+
+    resolveRefresh({ status: "already_fresh" });
+    await activeRefresh;
   });
 
   it("resolves runner container names from worker version metadata", () => {

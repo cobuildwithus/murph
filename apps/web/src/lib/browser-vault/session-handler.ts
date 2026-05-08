@@ -50,7 +50,7 @@ export function createBrowserVaultSessionRoute(input: {
 
     if (!replicaRef) {
       scheduleAfterResponseOrFireAndForget(() =>
-        scheduleDashboardReplicaRefreshBestEffort({ userId: auth.member.id }),
+        scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
       );
       return emptyBrowserVaultSession({
         refreshPending: true,
@@ -139,7 +139,7 @@ function emptyBrowserVaultSession(input: {
   });
 }
 
-async function scheduleDashboardReplicaRefreshBestEffort(input: {
+async function scheduleBrowserVaultRefreshBestEffort(input: {
   userId: string;
 }): Promise<void> {
   try {
@@ -152,6 +152,6 @@ async function scheduleDashboardReplicaRefreshBestEffort(input: {
       userId: input.userId,
     });
   } catch {
-    // Dashboard freshness is a best-effort derived read-model refresh.
+    // Browser-vault freshness is a best-effort derived read-model refresh.
   }
 }
