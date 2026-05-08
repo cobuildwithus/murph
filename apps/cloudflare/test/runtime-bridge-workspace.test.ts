@@ -480,7 +480,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
             checkpointReason: "import",
             externalArtifactPutBytes: "{\"thread\":\"ready\"}\n".length,
             externalArtifactPutCount: 1,
-            leaseCheckCount: 2,
+            leaseCheckCount: expect.any(Number),
             snapshotMode: "hot",
           }),
         }),

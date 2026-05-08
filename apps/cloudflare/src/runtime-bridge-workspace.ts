@@ -518,6 +518,14 @@ async function createHostedWorkspaceBridgeHotStateCheckpointSnapshot(input: {
       let snapshot: Awaited<ReturnType<typeof snapshotHostedAssistantRuntimeHotState>>;
       try {
         snapshot = await snapshotHostedAssistantRuntimeHotState({
+          assertSnapshotLive: async () => {
+            leaseCheckCount += 1;
+            assertHostedWorkspaceBridgeCheckpointLease({
+              lease: await input.readCurrentLease(),
+              request: input.request,
+              userId: input.userId,
+            });
+          },
           codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
           codexContinuityArtifactRefProvider,
           codexContinuityArtifactSink: async (artifact) => {
