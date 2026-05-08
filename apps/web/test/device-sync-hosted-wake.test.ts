@@ -533,21 +533,32 @@ describe("appendHostedDeviceSyncWake", () => {
     });
   });
 
-  it("maps device-sync nudge workflow start failures to a retryable device-sync error", async () => {
+  it("keeps committed wakes when the post-commit nudge workflow start fails", async () => {
     mocks.startHostedWebhookNudgeWorkflow.mockRejectedValue(new Error("workflow unavailable"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    await expect(appendHostedDeviceSyncWake({
-      connectionId: "dsc_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      provider: "oura",
-      source: "connection-established",
-      userId: "user-123",
-    })).rejects.toMatchObject({
-      code: "HOSTED_DEVICE_SYNC_NUDGE_WORKFLOW_START_RETRY_REQUIRED",
-      httpStatus: 503,
-      message: "Hosted device-sync wake is temporarily unavailable.",
-      retryable: true,
-    });
+    try {
+      await expect(appendHostedDeviceSyncWake({
+        connectionId: "dsc_123",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        provider: "oura",
+        source: "connection-established",
+        userId: "user-123",
+      })).resolves.toEqual({
+        wakeAppended: true,
+      });
+
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted device-sync wake workflow start failed after mailbox append.",
+        {
+          code: "HOSTED_DEVICE_SYNC_NUDGE_WORKFLOW_START_FAILED",
+          mailboxItemIdPresent: true,
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("uses the dedicated device-sync wake path for disconnect events", async () => {

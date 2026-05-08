@@ -453,6 +453,40 @@ test(
         requireData(showLoggedWorkout).entity.data.note,
         '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
       )
+
+      const editedMediaOnly = await runCli<ShowEnvelope>([
+        'workout',
+        'edit',
+        requireData(logFormat).eventId,
+        '--workout-media',
+        'kind=photo;relativePath=raw/workouts/2026/03/push-day-a/photo.jpg;mediaType=image/jpeg',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(editedMediaOnly.ok, true)
+      const editedWorkout = requireData(editedMediaOnly).entity.data.workout
+      assert.deepEqual(
+        summarizeWorkoutExercises(
+          typeof editedWorkout === 'object' && editedWorkout !== null
+            ? (editedWorkout as Record<string, unknown>)
+            : null,
+        ),
+        [
+          {
+            exercise: 'pushups',
+            setCount: 4,
+            repsPerSet: 20,
+          },
+          {
+            exercise: 'incline bench',
+            setCount: 4,
+            repsPerSet: 12,
+            load: 65,
+            loadUnit: 'lb',
+            loadDescription: '45 lb bar plus 10 lb plates on both sides',
+          },
+        ],
+      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

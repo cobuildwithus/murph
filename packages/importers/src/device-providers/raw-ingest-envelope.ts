@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 
+export type WearableRawIngestJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | WearableRawIngestJsonValue[]
+  | { [key: string]: WearableRawIngestJsonValue };
+
 export type WearableRawIngestSourceKind = "poll" | "webhook" | "sdk" | "xml" | "manual";
 export type WearableRawIngestDeliveryMode =
   | "full_payload"
@@ -27,7 +35,7 @@ export interface WearableRawIngestEnvelope {
   cursor?: string;
   signatureVerified?: boolean;
   payloadHash: string;
-  payload: unknown;
+  payload: WearableRawIngestJsonValue;
 }
 
 export interface BuildWearableRawIngestEnvelopeInput {
@@ -54,7 +62,8 @@ export function buildWearableRawIngestEnvelope(
   input: BuildWearableRawIngestEnvelopeInput,
 ): WearableRawIngestEnvelope {
   const observedAt = input.observedAt ?? new Date().toISOString();
-  const payloadHash = sha256Hex(stableStringify(input.payload));
+  const payload = normalizeWearableRawIngestJsonPayload(input.payload);
+  const payloadHash = sha256Hex(stableStringify(payload));
   const id = buildWearableRawIngestEnvelopeId({
     provider: input.provider,
     accountId: input.accountId,
@@ -85,7 +94,7 @@ export function buildWearableRawIngestEnvelope(
     cursor: input.cursor,
     signatureVerified: input.signatureVerified,
     payloadHash,
-    payload: input.payload,
+    payload,
   });
 }
 
@@ -103,10 +112,40 @@ function buildWearableRawIngestEnvelopeId(input: {
 }
 
 export function stableStringify(value: unknown): string {
-  return JSON.stringify(sortJsonValue(value));
+  return JSON.stringify(sortJsonValue(normalizeWearableRawIngestJsonPayload(value)));
 }
 
-function sortJsonValue(value: unknown): unknown {
+function normalizeWearableRawIngestJsonPayload(value: unknown): WearableRawIngestJsonValue {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new TypeError("Wearable raw ingest payload must contain only finite JSON numbers.");
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeWearableRawIngestJsonPayload);
+  }
+  if (isPlainJsonObject(value)) {
+    const normalized: { [key: string]: WearableRawIngestJsonValue } = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== undefined) {
+        normalized[key] = normalizeWearableRawIngestJsonPayload(entry);
+      }
+    }
+    return normalized;
+  }
+
+  throw new TypeError("Wearable raw ingest payload must be JSON-serializable.");
+}
+
+function sortJsonValue(value: WearableRawIngestJsonValue): WearableRawIngestJsonValue {
   if (!value || typeof value !== "object") {
     return value;
   }
@@ -116,10 +155,18 @@ function sortJsonValue(value: unknown): unknown {
   }
 
   return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
+    Object.entries(value)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => [key, sortJsonValue(entry)]),
   );
+}
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function sha256Hex(value: string): string {

@@ -599,6 +599,17 @@ describe("record service seams", () => {
                   },
                 },
               })
+            : lookup === "meal_photo_1"
+              ? sampleQueryRecord({
+                  kind: "meal",
+                  family: "event",
+                  entityId: "meal_1",
+                  primaryLookupId: "meal_1",
+                  path: "raw/meals/meal_1/meal.md",
+                  attributes: {
+                    documentPath: "raw/meals/meal_1/manifest.json",
+                  },
+                })
             : null,
       ),
       listEntities: vi.fn(() => [
@@ -674,6 +685,15 @@ describe("record service seams", () => {
     assert.equal(editedDocument.entity.id, "doc_1");
     const shownMeal = await documentMeal.showMealRecord("./vault", "meal_1");
     assert.equal(shownMeal.entity.id, "meal_1");
+    await assert.rejects(
+      () => documentMeal.showMealRecord("./vault", "meal_photo_1"),
+      (error: unknown) => {
+        const errorObject = asObject(error);
+        return error instanceof Error &&
+          errorObject?.code === "not_found" &&
+          error.message === 'No meal found for "meal_photo_1".';
+      },
+    );
     assert.deepEqual(shownMeal.entity.data.nutrition, {
       totals: {
         calories: 620,
@@ -713,6 +733,75 @@ describe("record service seams", () => {
 
     assert.equal(editEventRecord.mock.calls.length, 2);
     assert.equal(deleteEventRecord.mock.calls.length, 1);
+  });
+
+  test("event mutations require the requested id to identify the event directly", async () => {
+    const queryRuntime = {
+      readVault: vi.fn(async () => ({ vault: "./vault" })),
+      lookupEntityById: vi.fn((_readModel: unknown, lookup: string) =>
+        lookup === "media_1"
+          ? sampleQueryRecord({
+              kind: "activity_session",
+              family: "event",
+              entityId: "evt_1",
+              primaryLookupId: "evt_1",
+              lookupIds: ["evt_1", "media_1"],
+              path: "ledger/events/2026/2026-03.jsonl",
+              attributes: {
+                id: "evt_1",
+                kind: "activity_session",
+                title: "Ride",
+                occurredAt: "2026-03-12T12:00:00.000Z",
+              },
+            })
+          : null,
+      ),
+    };
+    const upsertEvent = vi.fn();
+    const deleteEvent = vi.fn();
+    const eventMutations = await importWithMocks<
+      typeof import("../src/usecases/event-record-mutations.ts")
+    >("../src/usecases/event-record-mutations.ts", {
+      "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
+        ...actual,
+        loadQueryRuntime: vi.fn(async () => queryRuntime),
+      })),
+      "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
+        ...actual,
+        loadRuntimeModule: vi.fn(async () => ({
+          upsertEvent,
+          deleteEvent,
+        })),
+      })),
+    });
+
+    await assert.rejects(
+      () =>
+        eventMutations.editEventRecord({
+          vault: "./vault",
+          lookup: "media_1",
+          entityLabel: "event",
+          set: ["title=Updated"],
+        }),
+      (error: unknown) =>
+        error instanceof Error &&
+        asObject(error)?.code === "not_found" &&
+        error.message === 'No event found for "media_1".',
+    );
+    await assert.rejects(
+      () =>
+        eventMutations.deleteEventRecord({
+          vault: "./vault",
+          lookup: "media_1",
+          entityLabel: "event",
+        }),
+      (error: unknown) =>
+        error instanceof Error &&
+        asObject(error)?.code === "not_found" &&
+        error.message === 'No event found for "media_1".',
+    );
+    assert.equal(upsertEvent.mock.calls.length, 0);
+    assert.equal(deleteEvent.mock.calls.length, 0);
   });
 
   test("document and workout manifest reads resolve vault-owned manifests through the shared path-safe seam", async () => {

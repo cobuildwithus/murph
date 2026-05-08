@@ -41,6 +41,9 @@ import {
   type GarminActivityNormalizationContext,
 } from "../src/device-providers/garmin-activity-normalizers.ts";
 import {
+  buildWearableRawIngestEnvelope,
+} from "../src/device-providers/raw-ingest-envelope.ts";
+import {
   normalizeGarminDailySummaries,
   normalizeGarminSleeps,
   normalizeGarminWomenHealth,
@@ -206,6 +209,12 @@ describe("garmin provider coverage", () => {
       },
       checksum: "abc123",
     };
+    const binaryLikeFile = {
+      activityId: "activity-2",
+      fileType: "fit",
+      fileName: "activity-2.fit",
+      content: new Uint8Array([1, 2, 3]),
+    };
     const anonymousDescriptorFile = {
       fileName: "route.fit",
     };
@@ -213,10 +222,11 @@ describe("garmin provider coverage", () => {
     const roles = normalizeGarminActivityFiles(rawArtifacts, [
       descriptorFile,
       contentFile,
+      binaryLikeFile,
       anonymousDescriptorFile,
     ]);
 
-    expect(rawArtifacts).toHaveLength(3);
+    expect(rawArtifacts).toHaveLength(4);
     expect(rawArtifacts[0]).toMatchObject({
       role: "activity-asset:activity-1:fit",
       fileName: "activity-1-fit-asset-descriptor.json",
@@ -229,7 +239,13 @@ describe("garmin provider coverage", () => {
         source: "device",
       },
     });
-    expect(rawArtifacts[0].content).toBe(descriptorFile);
+    expect(rawArtifacts[0].content).toEqual({
+      activityId: "activity-1",
+      descriptorOnly: true,
+      fileName: "activity.fit",
+      fileType: "fit",
+    });
+    expect(rawArtifacts[0].content).not.toHaveProperty("content");
     expect(rawArtifacts[1]).toMatchObject({
       role: "activity-asset:activity-1:json",
       fileName: "activity.json",
@@ -244,6 +260,27 @@ describe("garmin provider coverage", () => {
       },
     });
     expect(rawArtifacts[2]).toMatchObject({
+      role: "activity-asset:activity-2:fit",
+      fileName: "activity-2-fit-asset-descriptor.json",
+      mediaType: "application/json",
+      metadata: {
+        activityId: "activity-2",
+        intendedFileType: "fit",
+        intendedFileName: "activity-2.fit",
+        intendedMediaType: "application/octet-stream",
+      },
+    });
+    expect(rawArtifacts[2].content).toMatchObject({
+      activityId: "activity-2",
+      fileType: "fit",
+      fileName: "activity-2.fit",
+      byteLength: 3,
+      descriptorOnly: true,
+    });
+    expect(rawArtifacts[2].content).not.toHaveProperty("content");
+    expect(rawArtifacts[2].content).not.toHaveProperty("payload");
+    expect(rawArtifacts[2].content).not.toHaveProperty("data");
+    expect(rawArtifacts[3]).toMatchObject({
       role: "activity-asset:unknown:fit-1",
       fileName: "activity-asset-1-fit-descriptor.json",
       mediaType: "application/json",
@@ -252,6 +289,7 @@ describe("garmin provider coverage", () => {
       "activity-asset:activity-1:fit",
       "activity-asset:activity-1:json",
     ]);
+    expect(roles.get("activity-2")).toEqual(["activity-asset:activity-2:fit"]);
 
     const context = makeActivityContext();
     normalizeGarminActivities(context, [
@@ -290,6 +328,30 @@ describe("garmin provider coverage", () => {
     ]);
 
     expect(context.events.some((event) => event.kind === "activity_session" && event.externalRef?.resourceId === "activity-2")).toBe(false);
+  });
+
+  it("rejects non-JSON raw ingest payloads before hashing", () => {
+    expect(() =>
+      buildWearableRawIngestEnvelope({
+        provider: "garmin",
+        payload: {
+          id: "activity-1",
+          binary: new Uint8Array([1, 2, 3]),
+        },
+      }),
+    ).toThrow(/JSON-serializable/u);
+
+    const envelope = buildWearableRawIngestEnvelope({
+      provider: "garmin",
+      payload: {
+        id: "activity-1",
+        omitted: undefined,
+      },
+    });
+
+    expect(envelope.payload).toEqual({
+      id: "activity-1",
+    });
   });
 
   it("covers Garmin health timing fallbacks, sleep stage sampling, and aggregate stage durations", () => {

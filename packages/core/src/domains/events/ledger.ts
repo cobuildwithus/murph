@@ -331,16 +331,20 @@ function extractRetainedPaths(record: EventRecord): string[] {
   return [...retained].sort((left, right) => left.localeCompare(right));
 }
 
-function canWriteEventKind(
+function canWriteEventKind(input: {
   kind: EventRecord["kind"],
-  matchedShards: readonly LoadedEventLedgerShard[],
+  latestMatchedEvent: MatchedEventRecord | null,
   allowSpecializedKindRewrite: boolean | undefined,
-): boolean {
+}): boolean {
+  const { kind, latestMatchedEvent, allowSpecializedKindRewrite } = input;
   if (PUBLIC_EVENT_WRITE_KINDS.has(kind)) {
     return true;
   }
 
-  return allowSpecializedKindRewrite === true && matchedShards.length > 0;
+  return allowSpecializedKindRewrite === true &&
+    latestMatchedEvent !== null &&
+    latestMatchedEvent.record.kind === kind &&
+    !isDeletedEventSpineRecord(latestMatchedEvent.record);
 }
 
 function isDraftUpsertInput(input: UpsertEventInput): input is UpsertEventDraftInput {
@@ -362,20 +366,29 @@ export async function upsertEvent(
       ? []
       : await loadEventLedgerShardsById(input.vaultRoot, suppliedEventId);
 
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
   if (
-    !canWriteEventKind(
-      kind,
-      matchedShards,
-      input.allowSpecializedKindRewrite,
-    )
+    suppliedEventId !== undefined &&
+    latestMatchedEvent !== null &&
+    !isDeletedEventSpineRecord(latestMatchedEvent.record) &&
+    latestMatchedEvent.record.kind !== kind
   ) {
+    throw new VaultError(
+      "EVENT_KIND_MISMATCH",
+      `Event "${suppliedEventId}" is already kind "${latestMatchedEvent.record.kind}" and cannot be rewritten as "${kind}".`,
+    );
+  }
+  if (!canWriteEventKind({
+    allowSpecializedKindRewrite: input.allowSpecializedKindRewrite,
+    kind,
+    latestMatchedEvent,
+  })) {
     throw new VaultError(
       "EVENT_KIND_INVALID",
       `Event kind "${kind}" is not supported by generic event upsert.`,
     );
   }
 
-  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
   const lifecycle = buildEventSpineLifecycle(
     latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
   );

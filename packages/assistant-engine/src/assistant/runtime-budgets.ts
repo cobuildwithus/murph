@@ -286,9 +286,7 @@ async function pruneAssistantQuarantinePair(
     return 0
   }
 
-  const payloadPath =
-    metadata?.quarantinedPath ??
-    metadataPath.slice(0, -QUARANTINE_METADATA_SUFFIX.length)
+  const payloadPath = metadataPath.slice(0, -QUARANTINE_METADATA_SUFFIX.length)
   await Promise.all([
     rm(metadataPath, {
       force: true,

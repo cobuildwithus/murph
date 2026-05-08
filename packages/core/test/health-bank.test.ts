@@ -542,6 +542,28 @@ test("goals normalize repeated links and reject self-referential windows", async
     () =>
       upsertGoal({
         vaultRoot,
+        title: "Mismatched explicit related link",
+        window: {
+          startAt: "2026-03-04",
+        },
+        links: invalidTestValue<Parameters<typeof upsertGoal>[0]["links"]>([
+          {
+            type: "related_goal",
+            targetId: "exp_01JNYB6M9A6W4K2N8P3Q7R5S4F",
+          },
+        ]),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "links.targetId[0] must match goal_<ULID>.",
+  );
+  assert.equal((await listGoals(vaultRoot)).length, 3);
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
         title: "Backwards window",
         window: {
           startAt: "2026-03-10",
@@ -2807,6 +2829,27 @@ test("regimens normalize repeated relations, support ingredient edge cases, and 
   assert.match(clearedRead.document.markdown, /## Related Goals[\s\S]*- none/);
   assert.match(clearedRead.document.markdown, /## Related Conditions[\s\S]*- none/);
   assert.match(clearedRead.document.markdown, /## Related Regimens[\s\S]*- none/);
+
+  await assert.rejects(
+    () =>
+      upsertRegimen({
+        vaultRoot,
+        title: "Mismatched explicit goal link",
+        kind: "supplement",
+        startedOn: "2026-03-04",
+        links: invalidTestValue<Parameters<typeof upsertRegimen>[0]["links"]>([
+          {
+            type: "supports_goal",
+            targetId: peerRegimen.record.entity.regimenId,
+          },
+        ]),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "links.targetId[0] must match goal_<ULID>.",
+  );
+  assert.equal((await listRegimens(vaultRoot)).length, 2);
 
   await assert.rejects(
     () =>

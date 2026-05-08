@@ -75,6 +75,22 @@ function ensureExpectedEventKind(
   )
 }
 
+function eventRecordMatchesDirectLookup(
+  record: QueryCanonicalEntity,
+  lookup: string,
+): boolean {
+  const normalizedLookup = lookup.trim()
+  const attributeId = isJsonObject(record.attributes) && typeof record.attributes.id === 'string'
+    ? record.attributes.id.trim()
+    : ''
+  return normalizedLookup.length > 0 &&
+    (
+      normalizedLookup === record.entityId ||
+      normalizedLookup === record.primaryLookupId ||
+      (attributeId.length > 0 && normalizedLookup === attributeId)
+    )
+}
+
 async function requireEventRecord(
   input: EventRecordMutationLookupInput,
 ): Promise<QueryCanonicalEntity> {
@@ -83,6 +99,13 @@ async function requireEventRecord(
   const record = query.lookupEntityById(readModel, input.lookup)
 
   if (!record || record.family !== 'event') {
+    throw new VaultCliError(
+      'not_found',
+      `No ${input.entityLabel} found for "${input.lookup}".`,
+    )
+  }
+
+  if (!eventRecordMatchesDirectLookup(record, input.lookup)) {
     throw new VaultCliError(
       'not_found',
       `No ${input.entityLabel} found for "${input.lookup}".`,

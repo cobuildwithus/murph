@@ -585,6 +585,23 @@ test("generic event upserts cover payload and draft writes plus validation gates
   assert.equal(payloadRewrite.created, false);
   assert.equal(rewrittenRecords.filter((record) => record.id === payloadEventId).length, 2);
 
+  await assert.rejects(
+    () =>
+      upsertEvent({
+        vaultRoot,
+        payload: {
+          id: payloadEventId,
+          kind: "observation",
+          occurredAt: "2026-03-14T09:30:00.000Z",
+          title: "Payload observation",
+          metric: "resting-heart-rate",
+          value: 60,
+          unit: "bpm",
+        },
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "EVENT_KIND_MISMATCH",
+  );
+
   const draftEventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1A3";
   const draftWrite = await upsertEvent({
     vaultRoot,

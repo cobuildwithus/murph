@@ -198,6 +198,20 @@ async function resolveWorkoutFormat(vault: string, lookup: string): Promise<Work
   throw new VaultCliError('not_found', `No workout format found for "${normalizedLookup}".`)
 }
 
+async function resolveOptionalWorkoutFormat(
+  vault: string,
+  lookup: string,
+): Promise<WorkoutFormatRecord | null> {
+  try {
+    return await resolveWorkoutFormat(vault, lookup)
+  } catch (error) {
+    if (error instanceof VaultCliError && error.code === 'not_found') {
+      return null
+    }
+    throw error
+  }
+}
+
 function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
   return issues
     .map((issue) => {
@@ -278,6 +292,22 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
       template,
       note: undefined,
       templateText: text,
+    }
+  }
+  const isMetadataOnlyTypedTemplate =
+    input.payload !== undefined &&
+    payload.template.exercises.length === 0 &&
+    payload.template.routineNote === undefined &&
+    input.text === undefined &&
+    input.inputFile === undefined
+  if (isMetadataOnlyTypedTemplate) {
+    const lookup = payload.workoutFormatId ?? payload.slug ?? payload.title
+    const existing = await resolveOptionalWorkoutFormat(input.vault, lookup)
+    if (existing) {
+      payload = {
+        ...payload,
+        template: existing.template,
+      }
     }
   }
 

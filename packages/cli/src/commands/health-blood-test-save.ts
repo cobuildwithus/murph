@@ -1,4 +1,4 @@
-import { appendBloodTest, upsertEvent } from "@murphai/core";
+import { VaultError, appendBloodTest, upsertEvent } from "@murphai/core";
 import {
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_CATEGORY,
@@ -490,6 +490,9 @@ async function saveBloodTest(input: Parameters<typeof buildBloodTestAppendInput>
         created: upserted.created,
       };
     } catch (error) {
+      if (error instanceof VaultError && error.code === "EVENT_KIND_MISMATCH") {
+        throw new VaultCliError("invalid_input", error.message);
+      }
       if (!isUnsupportedSpecializedEventUpsert(error)) {
         throw error;
       }

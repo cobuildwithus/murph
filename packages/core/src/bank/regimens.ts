@@ -231,8 +231,45 @@ function buildRegimenLinksFromFields(input: {
   ];
 }
 
+function normalizeRegimenLink(link: RegimenLink): RegimenLink {
+  switch (link.type) {
+    case "supports_goal": {
+      const targetId = normalizeRecordIdList([link.targetId], "links.targetId", "goal")?.[0];
+      if (!targetId) {
+        throw new VaultError("VAULT_INVALID_INPUT", "links.targetId is invalid.");
+      }
+      return {
+        type: link.type,
+        targetId,
+      };
+    }
+    case "addresses_condition": {
+      const targetId = normalizeRecordIdList([link.targetId], "links.targetId", "cond")?.[0];
+      if (!targetId) {
+        throw new VaultError("VAULT_INVALID_INPUT", "links.targetId is invalid.");
+      }
+      return {
+        type: link.type,
+        targetId,
+      };
+    }
+    case "related_regimen": {
+      const targetId = normalizeRecordIdList([link.targetId], "links.targetId", "reg")?.[0];
+      if (!targetId) {
+        throw new VaultError("VAULT_INVALID_INPUT", "links.targetId is invalid.");
+      }
+      return {
+        type: link.type,
+        targetId,
+      };
+    }
+    default:
+      throw new VaultError("VAULT_INVALID_INPUT", "links.type is invalid.");
+  }
+}
+
 function normalizeRegimenLinks(rawLinks: readonly RegimenLink[]): RegimenLink[] {
-  const sortedLinks = [...rawLinks].sort(compareRegimenLinks);
+  const sortedLinks = rawLinks.map(normalizeRegimenLink).sort(compareRegimenLinks);
   const links: RegimenLink[] = [];
   const seen = new Set<string>();
 

@@ -5,7 +5,7 @@ import path from "node:path";
 import { Cli } from "incur";
 import { test } from "vitest";
 
-import { initializeVault } from "@murphai/core";
+import { initializeVault, upsertEvent } from "@murphai/core";
 import { createUnwiredVaultServices } from "@murphai/vault-usecases";
 
 import { registerBloodTestCommands } from "../src/commands/health-blood-test-save.js";
@@ -321,6 +321,57 @@ test("blood-test save maps typed fields and can revise a saved event id", async 
         flag: "unknown",
       },
     ]);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test save rejects rewriting a non-blood-test event id", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-wrong-kind-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+    const note = await upsertEvent({
+      vaultRoot,
+      payload: {
+        id: "evt_01JNYB6M9A6W4K2N8P3Q7R5T1A",
+        kind: "note",
+        title: "Non-test note",
+        occurredAt: "2026-03-12T13:00:00.000Z",
+        note: "Original note.",
+      },
+    });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Functional health panel",
+      "--id",
+      note.eventId,
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "functional_health_panel",
+      "--result",
+      "analyte=Ferritin;textValue=not tested",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_input");
+    }
+    const records = await readLedgerRecords(vaultRoot, "ledger/events/2026/2026-03.jsonl");
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.kind, "note");
   } finally {
     await rm(parentRoot, {
       force: true,

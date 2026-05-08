@@ -396,6 +396,10 @@ function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutS
   return parsed.data
 }
 
+function hasWorkoutExerciseReplacementOptions(options: Pick<WorkoutAddTypedOptions, 'workoutExercise' | 'workoutSet'>): boolean {
+  return options.workoutExercise !== undefined || options.workoutSet !== undefined
+}
+
 function resolveWorkoutAddText(argsText: string | undefined, optionNote: string | undefined): string | undefined {
   if (argsText !== undefined && optionNote !== undefined) {
     invalidWorkoutAddOption('Pass either positional workout text or --note, not both.')
@@ -775,7 +779,12 @@ export function registerWorkoutCommands(
         workoutSet: stringArrayOption(options.workoutSet),
       })
       if (workoutDraft?.media !== undefined) appendTypedSet(set, 'workout.media', workoutDraft.media)
-      if (workoutDraft?.exercises !== undefined) appendTypedSet(set, 'workout.exercises', workoutDraft.exercises)
+      if (workoutDraft?.exercises !== undefined && hasWorkoutExerciseReplacementOptions({
+        workoutExercise: stringArrayOption(options.workoutExercise),
+        workoutSet: stringArrayOption(options.workoutSet),
+      })) {
+        appendTypedSet(set, 'workout.exercises', workoutDraft.exercises)
+      }
       appendTypedClear(clear, 'durationMinutes', options.clearDuration === true)
       appendTypedClear(clear, 'distanceKm', options.clearDistance === true)
       appendTypedClear(clear, 'workout', options.clearWorkout === true)

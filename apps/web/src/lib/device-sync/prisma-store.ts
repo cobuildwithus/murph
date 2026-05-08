@@ -43,6 +43,7 @@ import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 export {
   hostedConnectionRecordArgs,
   mapHostedConnectionRecord,
+  sanitizeHostedDeviceSyncConnectionMetadata,
   type HostedStoredDeviceSyncAccount,
   type HostedConnectionRecord,
 } from "./prisma-store/connections";
@@ -346,6 +347,21 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${connectionId}))`;
       return callback(tx);
+    });
+  }
+
+  async withConnectionRefreshLock<TResult>(
+    connectionId: string,
+    callback: () => Promise<TResult>,
+  ): Promise<TResult> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        select pg_advisory_xact_lock(hashtext('hosted-device-token-refresh'), hashtext(${connectionId}))
+      `;
+      return await callback();
+    }, {
+      maxWait: 10_000,
+      timeout: 120_000,
     });
   }
 }
