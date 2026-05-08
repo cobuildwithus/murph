@@ -56,15 +56,11 @@ export class DashboardReplicaCoordinator {
 
   async schedulePending(input: { userId: string }): Promise<boolean> {
     await this.deps.stateStore.scheduleDashboardReplicaRefresh();
-    const immediateRefreshStarted = await this.startDetachedRefresh({
+    await this.scheduleContinuation({
       userId: input.userId,
     });
-    if (!immediateRefreshStarted && !this.deps.hasForegroundWork()) {
-      await this.scheduleContinuation({
-        userId: input.userId,
-      });
-    }
-    return immediateRefreshStarted;
+
+    return false;
   }
 
   async tryStart(input: {
@@ -184,14 +180,11 @@ export class DashboardReplicaCoordinator {
       return;
     }
 
-    const started = await this.tryStart();
-    if (!started) {
-      const record = await this.deps.readStateForRetryScheduling();
-      if (record) {
-        await this.scheduleContinuation({
-          userId: record.userId,
-        });
-      }
+    const record = await this.deps.readStateForRetryScheduling();
+    if (record) {
+      await this.scheduleContinuation({
+        userId: record.userId,
+      });
     }
   }
 
@@ -249,11 +242,9 @@ export class DashboardReplicaCoordinator {
         });
         return;
       }
-      if (!await this.tryStart({ userId: input.userId })) {
-        await this.scheduleContinuation({
-          userId: input.userId,
-        });
-      }
+      await this.scheduleContinuation({
+        userId: input.userId,
+      });
     });
 
     this.refreshLock = refresh;
