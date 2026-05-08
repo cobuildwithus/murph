@@ -96,8 +96,7 @@ describe("BrowserVaultRefreshCoordinator", () => {
       stateStore,
     });
 
-    await expect(coordinator.schedulePending({ userId: "member_123" }))
-      .resolves.toBe(false);
+    await coordinator.schedulePending({ userId: "member_123" });
 
     expect(runPendingRefresh).not.toHaveBeenCalled();
     expect(state.storage.setAlarm).toHaveBeenCalledOnce();
@@ -142,8 +141,7 @@ describe("BrowserVaultRefreshCoordinator", () => {
       stateStore,
     });
 
-    await expect(coordinator.schedulePending({ userId: "member_123" }))
-      .resolves.toBe(false);
+    await coordinator.schedulePending({ userId: "member_123" });
 
     expect(state.storage.setAlarm).toHaveBeenCalledOnce();
     expect(state.storage.setAlarm).toHaveBeenCalledWith(
@@ -209,8 +207,7 @@ describe("BrowserVaultRefreshCoordinator", () => {
       stateStore,
     });
 
-    await expect(coordinator.schedulePending({ userId: "member_123" }))
-      .resolves.toBe(false);
+    await coordinator.schedulePending({ userId: "member_123" });
     expect(state.storage.setAlarm).toHaveBeenCalledOnce();
 
     hasForegroundWork = false;

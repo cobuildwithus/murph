@@ -1321,13 +1321,9 @@ describe("cloudflare worker routes", () => {
   });
 
   it("normalizes legacy direct browser-vault refresh responses during rollout", async () => {
-    const scheduleBrowserVaultRefreshForUser = vi.fn(async (input: {
+    const scheduleBrowserVaultRefreshForUser = vi.fn(async (_input: {
       userId: string;
-    }) => ({
-      accepted: true as const,
-      immediateRefreshStarted: false,
-      userId: input.userId,
-    }));
+    }) => undefined);
     const stub = createUserRunnerStub({
       scheduleBrowserVaultRefreshForUser,
     });
