@@ -19,9 +19,35 @@ const REDACTED_LOCAL_PATH_TEXT = '[path]' as const
 const PORTABLE_STATE_STRING_MAX_LENGTH = 240
 const PORTABLE_STATE_METADATA_VALUE_MAX_LENGTH = 160
 
-const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/gu
+const SENSITIVE_AUTH_SCHEME_PATTERN =
+  '(?:AWS4-HMAC-SHA256|Bearer|Basic|Digest|OAuth|Token|ApiKey|Api-Key|X-Api-Key)'
+const SENSITIVE_HEADER_VALUE_PATTERN = new RegExp(
+  `\\b${SENSITIVE_AUTH_SCHEME_PATTERN}\\s+[A-Za-z0-9._~+/=-]+(?=$|[\\s,;\\]}])`,
+  'giu',
+)
+const UNKNOWN_AUTH_SCHEME_PATTERN = '[A-Za-z][A-Za-z0-9._~-]*'
+const UNKNOWN_AUTH_CREDENTIAL_PATTERN = '[^"\'\\s,;\\[\\]}=]{4,}={0,2}'
+const SENSITIVE_FIELD_ASSIGNMENT_KEYS_PATTERN =
+  '(?:authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|signature|token)'
+const SENSITIVE_NON_AUTH_FIELD_ASSIGNMENT_KEYS_PATTERN =
+  '(?:cookie|set-cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|signature|token)'
+const SENSITIVE_KNOWN_AUTHORIZATION_ASSIGNMENT_PATTERN = new RegExp(
+  `((?:authorization|proxy-authorization)\\s*[:=]\\s*["']?)(?:${SENSITIVE_AUTH_SCHEME_PATTERN}\\s+)([^"'\\s,;\\]}]{4,})`,
+  'giu',
+)
+const SENSITIVE_UNKNOWN_AUTHORIZATION_ASSIGNMENT_PATTERN = new RegExp(
+  `((?:authorization|proxy-authorization)\\s*[:=]\\s*["']?)(?!${SENSITIVE_AUTH_SCHEME_PATTERN}\\s)${UNKNOWN_AUTH_SCHEME_PATTERN}\\s+${UNKNOWN_AUTH_CREDENTIAL_PATTERN}(?=$|[\\s,;\\]}])`,
+  'giu',
+)
+const SENSITIVE_BARE_AUTHORIZATION_ASSIGNMENT_PATTERN = new RegExp(
+  `((?:authorization|proxy-authorization)\\s*[:=]\\s*["']?)(?!\\[REDACTED\\])([^"'\\s,;\\[\\]}]{4,})`,
+  'giu',
+)
 const SENSITIVE_INLINE_ASSIGNMENT_PATTERN =
-  /((?:authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|token)\s*[:=]\s*["']?)([^"'\s,;\]}]{4,})/giu
+  new RegExp(
+    `((${SENSITIVE_NON_AUTH_FIELD_ASSIGNMENT_KEYS_PATTERN}\\s*[:=]\\s*["']?)(?:${SENSITIVE_AUTH_SCHEME_PATTERN}\\s+)?)([^"'\\s,;\\]}]{4,})`,
+    'giu',
+  )
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu
 const URL_PATTERN = /(?:https?:\/\/|file:\/\/)[^\s),;]+/giu
 const POSIX_LOCAL_PATH_PATTERN =
@@ -38,12 +64,21 @@ export type { AssistantHeaderPersistenceSplit }
 
 export function redactAssistantStateString(value: string): string {
   return value
-    .replace(SENSITIVE_HEADER_VALUE_PATTERN, (match) => {
-      const scheme = match.split(/\s+/u, 1)[0]
-      return `${scheme} ${REDACTED_SECRET_TEXT}`
+    .replace(SENSITIVE_KNOWN_AUTHORIZATION_ASSIGNMENT_PATTERN, (_match, prefix: string) => {
+      return `${prefix}${REDACTED_SECRET_TEXT}`
+    })
+    .replace(SENSITIVE_UNKNOWN_AUTHORIZATION_ASSIGNMENT_PATTERN, (_match, prefix: string) => {
+      return `${prefix}${REDACTED_SECRET_TEXT}`
+    })
+    .replace(SENSITIVE_BARE_AUTHORIZATION_ASSIGNMENT_PATTERN, (_match, prefix: string) => {
+      return `${prefix}${REDACTED_SECRET_TEXT}`
     })
     .replace(SENSITIVE_INLINE_ASSIGNMENT_PATTERN, (_match, prefix: string) => {
       return `${prefix}${REDACTED_SECRET_TEXT}`
+    })
+    .replace(SENSITIVE_HEADER_VALUE_PATTERN, (match) => {
+      const scheme = match.split(/\s+/u, 1)[0]
+      return `${scheme} ${REDACTED_SECRET_TEXT}`
     })
 }
 

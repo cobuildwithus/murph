@@ -335,6 +335,20 @@ describe("hosted deploy automation helpers", () => {
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
   });
 
+  it("rejects partial numeric deploy automation values", () => {
+    for (const runnerReadyTimeout of ["60000ms", "1e3"]) {
+      expect(() =>
+        readHostedDeployAutomationEnvironment({
+          CF_BUNDLES_BUCKET: "hosted-bundles",
+          CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+          CF_RUNNER_READY_TIMEOUT_MS: runnerReadyTimeout,
+          CF_WORKER_NAME: "hosted-worker",
+          ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        }),
+      ).toThrow(/CF_RUNNER_READY_TIMEOUT_MS must be a positive integer/u);
+    }
+  });
+
   it("can omit the optional hosted email send binding for deploy tokens without that permission", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",

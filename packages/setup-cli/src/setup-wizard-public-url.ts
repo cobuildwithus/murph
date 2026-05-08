@@ -378,7 +378,7 @@ function resolveSetupWizardConfiguredPublicBaseUrl(
 function isConfiguredPublicBaseUrl(value: string): boolean {
   try {
     const parsed = new URL(value)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    if (parsed.protocol !== 'https:') {
       return false
     }
 

@@ -253,9 +253,13 @@ function normalizeSamplingRate(
 }
 
 function parsePositiveInteger(value: string, label: string, description: string): number {
-  const parsed = Number.parseInt(value, 10);
+  if (!/^[1-9][0-9]*$/u.test(value)) {
+    throw new Error(`${label} must be a ${description}.`);
+  }
 
-  if (!Number.isInteger(parsed) || parsed < 1) {
+  const parsed = Number(value);
+
+  if (!Number.isSafeInteger(parsed)) {
     throw new Error(`${label} must be a ${description}.`);
   }
 

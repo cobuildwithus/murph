@@ -18,7 +18,7 @@ describe('assistant redaction helpers', () => {
       redactAssistantStateString(
         'Authorization: Bearer secret-token-value api_key=my-api-key',
       ),
-    ).toBe('Authorization: [REDACTED] [REDACTED] api_key=[REDACTED]')
+    ).toBe('Authorization: [REDACTED] api_key=[REDACTED]')
     expect(
       containsInlineAssistantSecretMaterial('cookie=session-secret'),
     ).toBe(true)
@@ -65,6 +65,35 @@ describe('assistant redaction helpers', () => {
       ],
       password: '[REDACTED]',
     })
+  })
+
+  it('redacts non-Bearer authorization scheme credentials without leaving token values', () => {
+    expect(
+      redactAssistantStateString(
+        'Authorization: Token token-secret-value Proxy-Authorization: ApiKey api-key-secret',
+      ),
+    ).toBe('Authorization: [REDACTED] Proxy-Authorization: [REDACTED]')
+    expect(
+      redactAssistantStateString('authorization=Api-Key abc123'),
+    ).toBe('authorization=[REDACTED]')
+    expect(
+      redactAssistantStateString('Authorization=secret-token-123456'),
+    ).toBe('Authorization=[REDACTED]')
+    expect(
+      redactAssistantStateString('Authorization: secret-token-123456 status=ok'),
+    ).toBe('Authorization: [REDACTED] status=ok')
+    expect(
+      redactAssistantStateString('Authorization: OAuth oauth-secret-value, status=ok'),
+    ).toBe('Authorization: [REDACTED], status=ok')
+    expect(
+      redactAssistantStateString('Authorization: Custom raw-secret-value'),
+    ).toBe('Authorization: [REDACTED]')
+    expect(
+      redactAssistantStateString('Authorization: Custom raw-secret-value status=ok'),
+    ).toBe('Authorization: [REDACTED] status=ok')
+    expect(
+      redactAssistantStateString('Authorization: AWS4-HMAC-SHA256 Credential=secret, status=ok'),
+    ).toBe('Authorization: [REDACTED], status=ok')
   })
 
   it('splits persisted and secret headers and redacts secret ones for display', () => {

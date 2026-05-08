@@ -84,6 +84,8 @@ describe('assistant channels runtime seam', () => {
     )
     expect(getAssistantChannelAdapter(undefined)).toBeNull()
     expect(getAssistantChannelAdapter('unknown')).toBeNull()
+    expect(getAssistantChannelAdapter('constructor')).toBeNull()
+    expect(getAssistantChannelAdapter('__proto__')).toBeNull()
     expect(getAssistantChannelAdapter('email')).toBe(ASSISTANT_CHANNEL_ADAPTERS.email)
 
     expect(

@@ -765,6 +765,16 @@ test('setup wizard public URL guidance handles invalid public URLs and tunnel co
     'http://localhost:8788/connect/junction/callback',
   )
 
+  const httpPublicBaseReview = buildSetupWizardPublicUrlReview({
+    channels: [],
+    wearables: ['whoop'],
+    publicBaseUrl: 'http://murph.example',
+  })
+  assert.equal(
+    httpPublicBaseReview.targets[1]?.providerUrl,
+    'https://<your-public-host>/webhooks/whoop',
+  )
+
   const ipv6LoopbackReview = buildSetupWizardPublicUrlReview({
     channels: [],
     wearables: ['oura'],
