@@ -494,7 +494,9 @@ export async function importDocument(
 export async function addMeal(
   input: Parameters<typeof addMealInternal>[0],
 ): ReturnType<typeof addMealInternal> {
-  return addMealInternal(input);
+  return hasStableCanonicalId(input.mealId) || hasStableCanonicalId(input.eventId)
+    ? withCanonicalInputWriteLock(input, addMealInternal)
+    : addMealInternal(input);
 }
 
 export async function addActivitySession(
@@ -610,13 +612,17 @@ export async function updateWearablePreferences(
 export async function appendHistoryEvent(
   input: Parameters<typeof appendHistoryEventInternal>[0],
 ): ReturnType<typeof appendHistoryEventInternal> {
-  return appendHistoryEventInternal(input);
+  return hasStableCanonicalId(input.eventId)
+    ? withCanonicalInputWriteLock(input, appendHistoryEventInternal)
+    : appendHistoryEventInternal(input);
 }
 
 export async function appendBloodTest(
   input: Parameters<typeof appendBloodTestInternal>[0],
 ): ReturnType<typeof appendBloodTestInternal> {
-  return appendBloodTestInternal(input);
+  return hasStableCanonicalId(input.eventId)
+    ? withCanonicalInputWriteLock(input, appendBloodTestInternal)
+    : appendBloodTestInternal(input);
 }
 
 export async function upsertFamilyMember(

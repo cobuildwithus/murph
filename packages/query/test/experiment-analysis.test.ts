@@ -486,6 +486,32 @@ test("experiment progress treats incomplete setup as setup-missing rather than m
   assert.equal(progress.recommendation.reason, "Too early; no action is needed.");
 });
 
+test("experiment analysis rejects unbounded run-plan date windows before expanding days", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-wide-window",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        slug: "wide-window",
+        runPlan: {
+          baselineStart: "2020-01-01",
+          baselineEnd: "2026-01-01",
+          interventionStart: "2026-01-02",
+          interventionEnd: "2026-01-09",
+          modality: "sauna",
+          targetSessions: 3,
+          minimumUsefulSessions: 2,
+        },
+      }),
+    ],
+  });
+
+  assert.throws(
+    () => summarizeExperimentProgress(vault, "wide-window", { asOf: "2026-01-03" }),
+    /maximum supported span is 366 days/u,
+  );
+});
+
 test("experiment progress and outcome preserve private protocol refs and effective snapshots", () => {
   const effectiveSpecHash = `sha256:${"4".repeat(64)}`;
   const protocolRef = {

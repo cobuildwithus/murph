@@ -31,6 +31,7 @@ import {
 import {
   addMeal,
   applyCanonicalWriteBatch,
+  appendHistoryEvent,
   appendJournal,
   appendJsonlRecord,
   buildActivitySessionEventDraft,
@@ -48,6 +49,7 @@ import {
   linkJournalStreams,
   loadVault,
   listAssessmentResponses,
+  listHistoryEvents,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   parseFrontmatterDocument,
@@ -4645,6 +4647,41 @@ test("mutation helpers reject empty meal imports and invalid sample batches", as
   assert.equal(sleepStageImport.count, 1);
   assert.equal(sleepStageImport.records[0]?.stream, "sleep_stage");
   assert.equal(sleepStageImport.records[0]?.unit, "stage");
+});
+
+test("stable history event ids keep duplicate protection under concurrency", async () => {
+  const vaultRoot = await makeTempDirectory("murph-stable-history-event");
+  await initializeVault({ vaultRoot });
+
+  const eventId = "evt_01K72NW6HB9Y8M6W6VNZG4TF4M";
+  const attempts = await Promise.allSettled([
+    appendHistoryEvent({
+      vaultRoot,
+      eventId,
+      kind: "encounter",
+      occurredAt: "2026-04-07T08:15:00.000Z",
+      title: "Checkup",
+      encounterType: "primary-care",
+    }),
+    appendHistoryEvent({
+      vaultRoot,
+      eventId,
+      kind: "encounter",
+      occurredAt: "2026-04-07T08:15:00.000Z",
+      title: "Duplicate checkup",
+      encounterType: "primary-care",
+    }),
+  ]);
+
+  assert.equal(attempts.filter((attempt) => attempt.status === "fulfilled").length, 1);
+  const rejected = attempts.find((attempt) => attempt.status === "rejected");
+  assert.ok(rejected && rejected.status === "rejected");
+  assert.equal(rejected.reason instanceof VaultError, true);
+  assert.equal((rejected.reason as VaultError).code, "VAULT_ALREADY_EXISTS");
+
+  const events = await listHistoryEvents({ vaultRoot, kinds: ["encounter"] });
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.id, eventId);
 });
 
 test("importSamples validates the full batch before copying raw artifacts or appending ledgers", async () => {

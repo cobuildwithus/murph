@@ -201,6 +201,51 @@ test("scheduled logs support preview, filters, renames, conflicts, and status ch
   );
 });
 
+test("scheduled log upserts resolve creates and updates under one registry lock", async () => {
+  const vaultRoot = await makeTempDirectory("murph-scheduled-logs-concurrent");
+  await initializeVault({ vaultRoot });
+
+  const [first, second] = await Promise.all([
+    upsertScheduledLog({
+      vaultRoot,
+      title: "Morning Check",
+      slug: "morning-check",
+      status: "active",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "08:00",
+      },
+      action: {
+        kind: "measurement.add",
+        title: "Morning check",
+        measurements: [{ metric: "body-weight", value: 180, unit: "lb" }],
+      },
+      body: "Log the morning check.",
+    }),
+    upsertScheduledLog({
+      vaultRoot,
+      title: "Morning Check",
+      slug: "morning-check",
+      status: "active",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "08:00",
+      },
+      action: {
+        kind: "measurement.add",
+        title: "Morning check",
+        measurements: [{ metric: "body-weight", value: 181, unit: "lb" }],
+      },
+      body: "Log the morning check.",
+    }),
+  ]);
+
+  assert.deepEqual([first.created, second.created].sort(), [false, true]);
+  const records = await listScheduledLogs({ vaultRoot });
+  assert.equal(records.items.length, 1);
+  assert.equal(records.items[0]?.slug, "morning-check");
+});
+
 test("scheduled log execution inherits food details and is idempotent per occurrence", async () => {
   const vaultRoot = await makeTempDirectory("murph-scheduled-logs-meal");
   await initializeVault({ vaultRoot });
