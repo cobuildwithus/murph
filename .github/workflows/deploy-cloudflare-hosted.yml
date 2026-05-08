@@ -608,7 +608,32 @@ jobs:
         if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
         run: |
           set -euo pipefail
-          bundle_archive=".artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz"
+          resolve_handoff_archive() {
+            local expected_path="$1"
+            local archive_name="$2"
+            if [[ -f "${expected_path}" ]]; then
+              printf '%s\n' "${expected_path}"
+              return
+            fi
+
+            mapfile -t matches < <(find . -type f -name "${archive_name}" | sort)
+            if [[ "${#matches[@]}" -ne 1 ]]; then
+              echo "Expected exactly one downloaded ${archive_name}; found ${#matches[@]}." >&2
+              exit 1
+            fi
+            printf '%s\n' "${matches[0]}"
+          }
+
+          bundle_archive="$(
+            resolve_handoff_archive \
+              ".artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz" \
+              "runner-bundle.tar.gz"
+          )"
+          runner_base_archive="$(
+            resolve_handoff_archive \
+              ".artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz" \
+              "runner-base-image.tar.gz"
+          )"
           restore_staging="$(mktemp -d)"
           cleanup_restore_staging() {
             rm -rf "${restore_staging}"
@@ -663,7 +688,7 @@ jobs:
           done < <(find "${restore_staging}/runner-bundle" -type l -print0)
           rm -rf apps/cloudflare/.deploy/runner-bundle
           mv "${restore_staging}/runner-bundle" apps/cloudflare/.deploy/runner-bundle
-          gzip -dc .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz | docker load
+          gzip -dc "${runner_base_archive}" | docker load
 
       - name: Validate immediate runner bundle manifest
         if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
