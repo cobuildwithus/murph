@@ -491,7 +491,19 @@ function buildScheduleWeeks(input: {
       }
 
       if (scheduledCells.length === 0) {
-        return [];
+        const isIntervention = input.interventionStart && date >= input.interventionStart;
+        if (!isIntervention) {
+          return [];
+        }
+        const kind: ScheduleCellKind = date >= input.todayLocalDate ? "scheduled" : "missed";
+        return [{
+          columnStart: isoDateWeekdayColumn(date),
+          dayLabel: formatWeekday(date),
+          date: formatShortDate(date),
+          kind,
+          detail: formatScheduleCellDetail(kind),
+          isToday: date === input.todayLocalDate,
+        } satisfies ScheduleCell];
       }
 
       return scheduledCells.map((scheduledCell): ScheduleCell => ({

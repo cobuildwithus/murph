@@ -50,7 +50,7 @@ export function ResultsSummary({ signals, trends, schedule }: ResultsSummaryProp
               <TrendChart key={trend.label} data={trend} />
             ))}
           </div>
-          {schedule && <ExperimentScheduleSidebar schedule={schedule} />}
+          {schedule && <div className="self-start"><ExperimentScheduleSidebar schedule={schedule} /></div>}
         </div>
       )}
     </div>
