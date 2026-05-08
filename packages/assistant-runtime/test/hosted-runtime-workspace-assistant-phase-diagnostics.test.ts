@@ -145,7 +145,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
           codexResumeFailureErrorCode: "ASSISTANT_CODEX_FAILED",
           codexResumeFailureErrorKind: "turn-failed",
           codexResumeFailureErrorMessage:
-            "Codex app-server turn failed. status failed. Authorization: Bearer test-token-value at /tmp/provider",
+            "Codex app-server turn failed. status failed. Bearer test-token-value at /tmp/provider",
           codexResumeFailureErrorMessageLength: 251,
           codexResumeFailureErrorMessagePresent: true,
           codexResumeFailureErrorPhrases: [
@@ -189,7 +189,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         codexResumeFailureErrorCode: "ASSISTANT_CODEX_FAILED",
         codexResumeFailureErrorKind: "turn-failed",
         codexResumeFailureErrorMessage:
-          "Codex app-server turn failed. status failed. Authorization [redacted] at <REDACTED_PATH>",
+          "Codex app-server turn failed. status failed. Bearer [redacted] at <REDACTED_PATH>",
         codexResumeFailureErrorMessageLength: 251,
         codexResumeFailureErrorMessagePresent: true,
         codexResumeFailureErrorPhrases: [

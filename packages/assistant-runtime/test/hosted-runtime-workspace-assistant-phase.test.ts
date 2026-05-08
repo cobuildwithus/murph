@@ -863,9 +863,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         phase: "wake.running",
         redacted: {
           errorCode: "ASSISTANT_CODEX_FAILED",
-          safeErrorMessage: "Authorization: Bearer raw-token-value",
+          safeErrorMessage: "Bearer raw-token-value",
           safeErrorPresent: true,
-          safeErrorLength: "Authorization: Bearer raw-token-value".length,
+          safeErrorLength: "Bearer raw-token-value".length,
           type: "input.reply-failed",
         },
       }],
@@ -875,8 +875,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       errorCode: "ASSISTANT_CODEX_FAILED",
-      safeErrorLength: "Authorization: Bearer raw-token-value".length,
-      safeErrorMessage: "Authorization [redacted]",
+      safeErrorLength: "Bearer raw-token-value".length,
+      safeErrorMessage: "Bearer [redacted]",
       safeErrorPresent: true,
       type: "input.reply-failed",
     }));
