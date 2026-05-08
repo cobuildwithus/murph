@@ -1,4 +1,8 @@
-import { formatTimeZoneDateTimeParts, isStrictIsoDate } from '@murphai/contracts'
+import {
+  formatTimeZoneDateTimeParts,
+  isStrictIsoDate,
+  normalizeIanaTimeZone,
+} from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
 import {
   isoTimestampSchema,
@@ -14,6 +18,7 @@ const MAX_TIMEZONE_RESOLUTION_ITERATIONS = 4
 interface NormalizeOccurredAtOptionInput {
   vault: string
   occurredAt?: string
+  timeZone?: string
 }
 
 interface LocalDateParts {
@@ -45,8 +50,26 @@ export async function normalizeOccurredAtOption(
     )
   }
 
+  const timeZone = await resolveOccurredAtLocalDateTimeZone(input)
+  return resolveLocalDateAtVaultNoon(occurredAt, timeZone)
+}
+
+async function resolveOccurredAtLocalDateTimeZone(
+  input: NormalizeOccurredAtOptionInput,
+): Promise<string> {
+  if (typeof input.timeZone === 'string') {
+    const normalized = normalizeIanaTimeZone(input.timeZone)
+    if (!normalized) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Invalid --time-zone "${input.timeZone}".`,
+      )
+    }
+    return normalized
+  }
+
   const vault = await loadVault({ vaultRoot: input.vault })
-  return resolveLocalDateAtVaultNoon(occurredAt, vault.metadata.timezone)
+  return vault.metadata.timezone
 }
 
 function resolveLocalDateAtVaultNoon(localDate: string, timeZone: string): string {

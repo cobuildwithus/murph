@@ -342,7 +342,9 @@ export async function executeClaimedAssistantCronJob(input: {
       }
     }
 
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths)
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths, {
+      reclaimStaleRunningClaims: false,
+    })
     const currentRuntimeState =
       findAssistantCronCanonicalRuntimeRecord(
         runtimeStore,

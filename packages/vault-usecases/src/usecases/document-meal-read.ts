@@ -124,11 +124,7 @@ async function loadOwnedRecord(
   }
 
   const normalizedLookup = lookup.trim()
-  if (
-    normalizedLookup !== record.entityId &&
-    normalizedLookup !== record.primaryLookupId &&
-    !record.lookupIds.includes(normalizedLookup)
-  ) {
+  if (normalizedLookup !== record.entityId && normalizedLookup !== record.primaryLookupId) {
     throw new VaultCliError('not_found', `No ${expectedKind} found for "${lookup}".`)
   }
 
@@ -261,7 +257,7 @@ export async function editDocumentRecord(input: {
     expectedKinds: ['document'],
   })
 
-  return showDocumentRecord(input.vault, result.lookupId)
+  return showDocumentRecord(input.vault, input.lookup)
 }
 
 export async function deleteDocumentRecord(input: {
@@ -295,7 +291,7 @@ export async function editMealRecord(input: {
     expectedKinds: ['meal'],
   })
 
-  return showMealRecord(input.vault, result.lookupId)
+  return showMealRecord(input.vault, input.lookup)
 }
 
 export async function deleteMealRecord(input: {

@@ -15,6 +15,7 @@ export const ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS = 60 * 60 * 1000
 
 export interface AssistantCronCanonicalRuntimeNormalizationPolicy {
   now?: () => string
+  reclaimStaleRunningClaims?: boolean
   runningStaleAfterMs?: number
 }
 
@@ -190,12 +191,14 @@ function resolveAssistantCronCanonicalRuntimeNormalizationPolicy(
   policy?: AssistantCronCanonicalRuntimeNormalizationPolicy,
 ): {
   nowMs: number
+  reclaimStaleRunningClaims: boolean
   runningStaleAfterMs: number
 } {
   const fallbackNowMs = Date.now()
   const parsedNowMs = policy?.now ? Date.parse(policy.now()) : fallbackNowMs
   return {
     nowMs: Number.isFinite(parsedNowMs) ? parsedNowMs : fallbackNowMs,
+    reclaimStaleRunningClaims: policy?.reclaimStaleRunningClaims !== false,
     runningStaleAfterMs: normalizeRunningStaleAfterMs(policy?.runningStaleAfterMs),
   }
 }
@@ -212,10 +215,11 @@ function normalizeAssistantCronCanonicalRuntimeRecord(
   record: AssistantCronCanonicalRuntimeRecord,
   policy: {
     nowMs: number
+    reclaimStaleRunningClaims: boolean
     runningStaleAfterMs: number
   },
 ): AssistantCronCanonicalRuntimeRecord {
-  if (record.state.runningAt === null) {
+  if (record.state.runningAt === null || !policy.reclaimStaleRunningClaims) {
     return record
   }
 
