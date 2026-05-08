@@ -414,6 +414,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.hot_state_fallback",
   "checkpoint.idle_shutdown_snapshot_skipped",
   "checkpoint.optional_sidecar_degraded",
+  "checkpoint.runtime_residue_deferred",
   "checkpoint.snapshot_finished",
   "checkpoint.snapshot_size_progress",
   "workspace.codex_home_snapshot_failed",

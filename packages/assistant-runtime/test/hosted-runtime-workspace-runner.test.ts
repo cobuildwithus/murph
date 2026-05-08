@@ -507,10 +507,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("keeps Linq fast-dispatch idempotent when the receipt checkpoint fails and the same workspace retries", async () => {
+  test("sends Linq fast-dispatch without a foreground receipt checkpoint", async () => {
     const checkpointVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const firstAttemptVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const retryVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const attemptVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const effectObservations: Array<{ effectId: string; idempotencyKey: string | null }> = [];
     const transportRequests: Array<{ idempotencyKey: string | null }> = [];
@@ -569,59 +568,28 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         turnId: "turn_synthetic_crash_window",
         vault: checkpointVaultRoot,
       });
-      await rm(firstAttemptVaultRoot, { force: true, recursive: true });
-      await rm(retryVaultRoot, { force: true, recursive: true });
-      await cp(checkpointVaultRoot, firstAttemptVaultRoot, { recursive: true });
-      await cp(checkpointVaultRoot, retryVaultRoot, { recursive: true });
-
-      await assert.rejects(
-        () =>
-          runFastDispatchCrashWindowAttempt({
-            checkpointed: false,
-            checkpointRequests,
-            effectObservations,
-            sendLinq,
-            vaultRoot: firstAttemptVaultRoot,
-          }),
-        HostedMailboxImportCheckpointConflictError,
-      );
-
-      assert.equal(externalMessages.size, 1);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_receipt",
-      ]);
+      await rm(attemptVaultRoot, { force: true, recursive: true });
+      await cp(checkpointVaultRoot, attemptVaultRoot, { recursive: true });
 
       await runFastDispatchCrashWindowAttempt({
-        checkpointed: true,
         checkpointRequests,
         effectObservations,
         sendLinq,
-        vaultRoot: retryVaultRoot,
+        vaultRoot: attemptVaultRoot,
       });
 
       assert.equal(externalMessages.size, 1);
       assert.deepEqual(transportRequests, [
         { idempotencyKey: "assistant-outbox:crash-window-linq" },
-        { idempotencyKey: "assistant-outbox:crash-window-linq" },
       ]);
-      assert.equal(effectObservations.length, 2);
-      assert.equal(effectObservations[0]?.effectId, effectObservations[1]?.effectId);
+      assert.equal(effectObservations.length, 1);
       assert.deepEqual(effectObservations.map((effect) => effect.idempotencyKey), [
         "assistant-outbox:crash-window-linq",
-        "assistant-outbox:crash-window-linq",
       ]);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_receipt",
-        "outbox_receipt",
-      ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "0"],
-      );
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
     } finally {
       await rm(checkpointVaultRoot, { force: true, recursive: true });
-      await rm(firstAttemptVaultRoot, { force: true, recursive: true });
-      await rm(retryVaultRoot, { force: true, recursive: true });
+      await rm(attemptVaultRoot, { force: true, recursive: true });
     }
   });
 
@@ -2441,13 +2409,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("checkpoints assistant post-commit status after a progressed phase", async () => {
+  test("defers assistant post-commit runtime receipt checkpoint after a progressed phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
 
     try {
-      await runHostedWorkspaceUntilIdleOrBudget({
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_post_checkpoint",
           expectedWorkspaceVersion: "0",
@@ -2462,14 +2431,21 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         limitPerLane: 10,
         platform: createPlatform({
+          logRequests,
           mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_post_checkpoint",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_post_checkpoint",
+          leaseGeneration: "3",
+          workspaceVersion: "0",
+        },
         async runAssistantPhase() {
           return {
             afterCheckpoint: async () => ({
               checkpointReason: "outbox_receipt",
+              foregroundCheckpointRequired: false,
               nextWakeAt: "2026-04-26T00:05:00.000Z",
               nextWakeReason: "assistant",
               redactedStatus: {
@@ -2490,27 +2466,151 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "outbox_sending",
-        "outbox_receipt",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
+        ["0"],
       );
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "0",
-        hostedMailboxFetchedCount: 0,
-        hostedMailboxImportedCount: 0,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-        hostedOutboxDeliveryAttempted: 1,
-        hostedOutboxDeliverySent: 1,
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:05:00.000Z");
+      const deferredLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred");
+      assert.ok(deferredLog);
+      assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [deferredLog] }));
+      assert.deepEqual(deferredLog?.redactedJson, {
+        checkpointPhase: "post_assistant",
+        checkpointReason: "outbox_receipt",
       });
     } finally {
       await rm(vaultRoot, {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("keeps post-assistant receipt checkpoint when delivery cleanup requires foreground durability", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_required_receipt",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_required_receipt",
+        async runAssistantPhase() {
+          return {
+            afterCheckpoint: async () => ({
+              checkpointReason: "outbox_receipt",
+              foregroundCheckpointRequired: true,
+              redactedStatus: {
+                hostedOutboxDeliveryAttempted: 1,
+                hostedOutboxDeliverySent: 1,
+              },
+            }),
+            checkpointReason: "outbox_sending",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "outbox_sending",
+        "outbox_receipt",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("defers runtime-only assistant phase checkpoints without touching the workspace", async () => {
+    for (const checkpointReason of ["assistant_runtime_commit", "provider_cleanup"] as const) {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+      const { mailboxPort } = createMailboxPort({ items: [] });
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const logRequests: HostedRuntimeLogRequest[] = [];
+
+      try {
+        const result = await runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: `attempt_synthetic_runner_${checkpointReason}`,
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "3",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem() {
+            throw new Error("Initial mailbox import was already provided.");
+          },
+          initialMailboxImport: createCheckpointedMailboxImportResult(),
+          limitPerLane: 10,
+          platform: createPlatform({
+            logRequests,
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests }),
+          }),
+          requestId: `request_synthetic_runner_${checkpointReason}`,
+          runtimeLogContext: {
+            attemptId: `attempt_synthetic_runner_${checkpointReason}`,
+            leaseGeneration: "3",
+            workspaceVersion: "0",
+          },
+          async runAssistantPhase() {
+            return {
+              checkpointReason,
+              nextWakeAt: "2026-04-26T00:10:00.000Z",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+          workspace: createWorkspaceState({ version: "0" }),
+          now: () => TEST_NOW,
+        });
+
+        assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:10:00.000Z");
+        assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+        const deferredLog = logRequests.flatMap((request) => request.entries)
+          .find((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred");
+        assert.ok(deferredLog);
+        assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [deferredLog] }));
+        assert.deepEqual(deferredLog?.redactedJson, {
+          checkpointPhase: "assistant",
+          checkpointReason,
+        });
+      } finally {
+        await rm(vaultRoot, {
+          force: true,
+          recursive: true,
+        });
+      }
     }
   });
 
@@ -3156,7 +3256,6 @@ async function runActiveTurnRefreshSummaryScenario(input: {
 }
 
 async function runFastDispatchCrashWindowAttempt(input: {
-  checkpointed: boolean;
   checkpointRequests: HostedWorkspaceCheckpointRequest[];
   effectObservations: Array<{ effectId: string; idempotencyKey: string | null }>;
   sendLinq: NonNullable<HostedRuntimeEffectsPort["sendLinq"]>;
@@ -3176,7 +3275,7 @@ async function runFastDispatchCrashWindowAttempt(input: {
     async importItem() {
       throw new Error("Initial mailbox import was already provided.");
     },
-    initialMailboxImport: createDeferredMailboxImportResult(),
+    initialMailboxImport: createCheckpointedMailboxImportResult(),
     limitPerLane: 10,
     platform: createPlatform({
       effectsPort: {
@@ -3185,7 +3284,6 @@ async function runFastDispatchCrashWindowAttempt(input: {
       mailboxPort,
       workspacePort: createWorkspacePort({
         checkpointRequests: input.checkpointRequests,
-        checkpointed: input.checkpointed,
       }),
     }),
     requestId: "request_synthetic_fast_dispatch_crash_window",
@@ -3295,6 +3393,35 @@ function createWorkspaceState(
     userId: TEST_USER_ID,
     version: "0",
     ...overrides,
+  };
+}
+
+function createCheckpointedMailboxImportResult(): HostedMailboxImportCheckpointResult {
+  const previousState = createEmptyHostedMailboxImportState();
+  const state = {
+    ...createEmptyHostedMailboxImportState(),
+    watermarks: {
+      conversation: "1",
+      system: "0",
+    },
+  };
+
+  return {
+    afterCheckpointEffects: [],
+    checkpoint: {
+      checkpointed: true,
+      workspace: createWorkspaceState({ version: "0" }),
+    },
+    checkpointDeferred: false,
+    importResult: {
+      blocked: [],
+      fetchedCount: 1,
+      importedCount: 1,
+      state,
+    },
+    previousState,
+    state,
+    stateChanged: true,
   };
 }
 
