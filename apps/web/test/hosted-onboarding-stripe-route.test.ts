@@ -47,6 +47,35 @@ describe("hosted onboarding Stripe webhook route", () => {
     });
   });
 
+  it("rejects oversized Stripe webhook bodies before calling the service", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const request = new Request("https://join.example.test/api/hosted-onboarding/stripe/webhook", {
+        body: "{}",
+        headers: {
+          "content-length": String(1024 * 1024 + 1),
+          "stripe-signature": "sig_123",
+        },
+        method: "POST",
+      });
+
+      const response = await hostedOnboardingStripeRoute.POST(request);
+
+      expect(response.status).toBe(413);
+      expect(mocks.handleHostedStripeWebhook).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "STRIPE_WEBHOOK_BODY_TOO_LARGE",
+          message: "Stripe webhook body is too large.",
+          retryable: false,
+        },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("{}");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("waits for the Stripe webhook service before returning the response", async () => {
     let resolveWebhook!: (value: { ok: true; type: string }) => void;
     const webhookResult = new Promise<{ ok: true; type: string }>((resolve) => {

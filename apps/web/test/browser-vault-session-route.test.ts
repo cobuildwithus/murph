@@ -221,6 +221,64 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("rejects oversized session bodies before reading browser vault state", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await browserVaultSessionRoute.POST(
+        new Request("https://join.example.test/api/browser-vault/session", {
+          body: "{}",
+          headers: {
+            "content-length": String(16 * 1024 + 1),
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(413);
+      expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+      expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
+          message: "Browser vault session request body is too large.",
+          retryable: false,
+        },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("{}");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("rejects streamed oversized session bodies without trusting content-length", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await browserVaultSessionRoute.POST(
+        new Request("https://join.example.test/api/browser-vault/session", {
+          body: createBodyStream(17 * 1024),
+          duplex: "half",
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        } as RequestInit & { duplex: "half" }),
+      );
+
+      expect(response.status).toBe(413);
+      expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+      expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
+        },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("browserPublicKeyJwk");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("forwards the authenticated member and replica ref to the hosted control client when the known ref is stale", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -979,6 +1037,15 @@ function createReplicaRef() {
     schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
     sourceBundleHash: "a".repeat(64),
   };
+}
+
+function createBodyStream(byteLength: number): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(byteLength).fill(123));
+      controller.close();
+    },
+  });
 }
 
 function createSnapshotRef(hashCharacter: string) {

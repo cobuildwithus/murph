@@ -11,12 +11,18 @@ import {
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import {
+  jsonOk,
+  readHostedOnboardingJsonObject,
+  withJsonError,
+} from "@/src/lib/hosted-onboarding/http";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 import { browserVaultReplicaRefsMatch } from "./ref";
+
+const BROWSER_VAULT_SESSION_REQUEST_BODY_LIMIT_BYTES = 16 * 1024;
 
 export function createBrowserVaultSessionRoute(input: {
   requireActiveAccess: boolean;
@@ -31,7 +37,11 @@ export function createBrowserVaultSessionRoute(input: {
       memberId: auth.member.id,
       prisma,
     });
-    const body = await readJsonObject(request);
+    const body = await readHostedOnboardingJsonObject(request, {
+      limitBytes: BROWSER_VAULT_SESSION_REQUEST_BODY_LIMIT_BYTES,
+      tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
+      tooLargeErrorMessage: "Browser vault session request body is too large.",
+    });
     const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
       body.browserPublicKeyJwk,
       "Browser vault session request browserPublicKeyJwk",

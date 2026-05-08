@@ -3,11 +3,12 @@ import { Prisma } from "@prisma/client";
 import {
   createJsonRouteHelpers,
   mapDomainJsonError,
-  readOptionalJsonObject,
-  readJsonObject,
+  readOptionalJsonObject as readBaseOptionalJsonObject,
+  readJsonObject as readBaseJsonObject,
+  readRawBodyBuffer,
   sanitizeJsonLogString,
 } from "../http";
-import { isHostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 
 const HOSTED_ONBOARDING_DEFAULT_HEADERS = {
   "Cache-Control": "no-store",
@@ -39,7 +40,40 @@ const HOSTED_ONBOARDING_SAFE_DOMAIN_ERROR_DETAIL_KEYS = new Set([
 
 export const HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE = "[redacted]";
 
-export { readJsonObject, readOptionalJsonObject };
+export const readJsonObject = readBaseJsonObject;
+export const readOptionalJsonObject = readBaseOptionalJsonObject;
+
+export interface HostedOnboardingBoundedBodyOptions {
+  limitBytes: number;
+  tooLargeErrorCode: string;
+  tooLargeErrorMessage: string;
+}
+
+export async function readHostedOnboardingJsonObject(
+  request: Request,
+  options: HostedOnboardingBoundedBodyOptions,
+): Promise<Record<string, unknown>> {
+  try {
+    return await readBaseJsonObject(request, {
+      limitBytes: options.limitBytes,
+    });
+  } catch (error) {
+    throw mapHostedOnboardingBodyReadError(error, options);
+  }
+}
+
+export async function readHostedOnboardingRawBodyText(
+  request: Request,
+  options: HostedOnboardingBoundedBodyOptions,
+): Promise<string> {
+  try {
+    return (await readRawBodyBuffer(request, {
+      limitBytes: options.limitBytes,
+    })).toString("utf8");
+  } catch (error) {
+    throw mapHostedOnboardingBodyReadError(error, options);
+  }
+}
 
 function mapHostedOnboardingError(error: unknown) {
   if (!isHostedOnboardingError(error)) {
@@ -57,6 +91,21 @@ function mapHostedOnboardingError(error: unknown) {
         },
       }
     : mapping;
+}
+
+function mapHostedOnboardingBodyReadError(
+  error: unknown,
+  options: HostedOnboardingBoundedBodyOptions,
+): unknown {
+  if (!(error instanceof RangeError)) {
+    return error;
+  }
+
+  return hostedOnboardingError({
+    code: options.tooLargeErrorCode,
+    httpStatus: 413,
+    message: options.tooLargeErrorMessage,
+  });
 }
 
 function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unknown> | null {

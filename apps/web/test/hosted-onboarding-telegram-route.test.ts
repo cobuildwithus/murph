@@ -31,6 +31,7 @@ describe("hosted onboarding Telegram webhook route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "telegram-secret");
     mocks.after.mockImplementation((callback: () => void) => callback());
     mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
       ok: true,
@@ -60,6 +61,69 @@ describe("hosted onboarding Telegram webhook route", () => {
     });
   });
 
+  it("rejects invalid Telegram secrets before reading the request body", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const body = new ReadableStream<Uint8Array>({
+        pull() {
+          throw new Error("Telegram webhook body was read before secret validation.");
+        },
+      });
+      const request = new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
+        body,
+        duplex: "half",
+        headers: {
+          "x-telegram-bot-api-secret-token": "wrong-secret",
+        },
+        method: "POST",
+      } as RequestInit & { duplex: "half" });
+
+      const response = await hostedOnboardingTelegramRoute.POST(request);
+
+      expect(response.status).toBe(401);
+      expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "TELEGRAM_WEBHOOK_SECRET_INVALID",
+          message: "Invalid Telegram webhook secret.",
+          retryable: false,
+        },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("wrong-secret");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("rejects oversized Telegram webhook bodies before calling the service", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const request = new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
+        body: "{}",
+        headers: {
+          "content-length": String(256 * 1024 + 1),
+          "x-telegram-bot-api-secret-token": "telegram-secret",
+        },
+        method: "POST",
+      });
+
+      const response = await hostedOnboardingTelegramRoute.POST(request);
+
+      expect(response.status).toBe(413);
+      expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "TELEGRAM_WEBHOOK_BODY_TOO_LARGE",
+          message: "Telegram webhook body is too large.",
+          retryable: false,
+        },
+      });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("{}");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("maps in-progress receipt retries to a retryable 503 response", async () => {
     mocks.handleHostedOnboardingTelegramWebhook.mockRejectedValue(
       hostedOnboardingError({
@@ -74,6 +138,9 @@ describe("hosted onboarding Telegram webhook route", () => {
       new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
         method: "POST",
         body: JSON.stringify({ ok: true }),
+        headers: {
+          "x-telegram-bot-api-secret-token": "telegram-secret",
+        },
       }),
     );
 
