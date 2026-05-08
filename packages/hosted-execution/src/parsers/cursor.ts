@@ -203,7 +203,7 @@ export function parseHostedBrowserVaultReplicaRef(
     byteLength: requireNumber(record.byteLength, `${label}.byteLength`),
     ...(dataKeyEnvelope === undefined ? {} : { dataKeyEnvelope }),
     dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
-    generatedAt: requireString(record.generatedAt, `${label}.generatedAt`),
+    generatedAt: requireIsoTimestampString(record.generatedAt, `${label}.generatedAt`),
     keyId: requireString(record.keyId, `${label}.keyId`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
     replicaSchema,
@@ -211,4 +211,14 @@ export function parseHostedBrowserVaultReplicaRef(
     runtimeRootKeyId: requireString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`),
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
   } satisfies HostedBrowserVaultReplicaRef;
+}
+
+function requireIsoTimestampString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+  const timestamp = Date.parse(text);
+  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
+    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+  }
+
+  return text;
 }

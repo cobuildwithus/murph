@@ -44,7 +44,7 @@ export interface HostedBrowserVaultReplicaStore {
   deriveBrowserVaultReplicaKey(ref: HostedBrowserVaultReplicaRef): Promise<Uint8Array>;
   readBrowserVaultReplicaEnvelope(ref: HostedBrowserVaultReplicaRef): Promise<HostedCipherEnvelope | null>;
   writeBrowserVaultReplica(input: {
-    expectedSourceStateHash?: string | null;
+    expectedReplicaSourceHash?: string | null;
     replica: unknown;
     userId: string;
   }): Promise<HostedBrowserVaultReplicaRef>;
@@ -131,13 +131,13 @@ export function createHostedBrowserVaultReplicaStore(input: {
       );
     },
 
-    async writeBrowserVaultReplica({ expectedSourceStateHash = null, replica, userId }) {
+    async writeBrowserVaultReplica({ expectedReplicaSourceHash = null, replica, userId }) {
       const parsed = parseBrowserVaultReplicaStorageInput(replica);
       if (
-        expectedSourceStateHash
-        && parsed.source.sourceBundleHash !== expectedSourceStateHash
+        expectedReplicaSourceHash
+        && parsed.source.sourceBundleHash !== expectedReplicaSourceHash
       ) {
-        throw new TypeError("Hosted browser-vault replica source state hash does not match the refresh request.");
+        throw new TypeError("Hosted browser-vault replica source hash does not match the refresh request.");
       }
 
       const encodedReplica = encodeHostedBrowserVaultReplicaJson({ replica });

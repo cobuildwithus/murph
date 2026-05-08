@@ -230,40 +230,40 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("keeps one pending dashboard replica refresh slot", async () => {
+  it("keeps one pending browser-vault refresh slot", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
     const { store } = createRunnerStateStoreHarness();
 
-    await expect(store.scheduleDashboardReplicaRefresh()).resolves.toEqual({
+    await expect(store.scheduleBrowserVaultRefresh()).resolves.toEqual({
       deduped: false,
     });
-    const first = await store.readPendingDashboardReplicaRefresh();
+    const first = await store.readPendingBrowserVaultRefresh();
     expect(first).toEqual({
       slotId: expect.any(String),
       updatedAt: "2026-05-08T00:00:00.000Z",
     });
     vi.setSystemTime(new Date("2026-05-08T00:00:01.000Z"));
-    await expect(store.scheduleDashboardReplicaRefresh()).resolves.toEqual({
+    await expect(store.scheduleBrowserVaultRefresh()).resolves.toEqual({
       deduped: true,
     });
-    const second = await store.readPendingDashboardReplicaRefresh();
+    const second = await store.readPendingBrowserVaultRefresh();
     expect(second).toEqual({
       slotId: expect.any(String),
       updatedAt: "2026-05-08T00:00:01.000Z",
     });
     expect(second?.slotId).not.toBe(first?.slotId);
 
-    await expect(store.clearPendingDashboardReplicaRefresh({
+    await expect(store.clearPendingBrowserVaultRefresh({
       slotId: first?.slotId,
       updatedAt: first?.updatedAt,
     })).resolves.toBe(false);
-    await expect(store.clearPendingDashboardReplicaRefresh({
+    await expect(store.clearPendingBrowserVaultRefresh({
       slotId: second?.slotId,
       updatedAt: second?.updatedAt,
     })).resolves.toBe(true);
-    await expect(store.clearPendingDashboardReplicaRefresh()).resolves.toBe(false);
-    await expect(store.readPendingDashboardReplicaRefresh()).resolves.toBeNull();
+    await expect(store.clearPendingBrowserVaultRefresh()).resolves.toBe(false);
+    await expect(store.readPendingBrowserVaultRefresh()).resolves.toBeNull();
     vi.useRealTimers();
   });
 
@@ -272,10 +272,10 @@ describe("RunnerStateStore schema guard", () => {
     vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
     const { store } = createRunnerStateStoreHarness();
 
-    await store.scheduleDashboardReplicaRefresh();
-    const first = await store.readPendingDashboardReplicaRefresh();
-    await store.scheduleDashboardReplicaRefresh();
-    const second = await store.readPendingDashboardReplicaRefresh();
+    await store.scheduleBrowserVaultRefresh();
+    const first = await store.readPendingBrowserVaultRefresh();
+    await store.scheduleBrowserVaultRefresh();
+    const second = await store.readPendingBrowserVaultRefresh();
 
     expect(first).toEqual({
       slotId: expect.any(String),
@@ -286,11 +286,11 @@ describe("RunnerStateStore schema guard", () => {
       updatedAt: "2026-05-08T00:00:00.000Z",
     });
     expect(second?.slotId).not.toBe(first?.slotId);
-    await expect(store.clearPendingDashboardReplicaRefresh({
+    await expect(store.clearPendingBrowserVaultRefresh({
       slotId: first?.slotId,
       updatedAt: first?.updatedAt,
     })).resolves.toBe(false);
-    await expect(store.readPendingDashboardReplicaRefresh()).resolves.toEqual(second);
+    await expect(store.readPendingBrowserVaultRefresh()).resolves.toEqual(second);
 
     vi.useRealTimers();
   });

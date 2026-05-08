@@ -51,6 +51,7 @@ export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
   "linq",
   "telegram",
   "email",
+  "whatsapp",
 ] as const;
 
 export type HostedExecutionConversationMessageChannel =
@@ -271,6 +272,23 @@ export interface HostedExecutionTelegramConversationMessagePayload {
   telegramMessage: HostedExecutionTelegramMessage;
 }
 
+export const HOSTED_EXECUTION_WHATSAPP_MESSAGE_SCHEMA =
+  "murph.hosted-whatsapp-message.v1";
+
+export interface HostedExecutionWhatsAppMessage {
+  fromWaId: string;
+  messageId: string;
+  phoneNumberId?: string | null;
+  schema: typeof HOSTED_EXECUTION_WHATSAPP_MESSAGE_SCHEMA;
+  text: string;
+  threadId: string;
+}
+
+export interface HostedExecutionWhatsAppConversationMessagePayload {
+  channel: "whatsapp";
+  whatsappMessage: HostedExecutionWhatsAppMessage;
+}
+
 export interface HostedExecutionEmailAttachmentSummary {
   contentType?: string | null;
   fileName?: string | null;
@@ -296,6 +314,7 @@ export interface HostedExecutionEmailConversationMessagePayload {
 export type HostedExecutionConversationMessagePayload =
   | HostedExecutionLinqConversationMessagePayload
   | HostedExecutionTelegramConversationMessagePayload
+  | HostedExecutionWhatsAppConversationMessagePayload
   | HostedExecutionEmailConversationMessagePayload;
 
 export interface HostedExecutionConversationMessageWake extends HostedExecutionBaseWake {
@@ -464,6 +483,14 @@ export function isHostedTelegramConversationMessageWake(
   message: HostedExecutionTelegramConversationMessagePayload;
 } {
   return wake.kind === "conversation.message" && wake.message.channel === "telegram";
+}
+
+export function isHostedWhatsAppConversationMessageWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationMessageWake & {
+  message: HostedExecutionWhatsAppConversationMessagePayload;
+} {
+  return wake.kind === "conversation.message" && wake.message.channel === "whatsapp";
 }
 
 export function isHostedEmailConversationMessageWake(

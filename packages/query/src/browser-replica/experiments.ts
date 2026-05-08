@@ -28,6 +28,8 @@ import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
 
 type JsonRecord = Record<string, unknown>;
 
+const MAX_BROWSER_EXPERIMENT_WINDOW_DAYS = 3660;
+
 export type BrowserVaultExperimentResultsLookup =
   | string
   | {
@@ -1863,6 +1865,9 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 
 function dateRange(start: string | null, end: string | null): string[] {
   if (!start || !end || start > end) {
+    return [];
+  }
+  if (daysBetweenInclusive(start, end) > MAX_BROWSER_EXPERIMENT_WINDOW_DAYS) {
     return [];
   }
 

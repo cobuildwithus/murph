@@ -129,7 +129,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
   browserVaultRefreshAuthority?: boolean | null;
-  dashboardReplicaSourceStateHash?: string | null;
+  browserVaultRefreshSourceStateHash?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
@@ -254,14 +254,14 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
     ...(input.internalWorkerProxyToken && (
       input.workspaceCheckpointBridge
-      || input.dashboardReplicaSourceStateHash
+      || input.browserVaultRefreshSourceStateHash
       || input.browserVaultRefreshAuthority
     )
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
             boundUserId: input.boundUserId,
             browserVaultRefreshAuthority: input.browserVaultRefreshAuthority === true,
-            dashboardReplicaSourceStateHash: input.dashboardReplicaSourceStateHash ?? null,
+            browserVaultRefreshSourceStateHash: input.browserVaultRefreshSourceStateHash ?? null,
             fetchImpl,
             timeoutMs,
             transport: hostedWebControlTransport,
@@ -495,7 +495,7 @@ async function requireHostedRuntimeActiveLeaseHeaders(
 function createCloudflareBrowserVaultReplicaPort(input: {
   boundUserId: string;
   browserVaultRefreshAuthority: boolean;
-  dashboardReplicaSourceStateHash: string | null;
+  browserVaultRefreshSourceStateHash: string | null;
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport | null;
@@ -533,7 +533,7 @@ function createCloudflareBrowserVaultReplicaPort(input: {
         fetchImpl: input.fetchImpl,
         headers: await createHostedBrowserVaultReplicaWriteHeaders({
           browserVaultRefreshAuthority: input.browserVaultRefreshAuthority,
-          dashboardReplicaSourceStateHash: input.dashboardReplicaSourceStateHash,
+          browserVaultRefreshSourceStateHash: input.browserVaultRefreshSourceStateHash,
           workspaceCheckpointBridge: input.workspaceCheckpointBridge,
         }),
         method: "POST",
@@ -561,7 +561,7 @@ function createCloudflareBrowserVaultReplicaPort(input: {
 
 export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
   browserVaultRefreshAuthority: boolean;
-  dashboardReplicaSourceStateHash: string | null;
+  browserVaultRefreshSourceStateHash: string | null;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): Promise<Headers> {
   if (input.workspaceCheckpointBridge) {
@@ -571,10 +571,10 @@ export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
     );
   }
 
-  if (input.dashboardReplicaSourceStateHash) {
+  if (input.browserVaultRefreshSourceStateHash) {
     const headers = new Headers();
     writeRunnerBrowserVaultRefreshHeaders(headers, {
-      sourceStateHash: input.dashboardReplicaSourceStateHash,
+      sourceStateHash: input.browserVaultRefreshSourceStateHash,
     });
     return headers;
   }

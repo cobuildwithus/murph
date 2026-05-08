@@ -35,7 +35,7 @@ export type BrowserVaultReplicaRefreshResult =
       status: "publish_conflict";
     };
 
-export type DashboardReplicaRefreshResult = BrowserVaultReplicaRefreshResult;
+export type BrowserVaultRefreshResult = BrowserVaultReplicaRefreshResult;
 
 export async function refreshBrowserVaultReplicaFromLiveWorkspace(input: {
   generatedAt: string;

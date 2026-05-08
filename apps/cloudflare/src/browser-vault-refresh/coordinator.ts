@@ -10,13 +10,18 @@ import type {
   RunnerStateStore,
 } from "../user-runner/runner-state-store.ts";
 
-export interface HostedDashboardReplicaRefreshScheduleResult {
+export type BrowserVaultRefreshCoordinatorStateStore = Pick<
+  RunnerStateStore,
+  "readPendingBrowserVaultRefresh" | "readState" | "scheduleBrowserVaultRefresh"
+>;
+
+export interface HostedBrowserVaultRefreshScheduleResult {
   accepted: true;
   immediateRefreshStarted: boolean;
   userId: string;
 }
 
-export class DashboardReplicaCoordinator {
+export class BrowserVaultRefreshCoordinator {
   private refreshAbortController: AbortController | null = null;
   private refreshLock: Promise<void> | null = null;
   private refreshPreemptedByForeground = false;
@@ -30,11 +35,12 @@ export class DashboardReplicaCoordinator {
       retryDelayMs: number;
       runPendingRefresh: (input: { signal: AbortSignal; userId: string }) => Promise<void>;
       state: DurableObjectStateLike;
-      stateStore: RunnerStateStore;
+      stateStore: BrowserVaultRefreshCoordinatorStateStore;
+      syncStoredRunnerAlarm: () => Promise<void>;
     },
   ) {}
 
-  async schedule(input: { userId: string }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
+  async schedule(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     const immediateRefreshStarted = await this.schedulePending(input);
 
     emitHostedExecutionStructuredLog({
@@ -42,7 +48,7 @@ export class DashboardReplicaCoordinator {
       details: {
         immediateRefreshStarted,
       },
-      message: "Hosted runner accepted dashboard replica refresh schedule.",
+      message: "Hosted runner accepted browser-vault refresh schedule.",
       phase: "scheduled",
       userId: input.userId,
     });
@@ -55,12 +61,16 @@ export class DashboardReplicaCoordinator {
   }
 
   async schedulePending(input: { userId: string }): Promise<boolean> {
-    await this.deps.stateStore.scheduleDashboardReplicaRefresh();
-    await this.scheduleContinuation({
+    await this.deps.stateStore.scheduleBrowserVaultRefresh();
+    const immediateRefreshStarted = await this.startDetachedRefresh({
       userId: input.userId,
     });
-
-    return false;
+    if (!immediateRefreshStarted) {
+      await this.scheduleContinuation({
+        userId: input.userId,
+      });
+    }
+    return immediateRefreshStarted;
   }
 
   async tryStart(input: {
@@ -70,7 +80,7 @@ export class DashboardReplicaCoordinator {
       return false;
     }
 
-    const pendingRefresh = await this.deps.stateStore.readPendingDashboardReplicaRefresh();
+    const pendingRefresh = await this.deps.stateStore.readPendingBrowserVaultRefresh();
     if (!pendingRefresh) {
       return false;
     }
@@ -93,7 +103,7 @@ export class DashboardReplicaCoordinator {
     delayMs?: number;
     userId: string;
   }): Promise<boolean> {
-    const pendingRefresh = await this.deps.stateStore.readPendingDashboardReplicaRefresh();
+    const pendingRefresh = await this.deps.stateStore.readPendingBrowserVaultRefresh();
     if (!pendingRefresh) {
       return false;
     }
@@ -103,12 +113,14 @@ export class DashboardReplicaCoordinator {
       return false;
     }
 
-    const continuationAtMs = Date.now()
+    const nowMs = Date.now();
+    const continuationAtMs = nowMs
       + (input.delayMs ?? this.deps.continuationDelayMs);
     const existingAlarmAtMs = await this.deps.state.storage.getAlarm();
     if (
       typeof existingAlarmAtMs === "number"
       && Number.isFinite(existingAlarmAtMs)
+      && existingAlarmAtMs > nowMs
       && existingAlarmAtMs <= continuationAtMs
     ) {
       return false;
@@ -117,7 +129,7 @@ export class DashboardReplicaCoordinator {
     await this.deps.state.storage.setAlarm(new Date(continuationAtMs));
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
-      message: "Hosted runner scheduled pending dashboard replica refresh continuation.",
+      message: "Hosted runner scheduled pending browser-vault refresh continuation.",
       phase: "scheduled",
       userId: input.userId,
     });
@@ -145,13 +157,13 @@ export class DashboardReplicaCoordinator {
             component: "hosted.runner",
             error,
             level: "warn",
-            message: "Hosted runner could not stop optional dashboard replica refresh container.",
+            message: "Hosted runner could not stop optional browser-vault refresh container.",
             phase: "scheduled",
             userId: input.userId,
           });
         }),
         {
-          failureMessage: "Hosted runner dashboard replica refresh cleanup could not be registered with Durable Object waitUntil.",
+          failureMessage: "Hosted runner browser-vault refresh cleanup could not be registered with Durable Object waitUntil.",
           phase: "scheduled",
           userId: input.userId,
         },
@@ -162,7 +174,7 @@ export class DashboardReplicaCoordinator {
       details: {
         reason: input.reason,
       },
-      message: "Hosted runner aborted optional dashboard replica refresh.",
+      message: "Hosted runner aborted optional browser-vault refresh.",
       phase: "scheduled",
       userId: input.userId,
     });
@@ -177,6 +189,12 @@ export class DashboardReplicaCoordinator {
           userId: record.userId,
         });
       }
+      return;
+    }
+
+    const started = await this.tryStart();
+    if (started) {
+      await this.deps.syncStoredRunnerAlarm();
       return;
     }
 
@@ -221,7 +239,7 @@ export class DashboardReplicaCoordinator {
         component: "hosted.runner",
         error,
         level: "warn",
-        message: "Hosted runner dashboard replica refresh failed; pending refresh remains best-effort.",
+        message: "Hosted runner browser-vault refresh failed; pending refresh remains best-effort.",
         phase: "failed",
         userId: input.userId,
       });
@@ -242,14 +260,16 @@ export class DashboardReplicaCoordinator {
         });
         return;
       }
-      await this.scheduleContinuation({
-        userId: input.userId,
-      });
+      if (!await this.tryStart({ userId: input.userId })) {
+        await this.scheduleContinuation({
+          userId: input.userId,
+        });
+      }
     });
 
     this.refreshLock = refresh;
     this.registerWaitUntil(refresh, {
-      failureMessage: "Hosted runner dashboard replica refresh could not be registered with Durable Object waitUntil.",
+      failureMessage: "Hosted runner browser-vault refresh could not be registered with Durable Object waitUntil.",
       phase: "scheduled",
       userId: input.userId,
     });

@@ -143,10 +143,10 @@ export class RunnerStateStore {
     return { deleted: true };
   }
 
-  async scheduleDashboardReplicaRefresh(): Promise<{
+  async scheduleBrowserVaultRefresh(): Promise<{
     deduped: boolean;
   }> {
-    const current = await this.readPendingDashboardReplicaRefresh();
+    const current = await this.readPendingBrowserVaultRefresh();
     await this.state.storage.put<PendingBrowserVaultRefreshRecord>(
       PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
       {
@@ -161,7 +161,7 @@ export class RunnerStateStore {
     };
   }
 
-  async readPendingDashboardReplicaRefresh(): Promise<{
+  async readPendingBrowserVaultRefresh(): Promise<{
     slotId: string | null;
     updatedAt: string | null;
   } | null> {
@@ -182,11 +182,11 @@ export class RunnerStateStore {
       : null;
   }
 
-  async clearPendingDashboardReplicaRefresh(input: {
+  async clearPendingBrowserVaultRefresh(input: {
     slotId?: string | null;
     updatedAt?: string | null;
   } = {}): Promise<boolean> {
-    const current = await this.readPendingDashboardReplicaRefresh();
+    const current = await this.readPendingBrowserVaultRefresh();
     if (!current) {
       return false;
     }

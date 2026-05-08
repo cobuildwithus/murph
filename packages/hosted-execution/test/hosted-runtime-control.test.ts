@@ -37,6 +37,7 @@ import {
   parseHostedMailboxPayload,
   parseHostedMailboxPayloadFetchRequest,
   parseHostedMailboxPayloadFetchResponse,
+  parseHostedBrowserVaultReplicaPublishRequest,
   parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeIssueExportRequest,
@@ -587,6 +588,29 @@ describe("hosted runtime control contracts", () => {
       published: false,
       workspace: null,
     });
+    const replicaRef = {
+      byteLength: 12,
+      dataVersion: "v1",
+      generatedAt: "2026-04-26T00:00:00.000Z",
+      keyId: "browser-vault-replica:key",
+      objectKey: "users/browser-vault-replicas/user/replica.json",
+      replicaSchema: "murph.browser-vault-replica",
+      runtimeRootKeyId: "udrk:runtime:test-root",
+      schema: "murph.hosted-browser-vault-replica-ref.v1",
+      sourceBundleHash: "snapshot_1_hash",
+    };
+    expect(parseHostedBrowserVaultReplicaPublishRequest({
+      expectedSourceStateHash: "legacy_source_hash",
+      replicaRef,
+    })).toEqual({
+      replicaRef,
+    });
+    expect(() => parseHostedBrowserVaultReplicaPublishRequest({
+      replicaRef: {
+        ...replicaRef,
+        generatedAt: "not-a-date",
+      },
+    })).toThrow(/replicaRef\.generatedAt must be a valid ISO-8601 timestamp/u);
 
     expect(() => parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",

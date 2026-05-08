@@ -8,6 +8,8 @@ Cloudflare execution worker.
 - own shared hosted execution contract types for the greenfield mailbox,
   workspace checkpoint, redacted runtime log, hosted usage record, and runner
   nudge/status seams
+- define the shared hosted `conversation.message` payload shapes for supported
+  hosted conversation channels: Linq, Telegram, email, and WhatsApp
 - define hosted execution auth header names and request-canonicalization helpers
 - normalize the shared hosted execution env variables that are deployment-vendor neutral
 - build stable internal route paths for hosted runtime mailbox, workspace,

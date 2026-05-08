@@ -284,7 +284,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     userId: input.userId,
   });
   const replicaRef = await replicaStore.writeBrowserVaultReplica({
-    expectedSourceStateHash: refreshSourceStateHash,
+    expectedReplicaSourceHash: refreshSourceStateHash,
     replica: body.replica,
     userId: input.userId,
   });

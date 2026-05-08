@@ -8,20 +8,27 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { publishHostedBrowserVaultReplicaRef } from "@/src/lib/hosted-workspace/store";
+import {
+  publishLegacySourceHashBrowserVaultReplicaRef,
+  publishLatestBrowserVaultReplicaRef,
+} from "@/src/lib/hosted-workspace/store";
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
-  const body = parseHostedBrowserVaultReplicaPublishRequest(
-    await readOptionalJsonObject(request),
-  );
-  const result = await publishHostedBrowserVaultReplicaRef({
-    ...(body.expectedSourceStateHash === undefined
-      ? {}
-      : { expectedSourceStateHash: body.expectedSourceStateHash }),
-    replicaRef: body.replicaRef,
-    userId,
-  });
+  const rawBody = await readOptionalJsonObject(request);
+  const body = parseHostedBrowserVaultReplicaPublishRequest(rawBody);
+  const legacyExpectedSourceStateHash =
+    readLegacyExpectedSourceStateHash(rawBody);
+  const result = legacyExpectedSourceStateHash === null
+    ? await publishLatestBrowserVaultReplicaRef({
+        replicaRef: body.replicaRef,
+        userId,
+      })
+    : await publishLegacySourceHashBrowserVaultReplicaRef({
+        expectedSourceStateHash: legacyExpectedSourceStateHash,
+        replicaRef: body.replicaRef,
+        userId,
+      });
 
   if (!result.workspace) {
     return jsonOk(parseHostedBrowserVaultReplicaPublishResponse({
@@ -46,3 +53,17 @@ export const POST = withJsonError(async (request: Request) => {
     },
   }));
 });
+
+function readLegacyExpectedSourceStateHash(
+  body: Record<string, unknown>,
+): string | null {
+  if (!Object.hasOwn(body, "expectedSourceStateHash")) {
+    return null;
+  }
+  if (typeof body.expectedSourceStateHash !== "string" || !body.expectedSourceStateHash.trim()) {
+    throw new TypeError(
+      "Legacy hosted browser-vault replica publish expectedSourceStateHash must be a non-empty string.",
+    );
+  }
+  return body.expectedSourceStateHash;
+}

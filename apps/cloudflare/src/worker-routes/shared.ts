@@ -24,11 +24,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
   nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
   nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult>;
-  scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<{
-    accepted: true;
-    immediateRefreshStarted: boolean;
-    userId: string;
-  }>;
   scheduleBrowserVaultRefreshForUser?(input: { userId: string }): Promise<{
     accepted: true;
     immediateRefreshStarted: boolean;
