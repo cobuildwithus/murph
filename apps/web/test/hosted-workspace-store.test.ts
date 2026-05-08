@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
+  publishHostedBrowserVaultReplicaRef,
   publishLatestBrowserVaultReplicaRef,
   publishLegacySourceHashBrowserVaultReplicaRefTx,
   publishLatestBrowserVaultReplicaRefTx,
@@ -1055,7 +1056,7 @@ describe("hosted workspace store", () => {
       hostedWorkspace,
     });
 
-    const result = await publishLatestBrowserVaultReplicaRef({
+    const result = await publishHostedBrowserVaultReplicaRef({
       prisma,
       replicaRef,
       userId: "member_workspace_1",

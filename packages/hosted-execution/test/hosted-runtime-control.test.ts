@@ -603,6 +603,7 @@ describe("hosted runtime control contracts", () => {
       expectedSourceStateHash: "legacy_source_hash",
       replicaRef,
     })).toEqual({
+      expectedSourceStateHash: "legacy_source_hash",
       replicaRef,
     });
     expect(() => parseHostedBrowserVaultReplicaPublishRequest({

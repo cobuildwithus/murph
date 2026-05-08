@@ -29,6 +29,11 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     immediateRefreshStarted: boolean;
     userId: string;
   }>;
+  scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<{
+    accepted: true;
+    immediateRefreshStarted: boolean;
+    userId: string;
+  }>;
   ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;

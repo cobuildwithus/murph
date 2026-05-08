@@ -348,6 +348,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
+  async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
+    return this.runner.scheduleBrowserVaultRefreshForUser(input);
+  }
+
   async ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -979,6 +983,9 @@ async function handleBrowserVaultRefreshRoute(
   const stub = context.env.USER_RUNNER.getByName(userId);
   if (stub.scheduleBrowserVaultRefreshForUser) {
     return json(await stub.scheduleBrowserVaultRefreshForUser({ userId }));
+  }
+  if (stub.scheduleDashboardReplicaRefreshForUser) {
+    return json(await stub.scheduleDashboardReplicaRefreshForUser({ userId }));
   }
   throw new Error("Hosted user runner does not support browser-vault refresh scheduling.");
 }

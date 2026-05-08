@@ -1320,6 +1320,44 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
+  it("falls back to the legacy dashboard refresh Durable Object method during rollout", async () => {
+    const scheduleDashboardReplicaRefreshForUser = vi.fn(async (input: {
+      userId: string;
+    }) => ({
+      accepted: true as const,
+      immediateRefreshStarted: false,
+      userId: input.userId,
+    }));
+    const stub = createUserRunnerStub({
+      scheduleBrowserVaultRefreshForUser: undefined,
+      scheduleDashboardReplicaRefreshForUser,
+    });
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      immediateRefreshStarted: false,
+      userId: "member_123",
+    });
+    expect(scheduleDashboardReplicaRefreshForUser).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+  });
+
   it("deletes hosted runner user data without queuing a new invocation", async () => {
     const stub = createUserRunnerStub({
       deleteHostedUserData: vi.fn(async (userId: string) => ({
