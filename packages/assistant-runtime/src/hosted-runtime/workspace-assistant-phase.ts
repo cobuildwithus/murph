@@ -584,6 +584,7 @@ export async function runHostedWorkspaceAssistantPhase(
         assistantDeliveryEffects: deliveryEffects,
         baseNextWakeAt: resolveHostedFastDispatchBaseNextWakeAt({
           assistantMetrics,
+          input,
           skippedDeviceSyncWakeAt,
           systemMailboxWakeAt,
         }),
@@ -1627,6 +1628,7 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
 
 function resolveHostedFastDispatchBaseNextWakeAt(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
   skippedDeviceSyncWakeAt: string | null;
   systemMailboxWakeAt: string | null;
 }): string | null {
@@ -1634,12 +1636,41 @@ function resolveHostedFastDispatchBaseNextWakeAt(input: {
     input.assistantMetrics.assistantAutomationDeferredReceiptRecoveryWakeAt
       ? input.assistantMetrics.assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery ?? null
       : input.assistantMetrics.nextWakeAt;
+  const skippedDeviceSyncWakeAt = shouldDropHostedFastDispatchSkippedDeviceSyncRetry(input)
+    ? null
+    : input.skippedDeviceSyncWakeAt;
   return resolveEarliestHostedWorkspaceWakeAt(
     resolveEarliestHostedWorkspaceWakeAt(
       assistantWakeAt,
-      input.skippedDeviceSyncWakeAt,
+      skippedDeviceSyncWakeAt,
     ),
     input.systemMailboxWakeAt,
+  );
+}
+
+function shouldDropHostedFastDispatchSkippedDeviceSyncRetry(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  skippedDeviceSyncWakeAt: string | null;
+}): boolean {
+  if (!input.skippedDeviceSyncWakeAt) {
+    return false;
+  }
+
+  const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;
+  if (!existingWakeAt) {
+    return false;
+  }
+
+  const existingWakeReason = input.input.workspace?.nextWakeReason ?? null;
+  if (existingWakeReason !== "assistant") {
+    return false;
+  }
+
+  const existingWakeTime = Date.parse(existingWakeAt);
+  return (
+    Number.isFinite(existingWakeTime)
+    && existingWakeTime <= resolveHostedAssistantPhaseNowMs(input.input)
+    && shouldRescheduleSkippedDeviceSyncWake(input.input)
   );
 }
 

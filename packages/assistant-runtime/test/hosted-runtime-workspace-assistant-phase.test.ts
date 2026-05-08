@@ -966,7 +966,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("omits only the deferred receipt-recovery wake after clean fast dispatch", async () => {
-    const deferredReceiptRecoveryWakeAt = "2026-05-08T00:00:00.000Z";
+    const deferredReceiptRecoveryWakeAt = "2026-05-08T02:28:11.758Z";
     const nextWakeAtWithoutDeferredReceiptRecovery = "2026-05-08T16:00:00.000Z";
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       assistantAutomationDeferredReceiptRecoveryWakeAt: deferredReceiptRecoveryWakeAt,
@@ -1006,6 +1006,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
+      now: () => "2026-05-08T02:28:12.000Z",
+      workspace: {
+        checkpointedAt: "2026-05-08T02:02:12.387Z",
+        createdAt: "2026-05-08T02:02:12.387Z",
+        nextWakeAt: "2026-05-08T02:02:00.725Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-05-08T02:02:12.387Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
     }));
 
     expect(result).toEqual(expect.objectContaining({
@@ -1016,6 +1028,68 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hostedOutboxDeliverySent: 1,
         nextWakeAt: nextWakeAtWithoutDeferredReceiptRecovery,
       }),
+    }));
+  });
+
+  it("preserves a skipped non-assistant due wake after clean fast dispatch", async () => {
+    const deferredReceiptRecoveryWakeAt = "2026-05-08T02:28:11.758Z";
+    const nextWakeAtWithoutDeferredReceiptRecovery = "2026-05-08T16:00:00.000Z";
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationDeferredReceiptRecoveryWakeAt: deferredReceiptRecoveryWakeAt,
+      assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery:
+        nextWakeAtWithoutDeferredReceiptRecovery,
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: deferredReceiptRecoveryWakeAt,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_synthetic",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-05-08T02:28:12.000Z",
+      workspace: {
+        checkpointedAt: "2026-05-08T02:02:12.387Z",
+        createdAt: "2026-05-08T02:02:12.387Z",
+        nextWakeAt: "2026-05-08T02:02:00.725Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-05-08T02:02:12.387Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: "2026-05-08T02:28:42.000Z",
+      progressed: true,
     }));
   });
 
