@@ -22,6 +22,7 @@ import {
   HostedExecutionConfigurationError,
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
+  refreshHostedExecutionContainerBrowserVaultReplica,
   resolveHostedExecutionRunnerContainerName,
   RunnerContainer,
 } from "../src/runner-container.ts";
@@ -436,7 +437,7 @@ describe("RunnerContainer", () => {
       const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
 
       expect(destroy).not.toHaveBeenCalled();
-      vi.setSystemTime(new Date("2026-05-06T00:05:01.000Z"));
+      vi.setSystemTime(new Date("2026-05-06T00:07:01.000Z"));
       await container.onActivityExpired();
       expect(destroy).toHaveBeenCalledTimes(1);
 
@@ -729,7 +730,7 @@ describe("RunnerContainer", () => {
 
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date(Date.now() + 301_000));
+      vi.setSystemTime(new Date(Date.now() + 421_000));
       const cleanupPromise = container.onActivityExpired();
       await vi.advanceTimersByTimeAsync(5_500);
       await expect(cleanupPromise).resolves.toBeUndefined();
@@ -1695,14 +1696,14 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("maps the configured idle TTL onto the container sleepAfter lifecycle", () => {
+  it("keeps the container sleepAfter later than the configured idle checkpoint window", () => {
     const { container } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2500",
       },
     });
 
-    expect(container.sleepAfter).toBe("3s");
+    expect(container.sleepAfter).toBe("123s");
   });
 
   it("rejects runner lifecycle env values with trailing junk", async () => {
@@ -1730,10 +1731,39 @@ describe("RunnerContainer", () => {
     })).rejects.toThrow("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
   });
 
-  it("defaults the warm container idle TTL to five minutes", () => {
+  it("defaults the warm container idle fallback after the five-minute checkpoint window", () => {
     const { container } = createContainerDouble();
 
-    expect(container.sleepAfter).toBe("300s");
+    expect(container.sleepAfter).toBe("420s");
+  });
+
+  it("renews activity before an idle-shutdown checkpoint reaches the warm shell", async () => {
+    const renewActivityTimeout = vi.fn();
+    const { container, containerFetch } = createContainerDouble();
+    Object.assign(container, {
+      renewActivityTimeout,
+    });
+
+    await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: {
+          ...createRunnerRequest("evt_idle_checkpoint_renew"),
+          reason: "idle_shutdown_checkpoint",
+        },
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    const executeCallIndex = containerFetch.mock.calls.findIndex(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCallIndex).toBeGreaterThanOrEqual(0);
+    expect(renewActivityTimeout).toHaveBeenCalled();
+    expect(renewActivityTimeout.mock.invocationCallOrder[0]).toBeLessThan(
+      containerFetch.mock.invocationCallOrder[executeCallIndex] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("uses the configured readiness timeout when cold-starting the container shell", async () => {
@@ -1857,6 +1887,41 @@ describe("RunnerContainer", () => {
       timeoutMs: 45_000,
       userId: "member_123",
     });
+  });
+
+  it("does not pass AbortSignal values through browser-vault refresh container RPC", async () => {
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({ status: "already_fresh" }));
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      async destroyInstance() {},
+      async invoke() {
+        return createRunnerResult();
+      },
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      refreshBrowserVaultReplica,
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    await refreshHostedExecutionContainerBrowserVaultReplica({
+      runnerContainerNamespace: { getByName },
+      runtime: {},
+      timeoutMs: 45_000,
+      userId: "member_123",
+    });
+
+    expect(getByName).toHaveBeenCalledWith("member_123");
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(refreshBrowserVaultReplica.mock.calls[0]?.[0]).not.toHaveProperty("signal");
   });
 
   it("resolves runner container names from worker version metadata", () => {

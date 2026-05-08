@@ -343,6 +343,9 @@ export class HostedUserRunner {
             });
           }
 	        }
+          await this.destroyIdleShutdownCheckpointContainerAfterFailureBestEffort({
+            userId: record.userId,
+          });
 	        emitHostedExecutionStructuredLog({
 	          component: "hosted.runner",
 	          error,
@@ -1528,25 +1531,18 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<void> {
     if (isCommittedIdleShutdownCheckpointResult(input.result)) {
-      await this.finishCommittedIdleShutdownCheckpointBestEffort({
+      await this.finishIdleShutdownCheckpointBestEffort({
+        cleanupFailureMessage: "Hosted idle-shutdown checkpoint committed but cleanup failed.",
+        preferredWakeAt: null,
         userId: input.userId,
       });
       return;
     }
 
     if (input.result.idleShutdownCheckpointed === true) {
-      await this.stateStore.clearIdleShutdownCheckpoint();
-      await this.runtimeAlarmScheduler.syncNextWake({
+      await this.finishIdleShutdownCheckpointBestEffort({
+        cleanupFailureMessage: "Hosted idle-shutdown checkpoint cleanup failed.",
         preferredWakeAt: input.result.nextWakeAt ?? null,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          nextWakePresent: input.result.nextWakeAt !== undefined && input.result.nextWakeAt !== null,
-          resultStatus: input.result.status,
-        },
-        message: "Hosted runner preserved future wake after idle checkpoint.",
-        phase: "scheduled",
         userId: input.userId,
       });
       return;
@@ -1569,22 +1565,16 @@ export class HostedUserRunner {
       return;
     }
 
-    await this.stateStore.clearIdleShutdownCheckpoint();
-    await this.runtimeAlarmScheduler.syncNextWake({
+    await this.finishIdleShutdownCheckpointBestEffort({
+      cleanupFailureMessage: "Hosted idle-shutdown checkpoint cleanup failed.",
       preferredWakeAt: input.result.nextWakeAt ?? null,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        resultStatus: input.result.status,
-      },
-      message: "Hosted runner skipped idle-shutdown cleanup because checkpoint was not committed.",
-      phase: "scheduled",
       userId: input.userId,
     });
   }
 
-  private async finishCommittedIdleShutdownCheckpointBestEffort(input: {
+  private async finishIdleShutdownCheckpointBestEffort(input: {
+    cleanupFailureMessage: string;
+    preferredWakeAt: string | null;
     userId: string;
   }): Promise<void> {
     try {
@@ -1597,7 +1587,7 @@ export class HostedUserRunner {
         },
         error,
         level: "warn",
-        message: "Hosted idle-shutdown checkpoint committed but cleanup failed.",
+        message: input.cleanupFailureMessage,
         phase: "checkpoint",
         userId: input.userId,
       });
@@ -1621,6 +1611,7 @@ export class HostedUserRunner {
   }
 
   private async finishIdleShutdownCheckpoint(input: {
+    preferredWakeAt: string | null;
     userId: string;
   }): Promise<void> {
     const record = await this.stateStore.readState();
@@ -1670,7 +1661,7 @@ export class HostedUserRunner {
     }
     await this.stateStore.clearIdleShutdownCheckpoint();
     await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: null,
+      preferredWakeAt: input.preferredWakeAt,
     });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -1684,6 +1675,43 @@ export class HostedUserRunner {
       phase: "checkpoint",
       userId: input.userId,
     });
+  }
+
+  private async destroyIdleShutdownCheckpointContainerAfterFailureBestEffort(input: {
+    userId: string;
+  }): Promise<void> {
+    try {
+      const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId: input.userId,
+      });
+      const destroyed = await destroyHostedExecutionContainer({
+        runnerContainerName,
+        runnerContainerNamespace: this.runnerContainerNamespace,
+        userId: input.userId,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          destroyErrorCode: destroyed.errorCode,
+          destroyAttempted: destroyed.attempted,
+          destroyOk: destroyed.ok,
+        },
+        level: destroyed.ok ? "info" : "warn",
+        message: "Hosted runner destroyed container after idle-shutdown checkpoint failure.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted runner could not destroy container after idle-shutdown checkpoint failure.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
   }
 
   private async scheduleHostedWakeRetryAlarm(input: {
@@ -1765,7 +1793,6 @@ export class HostedUserRunner {
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
       runtime: runtimeConfig,
-      signal: input.signal,
       timeoutMs: this.env.runnerTimeoutMs,
       userId: input.userId,
     });
