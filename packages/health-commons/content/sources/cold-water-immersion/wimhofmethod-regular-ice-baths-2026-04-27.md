@@ -15,6 +15,8 @@ relations:
   target: experiment_family:cold-water-immersion
 - type: related_protocol
   target: protocol_variant:cold-water-immersion/cold-plunge
+- type: same_work_as
+  target: source_artifact:wimhofmethod-cold-showers-2026-04-27
 source:
   kind: external_protocol
   title: Regular Ice Baths

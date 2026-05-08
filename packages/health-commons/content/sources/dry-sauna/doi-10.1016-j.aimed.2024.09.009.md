@@ -18,6 +18,8 @@ relations:
   target: protocol_variant:dry-sauna/bryan-johnson-blueprint
 - type: parent_family
   target: experiment_family:dry-sauna
+- type: same_work_as
+  target: source_artifact:doi-10-1016-j-aimed-2024-09-009
 source:
   kind: review
   title: 'Sauna bath reduces blood pressure in healthy adult volunteers: A meta-analysis of RCTs and quasi-experimental studies'

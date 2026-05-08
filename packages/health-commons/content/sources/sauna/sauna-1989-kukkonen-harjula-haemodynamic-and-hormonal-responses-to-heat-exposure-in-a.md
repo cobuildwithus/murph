@@ -19,6 +19,8 @@ relations:
   -
     type: parent_family
     target: experiment_family:dry-sauna
+  - type: same_work_as
+    target: source_artifact:pmid-2759081
 source:
   kind: journal_article
   title: "Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath"
