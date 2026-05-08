@@ -328,6 +328,42 @@ export async function publishLatestBrowserVaultReplicaRefTx(input: {
   });
 }
 
+export async function publishHostedBrowserVaultReplicaRef(input: {
+  expectedSourceStateHash?: string | null;
+  prisma?: HostedWorkspaceTransactionRunner;
+  replicaRef: unknown;
+  userId: string;
+}): Promise<HostedBrowserVaultReplicaPublishResult> {
+  if (input.expectedSourceStateHash === undefined || input.expectedSourceStateHash === null) {
+    return await publishLatestBrowserVaultReplicaRef(input);
+  }
+
+  return await publishLegacySourceHashBrowserVaultReplicaRef({
+    expectedSourceStateHash: input.expectedSourceStateHash,
+    prisma: input.prisma,
+    replicaRef: input.replicaRef,
+    userId: input.userId,
+  });
+}
+
+export async function publishHostedBrowserVaultReplicaRefTx(input: {
+  expectedSourceStateHash?: string | null;
+  replicaRef: unknown;
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<HostedBrowserVaultReplicaPublishResult> {
+  if (input.expectedSourceStateHash === undefined || input.expectedSourceStateHash === null) {
+    return publishLatestBrowserVaultReplicaRefTx(input);
+  }
+
+  return publishLegacySourceHashBrowserVaultReplicaRefTx({
+    expectedSourceStateHash: input.expectedSourceStateHash,
+    replicaRef: input.replicaRef,
+    tx: input.tx,
+    userId: input.userId,
+  });
+}
+
 export async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
   expectedSourceStateHash: string;
   prisma?: HostedWorkspaceTransactionRunner;

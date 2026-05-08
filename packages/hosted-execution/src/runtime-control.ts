@@ -362,6 +362,11 @@ export interface HostedWorkspaceCheckpointResponse {
 }
 
 export interface HostedBrowserVaultReplicaPublishRequest {
+  /**
+   * @deprecated Compatibility-only source-hash guard for older refresh callers.
+   * Active browser-vault publishes should omit this and update the latest ref.
+   */
+  expectedSourceStateHash?: string;
   replicaRef: HostedBrowserVaultReplicaRef;
 }
 

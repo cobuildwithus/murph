@@ -446,8 +446,8 @@ describe("hosted execution coverage gaps", () => {
       currentReplicaRef: null,
       currentSnapshotRef: null,
     })).toBeNull();
-    expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
-    expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
+    expect(typeof rootModule.getDashboardReplicaFreshness).toBe("function");
+    expect(typeof rootModule.shouldScheduleDashboardReplicaRefresh).toBe("function");
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
