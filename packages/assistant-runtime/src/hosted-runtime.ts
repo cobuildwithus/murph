@@ -765,7 +765,7 @@ async function checkpointRestoredLegacyWorkingSnapshot(input: {
 function shouldDeferInitialMailboxImportCheckpoint(
   request: HostedAssistantWorkspaceRuntimeJobInput["request"],
 ): boolean {
-  return request.reason === "nudge";
+  return request.reason === "nudge" || request.reason === "alarm";
 }
 
 function raceHostedRuntimeLiveness<T>(
