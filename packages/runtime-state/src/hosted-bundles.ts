@@ -79,6 +79,7 @@ const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/automation-runtime.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/jobs.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-mailbox.json`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-materialized-artifacts.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-provider-cleanup.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-system-mailbox.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/indexes.json`,
@@ -94,6 +95,7 @@ const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS = [
 const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_EXCLUDED_PATHS = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/cron/runs`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/diagnostics`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/hosted-materialized-artifacts.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/journals`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/runtime-budgets.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/status.json`,
@@ -2194,9 +2196,13 @@ export async function materializeHostedExecutionArtifacts(input: {
   bundle?: Uint8Array | ArrayBuffer | null;
   shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
   workspaceRoot: string;
-}): Promise<void> {
+}): Promise<{
+  materializedArtifactPaths: ReadonlySet<string>;
+}> {
   if (!input.bundle) {
-    return;
+    return {
+      materializedArtifactPaths: new Set(),
+    };
   }
 
   const workspaceRoot = path.resolve(input.workspaceRoot);
@@ -2208,7 +2214,7 @@ export async function materializeHostedExecutionArtifacts(input: {
   await ensureAssistantStateDirectory(assistantStateRoot);
   await mkdir(operatorHomeRoot, { recursive: true });
 
-  await materializeHostedBundleArtifacts({
+  return await materializeHostedBundleArtifacts({
     artifactResolver: input.artifactResolver,
     bytes: input.bundle,
     expectedKind: "vault",

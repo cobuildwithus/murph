@@ -23,9 +23,13 @@ import {
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
+  buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
   normalizeHostedAiUsageAllowancePricedModelId,
+  parseHostedRunnerNudgeRequest,
+  signHostedAiUsageAllowDecision,
+  verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
 import {
   parseHostedMailboxFetchRequest,
@@ -57,6 +61,32 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
+  it("signs hosted AI usage allow decisions over the canonical decision body", async () => {
+    const body = buildHostedAiUsageAllowDecisionBody({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      nonce: "0123456789abcdef0123456789abcdef",
+      userId: "member_123",
+    });
+    const decision = await signHostedAiUsageAllowDecision({
+      body,
+      keyId: "test",
+      secret: "test-ai-usage-allow-secret",
+    });
+
+    await expect(verifyHostedAiUsageAllowDecision({
+      decision,
+      secret: "test-ai-usage-allow-secret",
+    })).resolves.toBe(true);
+    await expect(verifyHostedAiUsageAllowDecision({
+      decision: {
+        ...decision,
+        userId: "member_other",
+      },
+      secret: "test-ai-usage-allow-secret",
+    })).resolves.toBe(false);
+  });
+
   it("freezes the mailbox lanes, item kinds, checkpoint reasons, and log codes", () => {
     expect(HOSTED_MAILBOX_LANES).toEqual([
       "system",
@@ -968,6 +998,15 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
       workspace: null,
     });
+  });
+
+  it("treats malformed optional runner nudge allow decisions as absent", () => {
+    expect(parseHostedRunnerNudgeRequest({
+      aiUsageAllowDecision: {
+        allowed: false,
+        schema: "murph.hosted-ai-usage-allow-decision.v1",
+      },
+    })).toEqual({});
   });
 
   it("publishes the runtime-control subpath without restoring removed client surfaces", async () => {

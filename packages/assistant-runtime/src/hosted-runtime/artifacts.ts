@@ -3,7 +3,7 @@ import type {
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
 import {
-  materializeHostedExecutionArtifacts,
+  materializeHostedBundleFiles,
 } from "@murphai/runtime-state/node";
 
 import type {
@@ -13,6 +13,9 @@ import type {
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
 import { toHostedArtifactPathKey } from "./artifact-paths.ts";
+import {
+  recordHostedMaterializedArtifactPaths,
+} from "./materialized-artifact-state.ts";
 
 export function createHostedArtifactResolver(input: {
   artifactStore: HostedRuntimeArtifactStore;
@@ -46,41 +49,76 @@ export function createHostedArtifactUploadSink(input: {
 
 export function createHostedArtifactMaterializer(input: {
   artifactResolver: ReturnType<typeof createHostedArtifactResolver>;
-  bundle: Uint8Array;
+  bundles: readonly (() => Promise<Uint8Array | ArrayBuffer | null>)[];
   materializedArtifactPaths: Set<string>;
-  workspaceRoot: string;
+  operatorHomeRoot: string;
+  vaultRoot: string;
 }): HostedWorkspaceArtifactMaterializer {
   return async (relativePaths) => {
-    const materializedArtifactPathKeys = new Set(
-      [...input.materializedArtifactPaths].map((relativePath) =>
-        toHostedArtifactPathKey({ path: relativePath })
-      ),
-    );
-    const pendingRelativePaths = [...new Set(relativePaths)]
-      .filter((relativePath) => (
-        !materializedArtifactPathKeys.has(toHostedArtifactPathKey({ path: relativePath }))
-      ));
-    if (pendingRelativePaths.length === 0) {
-      return;
+    const pendingArtifactPathKeys = new Set<string>();
+    for (const relativePath of relativePaths) {
+      const key = toHostedArtifactPathKey({ path: relativePath });
+      if (!input.materializedArtifactPaths.has(key)) {
+        pendingArtifactPathKeys.add(key);
+      }
+    }
+    if (pendingArtifactPathKeys.size === 0) {
+      return {
+        materializedArtifactPaths: new Set(),
+        missingArtifactPaths: new Set(),
+      };
     }
 
-    const pendingArtifactPathKeys = new Set(
-      pendingRelativePaths.map((relativePath) => toHostedArtifactPathKey({ path: relativePath })),
-    );
-    await materializeHostedExecutionArtifacts({
-      artifactResolver: input.artifactResolver,
-      bundle: input.bundle,
-      shouldRestoreArtifact: ({ path: artifactPath, root }) => (
-        pendingArtifactPathKeys.has(toHostedArtifactPathKey({
-          path: artifactPath,
-          root,
-        }))
-      ),
-      workspaceRoot: input.workspaceRoot,
-    });
-    for (const relativePath of pendingRelativePaths) {
-      input.materializedArtifactPaths.add(relativePath);
+    const materializedArtifactPaths = new Set<string>();
+    for (const readBundle of input.bundles) {
+      const bundle = await readBundle();
+      if (!bundle) {
+        continue;
+      }
+      const result = await materializeHostedBundleFiles({
+        artifactResolver: input.artifactResolver,
+        bytes: bundle,
+        expectedKind: "vault",
+        roots: {
+          "operator-home": input.operatorHomeRoot,
+          vault: input.vaultRoot,
+        },
+        shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+          pendingArtifactPathKeys.has(toHostedArtifactPathKey({
+            path: artifactPath,
+            root,
+          }))
+        ),
+        shouldRestoreInlineFile: ({ path: inlinePath, root }) => (
+          pendingArtifactPathKeys.has(toHostedArtifactPathKey({
+            path: inlinePath,
+            root,
+          }))
+        ),
+      });
+      for (const materializedPath of result.materializedArtifactPaths) {
+        const key = toHostedArtifactPathKey({ path: materializedPath });
+        if (pendingArtifactPathKeys.has(key)) {
+          materializedArtifactPaths.add(key);
+        }
+      }
     }
+
+    for (const key of materializedArtifactPaths) {
+      input.materializedArtifactPaths.add(key);
+    }
+    await recordHostedMaterializedArtifactPaths({
+      materializedArtifactPaths,
+      vaultRoot: input.vaultRoot,
+    });
+
+    const missingArtifactPaths = new Set(
+      [...pendingArtifactPathKeys].filter((key) => !materializedArtifactPaths.has(key)),
+    );
+    return {
+      materializedArtifactPaths,
+      missingArtifactPaths,
+    };
   };
 }
 

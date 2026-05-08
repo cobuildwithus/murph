@@ -32,6 +32,9 @@ import {
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
+  recordHostedMaterializedArtifactPaths,
+} from "@murphai/assistant-runtime";
+import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
@@ -584,6 +587,87 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
     expect(Buffer.from(artifactBundles.get(sha256HostedBundleHex(preservedBytes)) ?? []))
       .toEqual(preservedBytes);
+  });
+
+  it("drops preserved raw inline files after targeted materialization", async () => {
+    const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
+    const hotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-hot-workspace-"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(baseVaultRoot, hotVaultRoot, vaultRoot);
+    const preservedPath = path.join("raw", "inbox", "example", "scan.txt");
+    const preservedBytes = Buffer.from("materialized hot raw\n");
+    await mkdir(path.join(hotVaultRoot, "raw", "inbox", "example"), { recursive: true });
+    await writeFile(path.join(baseVaultRoot, "note.md"), "committed base\n", "utf8");
+    await writeFile(path.join(hotVaultRoot, preservedPath), preservedBytes);
+    await writeHostedWorkspaceSkippedInlineFiles({
+      files: [{
+        path: preservedPath,
+        root: "vault",
+        sha256: sha256HostedBundleHex(preservedBytes),
+        size: preservedBytes.byteLength,
+      }],
+      vaultRoot,
+    });
+    await recordHostedMaterializedArtifactPaths({
+      materializedArtifactPaths: new Set([`vault:${preservedPath}`]),
+      vaultRoot,
+    });
+
+    const artifactBundles = new Map<string, Uint8Array>();
+    const legacyLayeredRef = await createLegacyLayeredSnapshotFixture({
+      artifactBundles,
+      baseVaultRoot,
+      hotVaultRoot,
+    });
+    const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
+      artifactBundles.set(sha256, bytes);
+    });
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: legacyLayeredRef,
+          version: "8",
+        }),
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "8",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "idle_shutdown_checkpoint",
+        userId: "member_1",
+        workspaceVersion: "8",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const fullRef = requireBundleRef(result.snapshotRef);
+    const fullBundle = artifactBundles.get(fullRef.hash) ?? null;
+    expect(readHostedBundleTextFile({
+      bytes: fullBundle,
+      expectedKind: "vault",
+      path: preservedPath,
+      root: "vault",
+    })).toBeNull();
+    expect(listHostedBundleArtifacts({
+      bytes: fullBundle,
+      expectedKind: "vault",
+    })).not.toContainEqual({
+      path: preservedPath,
+      ref: {
+        byteSize: preservedBytes.byteLength,
+        sha256: sha256HostedBundleHex(preservedBytes),
+      },
+      root: "vault",
+    });
   });
 
   it("logs hashed Codex home snapshot diagnostics when checkpointing", async () => {

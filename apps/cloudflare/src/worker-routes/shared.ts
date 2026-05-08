@@ -1,4 +1,5 @@
 import type {
+  HostedRunnerNudgeRequest,
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationReason,
@@ -22,8 +23,11 @@ import type {
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
-  nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
-  nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult>;
+  nudgeHostedRunner(input?: HostedRunnerNudgeRequest): Promise<HostedRunnerNudgeResult>;
+  nudgeHostedRunnerForUser(
+    userId: string,
+    input?: HostedRunnerNudgeRequest,
+  ): Promise<HostedRunnerNudgeResult>;
   scheduleBrowserVaultRefreshForUser?(input: { userId: string }): Promise<unknown>;
   /**
    * @deprecated Compatibility-only Durable Object method for deploy skew.

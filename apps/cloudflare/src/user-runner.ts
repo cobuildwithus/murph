@@ -1,11 +1,17 @@
 import type {
+  HostedAiUsageAllowDecision,
   HostedRunnerNudgeResult,
+  HostedRunnerNudgeRequest,
   HostedRunnerStatusResponse,
   HostedRuntimeWebStatusResponse,
   HostedWorkspaceReadResponse,
   HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  parseHostedAiUsageAllowDecision,
+  verifyHostedAiUsageAllowDecision,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   emitHostedExecutionStructuredLog,
@@ -83,6 +89,21 @@ const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
 const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
+const AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY =
+  "runner:ai-usage-allow-decision-nonces:v1";
+const AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA =
+  "murph.hosted-runner.ai-usage-allow-decision-nonces.v1";
+
+interface AiUsageAllowDecisionNonceRecord {
+  expiresAt: string;
+  nonce: string;
+}
+
+interface AiUsageAllowDecisionNonceStorageRecord {
+  entries: readonly AiUsageAllowDecisionNonceRecord[];
+  schema: typeof AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA;
+  updatedAt: string;
+}
 
 type HostedAiUsageGateDecision =
   | {
@@ -125,6 +146,7 @@ interface RunnerUserStores {
 }
 
 interface RunnerDrainInput {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   dueWake?: boolean;
   idleCheckpointWorkspaceVersion?: string | null;
   reason: HostedWorkspaceInvocationReason;
@@ -139,7 +161,11 @@ export class HostedUserRunner {
   private runtimeCryptoContextLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
   private pendingRunnerDriveAfterInvocation: {
+    aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
     reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  } | null = null;
+  private pendingBrowserVaultRefreshAfterInvocation: {
     userId: string;
   } | null = null;
 
@@ -389,6 +415,7 @@ export class HostedUserRunner {
       await this.stateStore.assertStateForUser(userId);
       const r2 = await this.deleteHostedUserR2DataBestEffort(userId);
       const stateDeletion = await this.stateStore.deleteStateForUser(userId);
+      await this.state.storage.delete(AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY);
       const deleteAlarm = this.state.storage.deleteAlarm;
       const alarmCleared = typeof deleteAlarm === "function";
       if (alarmCleared) {
@@ -453,7 +480,7 @@ export class HostedUserRunner {
     }
   }
 
-  async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
+  async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
     let runningRecord = await this.stateStore.readState();
     const abortedBrowserVaultRefresh = this.browserVaultRefreshCoordinator.abortForForegroundWork({
@@ -496,11 +523,13 @@ export class HostedUserRunner {
     let immediateDriveStarted = false;
     if (activeInThisIsolate && runningRecord.inFlight) {
       immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
+        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: "nudge",
         userId: record.userId,
       });
     } else if (!alreadyRunning) {
       immediateDriveStarted = this.startDetachedRunnerDrive({
+        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: "nudge",
         userId: record.userId,
       });
@@ -528,9 +557,12 @@ export class HostedUserRunner {
     };
   }
 
-  async nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult> {
+  async nudgeHostedRunnerForUser(
+    userId: string,
+    input: HostedRunnerNudgeRequest = {},
+  ): Promise<HostedRunnerNudgeResult> {
     await this.stateStore.bindUser(userId);
-    return this.nudgeHostedRunner();
+    return this.nudgeHostedRunner(input);
   }
 
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
@@ -683,7 +715,8 @@ export class HostedUserRunner {
 
     const gate = input.reason === "idle_shutdown_checkpoint"
       ? createAllowedHostedAiUsageGateDecision()
-      : await this.readHostedAiUsageGateBeforeInvocation({
+      : await this.resolveHostedAiUsageGateBeforeInvocation({
+          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
           notifyUserOnDenied: initialRecord.pendingNudge,
           userId: initialRecord.userId,
         });
@@ -835,6 +868,11 @@ export class HostedUserRunner {
               phase: "scheduled",
               userId: initialRecord.userId,
             });
+          }
+          if (result.status !== "failed") {
+            this.pendingBrowserVaultRefreshAfterInvocation = {
+              userId: initialRecord.userId,
+            };
           }
         }
       }
@@ -1095,6 +1133,135 @@ export class HostedUserRunner {
     return parseHostedWorkspaceReadResponse(await response.json());
   }
 
+  private async resolveHostedAiUsageGateBeforeInvocation(input: {
+    aiUsageAllowDecision: HostedAiUsageAllowDecision | null;
+    notifyUserOnDenied: boolean;
+    userId: string;
+  }): Promise<HostedAiUsageGateDecision> {
+    if (
+      input.aiUsageAllowDecision
+      && await this.isHostedAiUsageAllowDecisionFreshAndValid({
+        decision: input.aiUsageAllowDecision,
+        userId: input.userId,
+      })
+    ) {
+      return createAllowedHostedAiUsageGateDecision();
+    }
+
+    return await this.readHostedAiUsageGateBeforeInvocation({
+      notifyUserOnDenied: input.notifyUserOnDenied,
+      userId: input.userId,
+    });
+  }
+
+  private async isHostedAiUsageAllowDecisionFreshAndValid(input: {
+    decision: HostedAiUsageAllowDecision;
+    userId: string;
+  }): Promise<boolean> {
+    const secret = this.env.hostedAiUsageGateAllowSigningSecret;
+    if (!secret) {
+      return false;
+    }
+
+    try {
+      const decision = parseHostedAiUsageAllowDecision(input.decision);
+      if (decision.userId !== input.userId) {
+        return false;
+      }
+      if (
+        this.env.hostedAiUsageGateAllowSigningKeyId
+        && decision.signature.keyId !== this.env.hostedAiUsageGateAllowSigningKeyId
+      ) {
+        return false;
+      }
+      if (!isHostedAiUsageAllowDecisionFresh(decision)) {
+        return false;
+      }
+
+      const valid = await verifyHostedAiUsageAllowDecision({
+        decision,
+        secret,
+      });
+      if (!valid) {
+        return false;
+      }
+
+      return await this.consumeHostedAiUsageAllowDecisionNonce(decision);
+    } catch {
+      return false;
+    }
+  }
+
+  private async consumeHostedAiUsageAllowDecisionNonce(
+    decision: HostedAiUsageAllowDecision,
+  ): Promise<boolean> {
+    const nowMs = Date.now();
+    const existing = await this.readHostedAiUsageAllowDecisionNonceRecord();
+    const freshEntries = existing.entries.filter((entry) => {
+      const expiresAtMs = Date.parse(entry.expiresAt);
+      return Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+    });
+
+    if (freshEntries.some((entry) => entry.nonce === decision.nonce)) {
+      return false;
+    }
+
+    await this.state.storage.put<AiUsageAllowDecisionNonceStorageRecord>(
+      AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY,
+      {
+        entries: [
+          ...freshEntries,
+          {
+            expiresAt: decision.expiresAt,
+            nonce: decision.nonce,
+          },
+        ],
+        schema: AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA,
+        updatedAt: new Date(nowMs).toISOString(),
+      },
+    );
+
+    return true;
+  }
+
+  private async readHostedAiUsageAllowDecisionNonceRecord(): Promise<{
+    entries: readonly AiUsageAllowDecisionNonceRecord[];
+  }> {
+    const value = await this.state.storage.get<unknown>(
+      AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY,
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { entries: [] };
+    }
+
+    const record = value as Partial<AiUsageAllowDecisionNonceStorageRecord>;
+    if (
+      record.schema !== AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA
+      || !Array.isArray(record.entries)
+    ) {
+      return { entries: [] };
+    }
+
+    return {
+      entries: record.entries.flatMap((entry) => {
+        if (
+          !entry
+          || typeof entry !== "object"
+          || Array.isArray(entry)
+          || typeof entry.nonce !== "string"
+          || typeof entry.expiresAt !== "string"
+        ) {
+          return [];
+        }
+
+        return [{
+          expiresAt: entry.expiresAt,
+          nonce: entry.nonce,
+        }];
+      }),
+    };
+  }
+
   private async readHostedAiUsageGateBeforeInvocation(input: {
     notifyUserOnDenied: boolean;
     userId: string;
@@ -1237,6 +1404,7 @@ export class HostedUserRunner {
     const record = await this.stateStore.readState();
     if (record.pendingNudge) {
       this.pendingRunnerDriveAfterInvocation = {
+        aiUsageAllowDecision: null,
         reason: "nudge",
         userId: input.userId,
       };
@@ -1292,6 +1460,37 @@ export class HostedUserRunner {
       phase: "scheduled",
       userId: input.userId,
     });
+  }
+
+  private scheduleBrowserVaultRefreshAfterForegroundInvocation(input: {
+    userId: string;
+  }): void {
+    const schedule = this.browserVaultRefreshCoordinator
+      .schedulePending({ userId: input.userId })
+      .catch((error) => {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          error,
+          level: "warn",
+          message: "Hosted runner could not schedule browser-vault refresh after foreground invocation.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+      });
+
+    try {
+      this.state.waitUntil?.(schedule);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted runner could not register post-foreground browser-vault refresh scheduling.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+    }
+    void schedule;
   }
 
   private async preflightIdleShutdownCheckpoint(input: {
@@ -1880,6 +2079,7 @@ export class HostedUserRunner {
   }
 
   private startDetachedRunnerDrive(input: {
+    aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): boolean {
@@ -1887,7 +2087,10 @@ export class HostedUserRunner {
       return false;
     }
 
-    const drive = this.runUntilIdleOrBudget({ reason: input.reason })
+    const drive = this.runUntilIdleOrBudget({
+      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+      reason: input.reason,
+    })
       .then(() => undefined, async (error) => {
         const record = await this.tryReadStateForRetryScheduling();
         const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
@@ -1949,6 +2152,7 @@ export class HostedUserRunner {
   }
 
   private queueOrStartRunnerDriveAfterInvocation(input: {
+    aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): boolean {
@@ -2033,6 +2237,8 @@ export class HostedUserRunner {
       );
     } finally {
       const pendingDrive = this.pendingRunnerDriveAfterInvocation;
+      const pendingBrowserVaultRefresh = this.pendingBrowserVaultRefreshAfterInvocation;
+      this.pendingBrowserVaultRefreshAfterInvocation = null;
 
       if (pendingDrive && this.invocationLock === null) {
         this.pendingRunnerDriveAfterInvocation = null;
@@ -2045,6 +2251,10 @@ export class HostedUserRunner {
 
       if (!this.pendingRunnerDriveAfterInvocation && this.invocationLock === null) {
         await this.browserVaultRefreshCoordinator.drainAfterForegroundWork();
+      }
+
+      if (pendingBrowserVaultRefresh) {
+        this.scheduleBrowserVaultRefreshAfterForegroundInvocation(pendingBrowserVaultRefresh);
       }
     }
   }
@@ -2078,6 +2288,24 @@ function createAllowedHostedAiUsageGateDecision(): HostedAiUsageGateDecision {
     retryAfter: null,
     userNotice: null,
   };
+}
+
+function isHostedAiUsageAllowDecisionFresh(
+  decision: HostedAiUsageAllowDecision,
+  nowMs = Date.now(),
+): boolean {
+  const issuedAtMs = Date.parse(decision.issuedAt);
+  const expiresAtMs = Date.parse(decision.expiresAt);
+  if (!Number.isFinite(issuedAtMs) || !Number.isFinite(expiresAtMs)) {
+    return false;
+  }
+  if (issuedAtMs > nowMs + 5_000) {
+    return false;
+  }
+  if (expiresAtMs <= nowMs) {
+    return false;
+  }
+  return expiresAtMs - issuedAtMs <= 35_000;
 }
 
 function requireHostedAiUsageGateObject(value: unknown): Record<string, unknown> {

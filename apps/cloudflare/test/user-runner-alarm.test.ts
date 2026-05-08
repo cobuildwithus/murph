@@ -9,9 +9,14 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
+  HostedAiUsageAllowDecision,
   HostedRunnerNudgeResult,
   HostedWorkspaceState,
   HostedWorkspaceInvocationReason,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  buildHostedAiUsageAllowDecisionBody,
+  signHostedAiUsageAllowDecision,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type {
@@ -1636,6 +1641,235 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(JSON.parse(String(usageGateCall?.[0].body))).toEqual({});
   });
 
+  it("skips the live web AI usage gate when a fresh signed allow decision is valid", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const decision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      secret: "test-ai-usage-allow-secret",
+      userId: "member_123",
+    });
+    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
+      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
+      usageGateResponse: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({
+      aiUsageAllowDecision: decision,
+      reason: "manual",
+    })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
+        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to the live web AI usage gate when a signed allow decision nonce is reused", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const decision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      nonce: "0123456789abcdef0123456789abcdef",
+      secret: "test-ai-usage-allow-secret",
+      userId: "member_123",
+    });
+    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
+      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
+      usageGateResponse: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({
+      aiUsageAllowDecision: decision,
+      reason: "manual",
+    })).resolves.toMatchObject({
+      status: "idle",
+    });
+    await expect(runner.runUntilIdleOrBudget({
+      aiUsageAllowDecision: decision,
+      reason: "manual",
+    })).resolves.toMatchObject({
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateReason: "ai_usage_limit_exceeded",
+      },
+      status: "scheduled",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
+        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to the live web AI usage gate when a signed allow decision signature is invalid", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const decision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      nonce: "0123456789abcdef0123456789abcdef",
+      secret: "other-secret",
+      userId: "member_123",
+    });
+    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
+      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
+      usageGateResponse: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({
+      aiUsageAllowDecision: decision,
+      reason: "manual",
+    })).resolves.toMatchObject({
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateReason: "ai_usage_limit_exceeded",
+      },
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
+        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
+      ),
+    ).toBe(true);
+  });
+
+  it("carries a fresh signed allow decision from nudge into the detached runner drive", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const decision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      secret: "test-ai-usage-allow-secret",
+      userId: "member_123",
+    });
+    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
+      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
+      usageGateResponse: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner({
+      aiUsageAllowDecision: decision,
+    })).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await flushDetachedRunnerDrive();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
+        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to the live web AI usage gate when a signed allow decision is stale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:01:00.000Z"));
+    const decision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      secret: "test-ai-usage-allow-secret",
+      userId: "member_123",
+    });
+    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
+      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
+      usageGateResponse: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({
+      aiUsageAllowDecision: decision,
+      reason: "manual",
+    })).resolves.toMatchObject({
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateReason: "ai_usage_limit_exceeded",
+      },
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
+        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to the live web AI usage gate when a signed allow decision belongs to another user", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const decision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      secret: "test-ai-usage-allow-secret",
+      userId: "member_other",
+    });
+    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
+      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
+      usageGateResponse: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+        retryAfter: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({
+      aiUsageAllowDecision: decision,
+      reason: "manual",
+    })).resolves.toMatchObject({
+      redactedStatus: {
+        aiUsageGateBlocked: true,
+        aiUsageGateReason: "ai_usage_limit_exceeded",
+      },
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
+        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
+      ),
+    ).toBe(true);
+  });
+
   it("asks the web AI usage gate to notify the user when a pending nudge is denied", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
@@ -2809,6 +3043,95 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(latestAlarmMs).toBeLessThan(Date.parse("2026-04-27T00:00:02.000Z"));
   });
 
+  it("cleans up only the browser-vault refresh container without blocking a foreground nudge", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("refresh-cleanup-fire-and-forget"),
+      version: "4",
+    });
+    const activeRefresh = createDeferred<Awaited<ReturnType<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >>>();
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => await activeRefresh.promise);
+    const abortBrowserVaultRefresh = vi.fn(async () => {});
+    const destroyInstance = vi.fn(async () => {
+      destroyStarted.resolve();
+      await releaseDestroy.promise;
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle",
+    }));
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      void promise.catch(() => undefined);
+    });
+    const {
+      destroyInstanceNames,
+      runner,
+    } = createRunnerCryptoContextHarness(workspace, {
+      abortBrowserVaultRefresh,
+      destroyInstance,
+      invoke,
+      refreshBrowserVaultReplica,
+      waitUntil,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      scheduled: true,
+    });
+    await runner.alarm();
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+    waitUntil.mockClear();
+    const waitUntilSettled: boolean[] = [];
+    waitUntil.mockImplementation((promise: Promise<unknown>) => {
+      const index = waitUntilSettled.length;
+      waitUntilSettled.push(false);
+      void promise.finally(() => {
+        waitUntilSettled[index] = true;
+      }).catch(() => undefined);
+    });
+
+    let nudgeSettled = false;
+    const nudge = runner.nudgeHostedRunner().finally(() => {
+      nudgeSettled = true;
+    });
+    await destroyStarted.promise;
+
+    try {
+      await vi.waitFor(() => expect(nudgeSettled).toBe(true));
+      await expect(nudge).resolves.toMatchObject({
+        accepted: true,
+        immediateDriveStarted: true,
+      });
+      expect(waitUntil.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(waitUntil).toHaveBeenNthCalledWith(1, expect.any(Promise));
+      expect(waitUntilSettled[0]).toBe(false);
+    } finally {
+      releaseDestroy.resolve();
+      activeRefresh.resolve({
+        status: "already_fresh",
+      });
+    }
+    await flushDetachedRunnerDrive();
+    const refreshContainerName = resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
+      source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      userId: "member_123",
+    });
+    const mainRunnerContainerName = resolveHostedExecutionRunnerContainerName({
+      source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      userId: "member_123",
+    });
+    expect(destroyInstanceNames.length).toBeGreaterThan(0);
+    expect(destroyInstanceNames.every((name) => name === refreshContainerName)).toBe(true);
+    expect(destroyInstanceNames).not.toContain(mainRunnerContainerName);
+  });
+
   it("aborts an active browser-vault refresh before foreground manual work starts", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("refresh-preempted-by-manual"),
@@ -3090,13 +3413,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     }));
   });
 
-  it("does not schedule browser-vault refresh after a foreground invocation", async () => {
+  it("schedules browser-vault refresh after a foreground invocation without running it inline", async () => {
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("foreground-no-browser-vault"),
+      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-pending"),
       version: "4",
     });
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-      workspace.version = "5";
+      workspace.version = String(Number(workspace.version) + 1);
       return {
         nextWakeAt: null,
         status: "idle",
@@ -3122,9 +3445,159 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
+    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    }));
+
     await runner.alarm();
+    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
+  });
+
+  it("keeps foreground nudges ahead of a pending post-reply browser-vault refresh", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-nudge-wins"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      workspace.version = String(Number(workspace.version) + 1);
+      return {
+        nextWakeAt: null,
+        status: "idle",
+      };
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
+      workspace,
+      {
+        invoke,
+        refreshBrowserVaultReplica,
+      },
+    );
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    }));
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
     await flushDetachedRunnerDrive();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    });
+  });
+
+  it("preserves post-reply browser-vault refresh scheduling when a nudge is queued during foreground work", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-queued-nudge"),
+      version: "4",
+    });
+    const firstInvokeStarted = createDeferred<void>();
+    const finishFirstInvoke = createDeferred<void>();
+    const secondInvokeStarted = createDeferred<void>();
+    const finishSecondInvoke = createDeferred<void>();
+    let invokeCount = 0;
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      invokeCount += 1;
+      if (invokeCount === 1) {
+        firstInvokeStarted.resolve();
+        await finishFirstInvoke.promise;
+      } else {
+        secondInvokeStarted.resolve();
+        await finishSecondInvoke.promise;
+      }
+      workspace.version = String(Number(workspace.version) + 1);
+      return {
+        nextWakeAt: null,
+        status: "idle",
+      };
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
+      workspace,
+      {
+        invoke,
+        refreshBrowserVaultReplica,
+      },
+    );
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await firstInvokeStarted.promise;
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+    });
+
+    finishFirstInvoke.resolve();
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await secondInvokeStarted.promise;
+    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      updatedAt: expect.any(String),
+    }));
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    finishSecondInvoke.resolve();
+    await flushDetachedRunnerDrive();
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not schedule browser-vault refresh after a failed foreground invocation", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-failed"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      redactedStatus: {
+        reason: "test_failure",
+      },
+      status: "failed",
+    }));
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      void promise.catch(() => undefined);
+    });
+    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
+      workspace,
+      {
+        invoke,
+        refreshBrowserVaultReplica,
+        waitUntil,
+      },
+    );
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "failed",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(waitUntil).not.toHaveBeenCalled();
     expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
   });
@@ -3489,9 +3962,29 @@ function createRunnerContainerNamespace(
   };
 }
 
+async function createTestAiUsageAllowDecision(input: {
+  expiresAt: string;
+  issuedAt: string;
+  nonce?: string;
+  secret: string;
+  userId: string;
+}): Promise<HostedAiUsageAllowDecision> {
+  return await signHostedAiUsageAllowDecision({
+    body: buildHostedAiUsageAllowDecisionBody({
+      expiresAt: input.expiresAt,
+      issuedAt: input.issuedAt,
+      nonce: input.nonce ?? "0123456789abcdef0123456789abcdef",
+      userId: input.userId,
+    }),
+    keyId: "test",
+    secret: input.secret,
+  });
+}
+
 function createRunnerCryptoContextHarness(
   workspace: HostedWorkspaceState | null,
   options: {
+    aiUsageAllowSigningSecret?: string;
     browserVaultPublish?(): Promise<void> | void;
     cryptoContextCacheMaxAgeMs?: number;
     cryptoContextStatus?: number;
@@ -3553,6 +4046,7 @@ function createRunnerCryptoContextHarness(
     );
   const abortBrowserVaultRefresh = options.abortBrowserVaultRefresh ?? vi.fn(async () => {});
   const destroyInstance = options.destroyInstance ?? vi.fn(async () => {});
+  const destroyInstanceNames: string[] = [];
   const runnerContainerNames: string[] = [];
   let cryptoContextStatus = options.cryptoContextStatus ?? 200;
   let workspaceReadCount = 0;
@@ -3606,6 +4100,13 @@ function createRunnerCryptoContextHarness(
     {
       ...readHostedExecutionEnvironment(createHostedExecutionTestEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
+        ...(options.aiUsageAllowSigningSecret === undefined
+          ? {}
+          : {
+              HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID: "test",
+              HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET:
+                options.aiUsageAllowSigningSecret,
+            }),
         ...(options.maxEventAttempts === undefined
           ? {}
           : { HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: String(options.maxEventAttempts) }),
@@ -3632,7 +4133,10 @@ function createRunnerCryptoContextHarness(
         ]).toContain(name);
         return {
           abortBrowserVaultRefresh,
-          destroyInstance,
+          async destroyInstance() {
+            destroyInstanceNames.push(name);
+            await destroyInstance();
+          },
           invoke,
           async ownsInternalWorkerProxyToken() {
             return true;
@@ -3654,6 +4158,7 @@ function createRunnerCryptoContextHarness(
   return {
     alarms,
     abortBrowserVaultRefresh,
+    destroyInstanceNames,
     invoke,
     runnerContainerNames,
     readPendingBrowserVaultRefreshStorage() {

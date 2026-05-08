@@ -45,11 +45,16 @@ import {
 } from "./canonical-write-receipt-log.ts";
 
 import {
+  createHostedArtifactMaterializer,
   createHostedArtifactResolver,
 } from "./artifacts.ts";
 import type {
+  HostedWorkspaceArtifactMaterializer,
   HostedRestoredExecutionContext,
 } from "./models.ts";
+import {
+  readHostedMaterializedArtifactPaths,
+} from "./materialized-artifact-state.ts";
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
@@ -65,6 +70,8 @@ export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 
 export interface HostedWorkspaceRuntimeRestoreResult
   extends HostedRestoredExecutionContext {
+  materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
+  materializedArtifactPaths: ReadonlySet<string>;
   mode: HostedWorkspaceRuntimeRestoreMode;
   restoreWasCold: boolean;
 }
@@ -107,10 +114,21 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
+  const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
+    vaultRoot: restored.vaultRoot,
+  });
+  const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
 
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     return {
       ...restored,
+      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+        materializedArtifactPaths,
+        platform: input.platform,
+        restored,
+        readBundles: materializerBundles,
+      }),
+      materializedArtifactPaths,
       mode: "null-bootstrap",
       restoreWasCold: false,
     };
@@ -144,6 +162,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
     if (useCachedBaseRestore) {
       baseRestoreCacheHit = true;
+      materializerBundles.push(() => readHostedWorkspaceRuntimeBundle({
+        platform: input.platform,
+        ref: baseSnapshotRef,
+      }));
     } else {
       restoreWasCold = true;
       const baseBundle = await readHostedWorkspaceRuntimeBundle({
@@ -156,6 +178,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         platform: input.platform,
         snapshotLayer: "base",
       });
+      materializerBundles.push(async () => baseRepair.bundle);
       if (deltaSnapshotRef) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
       }
@@ -205,23 +228,29 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
           }),
         });
         await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
+        materializerBundles.push(() => readHostedWorkspaceRuntimeBundle({
+          platform: input.platform,
+          ref: hotSnapshotRef,
+        }));
       } catch {
         await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
         restoreWasCold = true;
-        await restoreHostedWorkspaceRuntimeHotLayer({
+        const restoredHotBundle = await restoreHostedWorkspaceRuntimeHotLayer({
           hotSnapshotRef,
           input,
           restored,
         });
+        materializerBundles.push(async () => restoredHotBundle);
       }
     } else {
       await clearHostedWorkspaceHotRestoreCacheBestEffort(restored.vaultRoot);
       restoreWasCold = true;
-      await restoreHostedWorkspaceRuntimeHotLayer({
+      const restoredHotBundle = await restoreHostedWorkspaceRuntimeHotLayer({
         hotSnapshotRef,
         input,
         restored,
       });
+      materializerBundles.push(async () => restoredHotBundle);
     }
   }
 
@@ -241,6 +270,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       platform: input.platform,
       ref: deltaSnapshotRef,
     });
+    materializerBundles.push(async () => deltaBundle);
     const skippedInlineFiles: HostedWorkspaceSkippedInlineFile[] = [];
     await restoreHostedWorkspaceWorkingDelta({
       artifactResolver: createHostedArtifactResolver({
@@ -278,6 +308,13 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
   return {
     ...restored,
+    materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+      materializedArtifactPaths,
+      platform: input.platform,
+      restored,
+      readBundles: materializerBundles,
+    }),
+    materializedArtifactPaths,
     mode: "snapshot",
     restoreWasCold,
   };
@@ -290,7 +327,7 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
     platform: HostedRuntimePlatform;
   };
   restored: HostedRestoredExecutionContext;
-}): Promise<void> {
+}): Promise<Uint8Array | ArrayBuffer> {
   const hotBundle = await readHostedWorkspaceRuntimeBundle({
     platform: input.input.platform,
     ref: input.hotSnapshotRef,
@@ -316,7 +353,26 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
     platform: input.input.platform,
     ref: input.hotSnapshotRef,
     restored: input.restored,
-    trackSkippedInlineFiles: false,
+    appendSkippedInlineFiles: true,
+    trackSkippedInlineFiles: true,
+  });
+  return hotRepair.bundle;
+}
+
+function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
+  materializedArtifactPaths: Set<string>;
+  platform: HostedRuntimePlatform;
+  readBundles: readonly (() => Promise<Uint8Array | ArrayBuffer | null>)[];
+  restored: HostedRestoredExecutionContext;
+}): HostedWorkspaceArtifactMaterializer {
+  return createHostedArtifactMaterializer({
+    artifactResolver: createHostedArtifactResolver({
+      artifactStore: input.platform.artifactStore,
+    }),
+    bundles: input.readBundles,
+    materializedArtifactPaths: input.materializedArtifactPaths,
+    operatorHomeRoot: input.restored.operatorHomeRoot,
+    vaultRoot: input.restored.vaultRoot,
   });
 }
 
@@ -782,6 +838,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function restoreHostedWorkspaceRuntimeBundle(input: {
+  appendSkippedInlineFiles?: boolean;
   bundle?: Uint8Array | ArrayBuffer | null;
   platform: HostedRuntimePlatform;
   ref: HostedExecutionBundleRef;
@@ -815,10 +872,17 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
       shouldRestoreInlineFile: shouldRestoreHostedRuntimeInlineFile,
     });
     if (input.trackSkippedInlineFiles) {
-      await writeHostedWorkspaceSkippedInlineFiles({
-        files: skippedInlineFiles,
-        vaultRoot: input.restored.vaultRoot,
-      });
+      if (input.appendSkippedInlineFiles) {
+        await appendHostedWorkspaceSkippedInlineFiles({
+          files: skippedInlineFiles,
+          vaultRoot: input.restored.vaultRoot,
+        });
+      } else {
+        await writeHostedWorkspaceSkippedInlineFiles({
+          files: skippedInlineFiles,
+          vaultRoot: input.restored.vaultRoot,
+        });
+      }
     }
     await verifyRestoredHostedCodexContinuityManifest(input.restored.operatorHomeRoot, {
       assistantStateRoot: resolveAssistantStatePaths(input.restored.vaultRoot).assistantStateRoot,
@@ -889,23 +953,27 @@ function shouldRestoreHostedRuntimeEagerArtifact(input: {
     return false;
   }
 
-  return (
-    hasHostedRuntimeEagerArtifactPrefix(input.path, "raw/inbox")
-    || hasHostedRuntimeEagerArtifactPrefix(input.path, "raw/assistant-input")
-    || hasHostedRuntimeEagerArtifactPrefix(input.path, "derived/inbox")
-    || hasHostedRuntimeEagerArtifactPrefix(input.path, "derived/assistant-input")
-  );
+  return false;
 }
 
 function shouldRestoreHostedRuntimeInlineFile(input: {
   path: string;
   root: string;
 }): boolean {
-  if (input.root !== "vault" || !input.path.startsWith("raw/")) {
+  if (input.root !== "vault") {
     return true;
   }
 
-  return shouldRestoreHostedRuntimeEagerArtifact(input);
+  return !isHostedRuntimeLazyContentPath(input.path);
+}
+
+function isHostedRuntimeLazyContentPath(relativePath: string): boolean {
+  return (
+    hasHostedRuntimeEagerArtifactPrefix(relativePath, "raw/inbox")
+    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "raw/assistant-input")
+    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "derived/inbox")
+    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "derived/assistant-input")
+  );
 }
 
 function hasHostedRuntimeEagerArtifactPrefix(

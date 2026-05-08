@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertPreparedDeployArtifacts,
+  assertPreparedRunnerBundle,
   runnerBundleManifestFileName,
   writeRunnerBundleManifest,
   type RunnerBundleManifest,
@@ -493,6 +494,44 @@ export function loadGeneratedHealthCommonsCatalog() {
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "generated Wrangler config is newer than the runner bundle",
+    );
+  });
+
+  it("accepts a downloaded runner bundle after refreshing its manifest", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);
+    const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
+      now: () => new Date(future.getTime() + 1_000),
+    };
+
+    if (fixture.appDir) {
+      manifestInput.appDir = fixture.appDir;
+    }
+
+    if (fixture.repoRoot) {
+      manifestInput.repoRoot = fixture.repoRoot;
+    }
+
+    await utimes(fixture.configPath, future, future);
+    await writeRunnerBundleManifest(fixture.runnerBundleDir, manifestInput);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
+  });
+
+  it("rejects a downloaded runner bundle with a stale source fingerprint before manifest refresh", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(fixture.runnerBundleDir, runnerBundleManifestFileName),
+      `${JSON.stringify({
+        ...fixture.manifest,
+        sourceFingerprint: "stale",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Prepared runner bundle source fingerprint is stale",
     );
   });
 

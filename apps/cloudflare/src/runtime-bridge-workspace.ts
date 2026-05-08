@@ -4,6 +4,7 @@ import {
   createHostedConversationMailboxImportItem,
   enqueueHostedSystemMailboxItem,
   normalizeHostedAssistantRuntimeConfig,
+  readHostedMaterializedArtifactPaths,
   type HostedAssistantRuntimeConfig,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedWorkspaceRuntimeJobOptions,
@@ -421,6 +422,9 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
             pendingArtifactPuts.push(artifact);
           },
           codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
+          materializedArtifactPaths: await readHostedMaterializedArtifactPaths({
+            vaultRoot: input.vaultRoot,
+          }),
           operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
           preservedArtifacts,
           vaultRoot: input.vaultRoot,
@@ -611,7 +615,10 @@ function shouldPreserveHostedWorkspaceBridgeInlineManifestFile(
   return (
     !file.artifact
     && file.root === "vault"
-    && file.path.startsWith("raw/")
+    && (
+      file.path.startsWith("raw/")
+      || file.path.startsWith("derived/")
+    )
     && !shouldRestoreHostedRuntimeBridgeEagerArtifact({
       path: file.path,
       root: file.root,
@@ -631,12 +638,7 @@ function shouldRestoreHostedRuntimeBridgeEagerArtifact(input: {
     return false;
   }
 
-  return (
-    hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "raw/inbox")
-    || hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "raw/assistant-input")
-    || hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "derived/inbox")
-    || hasHostedRuntimeBridgeEagerArtifactPrefix(input.path, "derived/assistant-input")
-  );
+  return false;
 }
 
 function hasHostedRuntimeBridgeEagerArtifactPrefix(

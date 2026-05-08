@@ -17,6 +17,7 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
+import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
 
 const HOSTED_WEBHOOK_LINQ_DIRECT_READ_RECEIPT_TIMEOUT_MS = 5_000;
 
@@ -50,6 +51,7 @@ interface HostedWebhookDirectNudgeSummary {
 }
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId?: string;
@@ -138,6 +140,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 }
 
 async function tryNudgeHostedWebhookRunnerDirect(input: {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   source: "linq" | "telegram" | "whatsapp";
   userId?: string;
 }): Promise<HostedWebhookDirectNudgeSummary> {
@@ -151,6 +154,9 @@ async function tryNudgeHostedWebhookRunnerDirect(input: {
   }
 
   const result = await nudgeHostedRunnerUserBestEffortResult({
+    ...(input.aiUsageAllowDecision
+      ? { aiUsageAllowDecision: input.aiUsageAllowDecision }
+      : {}),
     context: `webhook:${input.source}:direct`,
     timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
     userId: input.userId,

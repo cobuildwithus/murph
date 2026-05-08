@@ -1283,6 +1283,80 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
+  it("passes signed AI usage allow decisions from runner nudge requests to the Durable Object", async () => {
+    const stub = createUserRunnerStub({
+      nudgeHostedRunnerForUser: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: false,
+        inFlight: false,
+        nextAlarmAt: null,
+      })),
+    });
+    const env = createWorkerEnv(stub);
+    const aiUsageAllowDecision = {
+      allowed: true,
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      nonce: "0123456789abcdef0123456789abcdef",
+      schema: "murph.hosted-ai-usage-allow-decision.v1",
+      signature: {
+        alg: "HMAC-SHA256",
+        keyId: "test",
+        signature: "signature",
+      },
+      userId: "member_123",
+    };
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
+        body: JSON.stringify({ aiUsageAllowDecision }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(202);
+    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123", {
+      aiUsageAllowDecision,
+    });
+  });
+
+  it("falls back to the live usage gate path when a runner nudge allow decision is malformed", async () => {
+    const stub = createUserRunnerStub({
+      nudgeHostedRunnerForUser: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: true,
+        alreadyRunning: false,
+        inFlight: false,
+        nextAlarmAt: null,
+      })),
+    });
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
+        body: JSON.stringify({
+          aiUsageAllowDecision: {
+            allowed: false,
+            schema: "murph.hosted-ai-usage-allow-decision.v1",
+          },
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(202);
+    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+  });
+
   it("schedules browser-vault refreshes through the direct Durable Object path", async () => {
     const stub = createUserRunnerStub({
       scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {

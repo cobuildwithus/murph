@@ -32,6 +32,15 @@ export interface AssistantUsageRecorder {
   recordUsage(record: AssistantUsageRecord): Promise<void>
 }
 
+export interface AssistantWorkspaceArtifactMaterializationResult {
+  materializedArtifactPaths: ReadonlySet<string>
+  missingArtifactPaths: ReadonlySet<string>
+}
+
+export type AssistantWorkspaceArtifactMaterializer = (
+  relativePaths: readonly string[],
+) => Promise<AssistantWorkspaceArtifactMaterializationResult>
+
 export interface AssistantHostedExecutionContext {
   channelTypingDependencies?: AssistantChannelTypingDependencies
   defaultTarget?: AssistantModelTarget | null
@@ -39,6 +48,7 @@ export interface AssistantHostedExecutionContext {
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
@@ -72,6 +82,11 @@ export function normalizeAssistantExecutionContext(
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
             issueDeviceConnectLink: hosted.issueDeviceConnectLink,
+          }
+        : {}),
+      ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
+        ? {
+            materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
           }
         : {}),
       ...(defaultTarget

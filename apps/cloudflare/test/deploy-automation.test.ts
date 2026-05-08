@@ -522,10 +522,12 @@ describe("hosted deploy automation helpers", () => {
       "description: Optional runner container idle TTL override in milliseconds",
       "if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
       "if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
-      "if: ${{ !cancelled() && (inputs.skip_predeploy_e2e || (needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}",
+      "if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}",
+      "if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker) || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}",
       "name: Linq delivery E2E gate",
       "name: Linq scheduled reminder E2E gate",
       "name: Cloudflare verify and runner smoke gate",
+      "name: Immediate deploy build prep",
       "pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live 2>&1 \\",
       "pnpm hosted-local e2e linq-delivery 2>&1 \\",
       "pnpm hosted-local e2e linq-scheduled-reminder 2>&1 \\",
@@ -535,6 +537,7 @@ describe("hosted deploy automation helpers", () => {
       "- linq-delivery-gate",
       "- linq-scheduled-reminder-gate",
       "- cloudflare-runner-smoke-gate",
+      "- immediate-build-prep-gate",
       "name: Start Postgres",
       "docker run \\",
       "--name \"${postgres_container}\"",
@@ -546,8 +549,25 @@ describe("hosted deploy automation helpers", () => {
       "uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5",
       "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6",
       "uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6",
+      "uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6",
       "name: Prepare runner bundle and base image",
       "run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base",
+      "name: Prepare immediate runner bundle and base image",
+      "name: Save immediate build artifacts",
+      "tar -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \\",
+      "docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \\",
+      "name: Upload immediate build handoff",
+      "cloudflare-hosted-immediate-build-${{ github.sha }}",
+      "name: Download immediate build handoff",
+      "name: Restore immediate build handoff",
+      'bundle_archive=".artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz"',
+      "done < <(tar -tzf \"${bundle_archive}\")",
+      "done < <(tar -tvzf \"${bundle_archive}\")",
+      'bundle_root="$(realpath -m "${restore_staging}/runner-bundle")"',
+      'link_target="$(readlink "${link_path}")"',
+      "Unsafe runner bundle symlink target.",
+      "tar --no-same-owner --no-same-permissions -xzf \"${bundle_archive}\" \\",
+      "gzip -dc .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz | docker load",
       "docker build \\",
       "--file Dockerfile.cloudflare-hosted-runner-base \\",
       "--tag murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \\",
@@ -555,6 +575,7 @@ describe("hosted deploy automation helpers", () => {
       "if: ${{ inputs.deploy_worker && inputs.sync_worker_secrets }}",
       "run: pnpm --dir apps/cloudflare deploy:secrets:render",
       "name: Run hosted Codex auth deploy guard",
+      "if: ${{ !(inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}",
       'MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"',
       'npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"',
       'npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"',
@@ -572,6 +593,7 @@ describe("hosted deploy automation helpers", () => {
       "name: Show generated artifact paths",
       "run: pnpm --dir apps/cloudflare verify:parallel",
       "run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle",
+      "run: pnpm --dir apps/cloudflare runner:bundle:manifest:validate && pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh",
     ]) {
       expect(workflow).toContain(expectedLine);
     }
@@ -599,6 +621,22 @@ describe("hosted deploy automation helpers", () => {
     const parallelChecksAndSmokeStepIndex = workflow.indexOf(
       "- name: Run focused Cloudflare checks and smoke runner container image",
     );
+    const immediateBuildPrepJobStartIndex = workflow.indexOf("  immediate-build-prep-gate:");
+    const immediateUploadHandoffStepIndex = workflow.indexOf(
+      "- name: Upload immediate build handoff",
+    );
+    const immediateDownloadHandoffStepIndex = workflow.indexOf(
+      "- name: Download immediate build handoff",
+    );
+    const immediateManifestRefreshStepIndex = workflow.indexOf(
+      "- name: Render deploy config for immediate handoff",
+    );
+    const immediateManifestValidateCommandIndex = workflow.indexOf(
+      "runner:bundle:manifest:validate",
+    );
+    const immediateManifestRefreshCommandIndex = workflow.indexOf(
+      "runner:bundle:manifest:refresh",
+    );
     const validateGeneratedDeployBundleStepIndex = workflow.indexOf(
       "- name: Validate generated Worker deploy bundle",
     );
@@ -609,18 +647,30 @@ describe("hosted deploy automation helpers", () => {
     expect(validateDeployEnvStepIndex).toBeGreaterThanOrEqual(0);
     expect(prepareRunnerBaseImageStepIndex).toBeGreaterThanOrEqual(0);
     expect(parallelChecksAndSmokeStepIndex).toBeGreaterThanOrEqual(0);
+    expect(immediateBuildPrepJobStartIndex).toBeGreaterThanOrEqual(0);
+    expect(immediateUploadHandoffStepIndex).toBeGreaterThanOrEqual(0);
+    expect(immediateDownloadHandoffStepIndex).toBeGreaterThanOrEqual(0);
+    expect(immediateManifestRefreshStepIndex).toBeGreaterThanOrEqual(0);
+    expect(immediateManifestValidateCommandIndex).toBeGreaterThanOrEqual(0);
+    expect(immediateManifestRefreshCommandIndex).toBeGreaterThanOrEqual(0);
     expect(validateGeneratedDeployBundleStepIndex).toBeGreaterThanOrEqual(0);
     expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
     expect(blacksmithPrepareRunnerStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
     expect(parallelChecksAndSmokeStepIndex).toBeLessThan(hostedCodexAuthGuardStepIndex);
     expect(hostedCodexAuthGuardStepIndex).toBeLessThan(validateDeployEnvStepIndex);
+    expect(immediateBuildPrepJobStartIndex).toBeLessThan(validateDeployEnvStepIndex);
+    expect(immediateDownloadHandoffStepIndex).toBeLessThan(validateDeployEnvStepIndex);
     expect(prepareArtifactsStepIndex).toBeLessThan(prepareRunnerBaseImageStepIndex);
+    expect(immediateManifestRefreshStepIndex).toBeLessThan(validateGeneratedDeployBundleStepIndex);
+    expect(immediateManifestValidateCommandIndex).toBeLessThan(
+      immediateManifestRefreshCommandIndex,
+    );
     expect(prepareRunnerBaseImageStepIndex).toBeLessThan(validateGeneratedDeployBundleStepIndex);
     expect(validateGeneratedDeployBundleStepIndex).toBeLessThan(deployWorkerStepIndex);
     const cloudflareRunnerSmokeGateStartIndex = workflow.indexOf("  cloudflare-runner-smoke-gate:");
-    const deployJobStartIndex = workflow.indexOf("\n  deploy:", cloudflareRunnerSmokeGateStartIndex);
+    const deployJobStartIndex = workflow.indexOf("\n  deploy:", immediateBuildPrepJobStartIndex);
     expect(cloudflareRunnerSmokeGateStartIndex).toBeGreaterThanOrEqual(0);
-    expect(deployJobStartIndex).toBeGreaterThan(cloudflareRunnerSmokeGateStartIndex);
+    expect(deployJobStartIndex).toBeGreaterThan(immediateBuildPrepJobStartIndex);
     expect(workflow.slice(cloudflareRunnerSmokeGateStartIndex, deployJobStartIndex)).not.toContain(
       "\n    environment:",
     );
@@ -631,12 +681,15 @@ describe("hosted deploy automation helpers", () => {
       "- name: Show generated artifact paths\n        if: ${{ inputs.deploy_worker }}\n        run: ls -lah apps/cloudflare/.deploy",
     );
     expect([
-      ...workflow.matchAll(/run: pnpm --dir apps\/cloudflare deploy:config:render && pnpm --dir apps\/cloudflare runner:bundle/gmu),
+      ...workflow.matchAll(/^        run: pnpm --dir apps\/cloudflare deploy:config:render && pnpm --dir apps\/cloudflare runner:bundle$/gmu),
     ]).toHaveLength(1);
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
-    ]).toHaveLength(4);
-    expect([...workflow.matchAll(/runs-on: ubuntu-24\.04/gmu)]).toHaveLength(1);
+    ]).toHaveLength(5);
+    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(1);
+    expect(workflow).not.toContain(
+      "inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && 'blacksmith-4vcpu-ubuntu-2404'",
+    );
     expect([
       ...workflow.matchAll(/docker run \\/gmu),
     ]).toHaveLength(3);

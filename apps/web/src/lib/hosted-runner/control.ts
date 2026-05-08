@@ -1,4 +1,7 @@
-import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedAiUsageAllowDecision,
+  HostedRunnerNudgeResult,
+} from "@murphai/hosted-execution/runtime-control";
 import type { CloudflareHostedControlUserDataDeletionResult } from "@murphai/cloudflare-hosted-control/client";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
@@ -28,6 +31,7 @@ export interface HostedRunnerUserDataDeletionBestEffortResult {
 }
 
 export async function nudgeHostedRunnerUser(input: {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   timeoutMs?: number;
   userId: string;
 }): Promise<HostedRunnerNudgeResult | null> {
@@ -37,7 +41,11 @@ export async function nudgeHostedRunnerUser(input: {
     return null;
   }
 
-  return await client.nudgeUserRunner(input.userId);
+  return input.aiUsageAllowDecision
+    ? await client.nudgeUserRunner(input.userId, {
+        aiUsageAllowDecision: input.aiUsageAllowDecision,
+      })
+    : await client.nudgeUserRunner(input.userId);
 }
 
 export async function deleteHostedRunnerUserData(input: {
@@ -108,6 +116,7 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
 }
 
 export async function nudgeHostedRunnerUserBestEffortResult(input: {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   context?: string;
   timeoutMs?: number;
   userId: string;
@@ -156,6 +165,7 @@ export async function nudgeHostedRunnerUserBestEffortResult(input: {
 }
 
 export async function nudgeHostedRunnerUserBestEffort(input: {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   context?: string;
   timeoutMs?: number;
   userId: string;
@@ -165,11 +175,13 @@ export async function nudgeHostedRunnerUserBestEffort(input: {
 }
 
 export async function nudgeHostedRunnerBestEffort(input: {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   context?: string;
   timeoutMs?: number;
   userId: string;
 }): Promise<void> {
   await nudgeHostedRunnerUserBestEffort({
+    aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
     context: input.context,
     timeoutMs: input.timeoutMs,
     userId: input.userId,

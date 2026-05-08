@@ -206,6 +206,11 @@ export {
   enqueueHostedSystemMailboxItem,
 };
 export {
+  readHostedMaterializedArtifactPaths,
+  recordHostedMaterializedArtifactPaths,
+  resolveHostedMaterializedArtifactStateRelativePath,
+} from "./hosted-runtime/materialized-artifact-state.ts";
+export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   parseHostedAssistantWorkspaceRuntimeJobRequest,
@@ -509,6 +514,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       expectedUserId: input.request.userId,
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
+      materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       platform: runnerPlatform,
       requestId,
       runtimeLogContext,

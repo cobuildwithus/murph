@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
-import { test } from "vitest";
+import { expect, test } from "vitest";
+import {
+  sha256HostedBundleHex,
+  snapshotHostedBundleRoots,
+} from "@murphai/runtime-state/node";
 
 import {
+  createHostedArtifactMaterializer,
   createHostedArtifactResolver,
   createHostedArtifactUploadSink,
 } from "../src/hosted-runtime/artifacts.ts";
@@ -101,4 +109,61 @@ test("hosted artifact upload sink clones bytes before sending them to the store"
   assert.notEqual(putCalls[0]?.bytes, sourceBytes);
   assert.deepEqual(Array.from(putCalls[0]?.bytes ?? []), [9, 8, 7]);
   assert.deepEqual(Array.from(storedBytesByHash.get("sha_clone") ?? []), [9, 8, 7]);
+});
+
+test("hosted artifact materializer records only paths that restore", async () => {
+  const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-artifacts-source-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-artifacts-vault-"));
+  const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-artifacts-home-"));
+  const artifactBytesByHash = new Map<string, Uint8Array>();
+
+  try {
+    const sourcePath = path.join(sourceVaultRoot, "raw", "inbox", "example", "scan.txt");
+    const sourceBytes = Buffer.from("scan artifact\n", "utf8");
+    await mkdir(path.dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, sourceBytes);
+    const bundle = await snapshotHostedBundleRoots({
+      externalizeFile: async (file) => {
+        const sha256 = sha256HostedBundleHex(file.bytes);
+        artifactBytesByHash.set(sha256, file.bytes);
+        return {
+          byteSize: file.bytes.byteLength,
+          sha256,
+        };
+      },
+      kind: "vault",
+      roots: [{
+        root: sourceVaultRoot,
+        rootKey: "vault",
+      }],
+    });
+    assert.ok(bundle);
+    const { artifactStore } = createHostedRuntimeArtifactStoreStub(
+      Object.fromEntries(artifactBytesByHash),
+    );
+    const materializedArtifactPaths = new Set<string>();
+    const materialize = createHostedArtifactMaterializer({
+      artifactResolver: createHostedArtifactResolver({ artifactStore }),
+      bundles: [async () => bundle],
+      materializedArtifactPaths,
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    const missing = await materialize(["raw/inbox/example/missing.txt"]);
+    assert.deepEqual([...missing.materializedArtifactPaths], []);
+    assert.deepEqual([...missing.missingArtifactPaths], ["vault:raw/inbox/example/missing.txt"]);
+    assert.deepEqual([...materializedArtifactPaths], []);
+
+    const restored = await materialize(["raw/inbox/example/scan.txt"]);
+    assert.deepEqual([...restored.materializedArtifactPaths], ["vault:raw/inbox/example/scan.txt"]);
+    assert.deepEqual([...restored.missingArtifactPaths], []);
+    assert.deepEqual([...materializedArtifactPaths], ["vault:raw/inbox/example/scan.txt"]);
+    await expect(readFile(path.join(vaultRoot, "raw", "inbox", "example", "scan.txt"), "utf8"))
+      .resolves.toBe("scan artifact\n");
+  } finally {
+    await rm(sourceVaultRoot, { force: true, recursive: true });
+    await rm(vaultRoot, { force: true, recursive: true });
+    await rm(operatorHomeRoot, { force: true, recursive: true });
+  }
 });

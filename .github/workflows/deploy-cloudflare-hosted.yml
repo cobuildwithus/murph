@@ -344,6 +344,76 @@ jobs:
           trap - INT TERM
           exit "$status"
 
+  immediate-build-prep-gate:
+    name: Immediate deploy build prep
+    if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 60
+    env:
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4
+      MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run hosted Codex auth deploy guard
+        shell: bash
+        env:
+          MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"
+        run: |
+          set -euo pipefail
+
+          codex_cli_version="$(
+            sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
+          )"
+          if [[ -z "${codex_cli_version}" ]]; then
+            echo "Missing CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base" >&2
+            exit 1
+          fi
+
+          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"
+          mkdir -p "${npm_prefix}"
+          npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"
+          export PATH="${npm_prefix}/bin:${PATH}"
+          codex --version
+          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts
+
+      - name: Prepare immediate runner bundle and base image
+        run: pnpm --dir apps/cloudflare runner:bundle && pnpm --dir apps/cloudflare runner:docker:base
+
+      - name: Save immediate build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/cloudflare-hosted-deploy
+          tar -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \
+            -C apps/cloudflare/.deploy \
+            runner-bundle
+          docker save murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en \
+            | gzip -1 > .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
+
+      - name: Upload immediate build handoff
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: cloudflare-hosted-immediate-build-${{ github.sha }}
+          path: |
+            .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz
+            .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   deploy:
     name: Deploy hosted execution (${{ inputs.environment }})
     needs:
@@ -351,7 +421,8 @@ jobs:
       - linq-delivery-gate
       - linq-scheduled-reminder-gate
       - cloudflare-runner-smoke-gate
-    if: ${{ !cancelled() && (inputs.skip_predeploy_e2e || (needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
+      - immediate-build-prep-gate
+    if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker) || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
@@ -504,6 +575,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run hosted Codex auth deploy guard
+        if: ${{ !(inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
         shell: bash
         env:
           MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"
@@ -525,6 +597,74 @@ jobs:
           codex --version
           pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts
 
+      - name: Download immediate build handoff
+        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: cloudflare-hosted-immediate-build-${{ github.sha }}
+          path: .
+
+      - name: Restore immediate build handoff
+        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
+        run: |
+          set -euo pipefail
+          bundle_archive=".artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz"
+          restore_staging="$(mktemp -d)"
+          cleanup_restore_staging() {
+            rm -rf "${restore_staging}"
+          }
+          trap cleanup_restore_staging EXIT
+
+          while IFS= read -r entry; do
+            if [[ -z "${entry}" || "${entry}" == /* ]]; then
+              echo "Unsafe runner bundle archive entry." >&2
+              exit 1
+            fi
+            if [[ "${entry}" != "runner-bundle" && "${entry}" != runner-bundle/* ]]; then
+              echo "Unexpected runner bundle archive entry." >&2
+              exit 1
+            fi
+            IFS='/' read -r -a entry_parts <<< "${entry}"
+            for entry_part in "${entry_parts[@]}"; do
+              if [[ "${entry_part}" == ".." ]]; then
+                echo "Unsafe runner bundle archive traversal entry." >&2
+                exit 1
+              fi
+            done
+          done < <(tar -tzf "${bundle_archive}")
+          while IFS= read -r metadata_line; do
+            entry_type="${metadata_line:0:1}"
+            if [[ "${entry_type}" != "-" && "${entry_type}" != "d" && "${entry_type}" != "l" ]]; then
+              echo "Unsupported runner bundle archive entry type." >&2
+              exit 1
+            fi
+          done < <(tar -tvzf "${bundle_archive}")
+
+          mkdir -p apps/cloudflare/.deploy
+          tar --no-same-owner --no-same-permissions -xzf "${bundle_archive}" \
+            -C "${restore_staging}"
+          if [[ ! -d "${restore_staging}/runner-bundle" ]]; then
+            echo "Runner bundle archive did not contain runner-bundle." >&2
+            exit 1
+          fi
+          bundle_root="$(realpath -m "${restore_staging}/runner-bundle")"
+          while IFS= read -r -d '' link_path; do
+            link_target="$(readlink "${link_path}")"
+            if [[ "${link_target}" == /* ]]; then
+              echo "Unsafe absolute runner bundle symlink target." >&2
+              exit 1
+            fi
+            link_dir="$(dirname "${link_path}")"
+            resolved_target="$(realpath -m "${link_dir}/${link_target}")"
+            if [[ "${resolved_target}" != "${bundle_root}" && "${resolved_target}" != "${bundle_root}/"* ]]; then
+              echo "Unsafe runner bundle symlink target." >&2
+              exit 1
+            fi
+          done < <(find "${restore_staging}/runner-bundle" -type l -print0)
+          rm -rf apps/cloudflare/.deploy/runner-bundle
+          mv "${restore_staging}/runner-bundle" apps/cloudflare/.deploy/runner-bundle
+          gzip -dc .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz | docker load
+
       - name: Validate required deploy environment
         env:
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
@@ -537,11 +677,15 @@ jobs:
         run: pnpm --dir apps/cloudflare deploy:preflight
 
       - name: Prepare deploy artifacts
-        if: ${{ inputs.deploy_worker }}
+        if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
         run: pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle
 
+      - name: Render deploy config for immediate handoff
+        if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}
+        run: pnpm --dir apps/cloudflare runner:bundle:manifest:validate && pnpm --dir apps/cloudflare deploy:config:render && pnpm --dir apps/cloudflare runner:bundle:manifest:refresh
+
       - name: Prepare runner base image
-        if: ${{ inputs.deploy_worker }}
+        if: ${{ inputs.deploy_worker && !(inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
         run: |
           docker build \
             --file Dockerfile.cloudflare-hosted-runner-base \
@@ -554,6 +698,8 @@ jobs:
           DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
           GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}
           GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}
+          HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID: ${{ secrets.HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID }}
+          HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET: ${{ secrets.HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET }}
           HOSTED_AI_USAGE_REPORTING_SECRET: ${{ secrets.HOSTED_AI_USAGE_REPORTING_SECRET }}
           HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
           HOSTED_EMAIL_SIGNING_SECRET: ${{ secrets.HOSTED_EMAIL_SIGNING_SECRET }}
@@ -631,6 +777,8 @@ jobs:
           HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}
+          HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID: ${{ secrets.HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID }}
+          HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET: ${{ secrets.HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET }}
           HOSTED_AI_USAGE_REPORTING_SECRET: ${{ secrets.HOSTED_AI_USAGE_REPORTING_SECRET }}
           HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
           HOSTED_EMAIL_SIGNING_SECRET: ${{ secrets.HOSTED_EMAIL_SIGNING_SECRET }}

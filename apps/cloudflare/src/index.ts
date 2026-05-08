@@ -9,10 +9,14 @@ import {
   wrapHostedBrowserSessionKey,
 } from "@murphai/runtime-state";
 import type {
+  HostedRunnerNudgeRequest,
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  parseHostedRunnerNudgeRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
@@ -336,12 +340,15 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.runnerStatus();
   }
 
-  async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
-    return this.runner.nudgeHostedRunner();
+  async nudgeHostedRunner(input?: HostedRunnerNudgeRequest): Promise<HostedRunnerNudgeResult> {
+    return this.runner.nudgeHostedRunner(input);
   }
 
-  async nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult> {
-    return this.runner.nudgeHostedRunnerForUser(userId);
+  async nudgeHostedRunnerForUser(
+    userId: string,
+    input?: HostedRunnerNudgeRequest,
+  ): Promise<HostedRunnerNudgeResult> {
+    return this.runner.nudgeHostedRunnerForUser(userId, input);
   }
 
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
@@ -809,10 +816,11 @@ async function handleRunnerNudgeRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
+  let nudgeRequest: HostedRunnerNudgeRequest = {};
   try {
-    await readOptionalJsonObject(context.request, {
+    nudgeRequest = parseHostedRunnerNudgeRequest(await readOptionalJsonObject(context.request, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-    });
+    }));
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -830,7 +838,9 @@ async function handleRunnerNudgeRoute(
   }
 
   const stub = context.env.USER_RUNNER.getByName(userId);
-  const nudge = await stub.nudgeHostedRunnerForUser(userId);
+  const nudge = nudgeRequest.aiUsageAllowDecision
+    ? await stub.nudgeHostedRunnerForUser(userId, nudgeRequest)
+    : await stub.nudgeHostedRunnerForUser(userId);
 
   return json(nudge, 202);
 }
