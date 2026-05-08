@@ -529,12 +529,14 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'After successfully creating a protocol-linked run, send the public experiment page link',
     )
-    expect(prompt).toContain('/experiments/<routeId>')
     expect(prompt).toContain(
-      'make the link absolute with that origin',
+      '<murph-product-base-url>/experiments/<routeId>',
     )
     expect(prompt).toContain(
-      'make the experiment page URL the final line of the message with no text after it',
+      'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
+    )
+    expect(prompt).toContain(
+      'make the absolute experiment page URL the final line of the message with no text after it',
     )
     expect(prompt).toContain(
       'Do not invent a page URL for custom unlinked runs.',
@@ -556,6 +558,20 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Stop gathering info and create the run when you have enough context')
     expect(prompt).not.toContain('scaffold and update the experiment record')
     expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
+  })
+
+  it('does not allow relative experiment page routes when no product base URL is injected', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      murphProductBaseUrl: null,
+    }))
+
+    expect(prompt).not.toContain(
+      'Current Murph product base URL for user-facing app links:',
+    )
+    expect(prompt).toContain(
+      'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
+    )
+    expect(prompt).not.toContain('otherwise use the relative route')
   })
 
   it('resolves the injected Murph product base URL from hosted public env', () => {
