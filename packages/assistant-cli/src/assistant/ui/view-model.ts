@@ -11,6 +11,17 @@ import {
 } from '@murphai/assistant-engine/assistant-provider-catalog'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
+const ANSI_OSC_SEQUENCE_PATTERN =
+  /\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/gu
+const ANSI_CSI_SEQUENCE_PATTERN = /\u001B\[[0-?]*[ -/]*[@-~]/gu
+const ANSI_STRING_SEQUENCE_PATTERN =
+  /\u001B[PX^_][\s\S]*?\u001B\\/gu
+const ANSI_SINGLE_ESCAPE_PATTERN = /\u001B[@-Z\\-_]/gu
+const C1_CONTROL_SEQUENCE_PATTERN =
+  /(?:\u009B[0-?]*[ -/]*[@-~]|\u009D[^\u0007\u009C]*(?:\u0007|\u009C)|[\u0090\u0098\u009E\u009F][\s\S]*?\u009C)/gu
+const TERMINAL_CONTROL_CHARACTER_PATTERN =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u0080-\u009F]/gu
+
 export type InkChatTraceKind =
   | 'command'
   | 'file'
@@ -101,6 +112,16 @@ export const CHAT_STARTER_SUGGESTIONS = [
   'Find recent health anomalies',
 ] as const
 
+export function sanitizeAssistantTerminalText(value: string): string {
+  return value
+    .replace(C1_CONTROL_SEQUENCE_PATTERN, '')
+    .replace(ANSI_OSC_SEQUENCE_PATTERN, '')
+    .replace(ANSI_STRING_SEQUENCE_PATTERN, '')
+    .replace(ANSI_CSI_SEQUENCE_PATTERN, '')
+    .replace(ANSI_SINGLE_ESCAPE_PATTERN, '')
+    .replace(TERMINAL_CONTROL_CHARACTER_PATTERN, '')
+}
+
 export function shouldShowChatComposerGuidance(entryCount: number): boolean {
   return entryCount === 0
 }
@@ -125,7 +146,7 @@ export function seedChatEntries(
 ): InkChatEntry[] {
   return transcriptEntries.map((entry) => ({
     kind: entry.kind,
-    text: entry.text,
+    text: sanitizeAssistantTerminalText(entry.text),
   }))
 }
 
@@ -134,7 +155,7 @@ export function applyProviderProgressEventToEntries(input: {
   event: InkChatProgressEvent
 }): InkChatEntry[] {
   const traceKind = resolveInkTraceKind(input.event.kind)
-  const text = input.event.text.trim()
+  const text = sanitizeAssistantTerminalText(input.event.text).trim()
   if (!traceKind || text.length === 0) {
     return [...input.entries]
   }
@@ -481,7 +502,7 @@ function findInkChatEntryIndexByStreamKey(
 }
 
 function normalizeTraceText(value: string): string | null {
-  const normalized = value.replace(/\r\n?/gu, '\n')
+  const normalized = sanitizeAssistantTerminalText(value).replace(/\r\n?/gu, '\n')
   return normalized.length > 0 ? normalized : null
 }
 

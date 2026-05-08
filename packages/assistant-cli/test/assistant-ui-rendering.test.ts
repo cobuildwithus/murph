@@ -13,6 +13,7 @@ import {
 } from '../src/assistant/ui/ink-composer-panel.js'
 import { applyComposerEditingInput } from '../src/assistant/ui/composer-editing.js'
 import {
+  AssistantMessageText,
   formatAssistantTerminalHyperlink,
   resolveAssistantHyperlinkTarget,
   resolveMessageRoleLabel,
@@ -211,6 +212,19 @@ test('layout and message helpers wrap plain text, format footer badges, and pars
     wrapAssistantPlainText('  alpha beta gamma', 10),
     '  alpha\n  beta\n  gamma',
   )
+  assert.equal(
+    wrapAssistantPlainText('alpha\u001B[31m beta\u001B[0m\u0007 gamma', 20),
+    'alpha beta gamma',
+  )
+  assert.match(
+    renderInkOutput(
+      renderWrappedPlainTextBlock({
+        columns: 20,
+        text: 'alpha\u001B[31m beta\u001B[0m\u0007 gamma',
+      }),
+    ),
+    /alpha\s+beta\s+gamma/u,
+  )
   assert.match(
     renderInkOutput(
       renderWrappedPlainTextBlock({
@@ -261,6 +275,16 @@ test('layout and message helpers wrap plain text, format footer badges, and pars
   assert.equal(
     formatAssistantTerminalHyperlink('docs', 'https://example.com'),
     '\u001B]8;;https://example.com\u0007docs\u001B]8;;\u0007',
+  )
+  assert.doesNotMatch(
+    renderInkOutput(
+      withTheme(
+        React.createElement(AssistantMessageText, {
+          text: 'See [\u001B[31mdocs\u001B[0m](https://example.com/\u001B]0;owned\u0007path) now',
+        }),
+      ),
+    ),
+    /\u001B\]0;owned|\u001B\[31m|\u0007/u,
   )
   assert.equal(
     supportsAssistantTerminalHyperlinks({
@@ -868,7 +892,7 @@ test('transcript helpers and rows cover compact header, non-user busy flows, and
   const errorRow = renderInkOutput(
     withTheme(
       React.createElement(ChatEntryRow, {
-        entry: { kind: 'error', text: 'bad gateway' },
+        entry: { kind: 'error', text: 'bad \u001B[31mgateway\u001B[0m\u0007' },
       }),
     ),
   )
@@ -901,7 +925,8 @@ test('transcript helpers and rows cover compact header, non-user busy flows, and
   )
 
   assert.match(assistantRow, /assistant reply/u)
-  assert.match(errorRow, /bad gateway/u)
+  assert.match(errorRow, /bad\s+gateway/u)
+  assert.doesNotMatch(errorRow, /\u001B\[31m|\u0007/u)
   assert.match(traceRow, /trace line/u)
   assert.match(statusRow, /still working/u)
   assert.match(userRow, /hello user/u)

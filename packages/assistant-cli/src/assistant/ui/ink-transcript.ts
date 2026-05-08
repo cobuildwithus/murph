@@ -147,13 +147,11 @@ export const ChatEntryRow = React.memo(function ChatEntryRow(
       React.createElement(MessageRoleLabel, {
         kind: 'error',
       }),
-      React.createElement(
-        WrappedTextBlock,
-        {
-          color: theme.errorColor,
-        },
-        props.entry.text,
-      ),
+      React.createElement(WrappedPlainTextBlock, {
+        columns: rowWidth,
+        color: theme.errorColor,
+        text: props.entry.text,
+      }),
     )
   }
 
@@ -198,13 +196,11 @@ export const ChatEntryRow = React.memo(function ChatEntryRow(
             flexGrow: 1,
             flexShrink: 1,
           },
-          React.createElement(
-            WrappedTextBlock,
-            {
-              dimColor: true,
-            },
-            props.entry.text,
-          ),
+          React.createElement(WrappedPlainTextBlock, {
+            columns: Math.max(1, rowWidth - 2),
+            dimColor: true,
+            text: props.entry.text,
+          }),
         ),
       ),
     )
@@ -238,14 +234,11 @@ export const ChatEntryRow = React.memo(function ChatEntryRow(
           flexGrow: 1,
           flexShrink: 1,
         },
-        React.createElement(
-          Text,
-          {
-            color: theme.composerTextColor,
-            wrap: 'wrap',
-          },
-          props.entry.text,
-        ),
+      React.createElement(WrappedPlainTextBlock, {
+        columns: Math.max(1, rowWidth - 2),
+        color: theme.composerTextColor,
+        text: props.entry.text,
+      }),
       ),
     ),
   )
