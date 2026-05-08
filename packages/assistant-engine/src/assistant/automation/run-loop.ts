@@ -881,6 +881,7 @@ export async function runAssistantAutomationPass(
         progressed: false,
       }
     : await runReceiptRecovery()
+  let deferredReceiptRecoveryWakeAt: string | null = null
 
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
@@ -908,11 +909,12 @@ export async function runAssistantAutomationPass(
   })
   if (deferReceiptRecovery) {
     if (scanResult.replies.replied > 0) {
+      deferredReceiptRecoveryWakeAt = new Date().toISOString()
       recovery = {
         ...recovery,
         nextWakeAt: earliestAssistantAutomationWakeAt(
           recovery.nextWakeAt,
-          new Date().toISOString(),
+          deferredReceiptRecoveryWakeAt,
         ),
       }
     } else if (!input.signal?.aborted) {
@@ -975,6 +977,22 @@ export async function runAssistantAutomationPass(
     recovery,
     scanResult.replies,
   )
+  const recoveryWithoutDeferredReceiptRecovery = deferredReceiptRecoveryWakeAt
+    ? {
+        ...recovery,
+        nextWakeAt: null,
+      }
+    : recovery
+  const repliesWithoutDeferredReceiptRecovery = mergeAssistantAutoReplyScanResults(
+    recoveryWithoutDeferredReceiptRecovery,
+    scanResult.replies,
+  )
+  const nextWakeAtWithoutDeferredReceiptRecovery = earliestAssistantAutomationWakeAt(
+    repliesWithoutDeferredReceiptRecovery.nextWakeAt,
+    scanResult.routing.nextWakeAt,
+    cronNextRunAt,
+    outboxNextAttemptAt,
+  )
   const progressed =
     stateProgressed ||
     outboxResult.attempted > 0 ||
@@ -990,6 +1008,12 @@ export async function runAssistantAutomationPass(
       cronNextRunAt,
       outboxNextAttemptAt,
     ),
+    ...(deferredReceiptRecoveryWakeAt
+      ? {
+          deferredReceiptRecoveryWakeAt,
+          nextWakeAtWithoutDeferredReceiptRecovery,
+        }
+      : {}),
     outboxAttempted: outboxResult.attempted,
     progressed,
     replies,

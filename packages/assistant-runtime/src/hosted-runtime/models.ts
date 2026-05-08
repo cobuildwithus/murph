@@ -157,7 +157,9 @@ export interface HostedMaintenanceMetrics {
   activeTurnInputIngested?: boolean | null;
   assistantAutomationAfterStateElapsedMs?: number | null;
   assistantAutomationBeforeStateElapsedMs?: number | null;
+  assistantAutomationDeferredReceiptRecoveryWakeAt?: string | null;
   assistantAutomationElapsedMs?: number | null;
+  assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery?: string | null;
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationTotalElapsedMs?: number | null;

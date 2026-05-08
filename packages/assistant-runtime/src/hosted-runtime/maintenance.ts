@@ -185,7 +185,9 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.signal,
       )
     : {
+        deferredReceiptRecoveryWakeAt: null,
         nextWakeAt: null,
+        nextWakeAtWithoutDeferredReceiptRecovery: null,
         progressed: false,
         redactedLogEntries: [],
         timings: undefined,
@@ -202,7 +204,11 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       assistantResult.timings?.afterStateElapsedMs ?? null,
     assistantAutomationBeforeStateElapsedMs:
       assistantResult.timings?.beforeStateElapsedMs ?? null,
+    assistantAutomationDeferredReceiptRecoveryWakeAt:
+      assistantResult.deferredReceiptRecoveryWakeAt ?? null,
     assistantAutomationElapsedMs,
+    assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery:
+      assistantResult.nextWakeAtWithoutDeferredReceiptRecovery ?? assistantResult.nextWakeAt,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
@@ -235,7 +241,9 @@ export async function runHostedAssistantAutomation(
   deferReceiptRecovery = false,
   signal?: AbortSignal,
 ): Promise<{
+  deferredReceiptRecoveryWakeAt: string | null;
   nextWakeAt: string | null;
+  nextWakeAtWithoutDeferredReceiptRecovery: string | null;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   timings?: {
@@ -335,6 +343,9 @@ export async function runHostedAssistantAutomation(
       inputSource,
       vault: vaultRoot,
     });
+    const deferredReceiptRecoveryWakeAt = result.deferredReceiptRecoveryWakeAt ?? null;
+    const nextWakeAtWithoutDeferredReceiptRecovery =
+      result.nextWakeAtWithoutDeferredReceiptRecovery ?? result.nextWakeAt;
     const passElapsedMs = elapsedSince(passStartedAt);
     const afterStateStartedAt = Date.now();
     const afterState = await readAssistantAutomationState(vaultRoot);
@@ -362,6 +373,7 @@ export async function runHostedAssistantAutomation(
         ).join(","),
         cronProcessed: result.cronProcessed,
         nextWakeAt: result.nextWakeAt,
+        nextWakeAtWithoutDeferredReceiptRecovery,
         outboxAttempted: result.outboxAttempted,
         progressed: result.progressed,
         requestId,
@@ -380,7 +392,9 @@ export async function runHostedAssistantAutomation(
       phase: "wake.running",
     }));
     return {
+      deferredReceiptRecoveryWakeAt,
       nextWakeAt: result.nextWakeAt,
+      nextWakeAtWithoutDeferredReceiptRecovery,
       progressed: result.progressed,
       redactedLogEntries,
       timings: {
@@ -410,7 +424,9 @@ export async function runHostedAssistantAutomation(
         phase: "wake.running",
       }));
       return {
+        deferredReceiptRecoveryWakeAt: null,
         nextWakeAt,
+        nextWakeAtWithoutDeferredReceiptRecovery: nextWakeAt,
         progressed: true,
         redactedLogEntries,
       };

@@ -4628,7 +4628,9 @@ describe('assistant auto-reply runtime', () => {
     expect(runLoopMocks.recoverAssistantAutoReplies).not.toHaveBeenCalled()
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
     expect(result).toMatchObject({
+      deferredReceiptRecoveryWakeAt: '2026-05-07T00:00:00.000Z',
       nextWakeAt: '2026-05-07T00:00:00.000Z',
+      nextWakeAtWithoutDeferredReceiptRecovery: null,
       progressed: true,
       replies: {
         checkpointRequired: true,
