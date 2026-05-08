@@ -307,6 +307,8 @@ export async function sendAssistantMessageLocal(
             resolved.session.binding.conversationKey,
             resolveAssistantConversationLookupKey(input),
           ].filter((key): key is string => key !== null),
+          pollAvailableInput:
+            shouldPollActiveTurnInputForMessage(input, executionContext),
           sessionId: resolved.session.sessionId,
           turnId: receipt.turnId,
           vault: input.vault,
@@ -878,6 +880,17 @@ function resolveInitialUserPromptAcceptedTurnInputId(
   return initialInputs && initialInputs.length > 0
     ? null
     : DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID
+}
+
+function shouldPollActiveTurnInputForMessage(
+  input: AssistantMessageInput,
+  executionContext: ReturnType<typeof normalizeAssistantExecutionContext>,
+): boolean {
+  return !(
+    executionContext?.hosted != null &&
+    input.deliveryDispatchMode === 'queue-only' &&
+    input.turnTrigger === 'automation-auto-reply'
+  )
 }
 
 async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
