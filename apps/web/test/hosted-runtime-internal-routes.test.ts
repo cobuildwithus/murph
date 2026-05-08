@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   listHostedRuntimeLogs: vi.fn(),
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
+  readLatestHostedMailboxImportRuntimeLog: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
+  readLatestHostedMailboxImportRuntimeLog: mocks.readLatestHostedMailboxImportRuntimeLog,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
 }));
@@ -99,6 +101,7 @@ describe("hosted runtime internal web routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
+    mocks.readLatestHostedMailboxImportRuntimeLog.mockResolvedValue(null);
   });
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
@@ -700,6 +703,76 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(JSON.stringify(payload)).not.toContain(UNSAFE_SENTINEL);
     expect(JSON.stringify(payload)).not.toMatch(/payloadCiphertext|message|email|phone|token/u);
+  });
+
+  it("uses foreground mailbox import logs when workspace status has not checkpointed yet", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: null,
+      version: "0",
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "0",
+      },
+      {
+        lane: "system",
+        maxSeq: "2",
+      },
+    ]);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([]);
+    mocks.readLatestHostedMailboxImportRuntimeLog.mockResolvedValue({
+      at: FIXED_NOW,
+      attemptId: "attempt_1",
+      checkpointVersion: null,
+      component: "mailbox",
+      createdAt: FIXED_NOW,
+      errorCode: null,
+      eventCode: "mailbox.imported",
+      id: "runtime_log_3",
+      leaseGeneration: "2",
+      level: "info",
+      mailboxLane: null,
+      mailboxSeqEnd: null,
+      mailboxSeqStart: null,
+      outboxIntentRef: null,
+      phase: "import",
+      redactedJson: {
+        conversationSeqEnd: "0",
+        systemSeqEnd: "2",
+      },
+      userId: "member_routes_1",
+      workspaceVersion: "0",
+    });
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.readLatestHostedMailboxImportRuntimeLog).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+    expect(payload.mailboxLag).toEqual([
+      {
+        importedSeq: "0",
+        lag: "0",
+        lane: "conversation",
+        maxSeq: "0",
+      },
+      {
+        importedSeq: "2",
+        lag: "0",
+        lane: "system",
+        maxSeq: "2",
+      },
+    ]);
+    expect(payload.workspace?.redactedStatus).toMatchObject({
+      hostedMailboxConversationImportedSeq: "0",
+      hostedMailboxSystemImportedSeq: "2",
+    });
   });
 });
 

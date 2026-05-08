@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   groupBy: vi.fn(),
+  hostedRuntimeLogFindMany: vi.fn(),
   hostedWorkspaceFindMany: vi.fn(),
   getPrisma: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
@@ -30,6 +31,9 @@ describe("hosted mailbox lag sweeper", () => {
       hostedMailboxItem: {
         groupBy: mocks.groupBy,
       },
+      hostedRuntimeLog: {
+        findMany: mocks.hostedRuntimeLogFindMany,
+      },
       hostedWorkspace: {
         findMany: mocks.hostedWorkspaceFindMany,
       },
@@ -44,6 +48,7 @@ describe("hosted mailbox lag sweeper", () => {
       inFlight: false,
       nextAlarmAtPresent: true,
     });
+    mocks.hostedRuntimeLogFindMany.mockResolvedValue([]);
   });
 
   it("nudges lagged users from mailbox item high-water rows", async () => {
@@ -106,6 +111,22 @@ describe("hosted mailbox lag sweeper", () => {
         },
       },
     });
+    expect(mocks.hostedRuntimeLogFindMany).toHaveBeenCalledWith({
+      distinct: ["userId"],
+      orderBy: {
+        at: "desc",
+      },
+      select: {
+        redactedJson: true,
+        userId: true,
+      },
+      where: {
+        eventCode: "mailbox.imported",
+        userId: {
+          in: ["member_lag_1", "member_current"],
+        },
+      },
+    });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "hosted-mailbox-lag-sweeper",
@@ -128,6 +149,55 @@ describe("hosted mailbox lag sweeper", () => {
       }),
     );
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_lag_1");
+  });
+
+  it("does not nudge when the latest foreground import log reaches mailbox high water", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
+        lane: "conversation",
+        maxSeq: 457n,
+        userId: "member_foreground_import",
+      }),
+      buildHighWater({
+        lane: "system",
+        maxSeq: 6n,
+        userId: "member_foreground_import",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
+        redactedStatusJson: {
+          hostedMailboxConversationImportedSeq: "444",
+          hostedMailboxSystemImportedSeq: "6",
+        },
+        userId: "member_foreground_import",
+      }),
+    ]);
+    mocks.hostedRuntimeLogFindMany.mockResolvedValue([
+      {
+        redactedJson: {
+          conversationSeqEnd: "457",
+          systemSeqEnd: "6",
+        },
+        userId: "member_foreground_import",
+      },
+    ]);
+
+    const result = await lagSweeper.runHostedMailboxLagSweeper({
+      logger: buildLogger(),
+      nudgeLimit: 5,
+    });
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      highWaterRows: 2,
+      laggedUsers: 0,
+      nudgeAccepted: 0,
+      nudgeAttempted: 0,
+      nudgeLimit: 5,
+      nudgeNotAccepted: 0,
+      skippedLaggedUsers: 0,
+    });
   });
 
   it("rotates the nudge window when lagged users exceed the per-run limit", async () => {

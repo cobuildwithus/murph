@@ -23,6 +23,29 @@ export function computeHostedMailboxLaneLag(input: {
   };
 }
 
+export function mergeLatestHostedMailboxImportRedactedStatus(
+  workspaceStatus: Record<string, unknown> | null,
+  latestImportStatus: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!latestImportStatus) {
+    return workspaceStatus;
+  }
+
+  return {
+    ...(workspaceStatus ?? {}),
+    hostedMailboxConversationImportedSeq: maxHostedMailboxImportedSeq(
+      workspaceStatus,
+      latestImportStatus,
+      "conversation",
+    ),
+    hostedMailboxSystemImportedSeq: maxHostedMailboxImportedSeq(
+      workspaceStatus,
+      latestImportStatus,
+      "system",
+    ),
+  };
+}
+
 export function readHostedMailboxImportedSeqForLane(
   redactedStatus: Record<string, unknown> | null,
   lane: HostedMailboxLane,
@@ -35,6 +58,7 @@ export function readHostedMailboxImportedSeqForLane(
   const candidates = [
     `hostedMailbox${capitalizedLane}ImportedSeq`,
     `${lane}ImportedSeq`,
+    `${lane}SeqEnd`,
     `imported${capitalizedLane}Seq`,
     `mailbox${capitalizedLane}ImportedSeq`,
   ];
@@ -58,6 +82,17 @@ export function readHostedMailboxRedactedStatusRecord(
   }
 
   return Object.fromEntries(Object.entries(value));
+}
+
+function maxHostedMailboxImportedSeq(
+  workspaceStatus: Record<string, unknown> | null,
+  latestImportStatus: Record<string, unknown>,
+  lane: HostedMailboxLane,
+): string {
+  const workspaceSeq = readHostedMailboxImportedSeqForLane(workspaceStatus, lane);
+  const latestSeq = readHostedMailboxImportedSeqForLane(latestImportStatus, lane);
+
+  return (latestSeq > workspaceSeq ? latestSeq : workspaceSeq).toString();
 }
 
 function readNonNegativeBigInt(value: unknown): bigint | null {

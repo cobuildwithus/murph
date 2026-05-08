@@ -2536,6 +2536,57 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("clears stale foreground wake when deferred post-checkpoint work drains it", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_checkpoint_cleared_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_checkpoint_cleared_wake",
+        async runAssistantPhase() {
+          return {
+            afterCheckpoint: async () => ({
+              checkpointReason: "system_mailbox_receipt",
+              nextWakeAt: null,
+              nextWakeReason: null,
+            }),
+            checkpointReason: "activation_bootstrap",
+            nextWakeAt: "2026-04-26T00:00:00.000Z",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, null);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("defers runtime-only assistant phase checkpoints without touching the workspace", async () => {
     for (const checkpointReason of ["assistant_runtime_commit", "provider_cleanup"] as const) {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));

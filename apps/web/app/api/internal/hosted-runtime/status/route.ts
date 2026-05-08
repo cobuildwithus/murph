@@ -7,24 +7,32 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   computeHostedMailboxLaneLag,
+  mergeLatestHostedMailboxImportRedactedStatus,
   readHostedMailboxRedactedStatusRecord,
 } from "@/src/lib/hosted-mailbox/lag";
 import { readHostedMailboxMaxSeqByLane } from "@/src/lib/hosted-mailbox/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   listHostedRuntimeLogs,
+  readLatestHostedMailboxImportRuntimeLog,
   readHostedWorkspace,
 } from "@/src/lib/hosted-workspace/store";
 
 export const GET = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const logLimit = readStatusLogLimit(request);
-  const [workspace, maxSeqByLane, recentLogs] = await Promise.all([
+  const [workspace, maxSeqByLane, recentLogs, latestMailboxImportLog] = await Promise.all([
     readHostedWorkspace({ userId }),
     readHostedMailboxMaxSeqByLane({ userId }),
     listHostedRuntimeLogs({ limit: logLimit, userId }),
+    readLatestHostedMailboxImportRuntimeLog({ userId }),
   ]);
-  const redactedStatus = readHostedMailboxRedactedStatusRecord(workspace?.redactedStatusJson);
+  const workspaceRedactedStatus =
+    readHostedMailboxRedactedStatusRecord(workspace?.redactedStatusJson);
+  const redactedStatus = mergeLatestHostedMailboxImportRedactedStatus(
+    workspaceRedactedStatus,
+    readHostedMailboxRedactedStatusRecord(latestMailboxImportLog?.redactedJson),
+  );
 
   return jsonOk(parseHostedRuntimeWebStatusResponse({
     mailboxLag: maxSeqByLane.map((highWater) => computeHostedMailboxLaneLag({

@@ -8,7 +8,11 @@ import type { PrismaClient } from "@prisma/client";
 
 import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
 import { getPrisma } from "../prisma";
-import { computeHostedMailboxLaneLag } from "./lag";
+import {
+  computeHostedMailboxLaneLag,
+  mergeLatestHostedMailboxImportRedactedStatus,
+  readHostedMailboxRedactedStatusRecord,
+} from "./lag";
 
 const DEFAULT_NUDGE_LIMIT = 25;
 const MAX_NUDGE_LIMIT = 250;
@@ -26,7 +30,7 @@ export interface HostedMailboxLagSweeperResult {
 }
 
 type HostedMailboxLagSweeperPrisma =
-  Pick<PrismaClient, "hostedMailboxItem" | "hostedWorkspace">;
+  Pick<PrismaClient, "hostedMailboxItem" | "hostedRuntimeLog" | "hostedWorkspace">;
 
 type HostedMailboxLagSweeperLogger = Pick<Console, "info" | "warn">;
 
@@ -56,20 +60,46 @@ export async function runHostedMailboxLagSweeper(input: {
     by: ["userId", "lane"],
   });
   const userIds = Array.from(new Set(highWaterRows.map((row) => row.userId)));
-  const workspaces = await prisma.hostedWorkspace.findMany({
-    select: {
-      checkpointedAt: true,
-      redactedStatusJson: true,
-      userId: true,
-    },
-    where: {
-      userId: {
-        in: userIds,
+  const [workspaces, latestMailboxImportLogs] = await Promise.all([
+    prisma.hostedWorkspace.findMany({
+      select: {
+        checkpointedAt: true,
+        redactedStatusJson: true,
+        userId: true,
       },
-    },
-  });
+      where: {
+        userId: {
+          in: userIds,
+        },
+      },
+    }),
+    userIds.length > 0
+      ? prisma.hostedRuntimeLog.findMany({
+        distinct: ["userId"],
+        orderBy: {
+          at: "desc",
+        },
+        select: {
+          redactedJson: true,
+          userId: true,
+        },
+        where: {
+          eventCode: "mailbox.imported",
+          userId: {
+            in: userIds,
+          },
+        },
+      })
+      : Promise.resolve([]),
+  ]);
   const workspaceByUserId = new Map(
     workspaces.map((workspace) => [workspace.userId, workspace]),
+  );
+  const latestMailboxImportStatusByUserId = new Map(
+    latestMailboxImportLogs.map((log) => [
+      log.userId,
+      readHostedMailboxRedactedStatusRecord(log.redactedJson),
+    ]),
   );
   const laggedByUser = new Map<string, HostedMailboxLaggedUser>();
 
@@ -79,12 +109,16 @@ export async function runHostedMailboxLagSweeper(input: {
     }
 
     const workspace = workspaceByUserId.get(highWater.userId) ?? null;
+    const redactedStatusJson = mergeLatestHostedMailboxImportRedactedStatus(
+      readHostedMailboxRedactedStatusRecord(workspace?.redactedStatusJson ?? null),
+      latestMailboxImportStatusByUserId.get(highWater.userId) ?? null,
+    );
     const lag = computeHostedMailboxLaneLag({
       highWater: {
         lane: highWater.lane,
         maxSeq: highWater._max.laneSeq.toString(),
       },
-      redactedStatusJson: workspace?.redactedStatusJson ?? null,
+      redactedStatusJson,
     });
 
     if (lag.lag === "0") {
