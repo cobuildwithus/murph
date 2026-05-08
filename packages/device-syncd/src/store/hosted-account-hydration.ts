@@ -462,23 +462,27 @@ export function resolveHostedAccountHydrationPlan(input: {
 } {
   const connectionAccepted = input.existing === null || (!input.connectionStateStale && !input.connectionStateReplayed);
   const inputTokens = getHostedHydrationTokenInput(input.hydration);
-  const tokenBundleReplaysClearedCredential = inputTokens !== undefined
-    && input.existing?.credential.kind !== "oauth_tokens"
-    && typeof input.existing?.hostedObservedTokenVersion === "number"
-    && input.existing.hostedObservedTokenVersion === input.hydration.hostedObservedTokenVersion;
-  const tokenAccepted = !input.tokenStateStale
-    && !input.tokenStateReplayed
-    && !tokenBundleReplaysClearedCredential;
-  const disconnectedHostedClearRequested = input.hydration.connection.status === "disconnected"
-    && inputTokens === undefined
-    && input.hydration.credential === undefined;
-  const tokenClearRequested = input.hydration.clearTokens === true || disconnectedHostedClearRequested;
-  const tokenClearAccepted = !input.tokenStateStale
-    && connectionAccepted
-    && (disconnectedHostedClearRequested || !input.tokenStateReplayed);
+  const tokenBundleReplacesNonOauthCredential = inputTokens !== undefined
+    && input.existing !== null
+    && input.existing.credential.kind !== "oauth_tokens";
+  const tokenAccepted = tokenBundleReplacesNonOauthCredential
+    ? connectionAccepted
+    : !input.tokenStateStale && !input.tokenStateReplayed;
   const nonTokenCredentialReplacesOauthTokens = input.hydration.credential !== undefined
     && input.hydration.credential.kind !== "oauth_tokens"
     && input.existing?.credential.kind === "oauth_tokens";
+  const disconnectedHostedClearRequested = input.hydration.connection.status === "disconnected"
+    && inputTokens === undefined
+    && (
+      input.hydration.credential === undefined
+      || input.hydration.credential.kind === "none"
+    );
+  const tokenClearRequested = input.hydration.clearTokens === true
+    || disconnectedHostedClearRequested
+    || (nonTokenCredentialReplacesOauthTokens && inputTokens === undefined);
+  const tokenClearAccepted = !input.tokenStateStale
+    && connectionAccepted
+    && (disconnectedHostedClearRequested || !input.tokenStateReplayed);
 
   let tokenPayloadAction: HostedHydratedTokenPayloadAction = "keep";
 

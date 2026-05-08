@@ -1,6 +1,7 @@
 import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
+  MIN_AUTOMATION_EVERY_MS,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationScheduleKindValues,
@@ -45,7 +46,6 @@ const automationRegistryResource = canonicalLogicalResource(
   AUTOMATIONS_DIRECTORY,
 );
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
-const MIN_RECURRING_AUTOMATION_INTERVAL_MS = 60_000;
 
 function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
   if (Object.hasOwn(object, "timeZone")) {
@@ -172,7 +172,7 @@ function normalizeAutomationSchedule(
       if (typeof object.everyMs !== "number" || !Number.isInteger(object.everyMs) || object.everyMs <= 0) {
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.everyMs must be a positive integer.");
       }
-      if (object.everyMs < MIN_RECURRING_AUTOMATION_INTERVAL_MS) {
+      if (object.everyMs < MIN_AUTOMATION_EVERY_MS) {
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.everyMs must be at least 60000 ms.");
       }
       return {

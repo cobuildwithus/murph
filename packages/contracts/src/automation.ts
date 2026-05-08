@@ -31,6 +31,7 @@ export const automationScheduleKindValues = [
   "dailyLocal",
 ] as const;
 
+export const MIN_AUTOMATION_EVERY_MS = 60_000;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 function isoTimestampSchema() {
@@ -38,7 +39,9 @@ function isoTimestampSchema() {
 }
 export const isValidAutomationCronExpression = isValidExecutableCronExpression;
 export const automationScheduleAtSchema = executableScheduleIntentAtSchema;
-export const automationScheduleEverySchema = executableScheduleIntentEverySchema;
+export const automationScheduleEverySchema = executableScheduleIntentEverySchema.extend({
+  everyMs: z.number().int().min(MIN_AUTOMATION_EVERY_MS),
+}).strict();
 export const automationScheduleCronSchema = executableScheduleIntentCronSchema;
 export const automationScheduleDailyLocalSchema = executableScheduleIntentDailyLocalSchema;
 

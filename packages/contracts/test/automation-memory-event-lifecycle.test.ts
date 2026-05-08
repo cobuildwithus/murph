@@ -86,7 +86,26 @@ describe("automation contract seams", () => {
     ).toThrow(/Expected a five-field cron expression/u);
   });
 
+  it("rejects sub-minute recurring automation intervals at the contract boundary", () => {
+    expect(() =>
+      automationScheduleSchema.parse({
+        everyMs: 59_999,
+        kind: "every",
+      }),
+    ).toThrow(/Too small/u);
+  });
+
   it("accepts canonical recurring schedules without a time zone field", () => {
+    expect(
+      automationScheduleSchema.parse({
+        everyMs: 60_000,
+        kind: "every",
+      }),
+    ).toEqual({
+      everyMs: 60_000,
+      kind: "every",
+    });
+
     expect(
       automationScheduleSchema.parse({
         expression: "0 8 * * *",

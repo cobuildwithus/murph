@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
@@ -77,7 +77,13 @@ const SAME_ORIGIN_HEADERS = {
 
 describe("settings email sync route", () => {
   beforeAll(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-22T10:00:00.000Z"));
     settingsEmailSyncRoute = await import("../app/api/settings/email/sync/route");
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
   });
 
   beforeEach(() => {
@@ -119,9 +125,7 @@ describe("settings email sync route", () => {
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.upsertHostedMemberEmailAuthorization.mockResolvedValue({});
-    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
-      eventId: "member.channels.updated:settings.email.sync:member_123:2025-03-27T08:30:00.000Z",
-    });
+    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({});
     mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
     mocks.sendHostedSignupWelcomeEmailForRecentMember.mockResolvedValue({
       providerMessageId: "resend_email_123",
@@ -164,10 +168,13 @@ describe("settings email sync route", () => {
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
       emailLinked: true,
       memberId: "member_123",
-      occurredAt: "2025-03-27T08:30:00.000Z",
+      occurredAt: "2026-04-22T10:00:00.000Z",
       prisma: mocks.prismaClient,
       sourceType: "settings.email.sync",
     });
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.readHostedMemberEmailAuthorization.mock.invocationCallOrder[0],
+    );
     expect(mocks.sendHostedSignupWelcomeEmailForRecentMember).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
