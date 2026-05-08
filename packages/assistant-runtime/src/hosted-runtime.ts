@@ -1,11 +1,5 @@
 import path from "node:path";
 
-import {
-  HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV,
-} from "@murphai/core";
-import {
-  resolveAssistantStatePaths,
-} from "@murphai/runtime-state/node";
 import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -97,6 +91,7 @@ export {
 } from "./hosted-runtime/child-result.ts";
 export {
   createHostedBrowserVaultReplicaForSnapshot,
+  createHostedBrowserVaultReplicaForSourceState,
 } from "./hosted-runtime/browser-vault-replica.ts";
 
 export type {
@@ -154,6 +149,9 @@ export {
 export {
   executeHostedMailboxEvent,
 };
+export {
+  restoreHostedWorkspaceRuntimeJobWorkspace,
+} from "./hosted-runtime/workspace-restore.ts";
 export {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
@@ -570,11 +568,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runtimeEnv = {
       ...hostedCodexRuntime.runtimeEnv,
       ...(hostedCliBridge?.env ?? {}),
-      [HOSTED_CANONICAL_WRITE_RECEIPT_DIRECTORY_ENV]: path.join(
-        resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
-        "receipts",
-        "canonical-writes",
-      ),
     };
 
     let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
@@ -880,6 +873,12 @@ function createLivenessGuardedHostedRuntimePlatform(
     ...(platform.browserVaultReplicaPort
       ? {
           browserVaultReplicaPort: {
+            ...(platform.browserVaultReplicaPort.publishRef
+              ? {
+                  publishRef: (publishInput) =>
+                    guard(() => platform.browserVaultReplicaPort!.publishRef!(publishInput)),
+                }
+              : {}),
             write: (writeInput) =>
               guard(() => platform.browserVaultReplicaPort!.write(writeInput)),
           },

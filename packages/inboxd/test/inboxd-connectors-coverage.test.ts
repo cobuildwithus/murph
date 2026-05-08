@@ -699,6 +699,7 @@ test("createEmailPollConnector watch falls back to the driver inbox account, reu
 
 test("createTelegramPollConnector fails closed when an active webhook exists but deleteWebhook is unavailable", async () => {
   const connector = createTelegramPollConnector({
+    accountId: "42",
     driver: {
       async getMe() {
         return {
@@ -738,6 +739,7 @@ test("createTelegramPollConnector deletes active webhooks once and skips file do
   let deleteWebhookCalls = 0;
   let downloadCalls = 0;
   const connector = createTelegramPollConnector({
+    accountId: "42",
     driver: {
       async getMe() {
         return {
@@ -827,13 +829,13 @@ test("createTelegramPollConnector deletes active webhooks once and skips file do
   assert.equal(emitted[0]?.attachments[0]?.data ?? null, null);
 });
 
-test("createTelegramPollConnector treats blank webhook URLs as inactive, preserves null accounts, and keeps attachment metadata when file paths are missing", async () => {
+test("createTelegramPollConnector treats blank webhook URLs as inactive and keeps attachment metadata when file paths are missing", async () => {
   let deleteWebhookCalls = 0;
   let getMessagesCalls = 0;
   let getFileCalls = 0;
   let downloadFileCalls = 0;
   const connector = createTelegramPollConnector({
-    accountId: null,
+    accountId: "42",
     driver: {
       async getMe() {
         return {
@@ -908,8 +910,8 @@ test("createTelegramPollConnector treats blank webhook URLs as inactive, preserv
     };
   });
 
-  assert.equal(connector.id, "telegram:default");
-  assert.equal(connector.accountId, null);
+  assert.equal(connector.id, "telegram:42");
+  assert.equal(connector.accountId, "42");
   assert.equal(deleteWebhookCalls, 0);
   assert.equal(getFileCalls, 1);
   assert.equal(downloadFileCalls, 0);

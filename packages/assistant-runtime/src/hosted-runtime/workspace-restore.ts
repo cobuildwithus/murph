@@ -1,10 +1,9 @@
-import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
   applyHostedCanonicalWriteReceipt,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  resolveHostedCanonicalWritePayloadFilePath,
   type HostedCanonicalWriteReceiptAction,
   type HostedCanonicalWriteReceiptContentRef,
   type HostedCanonicalWriteReceipt,
@@ -38,6 +37,9 @@ import {
   type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
+import {
+  readHostedCanonicalWriteReceiptLogEntries,
+} from "./canonical-write-receipt-log.ts";
 
 import {
   createHostedArtifactResolver,
@@ -248,8 +250,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     });
   }
 
-  await applyHostedCanonicalWriteReceiptsFromRestoredRuntime({
+  await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
     platform: input.platform,
+    status: input.workspace?.redactedStatus ?? null,
     vaultRoot: restored.vaultRoot,
   });
 
@@ -296,29 +299,26 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
   });
 }
 
-async function applyHostedCanonicalWriteReceiptsFromRestoredRuntime(input: {
+async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
   platform: HostedRuntimePlatform;
+  status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
 }): Promise<void> {
-  const receiptRoot = path.join(
-    resolveAssistantStatePaths(input.vaultRoot).assistantStateRoot,
-    "receipts",
-    "canonical-writes",
-  );
-  let entries: string[];
-  try {
-    entries = await readdir(receiptRoot);
-  } catch (error) {
-    if (isMissingPathError(error)) {
-      return;
-    }
-    throw error;
-  }
-
+  const entries = await readHostedCanonicalWriteReceiptLogEntries({
+    artifactStore: input.platform.artifactStore,
+    status: input.status,
+  });
   const receipts: HostedCanonicalWriteReceipt[] = [];
-  for (const entry of entries.filter((value) => value.endsWith(".json")).sort()) {
+  for (const entry of entries) {
+    const bytes = await input.platform.artifactStore.get(entry.sha256);
+    if (!bytes) {
+      throw new Error("Hosted canonical write receipt artifact is unavailable.");
+    }
+    if (bytes.byteLength !== entry.byteSize) {
+      throw new Error("Hosted canonical write receipt artifact size does not match its log ref.");
+    }
     const parsed = parseHostedCanonicalWriteReceiptForRestore(
-      await readFile(path.join(receiptRoot, entry), "utf8"),
+      Buffer.from(bytes).toString("utf8"),
     );
     if (parsed) {
       receipts.push(parsed);
@@ -335,7 +335,6 @@ async function applyHostedCanonicalWriteReceiptsFromRestoredRuntime(input: {
       readPayload: async (ref) =>
         await readHostedCanonicalWritePayloadForRestore({
           platform: input.platform,
-          receiptRoot,
           ref,
         }),
       receipt,
@@ -346,20 +345,8 @@ async function applyHostedCanonicalWriteReceiptsFromRestoredRuntime(input: {
 
 async function readHostedCanonicalWritePayloadForRestore(input: {
   platform: HostedRuntimePlatform;
-  receiptRoot: string;
   ref: HostedCanonicalWriteReceiptContentRef;
 }): Promise<Uint8Array | ArrayBuffer | null> {
-  try {
-    return await readFile(resolveHostedCanonicalWritePayloadFilePath({
-      receiptRoot: input.receiptRoot,
-      sha256: input.ref.sha256,
-    }));
-  } catch (error) {
-    if (!isMissingPathError(error)) {
-      throw error;
-    }
-  }
-
   return await input.platform.artifactStore.get(input.ref.sha256);
 }
 
