@@ -88,8 +88,8 @@ interface HostedExecutionContainerInvokeRequest {
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
 interface HostedExecutionContainerBrowserVaultRefreshRequest {
+  attemptId: string;
   runtime: HostedAssistantRuntimeConfig;
-  signal?: AbortSignal;
   timeoutMs: number;
   userId: string;
 }
@@ -121,6 +121,7 @@ interface HostedExecutionContainerRunnerInput {
 }
 
 export interface HostedExecutionContainerStubLike {
+  abortBrowserVaultRefresh?(input: { attemptId: string; userId: string }): Promise<void>;
   destroyInstance(): Promise<void>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   ownsInternalWorkerProxyToken(input: {
@@ -203,6 +204,10 @@ export class RunnerContainer extends Container {
   private runnerControlToken: string | null = null;
   private runnerOutboundProxyState: RunnerOutboundProxyState | null = null;
   private installedRunnerOutboundProxyState: RunnerOutboundProxyState | null = null;
+  private browserVaultRefreshAbortController: AbortController | null = null;
+  private browserVaultRefreshCompletion: Promise<void> | null = null;
+  private browserVaultRefreshAttemptId: string | null = null;
+  private readonly pendingBrowserVaultRefreshAborts = new Set<string>();
   private activeInvocationCount = 0;
   private lastRunnerActivityAt = 0;
 
@@ -232,6 +237,24 @@ export class RunnerContainer extends Container {
         parseHostedExecutionContainerBrowserVaultRefreshInput(payload),
       )
     );
+  }
+
+  async abortBrowserVaultRefresh(input: { attemptId: string; userId: string }): Promise<void> {
+    if (this.currentLogContext?.userId && this.currentLogContext.userId !== input.userId) {
+      return;
+    }
+
+    const abortController = this.browserVaultRefreshAbortController;
+    if (!abortController || this.browserVaultRefreshAttemptId !== input.attemptId) {
+      this.pendingBrowserVaultRefreshAborts.add(input.attemptId);
+      return;
+    }
+    if (abortController.signal.aborted) {
+      return;
+    }
+
+    abortController.abort(new Error("browser-vault refresh preempted"));
+    await this.browserVaultRefreshCompletion;
   }
 
   async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
@@ -534,12 +557,18 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     };
     const outboundProxyState: RunnerOutboundProxyState = {
-      attemptId: buildRunnerBrowserVaultRefreshAttemptId("live"),
+      attemptId: input.attemptId,
       leaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
       token: createRunnerOutboundProxyToken(),
       userId: input.userId,
     };
-    let completedSuccessfully = false;
+    const operationAbortController = new AbortController();
+    let completeRefresh: () => void = () => undefined;
+    this.browserVaultRefreshAbortController = operationAbortController;
+    this.browserVaultRefreshAttemptId = input.attemptId;
+    this.browserVaultRefreshCompletion = new Promise<void>((resolve) => {
+      completeRefresh = resolve;
+    });
     this.currentLogContext = logContext;
     this.activeInvocationCount += 1;
     const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
@@ -562,11 +591,15 @@ export class RunnerContainer extends Container {
       });
       const runnerControlToken = await this.ensureContainerReady(input);
       await this.noteRunnerActivityDurably("container-ready");
+      if (this.pendingBrowserVaultRefreshAborts.delete(input.attemptId)) {
+        operationAbortController.abort(new Error("browser-vault refresh preempted"));
+      }
+      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       this.runnerOutboundProxyState = outboundProxyState;
       await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
-      throwIfRunnerContainerOperationAborted(input.signal);
+      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       const response = await this.containerFetch(
         RUNNER_BROWSER_VAULT_REFRESH_URL,
         {
@@ -585,7 +618,7 @@ export class RunnerContainer extends Container {
           },
           method: "POST",
           signal: combineRunnerContainerAbortSignals(
-            input.signal ?? null,
+            operationAbortController.signal,
             AbortSignal.timeout(remainingTimeoutMs),
           ),
         },
@@ -598,7 +631,6 @@ export class RunnerContainer extends Container {
       }
 
       const result = parseHostedBrowserVaultRefreshContainerResult(await response.json());
-      completedSuccessfully = true;
       return result;
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -612,8 +644,7 @@ export class RunnerContainer extends Container {
     } finally {
       try {
         const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
-        const shouldKeepWarm = completedSuccessfully && outboundProxyExpired;
-        if (!shouldKeepWarm) {
+        if (!outboundProxyExpired) {
           await this.stopWarmContainer({
             failClosed: true,
           });
@@ -625,6 +656,17 @@ export class RunnerContainer extends Container {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
+        if (this.browserVaultRefreshAbortController === operationAbortController) {
+          this.browserVaultRefreshAbortController = null;
+        }
+        if (this.browserVaultRefreshAttemptId === input.attemptId) {
+          this.browserVaultRefreshAttemptId = null;
+        }
+        if (this.browserVaultRefreshCompletion) {
+          this.browserVaultRefreshCompletion = null;
+        }
+        this.pendingBrowserVaultRefreshAborts.delete(input.attemptId);
+        completeRefresh();
       }
     }
   }
@@ -1160,26 +1202,43 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
   if (!container.refreshBrowserVaultReplica) {
     throw new Error("Hosted runner container does not support browser-vault refresh.");
   }
+  if (input.signal) {
+    throwIfRunnerContainerOperationAborted(input.signal);
+  }
+  if (input.signal && !container.abortBrowserVaultRefresh) {
+    throw new Error("Hosted runner container does not support browser-vault refresh abort.");
+  }
 
+  const attemptId = buildRunnerBrowserVaultRefreshAttemptId(createRunnerOutboundProxyToken());
   const refresh = container.refreshBrowserVaultReplica({
+    attemptId,
     runtime: input.runtime,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
   return input.signal
-    ? await raceRunnerContainerOperationAbort(refresh, input.signal)
+    ? await raceRunnerContainerOperationAbort(refresh, input.signal, async () => {
+        await container.abortBrowserVaultRefresh?.({ attemptId, userId: input.userId });
+      })
     : await refresh;
 }
 
 async function raceRunnerContainerOperationAbort<T>(
   operation: Promise<T>,
   signal: AbortSignal,
+  onOperationAbort?: () => Promise<void>,
 ): Promise<T> {
   throwIfRunnerContainerOperationAborted(signal);
 
   let removeAbortListener: () => void = () => undefined;
+  const abortCleanup: {
+    promise: Promise<void> | null;
+  } = {
+    promise: null,
+  };
   const abort = new Promise<never>((_, reject) => {
     const onAbort = () => {
+      abortCleanup.promise = onOperationAbort?.() ?? null;
       reject(signal.reason instanceof Error
         ? signal.reason
         : new DOMException("The operation was aborted.", "AbortError"));
@@ -1192,6 +1251,7 @@ async function raceRunnerContainerOperationAbort<T>(
     return await Promise.race([operation, abort]);
   } catch (error) {
     if (signal.aborted) {
+      await abortCleanup.promise?.catch(() => undefined);
       void operation.catch(() => undefined);
     }
     throw error;
@@ -1200,8 +1260,8 @@ async function raceRunnerContainerOperationAbort<T>(
   }
 }
 
-function throwIfRunnerContainerOperationAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
+function throwIfRunnerContainerOperationAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
     throw signal.reason instanceof Error
       ? signal.reason
       : new DOMException("The operation was aborted.", "AbortError");
@@ -1209,12 +1269,9 @@ function throwIfRunnerContainerOperationAborted(signal: AbortSignal | undefined)
 }
 
 function combineRunnerContainerAbortSignals(
-  first: AbortSignal | null,
+  first: AbortSignal,
   second: AbortSignal,
 ): AbortSignal {
-  if (!first) {
-    return second;
-  }
   if (first.aborted) {
     return first;
   }
@@ -1590,15 +1647,15 @@ function parseHostedExecutionContainerInvokeInput(
 
 function parseHostedExecutionContainerBrowserVaultRefreshInput(
   payload: {
+    attemptId?: unknown;
     runtime?: unknown;
-    signal?: AbortSignal;
     timeoutMs?: unknown;
     userId?: unknown;
   },
 ): HostedExecutionContainerBrowserVaultRefreshRequest {
   return {
+    attemptId: requireString(payload.attemptId, "payload.attemptId"),
     runtime: readHostedAssistantRuntimeConfig(payload.runtime),
-    signal: payload.signal,
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };

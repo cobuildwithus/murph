@@ -740,6 +740,7 @@ describe("hosted execution side-effects", () => {
       effectId: "intent_123",
       payload: createHostedAssistantDeliveryPayload(),
     })).toEqual({
+      deliveryPhase: "background_retry",
       effectId: "intent_123",
       fingerprint: "dedupe_123",
       kind: "assistant.delivery",
@@ -796,6 +797,7 @@ describe("hosted execution side-effects", () => {
       kind: "assistant.delivery",
       payload: createHostedAssistantDeliveryPayload(),
     })).toEqual({
+      deliveryPhase: "background_retry",
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
       kind: "assistant.delivery",
@@ -971,6 +973,7 @@ describe("hosted execution side-effects", () => {
       kind: "assistant.delivery",
       payload: createHostedAssistantDeliveryPayload(),
     }])).toEqual([{
+      deliveryPhase: "background_retry",
       effectId: "intent_123",
       fingerprint: "dedupe_123",
       kind: "assistant.delivery",

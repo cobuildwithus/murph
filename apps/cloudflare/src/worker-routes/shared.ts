@@ -24,16 +24,12 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
   nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
   nudgeHostedRunnerForUser(userId: string): Promise<HostedRunnerNudgeResult>;
-  scheduleBrowserVaultRefreshForUser?(input: { userId: string }): Promise<{
-    accepted: true;
-    immediateRefreshStarted: boolean;
-    userId: string;
-  }>;
-  scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<{
-    accepted: true;
-    immediateRefreshStarted: boolean;
-    userId: string;
-  }>;
+  scheduleBrowserVaultRefreshForUser?(input: { userId: string }): Promise<unknown>;
+  /**
+   * @deprecated Compatibility-only Durable Object method for deploy skew.
+   * Deletion target: 2026-05-23.
+   */
+  scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<unknown>;
   ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;

@@ -3,7 +3,12 @@ export const HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER = "5s";
 // long enough to cover deploys, transient Cloudflare issues, and brief web/runner outages.
 export const HOSTED_WEBHOOK_NUDGE_WORKFLOW_STEP_MAX_RETRIES = 120;
 
-export type HostedWebhookNudgeWorkflowSource = "device-sync" | "email" | "linq" | "telegram";
+export type HostedWebhookNudgeWorkflowSource =
+  | "device-sync"
+  | "email"
+  | "linq"
+  | "telegram"
+  | "whatsapp";
 
 export type HostedWebhookNudgeWorkflowInput = {
   mailboxItemId: string;

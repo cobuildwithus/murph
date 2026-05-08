@@ -4,6 +4,7 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
+  buildHostedExecutionWhatsAppConversationMessageWake,
 } from "@murphai/hosted-execution";
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 import type { AttachmentParseJobRecord, RunAttachmentParseJobResult } from "@murphai/parsers";
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   normalizeHostedEmailConversationCapture: vi.fn(),
   normalizeHostedLinqConversationCapture: vi.fn(),
   normalizeHostedTelegramConversationCapture: vi.fn(),
+  normalizeHostedWhatsAppConversationCapture: vi.fn(),
   openInboxRuntime: vi.fn(),
   readHostedRawEmailMessage: vi.fn(),
   markLinqChatRead: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("@murphai/inboxd/connectors/hosted-conversation", () => ({
   normalizeHostedEmailConversationCapture: mocks.normalizeHostedEmailConversationCapture,
   normalizeHostedLinqConversationCapture: mocks.normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture: mocks.normalizeHostedTelegramConversationCapture,
+  normalizeHostedWhatsAppConversationCapture: mocks.normalizeHostedWhatsAppConversationCapture,
 }));
 
 vi.mock("@murphai/parsers", () => ({
@@ -293,6 +296,27 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       wake: emailWake,
     });
 
+    const whatsappWake = buildHostedExecutionWhatsAppConversationMessageWake({
+      eventId: "evt_whatsapp",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      userId: "member_123",
+      whatsappMessage: {
+        fromWaId: "15551234567",
+        messageId: "wamid.test",
+        phoneNumberId: "phone-number-id",
+        schema: "murph.hosted-whatsapp-message.v1",
+        text: "CHECKIN",
+        threadId: "15551234567",
+      },
+    });
+    const whatsappCapture = { source: "whatsapp" };
+    mocks.normalizeHostedWhatsAppConversationCapture.mockResolvedValueOnce(whatsappCapture);
+    await importHostedConversationMessageWakeIntoLocalInbox({
+      runtime,
+      vaultRoot,
+      wake: whatsappWake,
+    });
+
     expect(mocks.createHostedLinqAttachmentDownloadDriver).toHaveBeenCalledTimes(1);
     expect(mocks.normalizeHostedLinqConversationCapture).toHaveBeenCalledWith({
       accountId: "15551234567",
@@ -331,13 +355,21 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       source: "email",
       threadTarget: null,
     });
-    expect(mocks.openInboxRuntime.mock.calls.length).toBeGreaterThanOrEqual(3);
-    expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(3);
+    expect(mocks.normalizeHostedWhatsAppConversationCapture).toHaveBeenCalledWith({
+      accountId: "phone-number-id",
+      externalId: "evt_whatsapp",
+      message: whatsappWake.message.whatsappMessage,
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      receivedAt: "2026-04-08T00:03:00.000Z",
+    });
+    expect(mocks.openInboxRuntime.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(4);
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
+    expect(processCapture).toHaveBeenNthCalledWith(4, whatsappCapture);
     expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
-    expect(pipelineClose).toHaveBeenCalledTimes(3);
+    expect(pipelineClose).toHaveBeenCalledTimes(4);
     expect(linqImport.metrics).toEqual({
       nextWakeAt: null,
       parserProcessed: 2,

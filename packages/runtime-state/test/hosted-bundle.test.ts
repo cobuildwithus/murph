@@ -22,6 +22,7 @@ import {
   HostedWorkspaceSnapshotContinuityIncompleteError,
   listHostedBundleArtifacts,
   clearHostedAssistantRuntimeHotState,
+  clearHostedCodexContinuityRestoreRoot,
   materializeHostedExecutionArtifacts,
   createHostedPortableWorkspaceManifestFromBundle,
   readHostedPortableWorkspaceDeltaManifestFromBundle,
@@ -37,6 +38,7 @@ import {
   ASSISTANT_STATE_FILE_MODE,
   sha256HostedBundleHex,
   snapshotHostedAssistantRuntimeHotState,
+  snapshotHostedCodexContinuityArtifact,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
   snapshotHostedExecutionContextUnsafeForFixture,
@@ -4338,6 +4340,159 @@ test("hosted Codex continuity prepare hook supplies missing rollout paths", asyn
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted tiny Codex continuity artifact snapshots only referenced rollout state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-tiny-continuity-"));
+
+  try {
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000043";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "07"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "auth"), { recursive: true });
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(vaultRoot, "raw", "captures"), { recursive: true });
+    await mkdir(path.join(vaultRoot, "derived", "knowledge"), { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      "{\"rollout\":\"kept\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "07", `rollout-2026-05-07T01-02-03-${threadId}.jsonl`),
+      "{\"rollout\":\"unreferenced\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "auth", "token.json"),
+      "{\"fixture\":\"not included\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(vaultRoot, "raw", "captures", "large.bin"), new Uint8Array(512 * 1024));
+    await writeFile(path.join(vaultRoot, "derived", "knowledge", "page.md"), "derived\n", "utf8");
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }),
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedCodexContinuityArtifact({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(snapshot.threadCount, 1);
+    assert.equal(readHostedPortableWorkspaceManifestFromBundle(snapshot.bundle), null);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${rolloutRelativePath}`,
+        root: "operator-home",
+      }),
+      "{\"rollout\":\"kept\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/sessions/session.json",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: "raw/captures/large.bin",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/auth/token.json",
+        root: "operator-home",
+      }),
+      null,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted tiny Codex continuity artifact restores against existing session requirements", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-tiny-restore-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-tiny-restore-target-"));
+
+  try {
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000044";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      "{\"rollout\":\"tiny\"}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+          resumeRouteId: "route-test",
+        },
+      }),
+      "utf8",
+    );
+
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+    const tinySnapshot = await snapshotHostedCodexContinuityArtifact({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+    const restored = await restoreHostedExecutionContext({
+      bundle: baseSnapshot.bundle,
+      workspaceRoot: restoreRoot,
+    });
+    await clearHostedCodexContinuityRestoreRoot(restored.operatorHomeRoot);
+
+    await restoreHostedBundleRoots({
+      bytes: tinySnapshot.bundle,
+      expectedKind: "vault",
+      roots: {
+        "operator-home": restored.operatorHomeRoot,
+      },
+    });
+    await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
+      assistantStateRoot: restored.assistantStateRoot,
+    });
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(restoreRoot, { force: true, recursive: true });
   }
 });
 

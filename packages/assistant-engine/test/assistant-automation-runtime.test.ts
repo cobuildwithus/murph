@@ -2539,11 +2539,11 @@ describe('assistant auto-reply runtime', () => {
       details: 'assistant provider turn started',
     }))
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'input.replied',
+      type: 'assistant.delivery.sent',
       inputId: expect.stringMatching(/^ain_/u),
-      details: 'delivery confirmed',
+      details: 'delivery sent',
       errorCode: undefined,
-      safeDetails: 'delivery confirmed',
+      safeDetails: 'delivery sent',
     }))
   })
 
@@ -2600,7 +2600,7 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('emits deferred delivery progress even when the outbox intent id is absent', async () => {
+  it('emits reply intent-created events even when the outbox intent id is absent', async () => {
     replyMocks.sendAssistantMessage.mockResolvedValue({
       delivery: null,
       deliveryDeferred: true,
@@ -2641,11 +2641,10 @@ describe('assistant auto-reply runtime', () => {
 
     expect(result.replied).toBe(1)
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'input.reply-progress',
+      type: 'assistant.reply.intent_created',
       inputId: expect.stringMatching(/^ain_/u),
-      details: 'assistant queued outbound delivery for retry',
-      providerKind: 'status',
-      providerState: 'completed',
+      details: 'assistant reply intent created',
+      safeDetails: 'reply intent created',
     }))
   })
 

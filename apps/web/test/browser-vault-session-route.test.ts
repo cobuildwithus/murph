@@ -491,7 +491,7 @@ describe("browser vault session route", () => {
     });
     const scheduleBrowserVaultRefresh = vi.fn().mockResolvedValue({
       accepted: true,
-      immediateRefreshStarted: false,
+      scheduled: true,
       userId: "member_123",
     });
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -698,7 +698,7 @@ describe("browser vault session route", () => {
     const createBrowserVaultSession = vi.fn();
     const scheduleBrowserVaultRefresh = vi.fn().mockResolvedValue({
       accepted: true,
-      immediateRefreshStarted: false,
+      scheduled: true,
       userId: "member_123",
     });
     mocks.readHostedWorkspace.mockResolvedValue({

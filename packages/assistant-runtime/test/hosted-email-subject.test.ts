@@ -13,7 +13,7 @@ import type { HostedAssistantDeliveryRecord } from '@murphai/hosted-execution/si
 
 import type { HostedEmailSendRequest } from '../src/hosted-email.js'
 import { parseHostedEmailSendRequest } from '../src/hosted-email.js'
-import { drainHostedCommittedAssistantDeliveriesAfterCommit } from '../src/hosted-runtime/callbacks.js'
+import { drainHostedPreparedAssistantDeliveries } from '../src/hosted-runtime/callbacks.js'
 
 describe('hosted runtime email subject support', () => {
   it('parses the optional hosted email subject field', () => {
@@ -51,7 +51,7 @@ describe('hosted runtime email subject support', () => {
         turnId: 'turn_123',
         vault: vaultRoot,
       })
-      const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
         assistantDeliveryEffects: [
           buildHostedAssistantDeliveryEffect({
             dedupeKey: intent.dedupeKey,

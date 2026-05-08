@@ -39,11 +39,25 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
-  publishLegacySourceHashBrowserVaultReplicaRef:
-    mocks.publishLegacySourceHashBrowserVaultReplicaRef,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
+}));
+
+vi.mock("@/src/lib/hosted-workspace/legacy-source-hash-browser-vault", () => ({
+  publishLegacySourceHashBrowserVaultReplicaRef:
+    mocks.publishLegacySourceHashBrowserVaultReplicaRef,
+  readLegacyExpectedSourceStateHash: (body: Record<string, unknown>) => {
+    if (!Object.hasOwn(body, "expectedSourceStateHash")) {
+      return null;
+    }
+    if (typeof body.expectedSourceStateHash !== "string" || !body.expectedSourceStateHash.trim()) {
+      throw new TypeError(
+        "Legacy hosted browser-vault replica publish expectedSourceStateHash must be a non-empty string.",
+      );
+    }
+    return body.expectedSourceStateHash;
+  },
 }));
 
 type MailboxFetchRoute = typeof import("../app/api/internal/hosted-mailbox/fetch/route");

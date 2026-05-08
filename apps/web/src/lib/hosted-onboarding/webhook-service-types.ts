@@ -1,12 +1,22 @@
 import type { HostedOnboardingTelegramWebhookResponse } from "./webhook-provider-telegram";
 import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-linq-types";
+import type { HostedOnboardingWhatsAppWebhookResponse } from "./webhook-provider-whatsapp";
 
 export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
   response: TResult;
+  wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
   wakeLinqChatId?: string;
   wakeMailboxItemId?: string;
   wakeUserId?: string;
+};
+
+export type HostedWebhookWakeHandoff = {
+  eventId: string;
+  linqChatId?: string | null;
+  mailboxItemId: string;
+  source: "linq" | "telegram" | "whatsapp";
+  userId: string;
 };
 
 export type HostedStripeWebhookResponse = {
@@ -17,4 +27,5 @@ export type HostedStripeWebhookResponse = {
 
 export type HostedWebhookServiceResponse =
   | HostedOnboardingLinqWebhookResponse
-  | HostedOnboardingTelegramWebhookResponse;
+  | HostedOnboardingTelegramWebhookResponse
+  | HostedOnboardingWhatsAppWebhookResponse;

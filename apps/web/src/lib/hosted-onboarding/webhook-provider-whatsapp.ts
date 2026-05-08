@@ -1,0 +1,324 @@
+import type {
+  HostedMember,
+  Prisma,
+} from "@prisma/client";
+import {
+  buildHostedExecutionWhatsAppConversationMessageWake,
+} from "@murphai/hosted-execution";
+import type {
+  WhatsAppInboundText,
+  WhatsAppWebhookBody,
+} from "@murphai/messaging-ingress/whatsapp-webhook";
+
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { createHostedPhoneLookupKeyReadCandidates } from "./contact-privacy";
+import {
+  hasHostedMemberActiveAccess,
+  isHostedMemberSuspended,
+} from "./entitlement";
+import { normalizePhoneNumber } from "./phone";
+import {
+  buildHostedWhatsAppWebhookEventId,
+  parseHostedWhatsAppInboundTexts,
+} from "./whatsapp";
+import {
+  grantHostedWhatsAppMessagingConsentTx,
+  readHostedWhatsAppMessagingConsentGrantedTx,
+  revokeHostedWhatsAppMessagingConsentTx,
+} from "./whatsapp-consent";
+import type {
+  HostedWebhookPlan,
+  HostedWebhookWakeHandoff,
+} from "./webhook-service-types";
+
+export type HostedOnboardingWhatsAppWebhookResponse = {
+  commandHandledCount: number;
+  duplicate?: boolean;
+  ignored?: boolean;
+  ok: true;
+  reason?: string;
+  inboundTextCount: number;
+  routedTextCount: number;
+};
+
+type WhatsAppCommand = "help" | "start" | "stop";
+
+export async function planHostedOnboardingWhatsAppWebhook(input: {
+  body: WhatsAppWebhookBody;
+  prisma?: Prisma.TransactionClient;
+}): Promise<HostedWebhookPlan<HostedOnboardingWhatsAppWebhookResponse>> {
+  const inboundTexts = parseHostedWhatsAppInboundTexts(input.body);
+
+  if (inboundTexts.length === 0) {
+    return buildIgnoredWhatsAppWebhookPlan("unsupported-update", 0);
+  }
+
+  if (!input.prisma) {
+    throw new Error("Hosted WhatsApp webhook planning requires Prisma for inbound texts.");
+  }
+
+  const wakeHandoffs: HostedWebhookWakeHandoff[] = [];
+  let commandHandledCount = 0;
+  let duplicateCount = 0;
+  let ignoredCount = 0;
+  let lastIgnoredReason = "whatsapp-routing-not-configured";
+
+  for (const inboundText of inboundTexts) {
+    const messagePlan = await planHostedOnboardingWhatsAppInboundText({
+      inboundText,
+      prisma: input.prisma,
+    });
+
+    commandHandledCount += messagePlan.commandHandled ? 1 : 0;
+    duplicateCount += messagePlan.duplicate ? 1 : 0;
+    ignoredCount += messagePlan.ignored ? 1 : 0;
+    if (messagePlan.reason) {
+      lastIgnoredReason = messagePlan.reason;
+    }
+    if (messagePlan.wakeHandoff) {
+      wakeHandoffs.push(messagePlan.wakeHandoff);
+    }
+  }
+
+  const routedTextCount = wakeHandoffs.length;
+  const handledCount = routedTextCount + commandHandledCount + duplicateCount;
+  const ignored = handledCount === 0 || ignoredCount === inboundTexts.length;
+  const reason = resolveWhatsAppWebhookResponseReason({
+    commandHandledCount,
+    duplicateCount,
+    ignored,
+    lastIgnoredReason,
+    routedTextCount,
+  });
+
+  return {
+    desiredSideEffects: [],
+    response: {
+      ...(duplicateCount > 0 ? { duplicate: true } : {}),
+      ignored,
+      commandHandledCount,
+      inboundTextCount: inboundTexts.length,
+      ok: true,
+      reason,
+      routedTextCount,
+    },
+    wakeHandoffs,
+  };
+}
+
+function buildIgnoredWhatsAppWebhookPlan(
+  reason: string,
+  inboundTextCount: number,
+): HostedWebhookPlan<HostedOnboardingWhatsAppWebhookResponse> {
+  return {
+    desiredSideEffects: [],
+    response: {
+      commandHandledCount: 0,
+      ignored: true,
+      inboundTextCount,
+      ok: true,
+      reason,
+      routedTextCount: 0,
+    },
+  };
+}
+
+async function planHostedOnboardingWhatsAppInboundText(input: {
+  inboundText: WhatsAppInboundText;
+  prisma: Prisma.TransactionClient;
+}): Promise<{
+  commandHandled: boolean;
+  duplicate: boolean;
+  ignored: boolean;
+  reason: string;
+  wakeHandoff: HostedWebhookWakeHandoff | null;
+}> {
+  const phoneNumber = normalizePhoneNumber(input.inboundText.fromWaId);
+  if (!phoneNumber) {
+    return buildWhatsAppInboundTextNoWakePlan("invalid-whatsapp-sender");
+  }
+
+  const member = await lookupHostedMemberByWhatsAppPhoneNumber({
+    phoneNumber,
+    prisma: input.prisma,
+  });
+  if (!member) {
+    return buildWhatsAppInboundTextNoWakePlan("unlinked-whatsapp");
+  }
+
+  if (isHostedMemberSuspended(member.suspendedAt)) {
+    return buildWhatsAppInboundTextNoWakePlan("suspended-member");
+  }
+
+  if (!hasHostedMemberActiveAccess(member)) {
+    return buildWhatsAppInboundTextNoWakePlan("inactive-member");
+  }
+
+  const command = parseWhatsAppCommand(input.inboundText.text);
+  if (command === "stop") {
+    await revokeHostedWhatsAppMessagingConsentTx({
+      memberId: member.id,
+      now: input.inboundText.receivedAt,
+      prisma: input.prisma,
+    });
+    return {
+      commandHandled: true,
+      duplicate: false,
+      ignored: false,
+      reason: "whatsapp-stop-revoked",
+      wakeHandoff: null,
+    };
+  }
+
+  if (command === "start") {
+    await grantHostedWhatsAppMessagingConsentTx({
+      memberId: member.id,
+      now: input.inboundText.receivedAt,
+      prisma: input.prisma,
+    });
+    return {
+      commandHandled: true,
+      duplicate: false,
+      ignored: false,
+      reason: "whatsapp-start-granted",
+      wakeHandoff: null,
+    };
+  }
+
+  if (command === "help") {
+    return {
+      commandHandled: true,
+      duplicate: false,
+      ignored: false,
+      reason: "whatsapp-help-handled",
+      wakeHandoff: null,
+    };
+  }
+
+  const consentGranted = await readHostedWhatsAppMessagingConsentGrantedTx({
+    memberId: member.id,
+    prisma: input.prisma,
+  });
+  if (!consentGranted) {
+    return buildWhatsAppInboundTextNoWakePlan("whatsapp-consent-required");
+  }
+
+  const eventId = buildHostedWhatsAppWebhookEventId(input.inboundText.externalMessageId);
+  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+    envelope: buildHostedExecutionWhatsAppConversationMessageWake({
+      eventId,
+      occurredAt: input.inboundText.receivedAt.toISOString(),
+      userId: member.id,
+      whatsappMessage: {
+        fromWaId: input.inboundText.fromWaId,
+        messageId: input.inboundText.externalMessageId,
+        phoneNumberId: input.inboundText.phoneNumberId,
+        schema: "murph.hosted-whatsapp-message.v1",
+        text: input.inboundText.text,
+        threadId: input.inboundText.fromWaId,
+      },
+    }),
+    tx: input.prisma,
+  });
+
+  if (mailboxAppend.duplicate) {
+    return {
+      commandHandled: false,
+      duplicate: true,
+      ignored: true,
+      reason: "duplicate-webhook-event",
+      wakeHandoff: null,
+    };
+  }
+
+  return {
+    commandHandled: false,
+    duplicate: false,
+    ignored: false,
+    reason: "wake-appended-active-member",
+    wakeHandoff: {
+      eventId,
+      mailboxItemId: mailboxAppend.item.id,
+      source: "whatsapp",
+      userId: member.id,
+    },
+  };
+}
+
+async function lookupHostedMemberByWhatsAppPhoneNumber(input: {
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMember | null> {
+  const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
+  if (phoneLookupKeys.length === 0) {
+    return null;
+  }
+
+  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
+    where: {
+      phoneLookupKey: {
+        in: phoneLookupKeys,
+      },
+      phoneNumberVerifiedAt: {
+        not: null,
+      },
+    },
+    include: {
+      member: true,
+    },
+  });
+
+  return identityRecord?.member ?? null;
+}
+
+function buildWhatsAppInboundTextNoWakePlan(reason: string): {
+  commandHandled: false;
+  duplicate: false;
+  ignored: true;
+  reason: string;
+  wakeHandoff: null;
+} {
+  return {
+    commandHandled: false,
+    duplicate: false,
+    ignored: true,
+    reason,
+    wakeHandoff: null,
+  };
+}
+
+function parseWhatsAppCommand(text: string): WhatsAppCommand | null {
+  const normalized = text.trim().toLowerCase();
+
+  if (normalized === "stop" || normalized === "unsubscribe" || normalized === "cancel") {
+    return "stop";
+  }
+
+  if (normalized === "start" || normalized === "subscribe") {
+    return "start";
+  }
+
+  return normalized === "help" ? "help" : null;
+}
+
+function resolveWhatsAppWebhookResponseReason(input: {
+  commandHandledCount: number;
+  duplicateCount: number;
+  ignored: boolean;
+  lastIgnoredReason: string;
+  routedTextCount: number;
+}): string {
+  if (input.routedTextCount > 0) {
+    return "wake-appended-active-member";
+  }
+
+  if (input.commandHandledCount > 0) {
+    return "whatsapp-command-handled";
+  }
+
+  if (input.duplicateCount > 0) {
+    return "duplicate-webhook-event";
+  }
+
+  return input.lastIgnoredReason;
+}

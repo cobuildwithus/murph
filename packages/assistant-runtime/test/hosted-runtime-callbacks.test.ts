@@ -50,7 +50,7 @@ vi.mock("@murphai/assistant-engine", () => ({
 
 import {
   collectHostedAssistantDeliverySideEffects,
-  drainHostedCommittedAssistantDeliveriesAfterCommit,
+  drainHostedPreparedAssistantDeliveries,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -314,6 +314,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.effectId).toBe("intent_fresh");
+    expect(sideEffects[0]?.deliveryPhase).toBe("background_retry");
     expect(sideEffects[0]?.payload.message).toBe("fresh reply");
   });
 
@@ -396,6 +397,10 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects.map((effect) => effect.effectId)).toEqual([
       "intent_fresh_2",
       "intent_fresh",
+    ]);
+    expect(sideEffects.map((effect) => effect.deliveryPhase)).toEqual([
+      "foreground_current_turn",
+      "foreground_current_turn",
     ]);
     expect(sideEffects.map((effect) => effect.payload.message)).toEqual([
       "second current-turn reply",
@@ -492,7 +497,7 @@ describe("hosted runtime callbacks", () => {
       }),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -519,7 +524,7 @@ describe("hosted runtime callbacks", () => {
       }),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -546,7 +551,7 @@ describe("hosted runtime callbacks", () => {
       }),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -580,7 +585,7 @@ describe("hosted runtime callbacks", () => {
       ),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -615,7 +620,7 @@ describe("hosted runtime callbacks", () => {
       }),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -646,7 +651,7 @@ describe("hosted runtime callbacks", () => {
     );
     mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(false);
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -681,7 +686,7 @@ describe("hosted runtime callbacks", () => {
       ),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -717,7 +722,7 @@ describe("hosted runtime callbacks", () => {
       }),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -746,7 +751,7 @@ describe("hosted runtime callbacks", () => {
       }),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -763,6 +768,41 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         deliveryStatus: "sent",
         retryable: false,
+      }),
+    );
+  });
+
+  it("labels foreground delivery start and sent logs with dispatch event types", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_123",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_123",
+      payload: createPayload(),
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          deliveryPhase: "foreground_current_turn",
+          eventType: "assistant.delivery.foreground_started",
+        }),
+        message: "Hosted assistant foreground delivery starting.",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          deliveryPhase: "foreground_current_turn",
+          eventType: "assistant.delivery.sent",
+        }),
+        message: "Hosted assistant delivery sent.",
       }),
     );
   });
@@ -791,7 +831,7 @@ describe("hosted runtime callbacks", () => {
     });
     const assertLiveness = vi.fn(async () => undefined);
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       assertLiveness,
       forwardedEnv: {
@@ -852,7 +892,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
@@ -913,7 +953,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
@@ -996,7 +1036,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
@@ -1079,7 +1119,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
@@ -1146,7 +1186,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
@@ -1182,7 +1222,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     await expect(
-      drainHostedCommittedAssistantDeliveriesAfterCommit({
+      drainHostedPreparedAssistantDeliveries({
         assistantDeliveryEffects: [effect],
         wake: HOSTED_WAKE.wake,
         effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -1212,7 +1252,7 @@ describe("hosted runtime callbacks", () => {
       ),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -1245,7 +1285,7 @@ describe("hosted runtime callbacks", () => {
       ),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -1284,7 +1324,7 @@ describe("hosted runtime callbacks", () => {
       ),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -1305,7 +1345,7 @@ describe("hosted runtime callbacks", () => {
       createMirrorState(null),
     );
 
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -1382,7 +1422,7 @@ describe("hosted runtime callbacks", () => {
         ),
       );
 
-      const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
         assistantDeliveryEffects: [effect],
         wake: HOSTED_WAKE.wake,
         effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -1404,7 +1444,7 @@ describe("hosted runtime callbacks", () => {
     mocks.dispatchAssistantOutboxIntent.mockRejectedValue(new Error("boom"));
 
     await expect(
-      drainHostedCommittedAssistantDeliveriesAfterCommit({
+      drainHostedPreparedAssistantDeliveries({
         assistantDeliveryEffects: [effect],
         wake: HOSTED_WAKE.wake,
         effectsPort: createHostedRuntimeEffectsPortStub(),
@@ -1449,7 +1489,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     await expect(
-      drainHostedCommittedAssistantDeliveriesAfterCommit({
+      drainHostedPreparedAssistantDeliveries({
         assistantDeliveryEffects: [effect],
         wake: HOSTED_WAKE.wake,
         effectsPort: createHostedRuntimeEffectsPortStub(),

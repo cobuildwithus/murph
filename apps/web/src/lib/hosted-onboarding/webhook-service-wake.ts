@@ -54,7 +54,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   linqChatId?: string | null;
   mailboxItemId?: string;
   response: HostedWebhookServiceResponse;
-  source: "linq" | "telegram";
+  source: "linq" | "telegram" | "whatsapp";
   userId?: string;
 }): Promise<HostedWebhookWakeHandoffResult | null> {
   if (input.response.reason !== "wake-appended-active-member") {
@@ -138,7 +138,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 }
 
 async function tryNudgeHostedWebhookRunnerDirect(input: {
-  source: "linq" | "telegram";
+  source: "linq" | "telegram" | "whatsapp";
   userId?: string;
 }): Promise<HostedWebhookDirectNudgeSummary> {
   if (!input.userId) {

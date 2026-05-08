@@ -33,30 +33,31 @@ describe('hosted assistant delivery side effects subject support', () => {
   })
 
   it('treats a missing subject as null for greenfield payload parsing', () => {
-    expect(
-      parseHostedAssistantDeliveryEffects([
-        {
-          effectId: 'effect_123',
-          fingerprint: 'dedupe_123',
-          kind: 'assistant.delivery',
-          payload: {
-            actorId: null,
-            bindingDeliveryKind: null,
-            bindingDeliveryTarget: null,
-            channel: 'email',
-            explicitTarget: 'user@example.com',
-            idempotencyKey: 'idempotency_123',
-            identityId: 'assistant@example.com',
-            message: 'Hello from Murph',
-            replyToMessageId: null,
-            sessionId: 'session_123',
-            threadId: null,
-            threadIsDirect: null,
-            transportIdempotent: false,
-            turnId: 'turn_123',
-          },
+    const effect = parseHostedAssistantDeliveryEffects([
+      {
+        effectId: 'effect_123',
+        fingerprint: 'dedupe_123',
+        kind: 'assistant.delivery',
+        payload: {
+          actorId: null,
+          bindingDeliveryKind: null,
+          bindingDeliveryTarget: null,
+          channel: 'email',
+          explicitTarget: 'user@example.com',
+          idempotencyKey: 'idempotency_123',
+          identityId: 'assistant@example.com',
+          message: 'Hello from Murph',
+          replyToMessageId: null,
+          sessionId: 'session_123',
+          threadId: null,
+          threadIsDirect: null,
+          transportIdempotent: false,
+          turnId: 'turn_123',
         },
-      ])[0]?.payload.subject,
-    ).toBeNull()
+      },
+    ])[0]
+
+    expect(effect?.deliveryPhase).toBe('background_retry')
+    expect(effect?.payload.subject).toBeNull()
   })
 })

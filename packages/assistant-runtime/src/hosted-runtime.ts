@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type {
   HostedWorkspaceCheckpointRequest,
+  HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -109,6 +110,7 @@ export type {
   HostedRuntimeActiveTurnInputMailboxRefresh,
   HostedRuntimeActiveTurnInputMailboxRefreshInput,
   HostedRuntimeBrowserVaultReplicaPort,
+  HostedRuntimeCodexContinuityPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
@@ -438,11 +440,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
         read: () => workspacePort.read!(),
-        async checkpoint(request) {
-          const response = await workspacePort.checkpoint(request);
-          await recordHotRestoreCache(response);
-          return response;
-        },
+        checkpoint: (request) => workspacePort.checkpoint(request),
       };
       const latestLiveness = await touchRuntimeLivenessOnce({
         port: runtime.platform.runtimeLivenessPort,
@@ -464,6 +462,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
         livenessAbortSignal: livenessAbortController.signal,
+        onCheckpointValidated: recordHotRestoreCache,
         readLivenessScheduledResult: () => idleShutdownInputAvailable
           ? {
               ...(idleShutdownInputNextWakeAt === undefined
@@ -586,6 +585,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       await hostedCliBridge?.stop();
     }
     assertRuntimeLiveness();
+    scheduleHostedCodexContinuitySnapshotAfterForegroundTurn({
+      operatorHomeRoot: restored.operatorHomeRoot,
+      platform: guardedRuntime.platform,
+      requestId,
+      result,
+      vaultRoot: restored.vaultRoot,
+    });
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
@@ -634,6 +640,7 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
   livenessAbortSignal: AbortSignal;
+  onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
   readLivenessScheduledResult: () => HostedWorkspaceInvocationResult | null;
   redactedStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
   workspacePort: HostedRuntimePlatform["workspacePort"];
@@ -653,8 +660,6 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
   input.assertRuntimeLiveness();
   const checkpointPromise = input.workspacePort.checkpoint(checkpointRequest);
   let checkpoint: Awaited<typeof checkpointPromise>;
-  let livenessInterrupted = false;
-  let livenessScheduledResult: HostedWorkspaceInvocationResult | null = null;
   try {
     checkpoint = await raceHostedRuntimeLiveness(
       checkpointPromise,
@@ -665,42 +670,55 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
     if (!scheduled) {
       throw error;
     }
-    livenessInterrupted = true;
-    livenessScheduledResult = scheduled;
-    try {
-      checkpoint = await checkpointPromise;
-    } catch {
-      return scheduled;
-    }
-    if (!checkpoint.checkpointed) {
-      return scheduled;
-    }
-  }
-  if (!livenessInterrupted) {
-    input.assertRuntimeLiveness();
-  }
-  if (checkpoint.workspace.userId !== input.expectedUserId) {
-    throw new HostedMailboxImportCheckpointUserMismatchError({
-      actualUserId: checkpoint.workspace.userId,
+    observeIdleShutdownCheckpointAfterPreemption({
+      checkpointPromise,
       expectedUserId: input.expectedUserId,
+      onCheckpointValidated: input.onCheckpointValidated,
     });
+    return scheduled;
   }
-  if (!checkpoint.checkpointed) {
-    throw new HostedMailboxImportCheckpointConflictError(checkpoint);
-  }
+  input.assertRuntimeLiveness();
+  assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
+  await input.onCheckpointValidated?.(checkpoint);
 
   return {
     idleShutdownCheckpointed: true,
     ...(checkpoint.workspace.nextWakeAt
       ? { nextWakeAt: checkpoint.workspace.nextWakeAt }
-      : livenessScheduledResult?.nextWakeAt
-        ? { nextWakeAt: livenessScheduledResult.nextWakeAt }
-        : {}),
+      : {}),
     ...(checkpoint.workspace.redactedStatus
       ? { redactedStatus: checkpoint.workspace.redactedStatus }
       : {}),
     status: "idle",
   };
+}
+
+function observeIdleShutdownCheckpointAfterPreemption(input: {
+  checkpointPromise: Promise<HostedWorkspaceCheckpointResponse>;
+  expectedUserId: string;
+  onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
+}): void {
+  void input.checkpointPromise
+    .then(async (checkpoint) => {
+      assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
+      await input.onCheckpointValidated?.(checkpoint);
+    })
+    .catch(() => undefined);
+}
+
+function assertIdleShutdownCheckpointAccepted(
+  checkpoint: HostedWorkspaceCheckpointResponse,
+  expectedUserId: string,
+): void {
+  if (checkpoint.workspace.userId !== expectedUserId) {
+    throw new HostedMailboxImportCheckpointUserMismatchError({
+      actualUserId: checkpoint.workspace.userId,
+      expectedUserId,
+    });
+  }
+  if (!checkpoint.checkpointed) {
+    throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+  }
 }
 
 function shouldRefreshHotRestoreCacheAfterNoProgressRun(
@@ -951,6 +969,36 @@ function assertWorkspaceRunVersionMatchesRequest(input: {
   throw new HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError({
     actualWorkspaceVersion,
     expectedWorkspaceVersion: input.expectedWorkspaceVersion,
+  });
+}
+
+function scheduleHostedCodexContinuitySnapshotAfterForegroundTurn(input: {
+  operatorHomeRoot: string;
+  platform: HostedRuntimePlatform;
+  requestId: string;
+  result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
+  vaultRoot: string;
+}): void {
+  if (input.result.assistantPhaseResult?.progressed !== true) {
+    return;
+  }
+  const port = input.platform.codexContinuityPort ?? null;
+  if (!port) {
+    return;
+  }
+
+  queueMicrotask(() => {
+    void Promise.resolve(
+      port.scheduleSnapshot({
+        operatorHomeRoot: input.operatorHomeRoot,
+        requestId: input.requestId,
+        vaultRoot: input.vaultRoot,
+      }),
+    ).catch((error: unknown) => {
+      console.warn("Hosted Codex continuity background snapshot failed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    });
   });
 }
 

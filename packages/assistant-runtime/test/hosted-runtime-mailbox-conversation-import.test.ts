@@ -267,6 +267,64 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.replyTarget?.messageId, "msg_email_identity");
   });
 
+  test("stages WhatsApp input with hashed conversation metadata and private reply target", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-whatsapp-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_whatsapp_001",
+      message: {
+        channel: "whatsapp",
+        whatsappMessage: {
+          fromWaId: "15551234567",
+          messageId: "wamid.synthetic",
+          phoneNumberId: "phone-number-id",
+          schema: "murph.hosted-whatsapp-message.v1",
+          text: "CHECKIN https://signed.example.invalid/raw",
+          threadId: "15551234567",
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_whatsapp_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    const event = listed.events[0];
+    assert.ok(event);
+
+    assert.equal(event.content.text, "CHECKIN [link omitted]");
+    assert.equal(event.conversation?.source, "whatsapp");
+    assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.equal(event.replyTarget?.channel, "whatsapp");
+    assert.equal(event.replyTarget?.messageId, "wamid.synthetic");
+    assert.equal(event.replyTarget?.threadId, "15551234567");
+    assert.equal(event.sourceMetadata, null);
+    assert.equal(JSON.stringify(event.conversation).includes("15551234567"), false);
+  });
+
   test("records hosted attachment evidence after successful inbox projection", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-"));
     tempRoots.push(parentRoot);

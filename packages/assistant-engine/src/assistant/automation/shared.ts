@@ -26,6 +26,9 @@ export interface AssistantRunEvent {
   type:
     | 'capture.failed'
     | 'capture.noop'
+    | 'assistant.reply.intent_created'
+    | 'assistant.delivery.foreground_started'
+    | 'assistant.delivery.sent'
     | 'input.reply-progress'
     | 'input.reply-started'
     | 'input.replied'

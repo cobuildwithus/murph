@@ -14,6 +14,46 @@ describe("BrowserVaultRefreshCoordinator", () => {
     vi.useRealTimers();
   });
 
+  it("returns the scheduled result shape from the public schedule API", async () => {
+    const record = createRunnerStateRecord({
+      inFlight: false,
+      pendingNudge: false,
+      userId: "member_123",
+    });
+    const state = {
+      storage: {
+        delete: vi.fn(async () => true),
+        get: vi.fn(async () => undefined),
+        getAlarm: vi.fn(async () => null),
+        put: vi.fn(async () => undefined),
+        setAlarm: vi.fn(async () => undefined),
+      },
+    } satisfies DurableObjectStateLike;
+    const stateStore = {
+      readPendingBrowserVaultRefresh: vi.fn(async () => ({
+        slotId: "refresh-slot",
+        updatedAt: "2026-04-27T00:00:00.000Z",
+      })),
+      readState: vi.fn(async () => record),
+      scheduleBrowserVaultRefresh: vi.fn(async () => ({ deduped: false })),
+    } satisfies BrowserVaultRefreshCoordinatorStateStore;
+    const coordinator = new BrowserVaultRefreshCoordinator({
+      continuationDelayMs: 50,
+      hasForegroundWork: () => false,
+      readStateForRetryScheduling: vi.fn(async () => record),
+      retryDelayMs: 30_000,
+      runPendingRefresh: vi.fn(async () => undefined),
+      state,
+      stateStore,
+    });
+
+    await expect(coordinator.schedule({ userId: "member_123" })).resolves.toEqual({
+      accepted: true,
+      scheduled: true,
+      userId: "member_123",
+    });
+  });
+
   it("schedules a continuation without starting refresh from the schedule path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
@@ -45,18 +85,15 @@ describe("BrowserVaultRefreshCoordinator", () => {
       scheduleBrowserVaultRefresh: vi.fn(async () => ({ deduped: false })),
     } satisfies BrowserVaultRefreshCoordinatorStateStore;
     const runPendingRefresh = vi.fn(async () => undefined);
-    const syncStoredRunnerAlarm = vi.fn(async () => undefined);
 
     const coordinator = new BrowserVaultRefreshCoordinator({
       continuationDelayMs: 50,
-      destroyActiveRefreshContainer: vi.fn(() => null),
       hasForegroundWork: () => false,
       readStateForRetryScheduling: vi.fn(async () => record),
       retryDelayMs: 30_000,
       runPendingRefresh,
       state,
       stateStore,
-      syncStoredRunnerAlarm,
     });
 
     await expect(coordinator.schedulePending({ userId: "member_123" }))
@@ -65,7 +102,6 @@ describe("BrowserVaultRefreshCoordinator", () => {
     expect(runPendingRefresh).not.toHaveBeenCalled();
     expect(state.storage.setAlarm).toHaveBeenCalledOnce();
     expect(alarmWrites).toEqual(["2026-04-27T00:00:00.050Z"]);
-    expect(syncStoredRunnerAlarm).not.toHaveBeenCalled();
   });
 
   it("ignores stale existing alarms when scheduling a blocked refresh continuation", async () => {
@@ -98,14 +134,12 @@ describe("BrowserVaultRefreshCoordinator", () => {
 
     const coordinator = new BrowserVaultRefreshCoordinator({
       continuationDelayMs: 50,
-      destroyActiveRefreshContainer: vi.fn(() => null),
       hasForegroundWork: () => true,
       readStateForRetryScheduling: vi.fn(async () => record),
       retryDelayMs: 30_000,
       runPendingRefresh: vi.fn(async () => undefined),
       state,
       stateStore,
-      syncStoredRunnerAlarm: vi.fn(async () => undefined),
     });
 
     await expect(coordinator.schedulePending({ userId: "member_123" }))
@@ -164,18 +198,15 @@ describe("BrowserVaultRefreshCoordinator", () => {
       await activeRefresh.promise;
       pendingRefresh = null;
     });
-    const syncStoredRunnerAlarm = vi.fn(async () => undefined);
 
     const coordinator = new BrowserVaultRefreshCoordinator({
       continuationDelayMs: 50,
-      destroyActiveRefreshContainer: vi.fn(() => null),
       hasForegroundWork: () => hasForegroundWork,
       readStateForRetryScheduling: vi.fn(async () => record),
       retryDelayMs: 30_000,
       runPendingRefresh,
       state,
       stateStore,
-      syncStoredRunnerAlarm,
     });
 
     await expect(coordinator.schedulePending({ userId: "member_123" }))
@@ -186,14 +217,13 @@ describe("BrowserVaultRefreshCoordinator", () => {
     await coordinator.drainAfterForegroundWork();
 
     expect(runPendingRefresh).not.toHaveBeenCalled();
-    expect(syncStoredRunnerAlarm).not.toHaveBeenCalled();
     expect(state.storage.setAlarm).toHaveBeenCalledOnce();
 
     activeRefresh.resolve();
     await Promise.all(waitUntilPromises);
   });
 
-  it("aborts and destroys the active refresh container when foreground work preempts a refresh", async () => {
+  it("aborts the active refresh without destroying warm state when foreground work preempts it", async () => {
     const pendingRefresh = {
       slotId: "refresh-slot",
       updatedAt: "2026-04-27T00:00:00.000Z",
@@ -231,19 +261,15 @@ describe("BrowserVaultRefreshCoordinator", () => {
       refreshSignal = input.signal;
       await activeRefresh.promise;
     });
-    const destroyActiveRefreshContainer = vi.fn(async () => undefined);
-    const syncStoredRunnerAlarm = vi.fn(async () => undefined);
 
     const coordinator = new BrowserVaultRefreshCoordinator({
       continuationDelayMs: 50,
-      destroyActiveRefreshContainer,
       hasForegroundWork: () => false,
       readStateForRetryScheduling: vi.fn(async () => record),
       retryDelayMs: 30_000,
       runPendingRefresh,
       state,
       stateStore,
-      syncStoredRunnerAlarm,
     });
 
     await expect(coordinator.tryStart({ userId: "member_123" }))
@@ -255,10 +281,7 @@ describe("BrowserVaultRefreshCoordinator", () => {
     });
 
     expect(refreshSignal?.aborted).toBe(true);
-    expect(destroyActiveRefreshContainer).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
-    expect(state.waitUntil).toHaveBeenCalledTimes(2);
+    expect(state.waitUntil).toHaveBeenCalledTimes(1);
 
     activeRefresh.resolve();
     await Promise.all(waitUntilPromises);

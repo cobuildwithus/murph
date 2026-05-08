@@ -1,4 +1,5 @@
 import type { InboundCapture } from "../contracts/capture.ts";
+import { createInboundCaptureFromChatMessage } from "./chat/message.ts";
 import {
   normalizeParsedEmailMessage,
   type NormalizeParsedEmailMessageInput,
@@ -14,6 +15,10 @@ import {
   type NormalizeHostedTelegramMessageInput,
   type TelegramAttachmentDownloadDriver,
 } from "./telegram/normalize.ts";
+import {
+  normalizeTextValue,
+  toIsoTimestamp,
+} from "../shared-runtime.ts";
 
 export type {
   LinqAttachmentDownloadDriver,
@@ -29,6 +34,21 @@ export type NormalizeHostedEmailConversationInput = Omit<
   rawMessage: Uint8Array | ArrayBuffer | string;
 };
 
+export interface NormalizeHostedWhatsAppConversationInput {
+  accountId?: string | null;
+  externalId: string;
+  message: {
+    fromWaId: string;
+    messageId: string;
+    phoneNumberId?: string | null;
+    text: string;
+    threadId: string;
+  };
+  occurredAt: string;
+  receivedAt?: string | null;
+  source?: string;
+}
+
 export async function normalizeHostedLinqConversationCapture(
   input: NormalizeHostedLinqConversationMessageInput,
 ): Promise<InboundCapture> {
@@ -41,6 +61,38 @@ export async function normalizeHostedTelegramConversationCapture(
   return normalizeHostedTelegramMessage(input);
 }
 
+export async function normalizeHostedWhatsAppConversationCapture({
+  accountId = "cloud-api",
+  externalId,
+  message,
+  occurredAt,
+  receivedAt = null,
+  source = "whatsapp",
+}: NormalizeHostedWhatsAppConversationInput): Promise<InboundCapture> {
+  return createInboundCaptureFromChatMessage({
+    accountId: normalizeTextValue(accountId) ?? "cloud-api",
+    message: {
+      actor: {
+        displayName: null,
+        id: normalizeTextValue(message.fromWaId),
+        isSelf: false,
+      },
+      attachments: [],
+      externalId,
+      occurredAt: toIsoTimestamp(occurredAt),
+      raw: buildHostedWhatsAppRawMetadata(message),
+      receivedAt: receivedAt ? toIsoTimestamp(receivedAt) : toIsoTimestamp(occurredAt),
+      text: normalizeTextValue(message.text),
+      thread: {
+        id: message.threadId,
+        isDirect: true,
+        title: null,
+      },
+    },
+    source,
+  });
+}
+
 export async function normalizeHostedEmailConversationCapture({
   rawMessage,
   ...input
@@ -49,4 +101,14 @@ export async function normalizeHostedEmailConversationCapture({
     ...input,
     message: parseRawEmailMessage(rawMessage),
   });
+}
+
+function buildHostedWhatsAppRawMetadata(
+  message: NormalizeHostedWhatsAppConversationInput["message"],
+): Record<string, unknown> {
+  return {
+    message_id: message.messageId,
+    phone_number_id: message.phoneNumberId ?? null,
+    schema: "murph.whatsapp-capture.v1",
+  };
 }

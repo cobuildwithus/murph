@@ -61,9 +61,6 @@
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],
-      "@murphai/hosted-execution/dashboard-replica": [
-        "packages/hosted-execution/src/dashboard-replica.ts"
-      ],
       "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
@@ -75,6 +72,9 @@
       ],
       "@murphai/messaging-ingress/telegram-webhook-payload": [
         "packages/messaging-ingress/src/telegram-webhook-payload.ts"
+      ],
+      "@murphai/messaging-ingress/whatsapp-webhook": [
+        "packages/messaging-ingress/src/whatsapp-webhook.ts"
       ],
       "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"

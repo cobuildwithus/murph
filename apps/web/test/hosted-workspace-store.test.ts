@@ -9,14 +9,15 @@ import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
   publishHostedBrowserVaultReplicaRef,
-  publishLatestBrowserVaultReplicaRef,
-  publishLegacySourceHashBrowserVaultReplicaRefTx,
   publishLatestBrowserVaultReplicaRefTx,
   recordHostedRuntimeLogTx,
   type HostedRuntimeLogRow,
   type HostedWorkspaceTransactionRunner,
   type HostedWorkspaceRow,
 } from "@/src/lib/hosted-workspace/store";
+import {
+  publishLegacySourceHashBrowserVaultReplicaRefTx,
+} from "@/src/lib/hosted-workspace/legacy-source-hash-browser-vault";
 
 const FIXED_NOW = new Date("2026-04-26T00:00:00.000Z");
 

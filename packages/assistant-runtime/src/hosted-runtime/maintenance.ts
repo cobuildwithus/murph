@@ -533,6 +533,9 @@ function prefixHostedAssistantAutomationFailureContext(
 function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
   return new Set([
     "capture.failed",
+    "assistant.reply.intent_created",
+    "assistant.delivery.foreground_started",
+    "assistant.delivery.sent",
     "cron.job.completed",
     "cron.scan.job",
     "cron.scan.started",

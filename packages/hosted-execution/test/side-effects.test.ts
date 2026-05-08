@@ -92,6 +92,7 @@ describe("hosted assistant delivery contracts", () => {
 
   it("parses canonical assistant-delivery side effects", () => {
     const payload = [{
+      deliveryPhase: "foreground_current_turn",
       effectId: "intent-1",
       fingerprint: "dedupe-1",
       kind: "assistant.delivery",
@@ -104,9 +105,11 @@ describe("hosted assistant delivery contracts", () => {
   it("builds canonical effects and sending records with only the canonical effect id", () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-1",
+      deliveryPhase: "foreground_current_turn",
       effectId: "intent-1",
       payload: createHostedAssistantDeliveryPayload(),
     });
+    expect(effect.deliveryPhase).toBe("foreground_current_turn");
     const record = buildHostedAssistantDeliverySendingRecord({
       attempt: createHostedAssistantDeliveryAttempt({
         channel: null,
@@ -123,6 +126,7 @@ describe("hosted assistant delivery contracts", () => {
     });
 
     expect(effect).toEqual({
+      deliveryPhase: "foreground_current_turn",
       effectId: "intent-1",
       fingerprint: "dedupe-1",
       kind: "assistant.delivery",
