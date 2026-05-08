@@ -185,6 +185,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.signal,
       )
     : {
+        currentTurnDeliveryIntentIds: [],
         deferredReceiptRecoveryWakeAt: null,
         nextWakeAt: null,
         nextWakeAtWithoutDeferredReceiptRecovery: null,
@@ -204,6 +205,8 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       assistantResult.timings?.afterStateElapsedMs ?? null,
     assistantAutomationBeforeStateElapsedMs:
       assistantResult.timings?.beforeStateElapsedMs ?? null,
+    assistantAutomationCurrentTurnDeliveryIntentIds:
+      assistantResult.currentTurnDeliveryIntentIds ?? [],
     assistantAutomationDeferredReceiptRecoveryWakeAt:
       assistantResult.deferredReceiptRecoveryWakeAt ?? null,
     assistantAutomationElapsedMs,
@@ -241,6 +244,7 @@ export async function runHostedAssistantAutomation(
   deferReceiptRecovery = false,
   signal?: AbortSignal,
 ): Promise<{
+  currentTurnDeliveryIntentIds: string[];
   deferredReceiptRecoveryWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeAtWithoutDeferredReceiptRecovery: string | null;
@@ -363,6 +367,8 @@ export async function runHostedAssistantAutomation(
       routed: 0,
       skipped: 0,
     };
+    const currentTurnDeliveryIntentIds =
+      result.currentTurnDeliveryIntentIds ?? [];
     redactedLogEntries.push(emitHostedRuntimeRedactedLog({
       component: "runtime",
       details: {
@@ -393,6 +399,7 @@ export async function runHostedAssistantAutomation(
     }));
     return {
       deferredReceiptRecoveryWakeAt,
+      currentTurnDeliveryIntentIds,
       nextWakeAt: result.nextWakeAt,
       nextWakeAtWithoutDeferredReceiptRecovery,
       progressed: result.progressed,
@@ -424,6 +431,7 @@ export async function runHostedAssistantAutomation(
         phase: "wake.running",
       }));
       return {
+        currentTurnDeliveryIntentIds: [],
         deferredReceiptRecoveryWakeAt: null,
         nextWakeAt,
         nextWakeAtWithoutDeferredReceiptRecovery: nextWakeAt,

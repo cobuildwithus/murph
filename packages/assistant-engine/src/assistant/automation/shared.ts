@@ -64,12 +64,14 @@ export interface AssistantAutomationScanStateProgress {
 }
 
 export interface AssistantAutomationScanResult {
+  currentTurnDeliveryIntentIds: string[]
   replies: AssistantAutoReplyScanResult
   routing: AssistantInboxScanResult
 }
 
 export interface AssistantAutomationPassResult {
   cronProcessed: number
+  currentTurnDeliveryIntentIds: string[]
   deferredReceiptRecoveryWakeAt?: string | null
   nextWakeAt: string | null
   nextWakeAtWithoutDeferredReceiptRecovery?: string | null

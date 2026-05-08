@@ -274,6 +274,65 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects[0]?.payload.message).toBe("fresh reply");
   });
 
+  it("uses preferred current-turn deliveries before older due backlog at the hosted effect cap", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_old",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_old",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "h1_111111111111111111111111",
+        identityId: "identity_1",
+        intentId: "intent_old",
+        lastError: null,
+        message: "old pending reply",
+        nextAttemptAt: "2026-04-08T00:00:00.000Z",
+        replyToMessageId: "old-message",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_old",
+      },
+      {
+        actorId: "actor_fresh",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_fresh",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: "h1_222222222222222222222222",
+        identityId: "identity_1",
+        intentId: "intent_fresh",
+        lastError: null,
+        message: "fresh current-turn reply",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "fresh-message",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_fresh",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_fresh"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.effectId).toBe("intent_fresh");
+    expect(sideEffects[0]?.payload.message).toBe("fresh current-turn reply");
+  });
+
   it("rejects hosted email participant routes before collecting committed delivery effects", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {

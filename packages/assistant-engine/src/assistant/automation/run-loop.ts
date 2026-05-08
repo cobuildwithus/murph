@@ -1008,6 +1008,8 @@ export async function runAssistantAutomationPass(
 
   return {
     cronProcessed: cronResult.processed,
+    currentTurnDeliveryIntentIds:
+      scanResult.currentTurnDeliveryIntentIds,
     nextWakeAt: earliestAssistantAutomationWakeAt(
       replies.nextWakeAt,
       scanResult.routing.nextWakeAt,

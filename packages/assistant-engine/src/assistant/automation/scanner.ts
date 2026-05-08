@@ -68,6 +68,7 @@ export async function scanAssistantAutomationOnce(input: {
 }): Promise<AssistantAutomationScanResult> {
   const routing = createEmptyInboxScanResult()
   const replies = createEmptyAutoReplyScanResult()
+  const currentTurnDeliveryIntentIds: string[] = []
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
@@ -88,6 +89,7 @@ export async function scanAssistantAutomationOnce(input: {
 
   if (replyChannels.length === 0) {
     return {
+      currentTurnDeliveryIntentIds,
       replies,
       routing,
     }
@@ -102,6 +104,7 @@ export async function scanAssistantAutomationOnce(input: {
   })
   if (candidates.length === 0) {
     return {
+      currentTurnDeliveryIntentIds,
       replies,
       routing,
     }
@@ -222,6 +225,9 @@ export async function scanAssistantAutomationOnce(input: {
       result: replyResult,
       summary: replies,
     })
+    currentTurnDeliveryIntentIds.push(
+      ...(replyResult.currentTurnDeliveryIntentIds ?? []),
+    )
     if (replyResult.advanceCursor) {
       advanceAssistantAutoReplyChannelCursor({
         autoReply: scanState.autoReply,
@@ -247,6 +253,7 @@ export async function scanAssistantAutomationOnce(input: {
   }
 
   return {
+    currentTurnDeliveryIntentIds,
     replies,
     routing,
   }
