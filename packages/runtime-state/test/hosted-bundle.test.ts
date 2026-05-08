@@ -38,6 +38,7 @@ import {
   ASSISTANT_STATE_FILE_MODE,
   sha256HostedBundleHex,
   snapshotHostedAssistantRuntimeHotState,
+  HostedCodexContinuityArtifactBudgetExceededError,
   snapshotHostedCodexContinuityArtifact,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
@@ -4430,6 +4431,93 @@ test("hosted tiny Codex continuity artifact snapshots only referenced rollout st
         root: "operator-home",
       }),
       null,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted tiny Codex continuity artifact dedupes duplicate session requirements", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-tiny-dedupe-"));
+
+  try {
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000045";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
+    await mkdir(path.join(assistantRoot, "sessions", "nested"), { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      "{\"rollout\":\"deduped\"}\n",
+      "utf8",
+    );
+    const sessionJson = JSON.stringify({
+      resumeState: {
+        codexRolloutRelativePath: rolloutRelativePath,
+        providerSessionId: threadId,
+      },
+    });
+    await writeFile(path.join(assistantRoot, "sessions", "a.json"), sessionJson, "utf8");
+    await writeFile(path.join(assistantRoot, "sessions", "nested", "b.json"), sessionJson, "utf8");
+
+    const snapshot = await snapshotHostedCodexContinuityArtifact({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(snapshot.threadCount, 1);
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: `.codex-hosted/${rolloutRelativePath}`,
+        root: "operator-home",
+      }),
+      "{\"rollout\":\"deduped\"}\n",
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted tiny Codex continuity artifact rejects oversized rollout state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-tiny-budget-"));
+
+  try {
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    const threadId = "00000000-0000-4000-8000-000000000046";
+    const rolloutRelativePath =
+      `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
+      new Uint8Array((2 * 1024 * 1024) + 1),
+    );
+    await writeFile(
+      path.join(assistantRoot, "sessions", "session.json"),
+      JSON.stringify({
+        resumeState: {
+          codexRolloutRelativePath: rolloutRelativePath,
+          providerSessionId: threadId,
+        },
+      }),
+      "utf8",
+    );
+
+    await assert.rejects(
+      snapshotHostedCodexContinuityArtifact({
+        operatorHomeRoot,
+        vaultRoot,
+      }),
+      (error: unknown) =>
+        error instanceof HostedCodexContinuityArtifactBudgetExceededError
+        && error.metric === "rollout_bytes",
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });

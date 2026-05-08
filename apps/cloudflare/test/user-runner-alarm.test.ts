@@ -18,6 +18,10 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import {
+  resolveHostedExecutionBrowserVaultRefreshRunnerContainerName,
+  resolveHostedExecutionRunnerContainerName,
+} from "../src/runner-container.ts";
 import { hostedEmailRawMessageUserPrefix } from "../src/hosted-email.ts";
 import {
   hostedArtifactUserPrefix,
@@ -2040,20 +2044,20 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-	    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
-	    expect(
-	      sql.exec(
-	        `SELECT idle_shutdown_checkpoint_due_at,
-	                idle_shutdown_checkpoint_workspace_version,
-	                next_wake_at
-	         FROM runner_meta WHERE user_id = ?`,
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: null,
-	      idle_shutdown_checkpoint_workspace_version: null,
-	      next_wake_at: "2026-04-27T00:01:30.000Z",
-	    }]);
+    expect(alarms).toContain("2026-04-27T00:01:30.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      next_wake_at: "2026-04-27T00:01:30.000Z",
+    }]);
   });
 
   it("schedules idle-shutdown checkpoint before a later workspace wake", async () => {
@@ -2752,13 +2756,14 @@ describe("HostedUserRunner runtime crypto context", () => {
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
       void promise.catch(() => undefined);
     });
-    const { alarms, readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(workspace, {
-      destroyInstance,
-      abortBrowserVaultRefresh,
-      invoke,
-      refreshBrowserVaultReplica,
-      waitUntil,
-    });
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner, runnerContainerNames } =
+      createRunnerCryptoContextHarness(workspace, {
+        destroyInstance,
+        abortBrowserVaultRefresh,
+        invoke,
+        refreshBrowserVaultReplica,
+        waitUntil,
+      });
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleBrowserVaultRefreshForUser({
@@ -2774,7 +2779,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       immediateDriveStarted: true,
     });
 
-    expect(destroyInstance).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalled());
     expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
       attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
       userId: "member_123",
@@ -2797,7 +2802,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
       updatedAt: expect.any(String),
     });
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toContain("member_123--browser-vault-refresh");
+    expect(runnerContainerNames).toContain("member_123");
     const latestAlarmMs = Date.parse(alarms.at(-1) ?? "");
     expect(latestAlarmMs).toBeGreaterThanOrEqual(Date.parse("2026-04-27T00:00:01.000Z"));
     expect(latestAlarmMs).toBeLessThan(Date.parse("2026-04-27T00:00:02.000Z"));
@@ -2824,12 +2830,13 @@ describe("HostedUserRunner runtime crypto context", () => {
       nextWakeAt: null,
       status: "idle",
     }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(workspace, {
-      destroyInstance,
-      abortBrowserVaultRefresh,
-      invoke,
-      refreshBrowserVaultReplica,
-    });
+    const { readPendingBrowserVaultRefreshStorage, runner, runnerContainerNames } =
+      createRunnerCryptoContextHarness(workspace, {
+        destroyInstance,
+        abortBrowserVaultRefresh,
+        invoke,
+        refreshBrowserVaultReplica,
+      });
     await runner.bindUser("member_123");
 
     await expect(runner.scheduleBrowserVaultRefreshForUser({
@@ -2844,7 +2851,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(destroyInstance).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalled());
     expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
       attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
       userId: "member_123",
@@ -2854,7 +2861,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
       updatedAt: expect.any(String),
     });
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toContain("member_123--browser-vault-refresh");
+    expect(runnerContainerNames).toContain("member_123");
   });
 
   it("clears pending browser-vault refresh after the container publishes the replica", async () => {
@@ -3082,9 +3090,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     }));
   });
 
-  it("keeps post-invocation browser-vault refresh alarm-driven when only workspace metadata changes", async () => {
+  it("does not schedule browser-vault refresh after a foreground invocation", async () => {
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("metadata-only-unchanged"),
+      snapshotRef: createLayeredSnapshotRef("foreground-no-browser-vault"),
       version: "4",
     });
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
@@ -3114,13 +3122,11 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    });
+    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
     await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     await flushDetachedRunnerDrive();
     expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
   });
 
   it("preserves a completed invocation when browser-vault refresh scheduling fails", async () => {
@@ -3184,6 +3190,11 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      scheduled: true,
+    });
     expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
       updatedAt: expect.any(String),
     });
@@ -3453,7 +3464,10 @@ function createRunnerContainerNamespace(
 ): HostedExecutionContainerNamespaceLike {
   return {
     getByName(name: string) {
-      expect(name).toBe("member_123");
+      expect([
+        "member_123",
+        "member_123--browser-vault-refresh",
+      ]).toContain(name);
       return {
         destroyInstance,
         async invoke() {
@@ -3539,6 +3553,7 @@ function createRunnerCryptoContextHarness(
     );
   const abortBrowserVaultRefresh = options.abortBrowserVaultRefresh ?? vi.fn(async () => {});
   const destroyInstance = options.destroyInstance ?? vi.fn(async () => {});
+  const runnerContainerNames: string[] = [];
   let cryptoContextStatus = options.cryptoContextStatus ?? 200;
   let workspaceReadCount = 0;
 
@@ -3604,7 +3619,17 @@ function createRunnerCryptoContextHarness(
     TEST_RUNNER_RUNTIME_ENV_SOURCE,
     {
       getByName(name: string) {
-        expect(name).toBe("member_123");
+        runnerContainerNames.push(name);
+        expect([
+          resolveHostedExecutionRunnerContainerName({
+            source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+            userId: "member_123",
+          }),
+          resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
+            source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+            userId: "member_123",
+          }),
+        ]).toContain(name);
         return {
           abortBrowserVaultRefresh,
           destroyInstance,
@@ -3630,6 +3655,7 @@ function createRunnerCryptoContextHarness(
     alarms,
     abortBrowserVaultRefresh,
     invoke,
+    runnerContainerNames,
     readPendingBrowserVaultRefreshStorage() {
       return values.get("runner:pending-browser-vault-refresh:v1");
     },

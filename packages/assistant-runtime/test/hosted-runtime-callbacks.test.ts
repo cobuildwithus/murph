@@ -772,16 +772,22 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("labels foreground delivery start and sent logs with dispatch event types", async () => {
-    const effect = buildHostedAssistantDeliveryEffect({
+  it("labels delivery start and sent logs with dispatch event types", async () => {
+    const foregroundEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_123",
       deliveryPhase: "foreground_current_turn",
       effectId: "intent_123",
       payload: createPayload(),
     });
+    const backgroundEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_456",
+      deliveryPhase: "background_retry",
+      effectId: "intent_456",
+      payload: createPayload(),
+    });
 
     await drainHostedPreparedAssistantDeliveries({
-      assistantDeliveryEffects: [effect],
+      assistantDeliveryEffects: [foregroundEffect, backgroundEffect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -794,6 +800,15 @@ describe("hosted runtime callbacks", () => {
           eventType: "assistant.delivery.foreground_started",
         }),
         message: "Hosted assistant foreground delivery starting.",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          deliveryPhase: "background_retry",
+          eventType: "assistant.delivery.background_started",
+        }),
+        message: "Hosted assistant background delivery starting.",
       }),
     );
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(

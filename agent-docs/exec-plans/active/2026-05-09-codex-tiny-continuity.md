@@ -13,7 +13,7 @@ Key decisions:
 - Expose it to hosted runtime through an optional platform hook rather than routing it through the existing workspace checkpoint request builder.
 
 State:
-- Handoff; implementation complete, scoped commit blocked by overlapping dirty hosted-runtime files.
+- Active review hardening.
 
 Done:
 - Added `snapshotHostedCodexContinuityArtifact`, which writes only manifest-referenced hosted Codex rollout files plus the continuity manifest and never builds a portable workspace manifest.
@@ -22,11 +22,13 @@ Done:
 - Wired the Cloudflare runtime platform port to persist the tiny artifact through the artifact store when a workspace lease is available.
 - Updated hosted runtime protocol/runtime-state docs to describe tiny continuity separately from idle full/base checkpoints.
 - Verification passed: focused runtime-state tests, focused assistant-runtime entrypoint tests, focused Cloudflare runtime-platform tests, focused package typechecks, repo typecheck, and diff whitespace check.
+- Review hardening in progress: enqueue-only scheduler boundary, required active lease checks for Cloudflare tiny snapshot/upload, duplicate requirement dedupe, and tiny artifact size budget.
 
 Now:
-- Handoff.
+- Re-verify review hardening.
 
 Next:
+- Decide and implement a durable web-owned `codexContinuityRef` if tiny continuity must be independently restorable before idle shutdown.
 - Commit in a clean/scopable worktree once overlapping dirty hosted-runtime and ledger edits are reconciled.
 
 Open questions (UNCONFIRMED if needed):
@@ -39,5 +41,7 @@ Working set (files/ids/commands):
 - `packages/assistant-runtime/src/hosted-runtime/platform.ts`
 - `packages/assistant-runtime/src/hosted-runtime.ts`
 - `packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`
+- `apps/cloudflare/src/runtime-platform.ts`
+- `apps/cloudflare/test/runner-platform.test.ts`
 - `packages/runtime-state/README.md`
 - `agent-docs/references/hosted-runtime-protocol.md`
