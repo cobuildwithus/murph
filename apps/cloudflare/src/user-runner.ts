@@ -80,6 +80,7 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
+const PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
@@ -261,6 +262,22 @@ export class HostedUserRunner {
           runnerAlarmKind: dueAlarm.kind,
         },
         message: "Hosted runner skipped disabled idle-shutdown checkpoint alarm.",
+        phase: "scheduled",
+        userId: record.userId,
+      });
+      return;
+    }
+
+    if (
+      dueAlarm.kind === "none"
+      && await this.tryStartPendingBrowserVaultRefresh({
+        userId: record.userId,
+      })
+    ) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        message: "Hosted runner alarm started pending browser-vault refresh.",
         phase: "scheduled",
         userId: record.userId,
       });
@@ -514,6 +531,11 @@ export class HostedUserRunner {
     const immediateRefreshStarted = this.startDetachedBrowserVaultRefresh({
       userId: input.userId,
     });
+    if (!immediateRefreshStarted) {
+      await this.schedulePendingBrowserVaultRefreshContinuation({
+        userId: input.userId,
+      });
+    }
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -1221,9 +1243,14 @@ export class HostedUserRunner {
     await this.stateStore.scheduleBrowserVaultRefresh({
       sourceStateHash: nextSourceStateHash,
     });
-    this.startDetachedBrowserVaultRefresh({
+    const immediateRefreshStarted = this.startDetachedBrowserVaultRefresh({
       userId: input.userId,
     });
+    if (!immediateRefreshStarted) {
+      await this.schedulePendingBrowserVaultRefreshContinuation({
+        userId: input.userId,
+      });
+    }
   }
 
   private async scheduleNextWorkspaceAlarm(input: {
@@ -1700,11 +1727,13 @@ export class HostedUserRunner {
     }
 
     const abortController = new AbortController();
+    let refreshFailed = false;
     this.browserVaultRefreshAbortController = abortController;
     const refresh = this.runPendingBrowserVaultRefresh({
       signal: abortController.signal,
       userId: input.userId,
     }).then(() => undefined, (error) => {
+      refreshFailed = true;
       if (abortController.signal.aborted) {
         return;
       }
@@ -1717,12 +1746,27 @@ export class HostedUserRunner {
         phase: "failed",
         userId: input.userId,
       });
-    }).finally(() => {
+    }).finally(async () => {
       if (this.browserVaultRefreshLock === refresh) {
         this.browserVaultRefreshLock = null;
       }
       if (this.browserVaultRefreshAbortController === abortController) {
         this.browserVaultRefreshAbortController = null;
+      }
+      if (abortController.signal.aborted) {
+        return;
+      }
+      if (refreshFailed) {
+        await this.schedulePendingBrowserVaultRefreshContinuation({
+          delayMs: this.env.retryDelayMs,
+          userId: input.userId,
+        });
+        return;
+      }
+      if (!await this.tryStartPendingBrowserVaultRefresh({ userId: input.userId })) {
+        await this.schedulePendingBrowserVaultRefreshContinuation({
+          userId: input.userId,
+        });
       }
     });
 
@@ -1740,6 +1784,70 @@ export class HostedUserRunner {
       });
     }
 
+    return true;
+  }
+
+  private async tryStartPendingBrowserVaultRefresh(input: {
+    userId?: string | null;
+  } = {}): Promise<boolean> {
+    if (this.browserVaultRefreshLock !== null || this.invocationLock !== null) {
+      return false;
+    }
+
+    const pendingRefresh = await this.stateStore.readPendingBrowserVaultRefresh();
+    if (!pendingRefresh) {
+      return false;
+    }
+
+    const record = await this.tryReadStateForRetryScheduling();
+    if (!record) {
+      return false;
+    }
+    const userId = input.userId ?? record.userId;
+    if (!userId || record.pendingNudge || record.inFlight) {
+      return false;
+    }
+
+    return this.startDetachedBrowserVaultRefresh({
+      userId,
+    });
+  }
+
+  private async schedulePendingBrowserVaultRefreshContinuation(input: {
+    delayMs?: number;
+    userId: string;
+  }): Promise<boolean> {
+    const pendingRefresh = await this.stateStore.readPendingBrowserVaultRefresh();
+    if (!pendingRefresh) {
+      return false;
+    }
+
+    const record = await this.tryReadStateForRetryScheduling();
+    if (!record || !record.userId || record.pendingNudge) {
+      return false;
+    }
+
+    const continuationAtMs = Date.now()
+      + (input.delayMs ?? PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS);
+    const existingAlarmAtMs = await this.state.storage.getAlarm();
+    if (
+      typeof existingAlarmAtMs === "number"
+      && Number.isFinite(existingAlarmAtMs)
+      && existingAlarmAtMs <= continuationAtMs
+    ) {
+      return false;
+    }
+
+    await this.state.storage.setAlarm(new Date(continuationAtMs));
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        sourceStateHash: pendingRefresh.sourceStateHash,
+      },
+      message: "Hosted runner scheduled pending browser-vault refresh continuation.",
+      phase: "scheduled",
+      userId: input.userId,
+    });
     return true;
   }
 
@@ -2103,12 +2211,14 @@ export class HostedUserRunner {
       }
 
       if (!this.pendingRunnerDriveAfterInvocation && this.invocationLock === null) {
-        const pendingRefresh = await this.stateStore.readPendingBrowserVaultRefresh();
-        const record = pendingRefresh ? await this.stateStore.readState() : null;
-        if (pendingRefresh && record && !record.pendingNudge && !record.inFlight) {
-          this.startDetachedBrowserVaultRefresh({
-            userId: record.userId,
-          });
+        const started = await this.tryStartPendingBrowserVaultRefresh();
+        if (!started) {
+          const record = await this.tryReadStateForRetryScheduling();
+          if (record) {
+            await this.schedulePendingBrowserVaultRefreshContinuation({
+              userId: record.userId,
+            });
+          }
         }
       }
     }
