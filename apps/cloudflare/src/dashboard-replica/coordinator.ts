@@ -39,17 +39,7 @@ export class DashboardReplicaCoordinator {
     sourceStateHash: string;
     userId: string;
   }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
-    await this.deps.stateStore.scheduleDashboardReplicaRefresh({
-      sourceStateHash: input.sourceStateHash,
-    });
-    const immediateRefreshStarted = await this.startDetachedRefresh({
-      userId: input.userId,
-    });
-    if (!immediateRefreshStarted) {
-      await this.scheduleContinuation({
-        userId: input.userId,
-      });
-    }
+    const immediateRefreshStarted = await this.schedulePending(input);
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -67,6 +57,24 @@ export class DashboardReplicaCoordinator {
       sourceStateHash: input.sourceStateHash,
       userId: input.userId,
     };
+  }
+
+  async schedulePending(input: {
+    sourceStateHash: string;
+    userId: string;
+  }): Promise<boolean> {
+    await this.deps.stateStore.scheduleDashboardReplicaRefresh({
+      sourceStateHash: input.sourceStateHash,
+    });
+    const immediateRefreshStarted = await this.startDetachedRefresh({
+      userId: input.userId,
+    });
+    if (!immediateRefreshStarted) {
+      await this.scheduleContinuation({
+        userId: input.userId,
+      });
+    }
+    return immediateRefreshStarted;
   }
 
   async tryStart(input: {

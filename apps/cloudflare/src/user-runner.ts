@@ -124,8 +124,6 @@ export interface HostedRunnerUserDataDeletionResult {
   userId: string;
 }
 
-export type HostedBrowserVaultRefreshScheduleResult =
-  HostedDashboardReplicaRefreshScheduleResult;
 export type { HostedDashboardReplicaRefreshScheduleResult };
 
 interface RunnerUserStores {
@@ -552,13 +550,6 @@ export class HostedUserRunner {
   }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
     return await this.dashboardReplicaCoordinator.schedule(input);
-  }
-
-  async scheduleBrowserVaultRefreshForUser(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): Promise<HostedBrowserVaultRefreshScheduleResult> {
-    return await this.scheduleDashboardReplicaRefreshForUser(input);
   }
 
   async ownsActiveInvocationLease(input: {
@@ -1245,17 +1236,10 @@ export class HostedUserRunner {
       return;
     }
 
-    await this.stateStore.scheduleDashboardReplicaRefresh({
+    await this.dashboardReplicaCoordinator.schedulePending({
       sourceStateHash: refreshDecision.sourceStateHash,
-    });
-    const immediateRefreshStarted = await this.dashboardReplicaCoordinator.tryStart({
       userId: input.userId,
     });
-    if (!immediateRefreshStarted) {
-      await this.dashboardReplicaCoordinator.scheduleContinuation({
-        userId: input.userId,
-      });
-    }
   }
 
   private async scheduleNextWorkspaceAlarm(input: {

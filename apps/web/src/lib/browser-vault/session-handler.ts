@@ -9,8 +9,9 @@ import {
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 
 import {
-  scheduleDashboardReplicaRefreshAfterResponse,
+  scheduleDashboardReplicaRefreshBestEffort,
 } from "@/src/lib/dashboard-replica/refresh-client";
+import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
   requireActiveHostedAppSessionFromRequest,
   requireHostedAppSessionFromRequest,
@@ -66,7 +67,7 @@ export function createBrowserVaultSessionRoute(input: {
     });
 
     if (!replicaRef) {
-      scheduleDashboardReplicaRefreshAfterResponse({
+      void scheduleDashboardReplicaRefreshBestEffort({
         sourceStateHash,
         userId: auth.member.id,
       });
@@ -77,7 +78,7 @@ export function createBrowserVaultSessionRoute(input: {
     }
 
     if (freshness === "stale") {
-      scheduleDashboardReplicaRefreshAfterResponse({
+      void scheduleDashboardReplicaRefreshBestEffort({
         sourceStateHash,
         userId: auth.member.id,
       });
