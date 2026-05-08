@@ -813,6 +813,79 @@ describe('assistant cron runtime orchestration', () => {
     expect(current.state.lastSucceededAt).toBeNull()
   })
 
+  it('finalizes a canonical cron run when its own claim becomes stale during execution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-long-canonical-run-',
+    )
+    await createCanonicalJob(vaultRoot, 'long-canonical')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date('2026-04-08T14:30:00.000Z'))
+      return {
+        response: 'Completed long scheduled check-in.',
+        session: {
+          sessionId: 'session-long-run',
+        },
+      }
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    await expect(
+      listAssistantCronRuns({
+        job: claimed.job.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: claimed.job.jobId,
+      runs: [
+        expect.objectContaining({
+          status: 'succeeded',
+        }),
+      ],
+    })
+
+    const current = await getAssistantCronJob(vaultRoot, claimed.job.jobId)
+    expect(current.state.runningAt).toBeNull()
+    expect(current.state.lastSucceededAt).toBe('2026-04-08T14:30:00.000Z')
+
+    const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
+      reclaimStaleRunningClaims: false,
+    })
+    const runtimeRecord = finalizedRuntimeStore.jobs.find((record) => record.jobId === claimed.job.jobId)
+    expect(runtimeRecord?.state.runningClaimId).toBeNull()
+  })
+
   it('processes a canonical daily-local midnight job when runtime state is missing', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))

@@ -87,7 +87,7 @@ function eventRecordMatchesDirectLookup(
     (
       normalizedLookup === record.entityId ||
       normalizedLookup === record.primaryLookupId ||
-      record.lookupIds.includes(normalizedLookup) ||
+      (normalizedLookup.startsWith('evt_') && record.lookupIds.includes(normalizedLookup)) ||
       (attributeId.length > 0 && normalizedLookup === attributeId)
     )
 }
@@ -97,13 +97,7 @@ async function requireEventRecord(
 ): Promise<QueryCanonicalEntity> {
   const query = await loadQueryRuntime()
   const readModel = await query.readVault(input.vault)
-  const record =
-    query.lookupEntityById(readModel, input.lookup) ??
-    query.listEntities(readModel, {
-      families: ['event'],
-      ids: [input.lookup],
-    }).find((entity) => eventRecordMatchesDirectLookup(entity, input.lookup)) ??
-    null
+  const record = query.lookupEntityById(readModel, input.lookup)
 
   if (!record || record.family !== 'event') {
     throw new VaultCliError(

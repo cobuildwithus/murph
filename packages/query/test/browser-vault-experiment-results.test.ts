@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
+import type { ExperimentAdherenceTarget } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -11,6 +12,7 @@ import {
   type BrowserVaultMetricRow,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
+import { buildExperimentAdherenceCalendar } from "../src/experiment-adherence.ts";
 
 test("returns null when no matching private run exists", () => {
   const client = createBrowserVaultQueryClient(createReplica());
@@ -21,6 +23,38 @@ test("returns null when no matching private run exists", () => {
     }),
     null,
   );
+});
+
+test("expands sparse weekday adherence schedules by expected cells instead of raw span", () => {
+  const target = {
+    targetId: "weekly-check-in",
+    label: "Weekly check-in",
+    phase: "intervention",
+    calendar: {
+      kind: "weekdays",
+      timeZone: "UTC",
+      weekdays: [1],
+    },
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "intervention_session",
+      missing: "missed_after_grace",
+    },
+  } satisfies ExperimentAdherenceTarget;
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2035-01-01",
+    targets: [target],
+    windows: {
+      baselineEnd: null,
+      baselineStart: null,
+      interventionEnd: "2034-12-31",
+      interventionStart: "2026-01-01",
+    },
+  });
+
+  assert.equal(result.cells.length, 469);
+  assert.equal(result.cells[0]?.localDate, "2026-01-05");
 });
 
 test("matches private runs by experiment id slug and protocol keys", () => {

@@ -621,7 +621,9 @@ function buildFoodCoreLinks(
     return []
   }
 
-  const explicitLinks = payload.links ?? []
+  const explicitLinks = (payload.links ?? []).filter((link) =>
+    !(clearedFields.has('attachedRegimenIds') && link.type === 'related_regimen')
+  )
   const attachedRegimenIds = clearedFields.has('attachedRegimenIds')
     ? []
     : payload.attachedRegimenIds ?? []
@@ -630,13 +632,27 @@ function buildFoodCoreLinks(
     return undefined
   }
 
-  return [
+  return uniqueFoodLinks([
     ...explicitLinks,
     ...attachedRegimenIds.map((targetId) => ({
       type: 'related_regimen' as const,
       targetId,
     })),
-  ]
+  ])
+}
+
+function uniqueFoodLinks(
+  links: NonNullable<FoodUpsertPayload['links']>,
+): FoodUpsertPayload['links'] {
+  const seen = new Set<string>()
+  return links.filter((link) => {
+    const key = `${link.type}:${link.targetId}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
 }
 
 function buildFoodPayload(food: FoodReadModel): FoodPayload {

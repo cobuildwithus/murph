@@ -6,6 +6,11 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  createVaultReadModel,
+  type ProtocolSummary,
+} from "@murphai/query";
+import * as queryRuntime from "@murphai/query";
 
 import {
   applyLimit,
@@ -83,6 +88,8 @@ import {
   scaffoldFoodPayload,
   upsertFoodRecord,
 } from "../src/usecases/food.ts";
+import { createExplicitHealthQueryServices } from "../src/usecases/explicit-health-family-services.ts";
+import type { QueryRuntimeModule } from "../src/usecases/types.ts";
 import {
   parseProviderPayload,
   scaffoldEventPayload,
@@ -1191,6 +1198,126 @@ describe("record service seams", () => {
       created: true,
     });
     assert.equal(recipe.parseRecipePayload(recipe.scaffoldRecipePayload()).title, "Sheet Pan Salmon Bowls");
+  });
+
+  test("food edit clearing attached regimens does not preserve related regimen links", async () => {
+    const foodCore = {
+      upsertFood: vi.fn(async (_input: Record<string, unknown>) => ({
+        created: false,
+        record: {
+          foodId: "food_01JNV44P4R5SWC90K2AHXQJQYT",
+          relativePath: "foods/regular-acai-bowl.md",
+        },
+      })),
+      readFood: vi.fn(async () => ({
+        foodId: "food_01JNV44P4R5SWC90K2AHXQJQYT",
+        slug: "regular-acai-bowl",
+        title: "Regular Acai Bowl",
+        status: "active",
+        attachedRegimenIds: ["reg_01JNV422Y2M5ZBV64ZP4N1DRB1"],
+        links: [{ type: "related_regimen", targetId: "reg_01JNV422Y2M5ZBV64ZP4N1DRB1" }],
+        relativePath: "foods/food_1.md",
+        markdown: "# Food",
+      })),
+    };
+
+    const food = await importWithMocks<typeof import("../src/usecases/food.ts")>(
+      "../src/usecases/food.ts",
+      {
+        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") {
+              return foodCore;
+            }
+            throw new Error(`Unexpected specifier: ${specifier}`);
+          }),
+        })),
+      },
+    );
+
+    await food.editFoodRecord({
+      vault: "./vault",
+      lookup: "food_01JNV44P4R5SWC90K2AHXQJQYT",
+      clear: ["attachedRegimenIds"],
+    });
+
+    expect(foodCore.upsertFood).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachedRegimenIds: [],
+      }),
+    );
+    const upsertInput = foodCore.upsertFood.mock.calls[0]?.[0];
+    assert.ok(upsertInput);
+    expect(upsertInput).not.toHaveProperty("links");
+  });
+
+  test("private protocol listing filters by Health Commons protocol references", async () => {
+    const query = {
+      ...queryRuntime,
+      readVault: vi.fn(async () =>
+        createVaultReadModel({
+          vaultRoot: "./vault",
+          entities: [],
+        })
+      ),
+      listProtocolSummaries: vi.fn((): ProtocolSummary[] => [
+        {
+          id: "protocol_1",
+          slug: "sauna-private",
+          title: "Sauna Private",
+          status: "active",
+          commonsProtocolRef: {
+            key: "hc:protocol/finnish-sauna",
+            pageRevisionId: "sha256:1",
+            runSpecRevisionId: "sha256:2",
+          },
+          effectiveSpec: null,
+          effectiveSpecHash: null,
+          path: "bank/protocols/sauna.md",
+          protocolRevisionId: null,
+          summary: null,
+          tags: [],
+          updatedAt: null,
+        },
+        {
+          id: "protocol_2",
+          slug: "sleep-private",
+          title: "Sleep Private",
+          status: "active",
+          commonsProtocolRef: {
+            key: "hc:protocol/sleep-extension",
+            pageRevisionId: "sha256:3",
+            runSpecRevisionId: "sha256:4",
+          },
+          effectiveSpec: null,
+          effectiveSpecHash: null,
+          path: "bank/protocols/sleep.md",
+          protocolRevisionId: null,
+          summary: null,
+          tags: [],
+          updatedAt: null,
+        },
+      ]),
+    } satisfies QueryRuntimeModule;
+    const services = createExplicitHealthQueryServices(async () => ({
+      query,
+    }));
+
+    const result = await services.listPrivateProtocols({
+      vault: "./vault",
+      commonsProtocol: "finnish-sauna",
+      limit: 10,
+      requestId: null,
+    });
+
+    expect(result.filters).toEqual({
+      commonsProtocol: "finnish-sauna",
+      limit: 10,
+    });
+    expect(result.protocols.map((protocol) => protocol.protocolId)).toEqual([
+      "protocol_1",
+    ]);
   });
 
   test("intervention and experiment journal services keep their event and journal wiring stable", async () => {

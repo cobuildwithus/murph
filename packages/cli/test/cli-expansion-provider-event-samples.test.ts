@@ -2500,6 +2500,29 @@ test.sequential(
       assert.equal(requireData(dateOnlyEdit).entity.occurredAt, '2026-03-28T01:00:00.000Z')
       assert.equal(requireData(dateOnlyEdit).entity.data.timeZone, 'Australia/Melbourne')
       assert.equal(requireData(dateOnlyEdit).entity.data.dayKey, '2026-03-28')
+
+      const dateOnlyEditInPatchedTimeZone = await runSliceCli<{
+        entity: {
+          occurredAt: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--occurred-at',
+        '2026-03-29',
+        '--time-zone',
+        'America/New_York',
+        '--day-key-policy',
+        'recompute',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(dateOnlyEditInPatchedTimeZone.ok, true)
+      assert.equal(requireData(dateOnlyEditInPatchedTimeZone).entity.occurredAt, '2026-03-29T16:00:00.000Z')
+      assert.equal(requireData(dateOnlyEditInPatchedTimeZone).entity.data.timeZone, 'America/New_York')
+      assert.equal(requireData(dateOnlyEditInPatchedTimeZone).entity.data.dayKey, '2026-03-29')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

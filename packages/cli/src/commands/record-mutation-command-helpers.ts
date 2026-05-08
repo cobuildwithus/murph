@@ -188,6 +188,7 @@ export function createEventBackedEntityEditCommandConfig<TResult>(
         normalizedOptions.occurredAt = await normalizeOccurredAtOption({
           vault: input.vault,
           occurredAt: options.occurredAt,
+          timeZone: typeof options.timeZone === 'string' ? options.timeZone : undefined,
         })
       }
 

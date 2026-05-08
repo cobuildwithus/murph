@@ -154,8 +154,7 @@ export function expandExperimentAdherenceExpectations(
       }));
     case "weekdays":
       const weekdayCalendar = target.calendar;
-      return dateRange(range.start, range.end)
-        .filter((localDate) => weekdayCalendar.weekdays.includes(localDateWeekday(localDate)))
+      return weekdayDateRange(range.start, range.end, weekdayCalendar.weekdays)
         .map((localDate) => ({
           expectedCount: weekdayCalendar.targetCountPerDay ?? 1,
           label: target.label,
@@ -617,6 +616,25 @@ function dateRange(start: string, end: string): string[] {
   const dates: string[] = [];
   for (let cursor = start; cursor <= end; cursor = addLocalDays(cursor, 1)) {
     dates.push(cursor);
+  }
+  return dates;
+}
+
+function weekdayDateRange(start: string, end: string, weekdays: readonly number[]): string[] {
+  if (start > end || weekdays.length === 0) {
+    return [];
+  }
+
+  if (countWeekdaysInRange(start, end, weekdays) > MAX_ADHERENCE_CELLS) {
+    throw new RangeError("Experiment adherence calendar expands beyond the supported cell limit.");
+  }
+
+  const weekdaySet = new Set(weekdays);
+  const dates: string[] = [];
+  for (let cursor = start; cursor <= end; cursor = addLocalDays(cursor, 1)) {
+    if (weekdaySet.has(localDateWeekday(cursor))) {
+      dates.push(cursor);
+    }
   }
   return dates;
 }
