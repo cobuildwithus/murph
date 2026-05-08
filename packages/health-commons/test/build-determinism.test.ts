@@ -53,6 +53,13 @@ function createCatalog(catalogHash: string) {
 }
 
 function createProtocolEntity(input: {
+  expectedSignalDescriptions?: Array<{
+    biomarkerKey: string;
+    description: string;
+    displayValue?: string;
+    expected?: string;
+    protocolProminence?: "focus" | "context";
+  }>;
   hidden?: boolean;
   key: string;
   slug: string;
@@ -76,6 +83,7 @@ function createProtocolEntity(input: {
       doseSignature: `${input.title} dose`,
       steps: [`Do ${input.title}.`],
     },
+    expectedSignalDescriptions: input.expectedSignalDescriptions,
     relations: input.relations,
     safety: {
       cautionLevel: "moderate" as const,
@@ -90,6 +98,27 @@ function createProtocolEntity(input: {
         primaryBiomarkerKey: "biomarker:test-signal",
       },
     ],
+    body: `${input.title} body.`,
+    relativePath: `${input.slug}.md`,
+    revision: {
+      pageRevisionId: TEST_PAGE_REVISION_ID,
+    },
+  };
+}
+
+function createBiomarkerEntity(input: {
+  key: string;
+  slug: string;
+  title: string;
+}) {
+  return {
+    schemaVersion: "murph.commons.page.v1" as const,
+    entityType: "biomarker" as const,
+    key: input.key,
+    slug: input.slug,
+    title: input.title,
+    summary: `${input.title} summary.`,
+    status: "reviewed" as const,
     body: `${input.title} body.`,
     relativePath: `${input.slug}.md`,
     revision: {
@@ -229,6 +258,41 @@ describe("@murphai/health-commons build determinism", () => {
     expect(webArtifacts.routeIndex.routes.find((route) =>
       route.routeId === "deprecated"
     )?.projections).toBeUndefined();
+  });
+
+  it("keeps protocol signal data for revision-qualified biomarker references", () => {
+    const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
+      ...createCatalog("sha256:first"),
+      entities: [
+        createBiomarkerEntity({
+          key: "biomarker:test-signal",
+          slug: "biomarkers/test-signal",
+          title: "Test Signal",
+        }),
+        createProtocolEntity({
+          expectedSignalDescriptions: [
+            {
+              biomarkerKey: `biomarker:test-signal@${TEST_PAGE_REVISION_ID}`,
+              description: "Protocol-authored soreness signal.",
+              displayValue: "Lower next-day soreness",
+              expected: "down",
+              protocolProminence: "focus",
+            },
+          ],
+          key: "protocol_variant:family/public",
+          slug: "protocols/family/public",
+          title: "Public Protocol",
+        }),
+      ],
+    });
+    const protocolTab = webArtifacts.projectionArtifacts.get("tabs/experiments/public/protocol.json");
+
+    expect(protocolTab && "expectedSignals" in protocolTab ? protocolTab.expectedSignals[0] : null).toMatchObject({
+      biomarkerRouteId: "test-signal",
+      displayValue: "Lower next-day soreness",
+      expected: "Could trend lower",
+      protocolProminence: "focus",
+    });
   });
 });
 

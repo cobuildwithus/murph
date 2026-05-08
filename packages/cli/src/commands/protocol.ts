@@ -283,32 +283,6 @@ function toRegimenSaveResult(
   };
 }
 
-function privateProtocolMatchesCommonsProtocol(
-  protocol: z.infer<typeof privateProtocolSummarySchema>,
-  lookup: string,
-): boolean {
-  const ref = protocol.commonsProtocolRef;
-  if (!ref) {
-    return false;
-  }
-
-  const candidates = ["key", "slug", "routeId"]
-    .map((field) => ref[field])
-    .filter((value): value is string => typeof value === "string" && value.length > 0);
-
-  return candidates.some((candidate) => {
-    if (candidate === lookup) {
-      return true;
-    }
-
-    const withoutPrefix = candidate.includes(":")
-      ? candidate.slice(candidate.indexOf(":") + 1)
-      : candidate;
-
-    return withoutPrefix === lookup || withoutPrefix.endsWith(`/${lookup}`);
-  });
-}
-
 function toPrivateProtocolListItem(
   protocol: z.infer<typeof privateProtocolDetailSchema>,
 ): PrivateProtocolListItem {
@@ -729,33 +703,13 @@ export function registerProtocolCommands(
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         status: options.status,
-        limit: options.commonsProtocol ? 200 : options.limit,
+        commonsProtocol: options.commonsProtocol,
+        limit: options.limit,
       });
-
-      if (!options.commonsProtocol) {
-        return {
-          ...result,
-          protocols: result.protocols.map(toPrivateProtocolListItem),
-        };
-      }
-
-      const protocols = result.protocols
-        .filter((protocol) =>
-          privateProtocolMatchesCommonsProtocol(protocol, options.commonsProtocol ?? ""),
-        )
-        .slice(0, options.limit)
-        .map(toPrivateProtocolListItem);
 
       return {
         ...result,
-        filters: {
-          ...result.filters,
-          commonsProtocol: options.commonsProtocol,
-          limit: options.limit,
-        },
-        protocols,
-        count: protocols.length,
-        nextCursor: null,
+        protocols: result.protocols.map(toPrivateProtocolListItem),
       };
     },
   });

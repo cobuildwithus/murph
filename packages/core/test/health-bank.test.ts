@@ -219,6 +219,29 @@ test("goal updates can clear shared relation fields without leaving stale links 
   assert.doesNotMatch(read.document.markdown, new RegExp(parent.record.entity.goalId));
   assert.doesNotMatch(read.document.markdown, new RegExp(related.record.entity.goalId));
   assert.doesNotMatch(read.document.markdown, /exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
+
+  const relinked = await upsertGoal({
+    vaultRoot,
+    goalId: goal.record.entity.goalId,
+    links: [
+      {
+        type: "related_goal",
+        targetId: related.record.entity.goalId,
+      },
+    ],
+  });
+  assert.deepEqual(relinked.record.entity.relatedGoalIds, [related.record.entity.goalId]);
+
+  const clearedByNull = await upsertGoal({
+    vaultRoot,
+    goalId: goal.record.entity.goalId,
+    links: null,
+  });
+  assert.equal(clearedByNull.created, false);
+  assert.equal(clearedByNull.record.entity.parentGoalId, null);
+  assert.equal(clearedByNull.record.entity.relatedGoalIds, undefined);
+  assert.equal(clearedByNull.record.entity.relatedExperimentIds, undefined);
+  assert.deepEqual(clearedByNull.record.entity.links, []);
 });
 
 test("goal upserts preserve metric targets in canonical frontmatter", async () => {

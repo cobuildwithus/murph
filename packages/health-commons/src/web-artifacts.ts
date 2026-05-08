@@ -1131,7 +1131,7 @@ function toExpectedSignal(
 ): HealthCommonsWebExperimentSignal {
   const hint = resolveBiomarkerDisplayHint(biomarker);
   const protocolSignal = protocol.expectedSignalDescriptions?.find(
-    (signal) => signal.biomarkerKey === biomarker.key,
+    (signal) => stripRevision(signal.biomarkerKey) === stripRevision(biomarker.key),
   );
   const protocolProminence =
     protocolSignal?.protocolProminence ?? hint.protocolProminence;

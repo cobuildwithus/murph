@@ -346,7 +346,7 @@ export interface UpsertGoalInput {
   parentGoalId?: string | null;
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
-  links?: GoalLink[];
+  links?: GoalLink[] | null;
   metricTargets?: GoalMetricTarget[];
   domains?: string[];
 }

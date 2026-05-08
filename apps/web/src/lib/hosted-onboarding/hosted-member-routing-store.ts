@@ -25,6 +25,7 @@ export {
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
+  tryCreateHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-linq";
 export {
   syncHostedMemberTelegramRoutingBinding,

@@ -668,6 +668,9 @@ function assertUniqueSourceIdentities(pages: readonly HealthCommonsSourcePage[])
       if (hasExplicitSourceIdentityDuplicateRelation(firstSeen.frontmatter, page.frontmatter)) {
         continue;
       }
+      throw new Error(
+        `Duplicate Health Commons source identity "${identityKey}" for ${firstSeen.frontmatter.key} and ${page.frontmatter.key}. Add a same-work relation when this duplication is intentional.`,
+      );
     }
   }
 }

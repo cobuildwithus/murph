@@ -453,7 +453,7 @@ export async function updateAssistantAutomationState(
 ): Promise<AssistantAutomationState> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
-    const current = await readAutomationState(paths)
+    const current = await readAutomationState(paths, { fresh: true })
     const updated = await update(current)
     if (updated === current) {
       return current

@@ -98,12 +98,17 @@ export function buildExperimentAdherenceCalendar(
   const timeZone = targets[0]?.calendar.timeZone ?? "UTC";
   const asOf = resolveAsOf(input.asOf, timeZone);
   const observations = input.observations ?? [];
+  const expectationCount = targets.reduce(
+    (total, target) => total + countExperimentAdherenceExpectations(target, input.windows),
+    0,
+  );
+  if (expectationCount > MAX_ADHERENCE_CELLS) {
+    throw new RangeError("Experiment adherence calendar expands beyond the supported cell limit.");
+  }
+
   const expectations = targets.flatMap((target) =>
     expandExperimentAdherenceExpectations(target, input.windows)
   );
-  if (expectations.length > MAX_ADHERENCE_CELLS) {
-    throw new RangeError("Experiment adherence calendar expands beyond the supported cell limit.");
-  }
 
   const cells = expectations
     .map((expectation) =>
@@ -168,6 +173,27 @@ export function expandExperimentAdherenceExpectations(
           localTime: entry.localTime ?? null,
           target,
         }));
+  }
+}
+
+function countExperimentAdherenceExpectations(
+  target: ExperimentAdherenceTarget,
+  windows: ExperimentAdherenceWindows,
+): number {
+  const range = resolveTargetDateRange(target.phase, windows);
+  if (!range) {
+    return 0;
+  }
+
+  switch (target.calendar.kind) {
+    case "daily":
+      return countLocalDateRangeDays(range.start, range.end);
+    case "weekdays":
+      return countWeekdaysInRange(range.start, range.end, target.calendar.weekdays);
+    case "explicitDates":
+      return target.calendar.dates.filter((entry) =>
+        entry.localDate >= range.start && entry.localDate <= range.end
+      ).length;
   }
 }
 
@@ -584,12 +610,48 @@ function dateRange(start: string, end: string): string[] {
   if (start > end) {
     return [];
   }
+  if (countLocalDateRangeDays(start, end) > MAX_ADHERENCE_CELLS) {
+    throw new RangeError("Experiment adherence calendar expands beyond the supported cell limit.");
+  }
 
   const dates: string[] = [];
   for (let cursor = start; cursor <= end; cursor = addLocalDays(cursor, 1)) {
     dates.push(cursor);
   }
   return dates;
+}
+
+function countLocalDateRangeDays(start: string, end: string): number {
+  if (start > end) {
+    return 0;
+  }
+
+  const startParts = parseIsoLocalDate(start);
+  const endParts = parseIsoLocalDate(end);
+  const startMs = Date.UTC(startParts.year, startParts.month - 1, startParts.day);
+  const endMs = Date.UTC(endParts.year, endParts.month - 1, endParts.day);
+  return Math.floor((endMs - startMs) / 86_400_000) + 1;
+}
+
+function countWeekdaysInRange(start: string, end: string, weekdays: readonly number[]): number {
+  const totalDays = countLocalDateRangeDays(start, end);
+  if (totalDays === 0 || weekdays.length === 0) {
+    return 0;
+  }
+
+  const weekdaySet = new Set(weekdays);
+  const fullWeeks = Math.floor(totalDays / 7);
+  let count = fullWeeks * weekdaySet.size;
+  const remainingDays = totalDays % 7;
+  const startWeekday = localDateWeekday(start);
+
+  for (let offset = 0; offset < remainingDays; offset += 1) {
+    if (weekdaySet.has((startWeekday + offset) % 7)) {
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 function resolveAsOf(value: Date | string, timeZone: string): Date {

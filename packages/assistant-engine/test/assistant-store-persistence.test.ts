@@ -10,7 +10,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { listAssistantQuarantineEntriesAtPaths } from '../src/assistant/quarantine.ts'
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
-import { appendAssistantTranscriptEntriesWithRefs } from '../src/assistant/store.ts'
+import {
+  appendAssistantTranscriptEntriesWithRefs,
+  updateAssistantAutomationState,
+} from '../src/assistant/store.ts'
 import {
   appendTranscriptEntries,
   ensureAssistantState,
@@ -458,6 +461,36 @@ describe('assistant store persistence seams', () => {
     })
   })
 
+  it('synchronizes session indexes from the durable file instead of a stale process cache', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-indexes-fresh-')
+    await ensureAssistantState(paths)
+
+    await readAssistantIndexStore(paths)
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {
+        external: 'session-external',
+      },
+      conversationKeys: {},
+    }))
+
+    await synchronizeAssistantIndexes(paths, createSession({
+      alias: 'local',
+      conversationKey: null,
+      sessionId: 'session-local',
+      updatedAt: '2026-04-08T00:07:00.000Z',
+    }), null)
+
+    await expect(readAssistantIndexStore(paths, { fresh: true })).resolves.toEqual({
+      version: 1,
+      aliases: {
+        external: 'session-external',
+        local: 'session-local',
+      },
+      conversationKeys: {},
+    })
+  })
+
   it('rebuilds corrupted index stores from durable sessions and skips corrupted sessions as missing', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-index-rebuild-')
     await ensureAssistantState(paths)
@@ -720,6 +753,41 @@ describe('assistant store persistence seams', () => {
         }),
       ]),
     )
+  })
+
+  it('updates automation state from the durable file instead of a stale process cache', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-automation-fresh-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await ensureAssistantState(paths)
+
+    await readAutomationState(paths)
+    await writeFile(paths.automationStatePath, JSON.stringify({
+      version: 1,
+      autoReply: [
+        {
+          channel: 'email',
+          enabledAt: '2026-04-08T00:05:00.000Z',
+          eligibleAfter: null,
+        },
+      ],
+      updatedAt: '2026-04-08T00:05:00.000Z',
+    }))
+
+    const updated = await updateAssistantAutomationState(context.vaultRoot, (state) => ({
+      ...state,
+      autoReply: [
+        ...state.autoReply,
+        {
+          channel: 'telegram',
+          enabledAt: '2026-04-08T00:06:00.000Z',
+          eligibleAfter: null,
+        },
+      ],
+      updatedAt: '2026-04-08T00:06:00.000Z',
+    }))
+
+    expect(updated.autoReply.map((entry) => entry.channel)).toEqual(['email', 'telegram'])
   })
 
   it('fails closed and quarantines unsupported session records', async () => {

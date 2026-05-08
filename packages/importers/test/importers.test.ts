@@ -622,6 +622,34 @@ test("prepareCsvSampleImport infers SpO2 imports from O2Ring-style CSV rows and 
   ]);
 });
 
+test("prepareCsvSampleImport only treats comma numeric separators as thousands grouping", async () => {
+  const filePath = await createTempFile(
+    "comma-numbers.csv",
+    [
+      "timestamp,bpm",
+      '2026-03-11T08:00:00Z,"1,234"',
+      '2026-03-11T08:05:00Z,"1,23"',
+    ].join("\n"),
+  );
+
+  const plan = await prepareCsvSampleImport({
+    filePath,
+    stream: "heart_rate",
+    tsColumn: "timestamp",
+    valueColumn: "bpm",
+    unit: "bpm",
+  });
+  const [payload] = plan.imports;
+
+  assert.ok(payload);
+  assert.equal(payload.importedCount, 1);
+  assert.equal(payload.skippedCount, 1);
+  assert.equal(payload.payload.samples[0]?.value, 1234);
+  assert.deepEqual(payload.payload.batchProvenance?.skipReasons, [
+    { reason: "non-numeric value", count: 1 },
+  ]);
+});
+
 test("prepareCsvSampleImport infers the stream from valueColumn when no stream is provided", async () => {
   const filePath = await createTempFile(
     "pulse-rate.csv",

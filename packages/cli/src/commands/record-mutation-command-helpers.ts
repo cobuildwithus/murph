@@ -11,6 +11,7 @@ import {
   deleteResultSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 interface EntityCommandArgConfig {
   name: string
@@ -46,7 +47,7 @@ interface EntityEditCommandConfig<TResult, TInput extends EntityEditCommandInput
   buildInput?: (
     input: EntityEditCommandInput,
     options: Record<string, unknown>,
-  ) => TInput
+  ) => TInput | Promise<TInput>
   run(input: TInput): Promise<TResult>
 }
 
@@ -154,11 +155,11 @@ export function createEntityEditCommandConfig<TResult, TInput extends EntityEdit
         requestId: context.requestId,
       })
 
-      return config.run(
-        config.buildInput
-          ? config.buildInput(input, context.options as Record<string, unknown>)
-          : (input as TInput),
-      )
+      const builtInput = config.buildInput
+        ? await config.buildInput(input, context.options as Record<string, unknown>)
+        : (input as TInput)
+
+      return config.run(builtInput)
     },
   }
 }
@@ -181,14 +182,22 @@ export function createEventBackedEntityEditCommandConfig<TResult>(
       dayKeyPolicy: dayKeyPolicySchema.optional(),
       ...(config.options ?? {}),
     },
-    buildInput(input, options) {
-      const patch = buildEventBackedTypedEditPatch(options)
-      const extraPatch = config.buildPatch?.(options)
+    async buildInput(input, options) {
+      const normalizedOptions = { ...options }
+      if (typeof options.occurredAt === 'string') {
+        normalizedOptions.occurredAt = await normalizeOccurredAtOption({
+          vault: input.vault,
+          occurredAt: options.occurredAt,
+        })
+      }
+
+      const patch = buildEventBackedTypedEditPatch(normalizedOptions)
+      const extraPatch = config.buildPatch?.(normalizedOptions)
       return {
         ...input,
         set: mergePatchLists(patch.set, extraPatch?.set),
         clear: mergePatchLists(patch.clear, extraPatch?.clear),
-        dayKeyPolicy: normalizeDayKeyPolicy(options.dayKeyPolicy),
+        dayKeyPolicy: normalizeDayKeyPolicy(normalizedOptions.dayKeyPolicy),
       }
     },
   })

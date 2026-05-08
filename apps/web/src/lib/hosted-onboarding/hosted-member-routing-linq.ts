@@ -86,6 +86,53 @@ export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
   });
 }
 
+export async function tryCreateHostedMemberPendingLinqParticipantContactTx(input: {
+  contact: HostedLinqParticipantContact;
+  memberId: string;
+  observedAt: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (Number.isNaN(input.observedAt.getTime())) {
+    throw new TypeError("Hosted Linq participant contact observed timestamp must be valid.");
+  }
+
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: input.memberId,
+    pendingLinqChatId: null,
+    pendingLinqParticipantContact: input.contact.value,
+    pendingLinqRecipientPhone: null,
+    prisma: input.prisma,
+    telegramThreadId: null,
+    telegramUserId: null,
+  });
+
+  const result = await input.prisma.hostedMemberRouting.createMany({
+    data: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: input.memberId,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted:
+        routingPrivateColumns.pendingLinqParticipantContactEncrypted,
+      pendingLinqParticipantContactKind: input.contact.kind,
+      pendingLinqParticipantContactLookupKey: input.contact.lookupKey,
+      pendingLinqParticipantContactObservedAt: input.observedAt,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    },
+    skipDuplicates: true,
+  });
+
+  return result.count > 0;
+}
+
 export async function upsertHostedMemberHomeLinqBindingTx(input: {
   clearPending?: boolean;
   linqChatId: string;

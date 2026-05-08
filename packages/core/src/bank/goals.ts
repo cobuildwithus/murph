@@ -229,13 +229,15 @@ function goalRelationsFromLinks(
 
 function canonicalizeGoalRelations(input: {
   goalId: string;
-  links?: readonly GoalLink[];
+  links?: readonly GoalLink[] | null;
   parentGoalId?: string | null;
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
 }): Pick<GoalEntity, "parentGoalId" | "relatedGoalIds" | "relatedExperimentIds" | "links"> {
   const links = normalizeGoalLinks(
-    input.links !== undefined
+    input.links === null
+      ? []
+      : input.links !== undefined
       ? [...input.links]
       : buildGoalLinksFromFields({
           parentGoalId: input.parentGoalId,

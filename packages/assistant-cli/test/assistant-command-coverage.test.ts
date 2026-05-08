@@ -683,6 +683,48 @@ test('assistant deliver rejects serialized object delivery targets before sendin
   assert.equal(commandMocks.deliverAssistantMessage.mock.calls.length, 0)
 })
 
+test('assistant deliver validates overrides against the session channel before sending', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const deliver = readCommand(assistant.commands, 'deliver')
+
+  commandMocks.getAssistantSession.mockResolvedValueOnce({
+    ...TEST_SESSION,
+    binding: {
+      ...TEST_SESSION.binding,
+      channel: 'email',
+      identityId: 'inbox_123',
+      threadId: 'thread_123',
+      delivery: {
+        kind: 'thread',
+        target: 'thread_123',
+      },
+    },
+  } satisfies AssistantSession)
+
+  await assert.rejects(
+    () =>
+      deliver.run({
+        args: {
+          message: 'Reuse the existing email session',
+        },
+        options: {
+          deliveryTarget: 'not-an-email-target',
+          session: 'session-email',
+          vault: '/tmp/vault',
+        },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'invalid_option')
+      assert.match(error.message, /Email delivery targets/u)
+      return true
+    },
+  )
+
+  assert.equal(commandMocks.deliverAssistantMessage.mock.calls.length, 0)
+})
+
 test('assistant deliver preflights existing sessions before sending', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')

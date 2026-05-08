@@ -3996,6 +3996,21 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
 test("searchVaultRuntime rebuilds the projection automatically and only returns sample rows when explicitly requested", async () => {
   const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const malformed = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: true });
+
+  try {
+    malformed.exec(`
+      PRAGMA user_version = 1;
+
+      CREATE TABLE query_entities (
+        entity_id TEXT PRIMARY KEY,
+        entity_json TEXT NOT NULL
+      );
+    `);
+  } finally {
+    malformed.close();
+  }
 
   try {
     const eventResult = await searchVaultRuntime(vaultRoot, "lab report", {

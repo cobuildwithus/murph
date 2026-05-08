@@ -513,7 +513,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`authorizationUrl\`, and do not fabricate URLs. When sending that authorization URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. For supported wearable connection requests that need a link, use \`vault-cli device connect <provider> --format json\`, send the returned \`connectUrl\`, and do not fabricate URLs. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(): string {

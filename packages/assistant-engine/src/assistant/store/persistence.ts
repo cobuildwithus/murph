@@ -515,10 +515,15 @@ export function isAssistantSessionExpired(
 
 export async function readAssistantIndexStore(
   paths: AssistantStatePaths,
+  options?: {
+    fresh?: boolean
+  },
 ): Promise<AssistantAliasStore> {
-  const cached = assistantIndexStoreCache.get(paths.indexesPath)
-  if (cached !== undefined) {
-    return cached
+  if (options?.fresh !== true) {
+    const cached = assistantIndexStoreCache.get(paths.indexesPath)
+    if (cached !== undefined) {
+      return cached
+    }
   }
 
   let raw: string
@@ -558,7 +563,7 @@ export async function synchronizeAssistantIndexes(
   session: AssistantSession,
   previous: AssistantSession | null,
 ): Promise<void> {
-  const store = await readAssistantIndexStore(paths)
+  const store = await readAssistantIndexStore(paths, { fresh: true })
   const aliases = {
     ...store.aliases,
   }
@@ -604,10 +609,15 @@ export async function writeAutomationState(
 
 export async function readAutomationState(
   paths: AssistantStatePaths,
+  options?: {
+    fresh?: boolean
+  },
 ): Promise<AssistantAutomationState> {
-  const cached = assistantAutomationStateCache.get(paths.automationStatePath)
-  if (cached !== undefined) {
-    return cached
+  if (options?.fresh !== true) {
+    const cached = assistantAutomationStateCache.get(paths.automationStatePath)
+    if (cached !== undefined) {
+      return cached
+    }
   }
 
   let raw: string

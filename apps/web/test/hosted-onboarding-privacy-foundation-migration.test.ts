@@ -240,6 +240,8 @@ describe("hosted Prisma baseline migration", () => {
       "2026050503_pulse_trial_checkout_offer",
       "2026050601_hosted_ai_usage_limit_notice_sent",
       "2026050602_hosted_plan_switch_schedule_ref",
+      "2026050801_device_webhook_trace_claim_token",
+      "2026050802_device_connect_intent",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');

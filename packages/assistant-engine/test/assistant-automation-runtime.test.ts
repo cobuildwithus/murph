@@ -698,6 +698,12 @@ function assistantInputCandidateFromInboxCapture(
 function createCapturelessAssistantInputCandidate(input: {
   conversationThreadId?: string | null
   inputId: string
+  mailboxRow?: {
+    dedupeKey: string
+    eventId: string
+    itemId: string
+    laneSeq: string
+  }
   occurredAt: string
   receivedAt?: string | null
   replyTarget?: AssistantInputCandidate['event']['replyTarget']
@@ -745,12 +751,12 @@ function createCapturelessAssistantInputCandidate(input: {
       source,
       sourceMetadata: input.sourceMetadata ?? null,
       sourceRef: {
-        dedupeKey: `dedupe_${input.inputId}`,
-        eventId: `event_${input.inputId}`,
-        itemId: `item_${input.inputId}`,
+        dedupeKey: input.mailboxRow?.dedupeKey ?? `dedupe_${input.inputId}`,
+        eventId: input.mailboxRow?.eventId ?? `event_${input.inputId}`,
+        itemId: input.mailboxRow?.itemId ?? `item_${input.inputId}`,
         kind: 'hosted-mailbox',
         lane: 'conversation',
-        laneSeq: '42',
+        laneSeq: input.mailboxRow?.laneSeq ?? '42',
         payloadSchema: 'murph.hosted-mailbox-payload.v1',
         payloadSource: 'inline',
         source: 'hosted-mailbox',
@@ -1007,6 +1013,7 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async (_vault: string, next: AssistantAutomationState) => next)
   runLoopMocks.scanAssistantAutomationOnce.mockReset().mockResolvedValue({
+    currentTurnDeliveryIntentIds: [],
     routing: {
       considered: 1,
       failed: 0,
@@ -4591,6 +4598,7 @@ describe('assistant auto-reply runtime', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-07T00:00:00.000Z'))
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
       routing: {
         considered: 0,
         failed: 0,
@@ -4642,6 +4650,7 @@ describe('assistant auto-reply runtime', () => {
 
   it('runs deferred receipt recovery after the scan when no fresh reply is produced', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
       routing: {
         considered: 0,
         failed: 0,
@@ -5733,6 +5742,118 @@ describe('assistant auto-reply runtime', () => {
     expect(firstKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
     expect(replayKey).toBe(firstKey)
   })
+
+  it.each([
+    [
+      'linq',
+      {
+        conversationThreadId: 'safe_thread_replayed_linq_rows',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq_msg_replayed_row_002',
+          threadId: 'linq_thread_replayed_rows',
+        },
+        source: 'linq',
+      },
+    ],
+    [
+      'email',
+      {
+        conversationThreadId: 'safe_thread_replayed_email_rows',
+        replyTarget: {
+          channel: 'email',
+          messageId: '<email-msg-replayed-row-002@example.test>',
+          threadId: serializeHostedEmailThreadTarget({
+            lastMessageId: '<email-msg-replayed-row-002@example.test>',
+            references: ['<email-msg-replayed-root@example.test>'],
+            subject: 'Replay rows',
+            to: ['sender@example.test'],
+          }),
+        },
+        source: 'email',
+      },
+    ],
+  ] as const)(
+    'uses durable hosted mailbox rows for replayed %s delivery idempotency after local-state loss',
+    async (_channel, fixture) => {
+      const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+        '../src/assistant/automation/reply.ts',
+      )
+      const mailboxRows = [
+        {
+          dedupeKey: 'durable_dedupe_replayed_row_001',
+          eventId: 'durable_event_replayed_row_001',
+          itemId: 'durable_mailbox_item_replayed_row_001',
+          laneSeq: '51',
+        },
+        {
+          dedupeKey: 'durable_dedupe_replayed_row_002',
+          eventId: 'durable_event_replayed_row_002',
+          itemId: 'durable_mailbox_item_replayed_row_002',
+          laneSeq: '52',
+        },
+      ]
+
+      const readDeliveryKey = async (localInputIds: readonly [string, string]) => {
+        replyMocks.sendAssistantMessage.mockClear()
+        const candidates = mailboxRows.map((mailboxRow, index) =>
+          createCapturelessAssistantInputCandidate({
+            conversationThreadId: fixture.conversationThreadId,
+            inputId: localInputIds[index]!,
+            mailboxRow,
+            occurredAt: `2026-04-08T00:1${index}:00.000Z`,
+            receivedAt: `2026-04-08T00:1${index}:01.000Z`,
+            replyTarget: fixture.replyTarget,
+            source: fixture.source,
+            text: `replayed ${fixture.source} row ${index + 1}`,
+          })
+        )
+        const context = reply.createAssistantAutoReplyGroupContext(
+          candidates.map(createCapturelessReplyGroupItem),
+        )
+        if (!context) {
+          throw new Error('expected replay context')
+        }
+
+        await reply.processAssistantAutoReplyGroup({
+          allowSelfAuthored: false,
+          context,
+          enabledChannels: [fixture.source],
+          executionContext: {
+            hosted: {
+              memberId: 'member_replayed_rows',
+              userEnvKeys: [],
+            },
+          },
+          inboxServices: createInboxServices({
+            show: vi.fn(),
+          }),
+          requestId: null,
+          sessionMaxAgeMs: null,
+          vault: '/tmp/assistant-automation-vault',
+        })
+
+        const key = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+          ?.deliveryIdempotencyKey
+        if (typeof key !== 'string') {
+          throw new Error('expected hosted delivery idempotency key')
+        }
+        return key
+      }
+
+      const firstImportKey = await readDeliveryKey([
+        'ain_replayfirst000000000000000001',
+        'ain_replayfirst000000000000000002',
+      ])
+      const afterLocalStateLossKey = await readDeliveryKey([
+        'ain_replaysecond00000000000000001',
+        'ain_replaysecond00000000000000002',
+      ])
+
+      expect(firstImportKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+      expect(afterLocalStateLossKey).toBe(firstImportKey)
+    },
+  )
 
   it('changes hosted delivery idempotency keys when route dimensions change', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
@@ -7671,6 +7792,7 @@ describe('assistant automation run loop', () => {
 
   it('can finish a document-preservation retry pass without replying or outbox work', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
       routing: {
         considered: 0,
         failed: 0,
@@ -7727,6 +7849,7 @@ describe('assistant automation run loop', () => {
 
   it('treats terminal evidence writes as pass progress for hosted checkpointing', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
       routing: {
         considered: 0,
         failed: 0,

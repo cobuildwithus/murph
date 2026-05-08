@@ -89,6 +89,10 @@ export interface PrivateProtocolUpsertResult {
   created: boolean
 }
 
+export interface PrivateProtocolListInput extends HealthListInput {
+  commonsProtocol?: string
+}
+
 export interface PrivateProtocolSummaryResult {
   vault: string
   protocol: {
@@ -112,6 +116,7 @@ export interface PrivateProtocolListResult {
   vault: string
   filters: {
     status?: string
+    commonsProtocol?: string
     limit: number
   }
   protocols: PrivateProtocolSummaryResult["protocol"][]
@@ -1008,7 +1013,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
     },
   ): Promise<PrivateProtocolSummaryResult>
   listPrivateProtocols(
-    input: HealthListInput,
+    input: PrivateProtocolListInput,
   ): Promise<PrivateProtocolListResult>
   showSupplement(
     input: CommandContext & {

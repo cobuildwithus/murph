@@ -182,13 +182,7 @@ describe("ensureHostedMemberForPhone", () => {
   });
 
   it("creates new members with blind phone lookup storage plus encrypted signup phone state", async () => {
-    const identityUpsert = vi.fn().mockResolvedValue(
-      await makeIdentityRecord({
-        memberId: "member_123",
-        phoneLookupKey: "hbidx:phone:v1:new",
-        signupPhoneNumber: "+15551234567",
-      }),
-    );
+    const identityCreateMany = vi.fn().mockResolvedValue({ count: 1 });
     const create = vi.fn(async ({
       data,
     }: {
@@ -203,9 +197,9 @@ describe("ensureHostedMemberForPhone", () => {
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMemberIdentity: {
+        createMany: identityCreateMany,
         findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue(null),
-        upsert: identityUpsert,
       },
     });
 
@@ -226,20 +220,13 @@ describe("ensureHostedMemberForPhone", () => {
         updatedAt: true,
       },
     });
-    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
+    expect(identityCreateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
-      update: expect.objectContaining({
-        maskedPhoneNumberHint: "*** 4567",
-        phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
-        signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
-      }),
-      where: {
-        memberId: expect.any(String),
-      },
+      skipDuplicates: true,
     }));
   });
 
@@ -274,12 +261,11 @@ describe("ensureHostedMemberForPhone", () => {
 
       return null;
     });
-    const create = vi.fn().mockRejectedValue(
-      new Prisma.PrismaClientKnownRequestError("duplicate", {
-        clientVersion: "test",
-        code: "P2002",
-      }),
-    );
+    const create = vi.fn(async ({ data }: { data: { id: string } }) => makeMember({
+      id: data.id,
+      suspendedAt: null,
+    }));
+    const identityCreateMany = vi.fn().mockResolvedValue({ count: 0 });
     const prisma = asRootPrisma({
       hostedMember: {
         create,
@@ -288,6 +274,7 @@ describe("ensureHostedMemberForPhone", () => {
           .mockResolvedValueOnce(concurrentMember),
       },
       hostedMemberIdentity: {
+        createMany: identityCreateMany,
         findFirst: identityFindFirst,
         findUnique: identityFindUnique,
         upsert: identityUpsert,
@@ -824,9 +811,30 @@ function makeInviteRecord() {
 function asRootPrisma<T extends object>(tx: T): T & {
   $transaction: ReturnType<typeof vi.fn>;
 } {
+  const prisma = tx as T & {
+    hostedMember?: {
+      delete?: ReturnType<typeof vi.fn>;
+    };
+    hostedMemberIdentity?: {
+      createMany?: ReturnType<typeof vi.fn>;
+    };
+    hostedMemberRouting?: {
+      createMany?: ReturnType<typeof vi.fn>;
+    };
+  };
+
+  prisma.hostedMember ??= {};
+  prisma.hostedMember.delete ??= vi.fn().mockResolvedValue({});
+  if (prisma.hostedMemberIdentity) {
+    prisma.hostedMemberIdentity.createMany ??= vi.fn().mockResolvedValue({ count: 1 });
+  }
+  if (prisma.hostedMemberRouting) {
+    prisma.hostedMemberRouting.createMany ??= vi.fn().mockResolvedValue({ count: 1 });
+  }
+
   return {
-    ...tx,
-    $transaction: vi.fn(async (callback: (innerTx: T) => Promise<unknown>) => callback(tx)),
+    ...prisma,
+    $transaction: vi.fn(async (callback: (innerTx: T) => Promise<unknown>) => callback(prisma)),
   };
 }
 
