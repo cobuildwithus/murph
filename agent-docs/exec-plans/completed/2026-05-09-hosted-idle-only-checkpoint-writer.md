@@ -1,6 +1,6 @@
 # Hosted Idle-Only Checkpoint Writer
 
-Status: active
+Status: completed
 Last updated: 2026-05-08T19:01:01Z
 
 ## Goal
@@ -40,3 +40,5 @@ Success criteria:
 - AUDIT: simplify review found two low-severity cleanup leftovers; both were applied.
 - AUDIT: security/privacy review found no scoped findings.
 - AUDIT: coverage review found coverage sufficient and made no edits.
+Updated: 2026-05-09
+Completed: 2026-05-09
