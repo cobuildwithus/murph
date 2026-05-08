@@ -2074,7 +2074,9 @@ describe("hosted workspace runtime entrypoint", () => {
     restoredState.watermarks.conversation = "3";
     await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
     await mkdir(path.join(sourceVaultRoot, "raw"), { recursive: true });
-    await writeFile(path.join(sourceVaultRoot, "raw", "artifact.txt"), "synthetic artifact", "utf8");
+    const rawArtifactBytes = Buffer.from("synthetic artifact", "utf8");
+    const rawArtifactHash = sha256HostedBundleHex(rawArtifactBytes);
+    await writeFile(path.join(sourceVaultRoot, "raw", "artifact.txt"), rawArtifactBytes);
     const sourceBundle = await snapshotHostedBundleRoots({
       externalizeFile: async (file) => {
         if (file.path !== "raw/artifact.txt") {
@@ -2106,7 +2108,10 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     });
     const bundleHash = sha256HostedBundleHex(bundle);
-    const artifactBytesByHash = new Map([[bundleHash, bundle]]);
+    const artifactBytesByHash = new Map([
+      [bundleHash, bundle],
+      [rawArtifactHash, rawArtifactBytes],
+    ]);
     const imported: string[] = [];
 
     try {
@@ -2186,7 +2191,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      assert.deepEqual(artifactGetCalls, [bundleHash]);
+      assert.deepEqual(artifactGetCalls, [bundleHash, rawArtifactHash]);
       assert.deepEqual(imported, ["4"]);
       assert.equal(fetchRequests.length, 1);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
@@ -2974,6 +2979,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const artifactLabelsByHash = new Map<string, string>();
+    const eagerArtifactSpec = {
+      bytes: Buffer.from("capture-artifact\n", "utf8"),
+      path: "raw/captures/example/capture.bin",
+    } as const;
     const artifactSpecs = [
       {
         bytes: Buffer.from("pdf-binary-artifact\n", "utf8"),
@@ -2993,19 +3002,21 @@ describe("hosted workspace runtime entrypoint", () => {
       },
     ] as const;
 
-    for (const spec of artifactSpecs) {
+    for (const spec of [eagerArtifactSpec, ...artifactSpecs]) {
       const sourceArtifactPath = path.join(sourceVaultRoot, spec.path);
       await mkdir(path.dirname(sourceArtifactPath), { recursive: true });
       await writeFile(sourceArtifactPath, spec.bytes);
     }
 
+    const eagerArtifactHash = sha256HostedBundleHex(eagerArtifactSpec.bytes);
+    artifactLabelsByHash.set(eagerArtifactHash, "eager-raw-capture");
     const artifactHashes = artifactSpecs.map((spec) => sha256HostedBundleHex(spec.bytes));
     artifactHashes.forEach((hash, index) => {
       artifactLabelsByHash.set(hash, `restored-artifact-${index}`);
     });
     const sourceBundle = await snapshotHostedBundleRoots({
       externalizeFile: async (file) => {
-        const spec = artifactSpecs.find((entry) => entry.path === file.path);
+        const spec = [eagerArtifactSpec, ...artifactSpecs].find((entry) => entry.path === file.path);
         if (!spec) {
           return null;
         }
@@ -3027,7 +3038,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const bundleHash = sha256HostedBundleHex(sourceBundle);
     artifactLabelsByHash.set(bundleHash, "workspace-bundle");
     const artifactBytesByHash = new Map<string, Uint8Array>(
-      artifactSpecs.map((spec, index) => [artifactHashes[index]!, spec.bytes]),
+      [
+        [eagerArtifactHash, eagerArtifactSpec.bytes],
+        ...artifactSpecs.map((spec, index) => [artifactHashes[index]!, spec.bytes] as const),
+      ],
     );
     artifactBytesByHash.set(bundleHash, sourceBundle);
 
@@ -3049,6 +3063,10 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           async importItem() {
+            assert.equal(
+              await readFile(path.join(vaultRoot, eagerArtifactSpec.path), "utf8"),
+              "capture-artifact\n",
+            );
             for (const spec of artifactSpecs) {
               const restoredArtifactPath = path.join(vaultRoot, spec.path);
               await assert.rejects(readFile(restoredArtifactPath, "utf8"));
@@ -3085,11 +3103,12 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      requireEventIndex(events, "mailbox.fetch");
+      const mailboxFetchIndex = requireEventIndex(events, "mailbox.fetch");
+      assert.ok(events.indexOf("artifact.get:eager-raw-capture") < mailboxFetchIndex);
       for (const [index] of artifactHashes.entries()) {
         assert.equal(events.includes(`artifact.get:restored-artifact-${index}`), false);
       }
-      assert.deepEqual(artifactGetCalls, [bundleHash]);
+      assert.deepEqual(artifactGetCalls, [bundleHash, eagerArtifactHash]);
       assert.equal(checkpointRequests.length, 0);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
