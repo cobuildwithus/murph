@@ -47,6 +47,7 @@ import type {
 import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
+  resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
 import { buildAssistantVaultOverviewBlock } from '../vault-overview.js'
@@ -399,6 +400,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
+            murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
+              input.sharedPlan.cliAccess.env,
+            ),
             onboardingGuidance: shouldInjectOnboardingGuidance,
             modelBehaviorProfile,
             turnTrigger: input.input.turnTrigger ?? null,
