@@ -68,6 +68,7 @@ export type {
   BrowserVaultExperimentBiomarkerResult,
   BrowserVaultExperimentBiomarkerStatus,
   BrowserVaultExperimentAdherenceResult,
+  BrowserVaultExperimentContextEntry,
   BrowserVaultExperimentCoverageStatus,
   BrowserVaultExperimentExpectedDirection,
   BrowserVaultExperimentExpectedEffect,

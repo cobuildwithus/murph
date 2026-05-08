@@ -406,18 +406,23 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
   switch (entity.kind) {
     case "intervention_session":
       return projectSafeAttributeKeys(entity, [
+        "afterExercise",
+        "confounders",
         "experimentId",
         "experimentSlug",
+        "note",
         "protocolId",
         "sessionStatus",
         "sessionLocalDate",
         "scheduledLocalDate",
+        "symptoms",
       ]);
     case "experiment_context":
       return projectSafeAttributeKeys(entity, [
         "experimentId",
         "experimentSlug",
         "contextType",
+        "note",
         "severity",
       ]);
     default:

@@ -256,6 +256,64 @@ test("builds active intervention progress and treats skipped sessions as missed 
   assert.equal(result.biomarkers[0]?.intervention.daysWithData, 2);
 });
 
+test("projects session confounders symptoms and notes as browser-safe run context", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-12T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-14",
+          },
+        }),
+        sessionEvent("2026-04-08", "completed", {
+          attributes: {
+            afterExercise: true,
+            confounders: {
+              travel: true,
+              trainingLoad: "heavy",
+              skipped: false,
+            },
+            note: "Felt lightheaded near the end.",
+            symptoms: ["lightheaded"],
+          },
+        }),
+        contextEvent("2026-04-09", {
+          contextType: "late_caffeine",
+          note: "Coffee after dinner.",
+          severity: "potential_confounder",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "exp_sauna");
+
+  assert.ok(result);
+  assert.deepEqual(result.context, [
+    {
+      confounders: ["After exercise", "Travel", "Training Load: heavy"],
+      date: "2026-04-08",
+      id: "evt_2026-04-08_completed",
+      kind: "session",
+      note: "Felt lightheaded near the end.",
+      symptoms: ["lightheaded"],
+    },
+    {
+      confounders: ["Late Caffeine"],
+      date: "2026-04-09",
+      id: "evt_context_2026-04-09",
+      kind: "context",
+      note: "Coffee after dinner.",
+      symptoms: [],
+    },
+  ]);
+  assert.equal(Object.hasOwn(result, "events"), false);
+});
+
 test("matches session events to schedule cells using the run schedule time zone", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -1162,6 +1220,33 @@ function sessionEvent(
     stream: null,
     tags: ["sauna"],
     title: "Sauna session",
+  };
+}
+
+function contextEvent(
+  date: string,
+  attributes: Record<string, unknown>,
+): BrowserVaultEntity {
+  return {
+    attributes: {
+      experimentId: "exp_sauna",
+      experimentSlug: "finnish-sauna-run",
+      ...attributes,
+    },
+    bodyPreview: null,
+    date,
+    experimentSlug: "finnish-sauna-run",
+    family: "event",
+    id: `evt_context_${date}`,
+    kind: "experiment_context",
+    links: [{ targetId: "exp_sauna", type: "related" }],
+    lookupIds: [`evt_context_${date}`],
+    occurredAt: `${date}T13:00:00.000Z`,
+    recordClass: "ledger",
+    status: null,
+    stream: null,
+    tags: ["sauna"],
+    title: "Experiment context",
   };
 }
 

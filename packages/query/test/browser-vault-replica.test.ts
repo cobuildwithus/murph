@@ -368,22 +368,25 @@ test("browser vault replica projects experiment event fields only for relevant e
 
   assert.ok(session);
   assert.deepEqual(session.attributes, {
+    afterExercise: true,
+    confounders: {
+      travel: true,
+      trainingLoad: "heavy",
+    },
     experimentId: "exp_sauna",
     experimentSlug: "sauna-rhr",
+    note: "Felt lightheaded near the end.",
     protocolId: "prot_sauna",
     scheduledLocalDate: "2026-04-20",
     sessionStatus: "partial",
     sessionLocalDate: "2026-04-20",
+    symptoms: ["lightheaded"],
   });
-  assert.equal(Object.hasOwn(session.attributes, "afterExercise"), false);
-  assert.equal(Object.hasOwn(session.attributes, "confounders"), false);
   assert.equal(Object.hasOwn(session.attributes, "durationMinutes"), false);
   assert.equal(Object.hasOwn(session.attributes, "interventionType"), false);
   assert.equal(Object.hasOwn(session.attributes, "regimenId"), false);
-  assert.equal(Object.hasOwn(session.attributes, "symptoms"), false);
   assert.equal(Object.hasOwn(session.attributes, "temperatureC"), false);
   assert.equal(Object.hasOwn(session.attributes, "timing"), false);
-  assert.equal(Object.hasOwn(session.attributes, "note"), false);
   assert.equal(Object.hasOwn(session.attributes, "markdownBody"), false);
   assert.equal(Object.hasOwn(session.attributes, "externalId"), false);
   assert.equal(Object.hasOwn(session.attributes, "externalRef"), false);
@@ -403,9 +406,9 @@ test("browser vault replica projects experiment event fields only for relevant e
     contextType: "travel",
     experimentId: "exp_sauna",
     experimentSlug: "sauna-rhr",
+    note: "Travel day.",
     severity: "potential_confounder",
   });
-  assert.equal(Object.hasOwn(context.attributes, "note"), false);
   assert.equal(Object.hasOwn(context.attributes, "externalId"), false);
   assert.equal(Object.hasOwn(context.attributes, "providerRef"), false);
   assert.equal(Object.hasOwn(context.attributes, "rawProvenance"), false);

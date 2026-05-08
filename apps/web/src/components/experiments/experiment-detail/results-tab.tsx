@@ -5,6 +5,7 @@ import { formatIsoDate } from "@/src/lib/browser-vault/display";
 import type { ExperimentStartContactChannels } from "@/src/lib/experiments/start-experiment-contact";
 import type {
   ExperimentConclusionSection,
+  ExperimentRunContextEntry,
   ExperimentRunProjection,
   ExperimentSchedule as ExperimentScheduleModel,
   ExperimentSignal,
@@ -38,6 +39,7 @@ export interface ResultsTabExperiment {
   nextStep?: ExperimentRunProjection["nextStep"];
   privateRun?: ExperimentRunProjection;
   schedule?: ExperimentScheduleModel;
+  sessionContext?: ExperimentRunContextEntry[];
   signals: ExperimentSignal[];
   status: ExperimentStatus;
   summary?: string;
@@ -153,6 +155,10 @@ export function ResultsTab({
         schedule={experiment.schedule}
       />
 
+      {hasPrivateRun && experiment.sessionContext && experiment.sessionContext.length > 0 && (
+        <RunContextPanel entries={experiment.sessionContext} />
+      )}
+
       {isRunnable && (
         <div className="flex flex-col gap-2">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -201,6 +207,89 @@ export function ResultsTab({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function RunContextPanel({ entries }: { entries: ExperimentRunContextEntry[] }) {
+  const visibleEntries = entries.slice(-6);
+  const extraCount = entries.length - visibleEntries.length;
+
+  return (
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-1.5">
+          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Interpretation context
+          </span>
+          <h3 className="font-serif text-xl font-semibold text-foreground">
+            Confounders and notes
+          </h3>
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          {entries.length} logged
+        </span>
+      </div>
+
+      <div className="flex flex-col divide-y divide-border/50">
+        {visibleEntries.map((entry) => (
+          <RunContextRow key={entry.id} entry={entry} />
+        ))}
+      </div>
+
+      {extraCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {extraCount} earlier context {extraCount === 1 ? "entry" : "entries"} kept in the browser-vault snapshot.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function RunContextRow({ entry }: { entry: ExperimentRunContextEntry }) {
+  const label = entry.kind === "session" ? "Session" : "Context";
+  const title = entry.kind === "session" ? "Session log" : "Context note";
+
+  return (
+    <div className="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[92px_1fr]">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        {formatIsoDate(entry.date, { day: "numeric", month: "short" })}
+      </div>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="font-serif text-base font-semibold text-foreground">
+            {title}
+          </span>
+          <span className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+            {label}
+          </span>
+        </div>
+        {entry.note && (
+          <p className="text-sm/5 text-muted-foreground">
+            {entry.note}
+          </p>
+        )}
+        {(entry.confounders.length > 0 || entry.symptoms.length > 0) && (
+          <div className="flex flex-wrap gap-1.5">
+            {entry.confounders.map((confounder) => (
+              <span
+                key={`confounder:${confounder}`}
+                className="rounded-md bg-secondary/20 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-foreground/75"
+              >
+                {confounder}
+              </span>
+            ))}
+            {entry.symptoms.map((symptom) => (
+              <span
+                key={`symptom:${symptom}`}
+                className="rounded-md border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
+              >
+                {symptom}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
