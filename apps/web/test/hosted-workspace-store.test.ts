@@ -760,7 +760,7 @@ describe("hosted workspace store", () => {
     });
   });
 
-  it("discards browser-vault replica publish conflicts when the retry source hash changed", async () => {
+  it("returns conflict when retry also loses the browser-vault latest-ref version guard", async () => {
     const initialSnapshotRef = createWorkingSnapshotRef({
       base: createBundleRef("snapshot_2"),
       delta: createBundleRef("delta_2"),
@@ -796,7 +796,7 @@ describe("hosted workspace store", () => {
 
     expect(updateMany).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
-      status: "stale_source",
+      status: "conflict",
       workspace: {
         snapshotRef: advancedSnapshotRef,
         version: "7",
@@ -908,7 +908,8 @@ describe("hosted workspace store", () => {
     expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
   });
 
-  it("discards stale derived browser-vault publishes after workspace advances", async () => {
+  it("rejects legacy source-hash browser-vault publishes when the workspace source advanced", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
     const current = buildHostedWorkspaceRow({
       snapshotRef: createWorkingSnapshotRef({
         base: createBundleRef("snapshot_2"),
@@ -925,19 +926,58 @@ describe("hosted workspace store", () => {
 
     const result = await publishHostedBrowserVaultReplicaRefTx({
       expectedSourceStateHash: "delta_2_hash",
-      replicaRef: createBrowserVaultReplicaRef("delta_2_hash"),
+      replicaRef,
       tx,
       userId: "member_workspace_1",
     });
 
     expect(result).toMatchObject({
-      status: "stale_source",
+      status: "conflict",
       workspace: {
         snapshotRef: current.snapshotRef,
         version: "6",
       },
     });
     expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("publishes live latest-ref browser-vault refs without coupling them to workspace snapshot source", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
+    const current = buildHostedWorkspaceRow({
+      snapshotRef: createWorkingSnapshotRef({
+        base: createBundleRef("snapshot_2"),
+        delta: createBundleRef("delta_3"),
+      }),
+      version: 6n,
+    });
+    const updated = buildHostedWorkspaceRow({
+      browserVaultReplicaRef: replicaRef,
+      snapshotRef: current.snapshotRef,
+      version: 6n,
+    });
+    const findUniqueRows = [current, updated];
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => findUniqueRows.shift() ?? updated),
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    const result = await publishHostedBrowserVaultReplicaRefTx({
+      replicaRef,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(result).toMatchObject({
+      status: "published",
+      workspace: {
+        browserVaultReplicaRef: replicaRef,
+        snapshotRef: current.snapshotRef,
+        version: "6",
+      },
+    });
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
   });
 });
 

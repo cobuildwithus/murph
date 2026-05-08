@@ -16,7 +16,9 @@ export const POST = withJsonError(async (request: Request) => {
     await readOptionalJsonObject(request),
   );
   const result = await publishHostedBrowserVaultReplicaRef({
-    expectedSourceStateHash: body.expectedSourceStateHash,
+    ...(body.expectedSourceStateHash === undefined
+      ? {}
+      : { expectedSourceStateHash: body.expectedSourceStateHash }),
     replicaRef: body.replicaRef,
     userId,
   });

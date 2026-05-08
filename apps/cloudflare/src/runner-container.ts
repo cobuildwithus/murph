@@ -89,7 +89,6 @@ type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest
 interface HostedExecutionContainerBrowserVaultRefreshRequest {
   runtime: HostedAssistantRuntimeConfig;
   signal?: AbortSignal;
-  sourceStateHash: string;
   timeoutMs: number;
   userId: string;
 }
@@ -106,6 +105,9 @@ type HostedExecutionContainerBrowserVaultRefreshResult =
       status: "refresh_failed_too_large";
     }
   | {
+      // Deploy-skew compatibility for older container shells. New live
+      // refreshes emit only published, refresh_failed_too_large, or
+      // publish_conflict.
       status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing";
     };
 
@@ -531,7 +533,7 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     };
     const outboundProxyState: RunnerOutboundProxyState = {
-      attemptId: buildRunnerBrowserVaultRefreshAttemptId(input.sourceStateHash),
+      attemptId: buildRunnerBrowserVaultRefreshAttemptId("live"),
       leaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
       token: createRunnerOutboundProxyToken(),
       userId: input.userId,
@@ -573,7 +575,6 @@ export class RunnerContainer extends Container {
               userId: input.userId,
             }),
             runtime: input.runtime,
-            sourceStateHash: input.sourceStateHash,
             userId: input.userId,
           }),
           headers: {
@@ -1148,7 +1149,6 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   runtime: HostedAssistantRuntimeConfig;
   signal?: AbortSignal;
-  sourceStateHash: string;
   timeoutMs: number;
   userId: string;
 }): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
@@ -1162,7 +1162,6 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
   return container.refreshBrowserVaultReplica({
     runtime: input.runtime,
     signal: input.signal,
-    sourceStateHash: input.sourceStateHash,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
@@ -1530,7 +1529,6 @@ function parseHostedExecutionContainerBrowserVaultRefreshInput(
   payload: {
     runtime?: unknown;
     signal?: unknown;
-    sourceStateHash?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
   },
@@ -1540,7 +1538,6 @@ function parseHostedExecutionContainerBrowserVaultRefreshInput(
     ...(payload.signal === undefined
       ? {}
       : { signal: readAbortSignal(payload.signal, "payload.signal") }),
-    sourceStateHash: requireString(payload.sourceStateHash, "payload.sourceStateHash"),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };

@@ -1284,15 +1284,12 @@ describe("cloudflare worker routes", () => {
   });
 
   it("schedules dashboard replica refreshes through the direct Durable Object path", async () => {
-    const sourceStateHash = "a".repeat(64);
     const stub = createUserRunnerStub({
       scheduleDashboardReplicaRefreshForUser: vi.fn(async (input: {
-        sourceStateHash: string;
         userId: string;
       }) => ({
         accepted: true,
         immediateRefreshStarted: false,
-        sourceStateHash: input.sourceStateHash,
         userId: input.userId,
       })),
     });
@@ -1300,7 +1297,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
-        body: JSON.stringify({ sourceStateHash }),
+        body: "{}",
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -1313,12 +1310,10 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       accepted: true,
       immediateRefreshStarted: false,
-      sourceStateHash,
       userId: "member_123",
     });
     expect(stub.bindUser).not.toHaveBeenCalled();
     expect(stub.scheduleDashboardReplicaRefreshForUser).toHaveBeenCalledWith({
-      sourceStateHash,
       userId: "member_123",
     });
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
@@ -1326,14 +1321,11 @@ describe("cloudflare worker routes", () => {
   });
 
   it("falls back to the old browser-vault refresh Durable Object method during deploy skew", async () => {
-    const sourceStateHash = "b".repeat(64);
     const scheduleBrowserVaultRefreshForUser = vi.fn(async (input: {
-      sourceStateHash: string;
       userId: string;
     }) => ({
       accepted: true as const,
       immediateRefreshStarted: false,
-      sourceStateHash: input.sourceStateHash,
       userId: input.userId,
     }));
     const stub = createUserRunnerStub({
@@ -1344,7 +1336,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
-        body: JSON.stringify({ sourceStateHash }),
+        body: "{}",
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -1357,11 +1349,9 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       accepted: true,
       immediateRefreshStarted: false,
-      sourceStateHash,
       userId: "member_123",
     });
     expect(scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
-      sourceStateHash,
       userId: "member_123",
     });
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
@@ -2226,21 +2216,17 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       workspace: null,
     })),
     scheduleDashboardReplicaRefreshForUser: vi.fn(async (input: {
-      sourceStateHash: string;
       userId: string;
     }) => ({
       accepted: true as const,
       immediateRefreshStarted: false,
-      sourceStateHash: input.sourceStateHash,
       userId: input.userId,
     })),
     scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
-      sourceStateHash: string;
       userId: string;
     }) => ({
       accepted: true as const,
       immediateRefreshStarted: false,
-      sourceStateHash: input.sourceStateHash,
       userId: input.userId,
     })),
     ...overrides,

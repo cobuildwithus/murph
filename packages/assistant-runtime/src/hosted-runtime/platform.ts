@@ -53,7 +53,6 @@ export interface HostedRuntimeArtifactStore {
 
 export interface HostedRuntimeBrowserVaultReplicaPort {
   publishRef?(input: {
-    expectedSourceStateHash: string;
     replicaRef: HostedBrowserVaultReplicaRef;
   }): Promise<HostedBrowserVaultReplicaPublishResponse>;
   write(input: {

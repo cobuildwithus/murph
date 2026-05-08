@@ -70,7 +70,6 @@ export interface CloudflareHostedControlUserDataDeletionResult {
 export interface CloudflareHostedControlBrowserVaultRefreshResult {
   accepted: true;
   immediateRefreshStarted: boolean;
-  sourceStateHash: string;
   userId: string;
 }
 
@@ -83,10 +82,7 @@ export interface CloudflareHostedControlClient {
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserRunner(userId: string): Promise<HostedRunnerNudgeResult>;
-  scheduleBrowserVaultRefresh(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): Promise<CloudflareHostedControlBrowserVaultRefreshResult>;
+  scheduleBrowserVaultRefresh(input: { userId: string }): Promise<CloudflareHostedControlBrowserVaultRefreshResult>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -221,10 +217,6 @@ export function createCloudflareHostedControlClient(
     },
     scheduleBrowserVaultRefresh(input) {
       const expectedUserId = requireCloudflareHostedControlUserId(input.userId);
-      const sourceStateHash = requireString(
-        input.sourceStateHash,
-        "Cloudflare browser-vault refresh sourceStateHash",
-      );
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -234,12 +226,11 @@ export function createCloudflareHostedControlClient(
         label: "browser vault refresh",
         parse: (value) =>
           parseCloudflareHostedControlBrowserVaultRefreshResult(value, {
-            sourceStateHash,
             userId: expectedUserId,
           }),
         path: buildCloudflareHostedControlBrowserVaultRefreshPath(expectedUserId),
         request: {
-          body: JSON.stringify({ sourceStateHash }),
+          body: "{}",
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -413,7 +404,6 @@ function parseCloudflareHostedControlBrowserVaultSession(
 function parseCloudflareHostedControlBrowserVaultRefreshResult(
   value: unknown,
   expected: {
-    sourceStateHash: string;
     userId: string;
   },
 ): CloudflareHostedControlBrowserVaultRefreshResult {
@@ -424,21 +414,11 @@ function parseCloudflareHostedControlBrowserVaultRefreshResult(
   }
 
   const userId = requireString(record.userId, "Cloudflare browser-vault refresh result userId");
-  const sourceStateHash = requireString(
-    record.sourceStateHash,
-    "Cloudflare browser-vault refresh result sourceStateHash",
-  );
   assertMatchingString(
     userId,
     expected.userId,
     "Cloudflare browser-vault refresh result userId",
     "the requested userId",
-  );
-  assertMatchingString(
-    sourceStateHash,
-    expected.sourceStateHash,
-    "Cloudflare browser-vault refresh result sourceStateHash",
-    "the requested sourceStateHash",
   );
 
   return {
@@ -447,7 +427,6 @@ function parseCloudflareHostedControlBrowserVaultRefreshResult(
       record.immediateRefreshStarted,
       "Cloudflare browser-vault refresh result immediateRefreshStarted",
     ),
-    sourceStateHash,
     userId,
   };
 }

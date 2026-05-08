@@ -234,19 +234,21 @@ describe("hosted execution coverage gaps", () => {
     expect(getDashboardReplicaFreshness({
       replicaRef: { ...freshReplica, sourceBundleHash: base.hash },
       snapshotRef: working,
-    })).toBe("stale");
+    })).toBe("fresh");
     expect(shouldScheduleDashboardReplicaRefresh({
       currentReplicaRef: null,
       currentSnapshotRef: working,
       previousSnapshotRef: base,
     })).toEqual({
-      sourceStateHash: delta.hash,
+      refresh: true,
     });
     expect(shouldScheduleDashboardReplicaRefresh({
       currentReplicaRef: null,
       currentSnapshotRef: working,
       previousSnapshotRef: working,
-    })).toBeNull();
+    })).toEqual({
+      refresh: true,
+    });
     expect(shouldScheduleDashboardReplicaRefresh({
       currentReplicaRef: freshReplica,
       currentSnapshotRef: working,

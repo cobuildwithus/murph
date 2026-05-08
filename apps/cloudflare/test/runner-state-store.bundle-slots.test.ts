@@ -230,38 +230,69 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("keeps one replaceable pending dashboard replica refresh source hash", async () => {
+  it("keeps one pending dashboard replica refresh slot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
     const { store } = createRunnerStateStoreHarness();
 
-    await expect(store.scheduleDashboardReplicaRefresh({
-      sourceStateHash: "a".repeat(64),
-    })).resolves.toEqual({
+    await expect(store.scheduleDashboardReplicaRefresh()).resolves.toEqual({
       deduped: false,
-      sourceStateHash: "a".repeat(64),
     });
-    await expect(store.scheduleDashboardReplicaRefresh({
-      sourceStateHash: "a".repeat(64),
-    })).resolves.toEqual({
+    const first = await store.readPendingDashboardReplicaRefresh();
+    expect(first).toEqual({
+      slotId: expect.any(String),
+      updatedAt: "2026-05-08T00:00:00.000Z",
+    });
+    vi.setSystemTime(new Date("2026-05-08T00:00:01.000Z"));
+    await expect(store.scheduleDashboardReplicaRefresh()).resolves.toEqual({
       deduped: true,
-      sourceStateHash: "a".repeat(64),
     });
-    await expect(store.readPendingDashboardReplicaRefresh()).resolves.toEqual({
-      sourceStateHash: "a".repeat(64),
+    const second = await store.readPendingDashboardReplicaRefresh();
+    expect(second).toEqual({
+      slotId: expect.any(String),
+      updatedAt: "2026-05-08T00:00:01.000Z",
     });
+    expect(second?.slotId).not.toBe(first?.slotId);
 
-    await expect(store.scheduleDashboardReplicaRefresh({
-      sourceStateHash: "b".repeat(64),
-    })).resolves.toEqual({
-      deduped: false,
-      sourceStateHash: "b".repeat(64),
-    });
     await expect(store.clearPendingDashboardReplicaRefresh({
-      sourceStateHash: "a".repeat(64),
+      slotId: first?.slotId,
+      updatedAt: first?.updatedAt,
     })).resolves.toBe(false);
     await expect(store.clearPendingDashboardReplicaRefresh({
-      sourceStateHash: "b".repeat(64),
+      slotId: second?.slotId,
+      updatedAt: second?.updatedAt,
     })).resolves.toBe(true);
+    await expect(store.clearPendingDashboardReplicaRefresh()).resolves.toBe(false);
     await expect(store.readPendingDashboardReplicaRefresh()).resolves.toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("does not clear a newer pending dashboard refresh scheduled in the same millisecond", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
+    const { store } = createRunnerStateStoreHarness();
+
+    await store.scheduleDashboardReplicaRefresh();
+    const first = await store.readPendingDashboardReplicaRefresh();
+    await store.scheduleDashboardReplicaRefresh();
+    const second = await store.readPendingDashboardReplicaRefresh();
+
+    expect(first).toEqual({
+      slotId: expect.any(String),
+      updatedAt: "2026-05-08T00:00:00.000Z",
+    });
+    expect(second).toEqual({
+      slotId: expect.any(String),
+      updatedAt: "2026-05-08T00:00:00.000Z",
+    });
+    expect(second?.slotId).not.toBe(first?.slotId);
+    await expect(store.clearPendingDashboardReplicaRefresh({
+      slotId: first?.slotId,
+      updatedAt: first?.updatedAt,
+    })).resolves.toBe(false);
+    await expect(store.readPendingDashboardReplicaRefresh()).resolves.toEqual(second);
+
+    vi.useRealTimers();
   });
 
   it("ignores stale invocation completion and failure metadata", async () => {

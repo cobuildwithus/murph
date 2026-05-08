@@ -344,17 +344,11 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.nudgeHostedRunnerForUser(userId);
   }
 
-  async scheduleDashboardReplicaRefreshForUser(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): ReturnType<HostedUserRunner["scheduleDashboardReplicaRefreshForUser"]> {
+  async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleDashboardReplicaRefreshForUser"]> {
     return this.runner.scheduleDashboardReplicaRefreshForUser(input);
   }
 
-  async scheduleBrowserVaultRefreshForUser(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
+  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
     return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
@@ -968,9 +962,8 @@ async function handleBrowserVaultRefreshRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  let body;
   try {
-    body = parseBrowserVaultRefreshRequest(parseJsonValue(await readCachedRequestText(context)));
+    parseBrowserVaultRefreshRequest(parseJsonValue(await readCachedRequestText(context)));
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -989,16 +982,10 @@ async function handleBrowserVaultRefreshRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId);
   if (stub.scheduleDashboardReplicaRefreshForUser) {
-    return json(await stub.scheduleDashboardReplicaRefreshForUser({
-      sourceStateHash: body.sourceStateHash,
-      userId,
-    }));
+    return json(await stub.scheduleDashboardReplicaRefreshForUser({ userId }));
   }
   if (stub.scheduleBrowserVaultRefreshForUser) {
-    return json(await stub.scheduleBrowserVaultRefreshForUser({
-      sourceStateHash: body.sourceStateHash,
-      userId,
-    }));
+    return json(await stub.scheduleBrowserVaultRefreshForUser({ userId }));
   }
   throw new Error("Hosted user runner does not support dashboard replica refresh scheduling.");
 }
@@ -1007,16 +994,8 @@ function parseJsonValue(value: string): unknown {
   return JSON.parse(value);
 }
 
-function parseBrowserVaultRefreshRequest(value: unknown): {
-  sourceStateHash: string;
-} {
-  const record = requireJsonRecord(value, "Browser vault refresh request");
-  return {
-    sourceStateHash: requireNonEmptyString(
-      record.sourceStateHash,
-      "Browser vault refresh request sourceStateHash",
-    ),
-  };
+function parseBrowserVaultRefreshRequest(value: unknown): void {
+  requireJsonRecord(value, "Browser vault refresh request");
 }
 
 function parseBrowserVaultSessionRequest(value: unknown): {

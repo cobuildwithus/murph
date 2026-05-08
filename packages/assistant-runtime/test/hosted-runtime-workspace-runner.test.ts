@@ -174,7 +174,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.browserVaultReplicaRef, null);
   });
 
-  test("imports mailbox and checkpoints before the assistant phase without inbox bootstrap", async () => {
+  test("imports mailbox locally before the assistant phase without foreground checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -194,10 +194,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
-      async onCheckpoint(request) {
-        events.push(`checkpoint:${request.reason}`);
-        const state = await readHostedMailboxImportState({ vaultRoot });
-        assert.equal(state.watermarks.conversation, "1");
+      async onCheckpoint() {
+        throw new Error("Foreground assistant turns must not checkpoint the workspace.");
       },
     });
 
@@ -242,7 +240,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async runAssistantPhase(input) {
           events.push("assistant");
           assert.equal(input.workspace, null);
-          assert.equal(input.initialMailboxImport.checkpoint?.checkpointed, true);
+          assert.equal(input.initialMailboxImport.checkpoint, null);
+          assert.equal(input.initialMailboxImport.checkpointDeferred, true);
           assert.equal(input.now?.(), TEST_NOW);
           assert.equal(input.platform.refreshMailboxForActiveTurnInput !== undefined, true);
           return {
@@ -256,26 +255,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "checkpoint:import",
         "mailbox:afterCheckpoint",
         "assistant",
       ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
-      assert.equal(result.latestWorkspace?.version, "1");
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.attemptId, "attempt_synthetic_runner_001");
-      assert.equal(checkpointRequests[0]?.leaseGeneration, "1");
-      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
-      assert.equal(checkpointRequests[0]?.reason, "import");
-      assert.deepEqual(checkpointRequests[0]?.browserVaultReplicaRef, TEST_BROWSER_VAULT_REPLICA_REF);
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
+      assert.equal(result.latestWorkspace, null);
+      assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(logRequests, [
         {
           entries: [
@@ -290,8 +275,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               redactedJson: {
                 blockCodes: [],
                 blockedCount: 0,
-                checkpointDeferred: false,
-                checkpointed: true,
+                checkpointDeferred: true,
+                checkpointed: false,
                 conversationSeqEnd: "1",
                 conversationSeqStart: "0",
                 fetchedCount: 1,
@@ -384,7 +369,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(recordUsage.mock.calls.length, 0);
       assert.deepEqual(
         checkpointRequests.map((request) => request.reason),
-        ["canonical_runtime_commit"],
+        [],
       );
     } finally {
       await rm(vaultRoot, {
@@ -486,19 +471,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_sending",
       ]);
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedAssistantDeliveryEffectCount: 1,
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -593,7 +568,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("checkpoints a deferred mailbox import after an idle assistant phase", async () => {
+  test("keeps a deferred mailbox import local after an idle assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -635,19 +610,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
       ]);
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportCheckpointDeferred: true,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -722,7 +687,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "assistant",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
       ]);
       assert.deepEqual(logRequests.map((request) => request.entries[0]?.phase), [
         "import",
@@ -799,8 +763,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "import:1",
         "assistant",
       ]);
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.reason, "import");
+      assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -809,7 +772,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("checkpoints reply intent even when optional runner lanes are degraded", async () => {
+  test("keeps reply intent local even when optional runner lanes are degraded", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
@@ -882,31 +845,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
-      assert.equal(result.latestWorkspace?.version, "2");
+      assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "outbox_sending",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
-      );
-      assert.equal(checkpointRequests[0]?.browserVaultReplicaRef, null);
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-        hostedOutboxSendingCheckpointed: true,
-      });
       assert.deepEqual(events, [
         "import:1",
         "optional:log",
         "optional:projection",
         "optional:log",
         "assistant",
+        "optional:log",
       ]);
     } finally {
       warn.mockRestore();
@@ -975,8 +923,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint",
         "assistant",
       ]);
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.reason, "import");
+      assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1036,7 +983,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       );
 
       assert.deepEqual(firstCheckpointRequests.map((request) => request.reason), [
-        "import",
       ]);
       assert.equal(
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
@@ -1094,18 +1040,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ["0", "1"],
       );
       assert.deepEqual(secondCheckpointRequests.map((request) => request.reason), [
-        "canonical_runtime_commit",
       ]);
-      assert.equal(secondCheckpointRequests[0]?.expectedWorkspaceVersion, "1");
-      assert.deepEqual(secondCheckpointRequests[0]?.redactedStatus, {
-        hostedAssistantReplayHandledCount: 1,
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 0,
-        hostedMailboxImportedCount: 0,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1168,8 +1103,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(logRequests[0]?.entries[0]?.redactedJson, {
         blockCodes: ["lane.gap"],
         blockedCount: 1,
-        checkpointDeferred: false,
-        checkpointed: true,
+        checkpointDeferred: true,
+        checkpointed: false,
         conversationSeqEnd: "0",
         conversationSeqStart: "0",
         fetchedCount: 1,
@@ -1180,6 +1115,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         systemSeqEnd: "0",
         systemSeqStart: "0",
       });
+      assert.deepEqual(checkpointRequests, []);
       assert.equal(assistantPhaseCalled, true);
     } finally {
       await rm(vaultRoot, {
@@ -1265,7 +1201,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("active-turn refresh imports and checkpoints late conversation input before continuation admission", async () => {
+  test("active-turn refresh imports late conversation input without foreground checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -1426,32 +1362,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "active_turn_acceptance",
-        "canonical_runtime_commit",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1", "2"],
-      );
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
-        acceptedInputCount: 1,
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "2",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-        providerRequestOrdinal: 0,
-      });
-      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "2",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "system" },
@@ -1462,7 +1373,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
       ]);
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.eventCode),
+        logRequests.map((request) => request.entries[0]?.eventCode).slice(0, 2),
         ["mailbox.imported", "mailbox.imported"],
       );
       assert.deepEqual(logRequests[1]?.entries[0], {
@@ -1501,7 +1412,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("active-turn refresh still checkpoints accepted input and reply intent when optional lanes degrade", async () => {
+  test("active-turn refresh keeps accepted input and reply intent local when optional lanes degrade", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
@@ -1615,36 +1526,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
-      assert.equal(result.latestWorkspace?.version, "3");
+      assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "active_turn_acceptance",
-        "outbox_sending",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1", "2"],
-      );
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
-        acceptedInputCount: 2,
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "2",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-        providerRequestOrdinal: 1,
-      });
-      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "2",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-        hostedOutboxSendingCheckpointed: true,
-      });
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "system" },
@@ -1662,7 +1547,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "import:2",
         "optional:log",
         "refresh:done",
+        "optional:log",
         "accepted",
+        "optional:log",
         "optional:active-turn-projection",
         "optional:log",
       ]);
@@ -1740,20 +1627,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(
         logRequests.map((request) => request.entries[0]?.phase),
-        ["import"],
+        ["import", "checkpoint"],
       );
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "canonical_runtime_commit",
       ]);
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1762,7 +1639,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("checkpoints accepted active-turn input before the assistant samples a continuation", async () => {
+  test("accepts active-turn input without foreground checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -1817,23 +1694,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "active_turn_acceptance",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
-      );
-      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
-        acceptedInputCount: 1,
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-        providerRequestOrdinal: 0,
-      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1842,7 +1703,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("preserves scheduled wake fields when checkpointing active-turn input acceptance", async () => {
+  test("does not checkpoint active-turn input acceptance when scheduled wake fields exist", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({
       items: [
@@ -1900,11 +1761,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "active_turn_acceptance",
       ]);
-      assert.equal(checkpointRequests[1]?.nextWakeAt, nextWakeAt);
-      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -1959,12 +1816,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       );
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0"],
-      );
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -2465,16 +2317,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_sending",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0"],
-      );
-      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(result.latestWorkspace?.version, "0");
       assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:05:00.000Z");
       const deferredLog = logRequests.flatMap((request) => request.entries)
-        .find((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred");
+        .find((entry) =>
+          entry.eventCode === "checkpoint.runtime_residue_deferred"
+          && entry.redactedJson?.checkpointPhase === "post_assistant"
+        );
       assert.ok(deferredLog);
       assert.doesNotThrow(() => parseHostedRuntimeLogRequest({ entries: [deferredLog] }));
       assert.deepEqual(deferredLog?.redactedJson, {
@@ -2489,7 +2339,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("keeps post-assistant receipt checkpoint when delivery cleanup requires foreground durability", async () => {
+  test("defers post-assistant receipt checkpoint even when delivery cleanup requested foreground durability", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2534,13 +2384,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_sending",
-        "outbox_receipt",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
-      );
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -2670,23 +2514,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
-      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(events, [
         "assistant",
         "optional:post-assistant-cleanup",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_sending",
       ]);
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "0",
-        hostedMailboxFetchedCount: 0,
-        hostedMailboxImportedCount: 0,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-        hostedOutboxSendingCheckpointed: true,
-      });
 
       const postCheckpointFailureLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "runner.error");
@@ -2697,7 +2531,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(postCheckpointFailureLog.errorCode, "assistant_after_checkpoint_failed");
       assert.equal(postCheckpointFailureLog.level, "warn");
       assert.deepEqual(postCheckpointFailureLog.redactedJson, {
-        checkpointed: true,
+        checkpointed: false,
         failureCodeDetails: ["PROVIDER_CLEANUP_UNAVAILABLE"],
         failureNames: ["Error"],
         failureSummaries: ["provider cleanup unavailable"],
@@ -2866,7 +2700,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("fails closed when the workspace checkpoint is stale", async () => {
+  test("does not contact stale workspace checkpoint in the foreground assistant lane", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({
       items: [
@@ -2877,46 +2711,44 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ],
     });
     let assistantPhaseCalled = false;
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointed: false,
-      checkpointRequests: [],
+      checkpointRequests,
     });
 
     try {
-      await assert.rejects(
-        () =>
-          runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-              attemptId: "attempt_synthetic_runner_stale",
-              expectedWorkspaceVersion: "7",
-              leaseGeneration: "2",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
-            }),
-            expectedUserId: TEST_USER_ID,
-            async importItem() {
-              return { status: "imported" };
-            },
-            limitPerLane: 10,
-            platform: createPlatform({
-              mailboxPort,
-              workspacePort,
-            }),
-            requestId: "request_synthetic_runner_stale",
-            async runAssistantPhase() {
-              assistantPhaseCalled = true;
-              return {};
-            },
-            vaultRoot,
-            workspace: createWorkspaceState({ version: "7" }),
-          }),
-        HostedMailboxImportCheckpointConflictError,
-      );
-      assert.equal(assistantPhaseCalled, false);
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_stale",
+          expectedWorkspaceVersion: "7",
+          leaseGeneration: "2",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort,
+        }),
+        requestId: "request_synthetic_runner_stale",
+        async runAssistantPhase() {
+          assistantPhaseCalled = true;
+          return {};
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "7" }),
+      });
+      assert.equal(assistantPhaseCalled, true);
+      assert.deepEqual(checkpointRequests, []);
       assert.equal(
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
-        "0",
+        "1",
       );
     } finally {
       await rm(vaultRoot, {
@@ -2926,7 +2758,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("rolls back only the active-turn mailbox state when the deferred import checkpoint is stale", async () => {
+  test("keeps active-turn mailbox state local when foreground import checkpoints are disabled", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -2987,18 +2819,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         caught = error;
       }
 
-      assert.ok(caught instanceof HostedMailboxImportCheckpointConflictError);
+      assert.equal(caught, undefined);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-        "import",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
-      );
       assert.equal(
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
-        "1",
+        "2",
       );
     } finally {
       await rm(vaultRoot, {

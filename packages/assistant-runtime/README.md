@@ -10,8 +10,8 @@ Current responsibilities:
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
-- keep hosted execution local-runtime-first: hosted mailbox decode writes minimized assistant input and checkpoints it before inbox capture, parser draining, and attachment/file materialization run as best-effort projections outside the Codex admission path
-- collect due hosted side effects before the durable commit, then resume their post-commit delivery from committed state
+- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container and defer hosted workspace checkpointing to idle/background persistence
+- collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
 - provide shared hosted runtime env sanitization so host apps can build their own launcher policy without forwarding control-plane secrets
@@ -24,16 +24,16 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active 
 ```
 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
-stages bounded `AssistantInputEvent` records, checkpoints the mailbox staged
-watermark, and only then makes one best-effort inbox projection attempt while
-the decoded wake is still in memory. Projection status and event-owned
-`attachmentEvidence` are checkpointed separately as diagnostic/materialization
-state; failed projection is not durably retried by hosted runtime. Inbox
-capture, parser work, attachment materialization, and display/search indexes are
-recovery context; they are not a hidden runtime-only admission path for Codex.
-Prompt construction reads the staged assistant input event and its sanitized
-vault-relative attachment evidence refs; it does not call inbox projection at
-prompt time.
+stages bounded `AssistantInputEvent` records in the warm live workspace, then
+makes one best-effort inbox projection attempt while the decoded wake is still
+in memory. Normal foreground turns do not wait for hosted workspace
+checkpointing before Codex admission or reply delivery; if the container dies
+before the next idle/background checkpoint, local runtime residue since the last
+checkpoint can be lost. Inbox capture, parser work, attachment materialization,
+and display/search indexes are recovery context; they are not a hidden
+runtime-only admission path for Codex. Prompt construction reads the staged
+assistant input event and its sanitized vault-relative attachment evidence refs;
+it does not call inbox projection at prompt time.
 
 Current non-goals:
 

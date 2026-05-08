@@ -177,8 +177,6 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch",
         "import:mailbox_item_entrypoint_001",
         "sidecar.ready",
-        "snapshot:1",
-        "workspace.checkpoint",
       ]);
       assert.deepEqual(imported, [
         {
@@ -186,25 +184,13 @@ describe("hosted workspace runtime entrypoint", () => {
           route: "import-conversation-message",
         },
       ]);
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.attemptId, "attempt_synthetic_workspace_entrypoint");
-      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
-      assert.equal(checkpointRequests[0]?.leaseGeneration, "7");
-      assert.equal(checkpointRequests[0]?.reason, "import");
-      const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(
-        checkpointRequests[0]?.snapshotRef ?? null,
-      );
-      assert.equal(
-        baseSnapshotRef?.key,
-        "users/bundles/member-synthetic/workspace-entrypoint.bundle.json",
-      );
+      assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {
           hostedMailboxBlockedCount: 0,
           hostedMailboxConversationImportedSeq: "1",
           hostedMailboxFetchedCount: 1,
-          hostedMailboxImportCheckpointDeferred: true,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
           hostedMailboxSystemImportedSeq: "0",
@@ -1161,16 +1147,9 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch",
         "import:1",
         "assistant",
-        "snapshot:outbox_sending:1",
-        "workspace.checkpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_sending",
       ]);
-      assert.deepEqual(
-        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0"],
-      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -1246,27 +1225,15 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch",
         "import:1",
         "assistant",
-        "snapshot:outbox_sending:1",
-        "workspace.checkpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "outbox_sending",
       ]);
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedAssistantProgressed: true,
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
-  test("checkpoints exact hosted canonical writes without a full workspace snapshot", async () => {
+  test("keeps exact hosted canonical writes local without foreground workspace checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1330,21 +1297,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "artifact.put:unlabeled-artifact",
-        "artifact.put:unlabeled-artifact",
-        "artifact.put:unlabeled-artifact",
-        "snapshot:canonical_runtime_commit",
-        "workspace.checkpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "canonical_runtime_commit",
       ]);
-      assert.ok(checkpointRequests[0]?.snapshotRef);
-      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteActionCount, 1);
-      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogEntryCount, 1);
-      assert.equal(typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256, "string");
-      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWritePayloadCount, 1);
-      assert.equal(artifactPutCalls.length, 3);
+      assert.equal(artifactPutCalls.length, 0);
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-27.md"), "utf8"),
         "exact hosted note\n",
@@ -1661,8 +1617,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "snapshot:4",
-        "workspace.checkpoint",
       ]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -1798,15 +1752,12 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "import:4",
-        "snapshot:import:4",
-        "workspace.checkpoint",
         "assistant",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => [
         request.reason,
         request.expectedWorkspaceVersion,
       ]), [
-        ["import", "9"],
       ]);
       assert.equal(
         await readFile(path.join(vaultRoot, "note.md"), "utf8"),
@@ -1896,8 +1847,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "snapshot:4",
-        "workspace.checkpoint",
       ]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -1994,8 +1943,6 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "artifact.get:workspace-bundle",
         "mailbox.fetch",
-        "snapshot:4",
-        "workspace.checkpoint",
       ]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -2085,8 +2032,6 @@ describe("hosted workspace runtime entrypoint", () => {
         assert.deepEqual(events, [
           "workspace.read",
           "mailbox.fetch",
-          "snapshot:4",
-          "workspace.checkpoint",
         ]);
       } finally {
         await rm(vaultRoot, { force: true, recursive: true });
@@ -2426,18 +2371,17 @@ describe("hosted workspace runtime entrypoint", () => {
       await runOnce();
       assert.deepEqual(artifactGetCalls, [baseHash, initialHotHash]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "canonical_runtime_commit",
       ]);
       artifactGetCalls.length = 0;
 
       await runOnce();
-      assert.deepEqual(artifactGetCalls, []);
-      assert.equal(checkpointRequests.length, 1);
+      assert.deepEqual(artifactGetCalls, [initialHotHash]);
+      assert.equal(checkpointRequests.length, 0);
       artifactGetCalls.length = 0;
 
       await runOnce();
       assert.deepEqual(artifactGetCalls, []);
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests.length, 0);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
       await rm(sourceBaseVaultRoot, { force: true, recursive: true });
@@ -2561,7 +2505,7 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(artifactGetCalls).toEqual(
         expect.arrayContaining([bundleHash, ...artifactHashes]),
       );
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests.length, 0);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
       await rm(sourceVaultRoot, { force: true, recursive: true });
@@ -2772,9 +2716,6 @@ describe("hosted workspace runtime entrypoint", () => {
       const mailboxFetchIndex = requireEventIndex(events, "mailbox.fetch");
       const firstArtifactFetchIndex = requireEventIndex(events, "artifact.get:workspace-bundle");
       const importedEvents = events.filter((event) => event.startsWith("import:"));
-      const snapshotIndex = requireEventIndex(events, `snapshot.create:${mailboxItemCount}`);
-      const checkpointUploadIndex = requireEventIndex(events, "artifact.put:checkpoint-snapshot");
-      const checkpointIndex = requireEventIndex(events, "workspace.checkpoint");
       const mailboxImportedLogIndex = requireEventIndex(events, "runtime.log:mailbox.imported");
       const sidecarIndex = requireEventIndex(events, "sidecar.ready");
       const mailboxImportedLog = logRequests
@@ -2788,19 +2729,16 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(artifactGetCalls.length, externalArtifactCount + 1);
       assert.equal(importedEvents.length, mailboxItemCount);
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
-      assert.equal(artifactPutCalls.length, 1);
+      assert.equal(artifactPutCalls.length, 0);
       assert.ok(mailboxFetchIndex < mailboxImportedLogIndex);
       assert.ok(mailboxImportedLogIndex < sidecarIndex);
-      assert.ok(sidecarIndex < snapshotIndex);
-      assert.ok(snapshotIndex < checkpointUploadIndex);
-      assert.ok(checkpointUploadIndex < checkpointIndex);
       assert.equal(stageSummary["workspace.read"]?.count, 1);
       assert.equal(stageSummary["artifact.get"]?.count, externalArtifactCount + 1);
       assert.equal(stageSummary["mailbox.fetch"]?.count, 1);
       assert.equal(stageSummary["mailbox.importItem"]?.count, mailboxItemCount);
-      assert.equal(stageSummary["snapshot.create"]?.count, 1);
-      assert.equal(stageSummary["artifact.put"]?.count, 1);
-      assert.equal(stageSummary["workspace.checkpoint"]?.count, 1);
+      assert.equal(stageSummary["snapshot.create"]?.count ?? 0, 0);
+      assert.equal(stageSummary["artifact.put"]?.count ?? 0, 0);
+      assert.equal(stageSummary["workspace.checkpoint"]?.count ?? 0, 0);
       assert.ok((stageSummary["runtime.log.write"]?.count ?? 0) >= 1);
       for (const key of Object.keys(mailboxImportedLog.redactedJson ?? {})) {
         assert.doesNotMatch(key, /(?:body|cipher|file|id|path|payload|ref)/iu);
@@ -2819,7 +2757,6 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxBlockedCount: 0,
           hostedMailboxConversationImportedSeq: String(mailboxItemCount),
           hostedMailboxFetchedCount: mailboxItemCount,
-          hostedMailboxImportCheckpointDeferred: true,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
           hostedMailboxSystemImportedSeq: "0",
@@ -2886,8 +2823,6 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "import",
-        "snapshot:0->1",
-        "workspace.checkpoint",
       ]);
       await assertPrivateDirectoryMode(vaultRoot);
       await assertPrivateDirectoryMode(
@@ -3031,22 +2966,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "snapshot:1",
-        "workspace.checkpoint",
       ]);
-      assert.equal(checkpointRequests.length, 1);
-      const mailboxRetryWakeAt = checkpointRequests[0]?.nextWakeAt;
+      assert.equal(checkpointRequests.length, 0);
+      const mailboxRetryWakeAt = result.nextWakeAt;
       assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedMailboxBlockedCount: 1,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 2,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxNextRetryAtPresent: true,
-        hostedMailboxRetryableBlockedCount: 1,
-        hostedMailboxSystemImportedSeq: "0",
-      });
       assert.deepEqual(result, {
         nextWakeAt: mailboxRetryWakeAt,
         redactedStatus: {
@@ -3065,7 +2988,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoints mailbox retry wake for a pure retryable sidecar block", async () => {
+  test("returns mailbox retry wake for a pure retryable sidecar block without foreground checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3126,22 +3049,10 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "mailbox.fetchPayload",
-        "snapshot:0",
-        "workspace.checkpoint",
       ]);
-      assert.equal(checkpointRequests.length, 1);
-      const mailboxRetryWakeAt = checkpointRequests[0]?.nextWakeAt;
+      assert.equal(checkpointRequests.length, 0);
+      const mailboxRetryWakeAt = result.nextWakeAt;
       assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedMailboxBlockedCount: 1,
-        hostedMailboxConversationImportedSeq: "0",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 0,
-        hostedMailboxNextRetryAtPresent: true,
-        hostedMailboxRetryableBlockedCount: 1,
-        hostedMailboxSystemImportedSeq: "0",
-      });
       assert.deepEqual(result, {
         nextWakeAt: mailboxRetryWakeAt,
         redactedStatus: {
@@ -3214,8 +3125,8 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, previousWakeAt);
+      assert.equal(result.status, "scheduled");
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -3313,11 +3224,8 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "mailbox.fetch",
-        "snapshot:canonical_runtime_commit:0",
-        "workspace.checkpoint",
       ]);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), ["canonical_runtime_commit"]);
-      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {

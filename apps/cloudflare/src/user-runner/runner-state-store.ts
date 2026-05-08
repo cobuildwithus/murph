@@ -26,7 +26,7 @@ const PENDING_BROWSER_VAULT_REFRESH_SCHEMA =
 
 interface PendingBrowserVaultRefreshRecord {
   schema: typeof PENDING_BROWSER_VAULT_REFRESH_SCHEMA;
-  sourceStateHash: string;
+  slotId: string;
   updatedAt: string;
 }
 
@@ -78,8 +78,17 @@ export type RunnerInvocationHeartbeatResult =
       | "stale_attempt"
       | "stale_generation"
       | "wrong_user";
-    record: RunnerStateRecord;
-  };
+      record: RunnerStateRecord;
+    };
+
+function createPendingBrowserVaultRefreshSlotId(): string {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  if (typeof randomUUID === "function") {
+    return randomUUID.call(globalThis.crypto);
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 export class RunnerStateStore {
   private userId: string | null = null;
@@ -134,41 +143,27 @@ export class RunnerStateStore {
     return { deleted: true };
   }
 
-  async scheduleDashboardReplicaRefresh(input: {
-    sourceStateHash: string;
-  }): Promise<{
+  async scheduleDashboardReplicaRefresh(): Promise<{
     deduped: boolean;
-    sourceStateHash: string;
   }> {
-    const sourceStateHash = requireRunnerStateNonEmptyString(
-      input.sourceStateHash,
-      "Hosted dashboard replica refresh sourceStateHash",
-    );
     const current = await this.readPendingDashboardReplicaRefresh();
-    if (current?.sourceStateHash === sourceStateHash) {
-      return {
-        deduped: true,
-        sourceStateHash,
-      };
-    }
-
     await this.state.storage.put<PendingBrowserVaultRefreshRecord>(
       PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
       {
         schema: PENDING_BROWSER_VAULT_REFRESH_SCHEMA,
-        sourceStateHash,
+        slotId: createPendingBrowserVaultRefreshSlotId(),
         updatedAt: new Date().toISOString(),
       },
     );
 
     return {
-      deduped: false,
-      sourceStateHash,
+      deduped: Boolean(current),
     };
   }
 
   async readPendingDashboardReplicaRefresh(): Promise<{
-    sourceStateHash: string;
+    slotId: string | null;
+    updatedAt: string | null;
   } | null> {
     const value = await this.state.storage.get<unknown>(
       PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
@@ -180,17 +175,31 @@ export class RunnerStateStore {
 
     const record = value as Partial<PendingBrowserVaultRefreshRecord>;
     return record.schema === PENDING_BROWSER_VAULT_REFRESH_SCHEMA
-      && typeof record.sourceStateHash === "string"
-      && record.sourceStateHash.length > 0
-      ? { sourceStateHash: record.sourceStateHash }
+      ? {
+          slotId: typeof record.slotId === "string" ? record.slotId : null,
+          updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null,
+        }
       : null;
   }
 
   async clearPendingDashboardReplicaRefresh(input: {
-    sourceStateHash: string;
-  }): Promise<boolean> {
+    slotId?: string | null;
+    updatedAt?: string | null;
+  } = {}): Promise<boolean> {
     const current = await this.readPendingDashboardReplicaRefresh();
-    if (!current || current.sourceStateHash !== input.sourceStateHash) {
+    if (!current) {
+      return false;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(input, "slotId")
+      && current.slotId !== input.slotId
+    ) {
+      return false;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(input, "updatedAt")
+      && current.updatedAt !== input.updatedAt
+    ) {
       return false;
     }
 
@@ -837,14 +846,6 @@ export class RunnerStateStore {
 
 function normalizeLeaseGeneration(value: number | null): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
-}
-
-function requireRunnerStateNonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
-  }
-
-  return value;
 }
 
 function isIdleShutdownCheckpointBlockedByPendingNudge(meta: RunnerMetaBundleRow): boolean {

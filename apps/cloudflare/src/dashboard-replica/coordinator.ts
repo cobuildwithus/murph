@@ -13,7 +13,6 @@ import type {
 export interface HostedDashboardReplicaRefreshScheduleResult {
   accepted: true;
   immediateRefreshStarted: boolean;
-  sourceStateHash: string;
   userId: string;
 }
 
@@ -35,10 +34,7 @@ export class DashboardReplicaCoordinator {
     },
   ) {}
 
-  async schedule(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
+  async schedule(input: { userId: string }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
     const immediateRefreshStarted = await this.schedulePending(input);
 
     emitHostedExecutionStructuredLog({
@@ -54,24 +50,20 @@ export class DashboardReplicaCoordinator {
     return {
       accepted: true,
       immediateRefreshStarted,
-      sourceStateHash: input.sourceStateHash,
       userId: input.userId,
     };
   }
 
-  async schedulePending(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): Promise<boolean> {
-    await this.deps.stateStore.scheduleDashboardReplicaRefresh({
-      sourceStateHash: input.sourceStateHash,
-    });
+  async schedulePending(input: { userId: string }): Promise<boolean> {
+    await this.deps.stateStore.scheduleDashboardReplicaRefresh();
     const immediateRefreshStarted = await this.startDetachedRefresh({
       userId: input.userId,
     });
-    await this.scheduleContinuation({
-      userId: input.userId,
-    });
+    if (!immediateRefreshStarted && !this.deps.hasForegroundWork()) {
+      await this.scheduleContinuation({
+        userId: input.userId,
+      });
+    }
     return immediateRefreshStarted;
   }
 
@@ -129,9 +121,6 @@ export class DashboardReplicaCoordinator {
     await this.deps.state.storage.setAlarm(new Date(continuationAtMs));
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
-      details: {
-        sourceStateHash: pendingRefresh.sourceStateHash,
-      },
       message: "Hosted runner scheduled pending dashboard replica refresh continuation.",
       phase: "scheduled",
       userId: input.userId,

@@ -26,9 +26,6 @@ import {
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
 } from "@murphai/hosted-execution/parsers";
-import {
-  readDashboardReplicaSourceStateHash,
-} from "@murphai/hosted-execution/dashboard-replica";
 import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionSnapshotRef,
@@ -134,7 +131,7 @@ export interface HostedWorkspaceCheckpointResult {
 }
 
 export interface HostedBrowserVaultReplicaPublishResult {
-  status: "published" | "missing" | "stale_source" | "conflict";
+  status: "published" | "missing" | "conflict";
   workspace: HostedWorkspaceRecord | null;
 }
 
@@ -320,7 +317,7 @@ export async function checkpointHostedWorkspaceTx(input: {
 }
 
 export async function publishHostedBrowserVaultReplicaRef(input: {
-  expectedSourceStateHash: string;
+  expectedSourceStateHash?: string;
   prisma?: PrismaClient;
   replicaRef: unknown;
   userId: string;
@@ -334,16 +331,18 @@ export async function publishHostedBrowserVaultReplicaRef(input: {
 }
 
 export async function publishHostedBrowserVaultReplicaRefTx(input: {
-  expectedSourceStateHash: string;
+  expectedSourceStateHash?: string;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
   const userId = requireNonEmptyString(input.userId, "Hosted browser-vault replica publish userId");
-  const expectedSourceStateHash = requireNonEmptyString(
-    input.expectedSourceStateHash,
-    "Hosted browser-vault replica publish expectedSourceStateHash",
-  );
+  const expectedSourceStateHash = input.expectedSourceStateHash === undefined
+    ? null
+    : requireNonEmptyString(
+        input.expectedSourceStateHash,
+        "Hosted browser-vault replica publish expectedSourceStateHash",
+      );
   const replicaRef = parseHostedBrowserVaultReplicaRef(
     input.replicaRef,
     "Hosted browser-vault replica publish replicaRef",
@@ -353,7 +352,7 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
     throw new TypeError("Hosted browser-vault replica publish replicaRef must not be null.");
   }
 
-  if (replicaRef.sourceBundleHash !== expectedSourceStateHash) {
+  if (expectedSourceStateHash && replicaRef.sourceBundleHash !== expectedSourceStateHash) {
     throw new TypeError(
       "Hosted browser-vault replica publish sourceBundleHash must match expectedSourceStateHash.",
     );
@@ -380,10 +379,6 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
       tx: input.tx,
       userId,
     });
-
-    if (publish.status === "stale_source") {
-      return publish;
-    }
 
     const row = await input.tx.hostedWorkspace.findUnique({
       where: {
@@ -421,23 +416,19 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
 
 async function publishHostedBrowserVaultReplicaRefAgainstCurrentWorkspace(input: {
   current: HostedWorkspaceRow;
-  expectedSourceStateHash: string;
+  expectedSourceStateHash: string | null;
   replicaRef: HostedBrowserVaultReplicaRef;
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<
-  | { status: "conflict" | "published" }
-  | { status: "stale_source"; workspace: HostedWorkspaceRecord }
+  { status: "conflict" | "published" }
 > {
-  const snapshotRef = parseHostedExecutionSnapshotRef(
-    input.current.snapshotRef,
-    "Hosted browser-vault replica publish current snapshotRef",
-  );
-  const currentSourceStateHash = readDashboardReplicaSourceStateHash(snapshotRef);
-  if (currentSourceStateHash !== input.expectedSourceStateHash) {
+  if (
+    input.expectedSourceStateHash
+    && readHostedWorkspaceBrowserVaultSourceStateHash(input.current.snapshotRef) !== input.expectedSourceStateHash
+  ) {
     return {
-      status: "stale_source",
-      workspace: projectHostedWorkspace(input.current),
+      status: "conflict",
     };
   }
 
@@ -454,6 +445,22 @@ async function publishHostedBrowserVaultReplicaRefAgainstCurrentWorkspace(input:
   return {
     status: updated.count === 1 ? "published" : "conflict",
   };
+}
+
+function readHostedWorkspaceBrowserVaultSourceStateHash(
+  snapshotRefValue: Prisma.JsonValue | null,
+): string | null {
+  const snapshotRef = parseHostedExecutionSnapshotRef(
+    snapshotRefValue,
+    "Hosted browser-vault replica publish snapshotRef",
+  );
+  if (!snapshotRef) {
+    return null;
+  }
+
+  return readHostedExecutionSnapshotDeltaRef(snapshotRef)?.hash
+    ?? readHostedExecutionSnapshotBaseRef(snapshotRef)?.hash
+    ?? null;
 }
 
 function assertHostedWorkspaceBrowserVaultReplicaCheckpointInvariant(input: {

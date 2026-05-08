@@ -17,10 +17,6 @@ import {
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
-  readDashboardReplicaSourceStateHash,
-  shouldScheduleDashboardReplicaRefresh,
-} from "@murphai/hosted-execution/dashboard-replica";
-import {
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -539,18 +535,12 @@ export class HostedUserRunner {
     return this.nudgeHostedRunner();
   }
 
-  async scheduleDashboardReplicaRefreshForUser(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
+  async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
     return await this.dashboardReplicaCoordinator.schedule(input);
   }
 
-  async scheduleBrowserVaultRefreshForUser(input: {
-    sourceStateHash: string;
-    userId: string;
-  }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
+  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedDashboardReplicaRefreshScheduleResult> {
     return await this.scheduleDashboardReplicaRefreshForUser(input);
   }
 
@@ -846,10 +836,20 @@ export class HostedUserRunner {
               userId: initialRecord.userId,
             });
           }
-          await this.scheduleDashboardReplicaRefreshAfterWorkspaceChange({
-            previousWorkspace: workspaceRead.workspace,
-            userId: initialRecord.userId,
-          });
+          try {
+            await this.scheduleBrowserVaultRefreshAfterForegroundTurn({
+              userId: initialRecord.userId,
+            });
+          } catch (error) {
+            emitHostedExecutionStructuredLog({
+              component: "hosted.runner",
+              error,
+              level: "warn",
+              message: "Hosted runner post-completion dashboard replica refresh scheduling failed; invocation result preserved.",
+              phase: "scheduled",
+              userId: initialRecord.userId,
+            });
+          }
         }
       }
       emitHostedExecutionStructuredLog({
@@ -1243,8 +1243,7 @@ export class HostedUserRunner {
     });
   }
 
-  private async scheduleDashboardReplicaRefreshAfterWorkspaceChange(input: {
-    previousWorkspace: HostedWorkspaceState | null;
+  private async scheduleBrowserVaultRefreshAfterForegroundTurn(input: {
     userId: string;
   }): Promise<void> {
     const record = await this.stateStore.readState();
@@ -1252,19 +1251,7 @@ export class HostedUserRunner {
       return;
     }
 
-    const workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
-    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
-    const refreshDecision = shouldScheduleDashboardReplicaRefresh({
-      currentReplicaRef: workspaceRead.workspace?.browserVaultReplicaRef ?? null,
-      currentSnapshotRef: workspaceRead.workspace?.snapshotRef ?? null,
-      previousSnapshotRef: input.previousWorkspace?.snapshotRef ?? null,
-    });
-    if (!refreshDecision) {
-      return;
-    }
-
     await this.dashboardReplicaCoordinator.schedulePending({
-      sourceStateHash: refreshDecision.sourceStateHash,
       userId: input.userId,
     });
   }
@@ -1749,41 +1736,6 @@ export class HostedUserRunner {
       return;
     }
 
-    let workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
-    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
-    record = await this.stateStore.readState();
-    if (
-      record.pendingNudge
-      || record.inFlight
-      || this.invocationLock !== null
-      || input.signal.aborted
-    ) {
-      return;
-    }
-
-    let workspace = workspaceRead.workspace;
-    const currentSourceStateHash = readDashboardReplicaSourceStateHash(
-      workspace?.snapshotRef ?? null,
-    );
-    if (!workspace || currentSourceStateHash !== pending.sourceStateHash) {
-      await this.stateStore.clearPendingDashboardReplicaRefresh({
-        sourceStateHash: pending.sourceStateHash,
-      });
-      return;
-    }
-
-    if (workspace.browserVaultReplicaRef?.sourceBundleHash === pending.sourceStateHash) {
-      await this.stateStore.clearPendingDashboardReplicaRefresh({
-        sourceStateHash: pending.sourceStateHash,
-      });
-      return;
-    }
-
-    record = await this.stateStore.readState();
-    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
-      return;
-    }
-
     if (!this.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
@@ -1814,7 +1766,6 @@ export class HostedUserRunner {
       runnerContainerNamespace: this.runnerContainerNamespace,
       runtime: runtimeConfig,
       signal: input.signal,
-      sourceStateHash: pending.sourceStateHash,
       timeoutMs: this.env.runnerTimeoutMs,
       userId: input.userId,
     });
@@ -1829,7 +1780,6 @@ export class HostedUserRunner {
         details: {
           browserVaultReplicaByteLength: generated.byteLength,
           browserVaultReplicaMaxBytes: generated.maxBytes,
-          sourceStateHash: pending.sourceStateHash,
         },
         level: "warn",
         message: "Hosted runner skipped dashboard replica refresh because the generated replica exceeded the size limit.",
@@ -1837,24 +1787,27 @@ export class HostedUserRunner {
         userId: input.userId,
       });
       await this.stateStore.clearPendingDashboardReplicaRefresh({
-        sourceStateHash: pending.sourceStateHash,
+        slotId: pending.slotId,
+        updatedAt: pending.updatedAt,
       });
       return;
     }
 
     if (generated.status === "publish_conflict") {
-      throw new Error("Hosted browser-vault replica publish lost the workspace version guard.");
+      throw new Error("Hosted browser-vault replica publish conflicted with the latest workspace row.");
     }
 
     if (generated.status !== "published") {
       await this.stateStore.clearPendingDashboardReplicaRefresh({
-        sourceStateHash: pending.sourceStateHash,
+        slotId: pending.slotId,
+        updatedAt: pending.updatedAt,
       });
       return;
     }
 
     await this.stateStore.clearPendingDashboardReplicaRefresh({
-      sourceStateHash: pending.sourceStateHash,
+      slotId: pending.slotId,
+      updatedAt: pending.updatedAt,
     });
   }
 

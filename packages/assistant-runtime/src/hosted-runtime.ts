@@ -6,9 +6,6 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  readDashboardReplicaSourceStateHash,
-} from "@murphai/hosted-execution/dashboard-replica";
-import {
   notifyAssistantActiveTurnInputsAvailableForVault,
 } from "@murphai/assistant-engine";
 import {
@@ -85,9 +82,6 @@ import {
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
-import {
-  writeHostedBrowserVaultWarmSourceStateHashBestEffort,
-} from "./hosted-runtime/browser-vault-replica.ts";
 export {
   formatHostedRuntimeChildResult,
   parseHostedRuntimeChildResult,
@@ -519,7 +513,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importHostedMailboxForWorkspaceRunner({
         checkpointRequestBuilder,
         checkpointReason: "import",
-        deferCheckpoint: shouldDeferInitialMailboxImportCheckpoint(input.request),
+        deferCheckpoint: true,
         input: baseRunnerInput,
         requestId,
       }),
@@ -590,10 +584,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
-    await writeHostedBrowserVaultWarmSourceStateHashBestEffort({
-      sourceStateHash: readDashboardReplicaSourceStateHash(committedWorkspace?.snapshotRef ?? null),
-      vaultRoot: restored.vaultRoot,
-    });
     if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
       await recordHotRestoreCacheForSnapshotRef(committedWorkspace?.snapshotRef ?? null);
     }
@@ -603,12 +593,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       committedWorkspace,
       mailboxImportRetryAt,
     });
+    const redactedStatus = {
+      ...buildHostedMailboxImportRedactedStatus(result.initialMailboxImport.importResult),
+      ...(result.assistantPhaseResult?.progressed === true
+        ? result.assistantPhaseResult.redactedStatus ?? {}
+        : {}),
+    };
 
     return {
       ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
-      ...(committedWorkspace?.redactedStatus
-        ? { redactedStatus: committedWorkspace.redactedStatus }
-        : { redactedStatus: buildHostedMailboxImportRedactedStatus(result.initialMailboxImport.importResult) }),
+      redactedStatus,
       status: resolveHostedWorkspaceInvocationStatus({
         mailboxBudgetExhausted: mailboxBudget.exhausted,
         nextWakeAt,
@@ -702,12 +696,6 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
       : {}),
     status: "idle",
   };
-}
-
-function shouldDeferInitialMailboxImportCheckpoint(
-  request: HostedAssistantWorkspaceRuntimeJobInput["request"],
-): boolean {
-  return request.reason === "nudge" || request.reason === "alarm";
 }
 
 function shouldRefreshHotRestoreCacheAfterNoProgressRun(

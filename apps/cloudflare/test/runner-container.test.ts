@@ -1402,7 +1402,6 @@ describe("RunnerContainer", () => {
 
     const refresh = container.refreshBrowserVaultReplica({
       runtime: {},
-      sourceStateHash: "refresh-preempted-by-destroy",
       timeoutMs: 30_000,
       userId: "member_123",
     });
@@ -1417,7 +1416,6 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledOnce();
 
     resolveRefresh(new Response(JSON.stringify({
-      sourceStateHash: "refresh-preempted-by-destroy",
       status: "already_fresh",
       userId: "member_123",
     }), {

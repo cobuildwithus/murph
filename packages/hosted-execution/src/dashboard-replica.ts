@@ -11,7 +11,7 @@ import {
 export type DashboardReplicaFreshness = "fresh" | "stale";
 
 export interface DashboardReplicaRefreshDecision {
-  sourceStateHash: string;
+  refresh: true;
 }
 
 export function readDashboardReplicaSourceStateHash(
@@ -24,12 +24,11 @@ export function getDashboardReplicaFreshness(input: {
   replicaRef: HostedBrowserVaultReplicaRef | null;
   snapshotRef: HostedExecutionSnapshotRefState;
 }): DashboardReplicaFreshness {
-  const sourceStateHash = readDashboardReplicaSourceStateHash(input.snapshotRef);
-  return input.replicaRef
-    && sourceStateHash
-    && input.replicaRef.sourceBundleHash === sourceStateHash
-    ? "fresh"
-    : "stale";
+  // Compatibility helper for older browser-vault clients. Active hosted
+  // refresh now publishes the latest live projection ref instead of deriving
+  // freshness from committed workspace snapshot source hashes.
+  void input.snapshotRef;
+  return input.replicaRef ? "fresh" : "stale";
 }
 
 export function shouldScheduleDashboardReplicaRefresh(input: {
@@ -37,23 +36,11 @@ export function shouldScheduleDashboardReplicaRefresh(input: {
   currentSnapshotRef: HostedExecutionSnapshotRefState;
   previousSnapshotRef?: HostedExecutionSnapshotRefState;
 }): DashboardReplicaRefreshDecision | null {
-  const sourceStateHash = readDashboardReplicaSourceStateHash(input.currentSnapshotRef);
-  if (!sourceStateHash) {
+  // Compatibility helper only. Active scheduling is a one-slot latest-live
+  // refresh request owned by the runner, not a source-hash queue.
+  if (!input.currentSnapshotRef) {
     return null;
   }
-
-  if (input.currentReplicaRef?.sourceBundleHash === sourceStateHash) {
-    return null;
-  }
-
-  if (input.previousSnapshotRef !== undefined) {
-    const previousSourceStateHash = readDashboardReplicaSourceStateHash(
-      input.previousSnapshotRef,
-    );
-    if (previousSourceStateHash === sourceStateHash) {
-      return null;
-    }
-  }
-
-  return { sourceStateHash };
+  void input.previousSnapshotRef;
+  return input.currentReplicaRef ? null : { refresh: true };
 }
