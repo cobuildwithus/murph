@@ -1483,15 +1483,14 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
-      await new Promise((resolve) => setImmediate(resolve));
 
       assert.deepEqual(checkpointRequests, []);
-      assert.deepEqual(events, [
+      assert.deepEqual(events.slice(0, 3), [
         "workspace.read",
         "mailbox.fetch",
         "assistant",
-        "codex-continuity.snapshot",
       ]);
+      assert.equal(events.filter((event) => event === "codex-continuity.snapshot").length, 1);
       assert.equal(codexContinuitySnapshots.length, 1);
       assert.equal(codexContinuitySnapshots[0]?.vaultRoot, vaultRoot);
       assert.match(path.basename(codexContinuitySnapshots[0]?.operatorHomeRoot ?? ""), /operator-home$/);
@@ -3907,7 +3906,7 @@ function createPlatform(input: {
     ...(input.codexContinuitySnapshots
       ? {
           codexContinuityPort: {
-            async scheduleSnapshot(snapshotInput) {
+            scheduleSnapshot(snapshotInput) {
               input.codexContinuitySnapshots?.push(snapshotInput);
               input.events?.push("codex-continuity.snapshot");
             },

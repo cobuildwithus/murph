@@ -148,7 +148,7 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
 } | undefined>;
 
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
-type RunnerContainerNameSource = Readonly<{ CF_VERSION_METADATA?: unknown }>;
+type RunnerContainerNameSource = Readonly<Record<string, unknown>>;
 
 interface RunnerContainerLogContext {
   userId: string;
@@ -1599,6 +1599,13 @@ export function resolveHostedExecutionRunnerContainerName(input: {
   return workerVersionSegment
     ? `${input.userId}--v-${workerVersionSegment}`
     : input.userId;
+}
+
+export function resolveHostedExecutionBrowserVaultRefreshRunnerContainerName(input: {
+  source: RunnerContainerNameSource;
+  userId: string;
+}): string {
+  return `${resolveHostedExecutionRunnerContainerName(input)}--browser-vault-refresh`;
 }
 
 function readRunnerContainerWorkerVersionSegment(source: RunnerContainerNameSource): string | null {

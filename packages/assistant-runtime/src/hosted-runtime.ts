@@ -987,19 +987,17 @@ function scheduleHostedCodexContinuitySnapshotAfterForegroundTurn(input: {
     return;
   }
 
-  queueMicrotask(() => {
-    void Promise.resolve(
-      port.scheduleSnapshot({
-        operatorHomeRoot: input.operatorHomeRoot,
-        requestId: input.requestId,
-        vaultRoot: input.vaultRoot,
-      }),
-    ).catch((error: unknown) => {
-      console.warn("Hosted Codex continuity background snapshot failed.", {
-        errorName: error instanceof Error ? error.name : typeof error,
-      });
+  try {
+    port.scheduleSnapshot({
+      operatorHomeRoot: input.operatorHomeRoot,
+      requestId: input.requestId,
+      vaultRoot: input.vaultRoot,
     });
-  });
+  } catch (error: unknown) {
+    console.warn("Hosted Codex continuity background snapshot scheduling failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
 }
 
 function assertWorkspaceRunUserMatchesRequest(input: {

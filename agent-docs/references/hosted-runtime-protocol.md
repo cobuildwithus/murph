@@ -270,8 +270,12 @@ one small hosted bundle containing those rollout files and the continuity
 manifest. That tiny artifact must not call the workspace checkpoint builder,
 must not write a portable workspace manifest, and must not scan `vault/raw/**`,
 `vault/derived/**`, projections, caches, temp roots, or the whole Codex home.
-The next `idle_shutdown` full/base checkpoint can include or supersede the same
-continuity state, but idle compaction is not the only continuity path.
+For the tiny artifact to become an independent restore path, the runtime must
+also publish a durable, web-owned `codexContinuityRef` that restore can discover
+without a workspace checkpoint. Until that ref exists, the artifact is
+best-effort continuity evidence and the next `idle_shutdown` full/base
+checkpoint remains the durable path that can include or supersede the same
+continuity state.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. Foreground work does not generate or publish browser-vault replicas

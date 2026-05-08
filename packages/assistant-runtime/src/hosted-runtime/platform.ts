@@ -234,7 +234,7 @@ export interface HostedRuntimeCodexContinuityPort {
     operatorHomeRoot: string;
     requestId: string;
     vaultRoot: string;
-  }): Promise<void> | void;
+  }): void;
 }
 
 export interface HostedRuntimeLogPort {

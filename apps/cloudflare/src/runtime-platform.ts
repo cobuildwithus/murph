@@ -158,12 +158,22 @@ export function buildHostedExecutionRuntimePlatform(input: {
     : null;
   const uploadedArtifactShas = new Set<string>();
   const inFlightArtifactUploads = new Map<string, Promise<void>>();
-  const putArtifactUncached = async (artifact: {
-    bytes: Uint8Array;
-    sha256: string;
-  }): Promise<void> => {
+  const putArtifactUncached = async (
+    artifact: {
+      bytes: Uint8Array;
+      sha256: string;
+    },
+    options: {
+      requireActiveLease?: boolean;
+    } = {},
+  ): Promise<void> => {
     const headers = input.workspaceCheckpointBridge
-      ? await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge)
+      ? options.requireActiveLease
+        ? await requireHostedRuntimeActiveLeaseHeaders(
+            input.workspaceCheckpointBridge,
+            `Hosted artifact upload ${artifact.sha256}`,
+          )
+        : await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge)
       : new Headers();
     const response = await fetchHostedResponse({
       description: `Hosted artifact upload ${artifact.sha256}`,
@@ -179,10 +189,15 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
     assertHostedOk(response, `Hosted artifact upload ${artifact.sha256}`);
   };
-  const putArtifactOnce = async (artifact: {
-    bytes: Uint8Array;
-    sha256: string;
-  }): Promise<void> => {
+  const putArtifactOnce = async (
+    artifact: {
+      bytes: Uint8Array;
+      sha256: string;
+    },
+    options: {
+      requireActiveLease?: boolean;
+    } = {},
+  ): Promise<void> => {
     if (uploadedArtifactShas.has(artifact.sha256)) {
       return;
     }
@@ -193,7 +208,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
       return;
     }
 
-    const upload = putArtifactUncached(artifact)
+    const upload = putArtifactUncached(artifact, options)
       .then(() => {
         uploadedArtifactShas.add(artifact.sha256);
       })
@@ -259,19 +274,42 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(input.workspaceCheckpointBridge
       ? {
           codexContinuityPort: {
-            scheduleSnapshot: async ({ operatorHomeRoot, vaultRoot }) => {
-              const snapshot = await snapshotHostedCodexContinuityArtifact({
-                operatorHomeRoot,
-                vaultRoot,
-              });
-              if (snapshot.threadCount === 0) {
+            scheduleSnapshot({ operatorHomeRoot, vaultRoot }) {
+              const workspaceCheckpointBridge = input.workspaceCheckpointBridge;
+              if (!workspaceCheckpointBridge) {
                 return;
               }
-              const sha256 = sha256HostedBundleHex(snapshot.bundle);
-              await putArtifactOnce({
-                bytes: snapshot.bundle,
-                sha256,
-              });
+              setTimeout(() => {
+                void (async () => {
+                  const assertSnapshotLive = async () => {
+                    await requireHostedRuntimeActiveLeaseHeaders(
+                      workspaceCheckpointBridge,
+                      "Hosted Codex continuity snapshot",
+                    );
+                  };
+                  const snapshot = await snapshotHostedCodexContinuityArtifact({
+                    assertSnapshotLive,
+                    operatorHomeRoot,
+                    vaultRoot,
+                  });
+                  if (snapshot.threadCount === 0) {
+                    return;
+                  }
+                  await assertSnapshotLive();
+                  const sha256 = sha256HostedBundleHex(snapshot.bundle);
+                  await putArtifactOnce(
+                    {
+                      bytes: snapshot.bundle,
+                      sha256,
+                    },
+                    { requireActiveLease: true },
+                  );
+                })().catch((error: unknown) => {
+                  console.warn("Hosted Codex continuity background snapshot failed.", {
+                    errorName: error instanceof Error ? error.name : typeof error,
+                  });
+                });
+              }, 0);
             },
           },
         }

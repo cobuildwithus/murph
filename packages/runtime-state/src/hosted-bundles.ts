@@ -68,6 +68,9 @@ const HOSTED_HOT_STATE_MAX_FILES = 5_000;
 const HOSTED_HOT_STATE_MAX_INLINE_BYTES = 16 * 1024 * 1024;
 const HOSTED_HOT_STATE_MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
 const HOSTED_CODEX_CONTINUITY_SNAPSHOT_MAX_ATTEMPTS = 2;
+const HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_THREADS = 64;
+const HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_ROLLOUT_BYTES = 2 * 1024 * 1024;
+const HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_BUNDLE_BYTES = 3 * 1024 * 1024;
 
 const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/accepted-turn-inputs`,
@@ -174,6 +177,17 @@ export class HostedAssistantRuntimeHotStateBudgetExceededError extends Error {
   ) {
     super("Hosted assistant runtime hot-state snapshot exceeded its budget.");
     this.name = "HostedAssistantRuntimeHotStateBudgetExceededError";
+  }
+}
+
+export class HostedCodexContinuityArtifactBudgetExceededError extends Error {
+  constructor(
+    public readonly metric: "bundle_bytes" | "rollout_bytes" | "threads",
+    public readonly limit: number,
+    public readonly actual: number,
+  ) {
+    super(`Hosted Codex continuity artifact budget exceeded for ${metric}: ${actual} > ${limit}.`);
+    this.name = "HostedCodexContinuityArtifactBudgetExceededError";
   }
 }
 
@@ -1476,6 +1490,15 @@ async function snapshotHostedCodexContinuityArtifactOnce(input: {
     hostedCodexContinuity,
     codexHomeSnapshotDiagnostics,
   );
+  const rolloutBytes = hostedCodexContinuity.entries.reduce(
+    (total, entry) => total + entry.byteSize,
+    0,
+  );
+  assertHostedCodexContinuityArtifactBudget({
+    bundleBytes: 0,
+    rolloutBytes,
+    threadCount: hostedCodexContinuity.entries.length,
+  });
 
   await input.assertSnapshotLive?.();
   const files = await createHostedCodexContinuityArtifactArchiveFiles(
@@ -1487,6 +1510,11 @@ async function snapshotHostedCodexContinuityArtifactOnce(input: {
     files,
     kind: "vault",
     schema: HOSTED_BUNDLE_SCHEMA,
+  });
+  assertHostedCodexContinuityArtifactBudget({
+    bundleBytes: bundle.byteLength,
+    rolloutBytes,
+    threadCount: hostedCodexContinuity.entries.length,
   });
 
   return {
@@ -2571,6 +2599,36 @@ function assertHostedAssistantRuntimeHotStateBudget(input: {
   }
 }
 
+function assertHostedCodexContinuityArtifactBudget(input: {
+  bundleBytes: number;
+  rolloutBytes: number;
+  threadCount: number;
+}): void {
+  if (input.threadCount > HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_THREADS) {
+    throw new HostedCodexContinuityArtifactBudgetExceededError(
+      "threads",
+      HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_THREADS,
+      input.threadCount,
+    );
+  }
+
+  if (input.rolloutBytes > HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_ROLLOUT_BYTES) {
+    throw new HostedCodexContinuityArtifactBudgetExceededError(
+      "rollout_bytes",
+      HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_ROLLOUT_BYTES,
+      input.rolloutBytes,
+    );
+  }
+
+  if (input.bundleBytes > HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_BUNDLE_BYTES) {
+    throw new HostedCodexContinuityArtifactBudgetExceededError(
+      "bundle_bytes",
+      HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_BUNDLE_BYTES,
+      input.bundleBytes,
+    );
+  }
+}
+
 function isHostedCodexResumeContinuitySnapshotRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
   return normalizedRelativePath === HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH
@@ -3470,7 +3528,34 @@ async function readAssistantSessionProviderResumeRequirements(
   }
 
   await visit(sessionsRoot);
-  return requirements;
+  return dedupeAssistantSessionProviderResumeRequirements(requirements);
+}
+
+function dedupeAssistantSessionProviderResumeRequirements(
+  requirements: Array<{
+    codexRolloutRelativePath: string | null;
+    providerSessionId: string;
+  }>,
+): Array<{
+  codexRolloutRelativePath: string | null;
+  providerSessionId: string;
+}> {
+  const seen = new Set<string>();
+  const uniqueRequirements: Array<{
+    codexRolloutRelativePath: string | null;
+    providerSessionId: string;
+  }> = [];
+
+  for (const requirement of requirements) {
+    const key = `${requirement.providerSessionId}\0${requirement.codexRolloutRelativePath ?? ""}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    uniqueRequirements.push(requirement);
+  }
+
+  return uniqueRequirements;
 }
 
 function normalizeHostedCodexRolloutRelativePathForProvider(input: {
