@@ -2415,7 +2415,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 "utf8",
               );
               return {
-                checkpointReason: "assistant_runtime_commit",
+                checkpointReason: "canonical_runtime_commit",
                 progressed: true,
               };
             },
@@ -2426,7 +2426,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await runOnce();
       assert.deepEqual(artifactGetCalls, [baseHash, initialHotHash]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "assistant_runtime_commit",
+        "canonical_runtime_commit",
       ]);
       artifactGetCalls.length = 0;
 

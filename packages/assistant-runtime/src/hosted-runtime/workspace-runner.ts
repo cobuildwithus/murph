@@ -152,6 +152,7 @@ export type HostedWorkspaceRunnerAssistantPhaseResult =
 
 export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
   checkpointReason: HostedWorkspaceCheckpointReason;
+  foregroundCheckpointRequired?: boolean;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -195,6 +196,12 @@ export interface HostedWorkspaceRunnerResult {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
 }
+
+const DEFERRED_RUNTIME_RESIDUE_CHECKPOINT_REASONS = new Set<HostedWorkspaceCheckpointReason>([
+  "assistant_runtime_commit",
+  "outbox_receipt",
+  "provider_cleanup",
+]);
 
 export class HostedWorkspaceRunnerUserMismatchError extends Error {
   readonly actualUserId: string;
@@ -332,6 +339,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       checkpointRequestBuilder: checkpointRequestSession,
       expectedUserId: input.expectedUserId,
       initialMailboxImport,
+      now: input.now,
+      platform: input.platform,
+      runtimeLogContext: input.runtimeLogContext,
       workspacePort: input.platform.workspacePort,
     });
     await checkpointHostedWorkspaceDeferredMailboxImportIfNeeded({
@@ -360,13 +370,22 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
     if (postCheckpoint) {
       try {
-        await checkpointHostedWorkspacePostAssistantPhase({
+        const postCheckpointResult = await checkpointHostedWorkspacePostAssistantPhase({
           checkpointRequestBuilder: checkpointRequestSession,
           expectedUserId: input.expectedUserId,
           initialMailboxImport,
+          now: input.now,
           postCheckpoint,
+          platform: input.platform,
+          runtimeLogContext: input.runtimeLogContext,
           workspacePort: input.platform.workspacePort,
         });
+        if (postCheckpointResult.deferred) {
+          mergeDeferredPostCheckpointWake({
+            assistantPhaseResult,
+            postCheckpoint,
+          });
+        }
       } catch (error) {
         if (
           error instanceof HostedMailboxImportCheckpointConflictError
@@ -672,9 +691,26 @@ async function checkpointHostedWorkspacePostAssistantPhase(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   expectedUserId: string;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  now?: () => string;
   postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
+  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
   workspacePort: HostedRuntimeWorkspacePort;
-}): Promise<void> {
+}): Promise<{ deferred: boolean }> {
+  if (shouldDeferHostedRuntimeResidueCheckpoint({
+    foregroundCheckpointRequired: input.postCheckpoint.foregroundCheckpointRequired ?? true,
+    reason: input.postCheckpoint.checkpointReason,
+  })) {
+    writeHostedRuntimeResidueCheckpointDeferredLog({
+      checkpointPhase: "post_assistant",
+      now: input.now,
+      platform: input.platform,
+      reason: input.postCheckpoint.checkpointReason,
+      runtimeLogContext: input.runtimeLogContext,
+    });
+    return { deferred: true };
+  }
+
   const mailboxImport =
     input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
@@ -710,6 +746,7 @@ async function checkpointHostedWorkspacePostAssistantPhase(input: {
   }
 
   input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
+  return { deferred: false };
 }
 
 function createHostedWorkspaceCheckpointRequestSession(
@@ -1001,15 +1038,31 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   expectedUserId: string;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  now?: () => string;
+  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
   workspacePort: HostedRuntimeWorkspacePort;
 }): Promise<void> {
-  if (!shouldCheckpointHostedWorkspaceAssistantPhase(input.assistantPhaseResult)) {
+  if (input.assistantPhaseResult.progressed !== true) {
     return;
   }
 
   const checkpointReason = requireHostedWorkspaceAssistantPhaseCheckpointReason(
     input.assistantPhaseResult,
   );
+  if (shouldDeferHostedRuntimeResidueCheckpoint({
+    reason: checkpointReason,
+  })) {
+    writeHostedRuntimeResidueCheckpointDeferredLog({
+      checkpointPhase: "assistant",
+      now: input.now,
+      platform: input.platform,
+      reason: checkpointReason,
+      runtimeLogContext: input.runtimeLogContext,
+    });
+    return;
+  }
+
   const mailboxImport =
     input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
@@ -1191,12 +1244,6 @@ function hostedWorkspaceScheduledWake(
   };
 }
 
-function shouldCheckpointHostedWorkspaceAssistantPhase(
-  result: HostedWorkspaceRunnerAssistantPhaseResult,
-): boolean {
-  return result.progressed === true;
-}
-
 function requireHostedWorkspaceAssistantPhaseCheckpointReason(
   result: HostedWorkspaceRunnerAssistantPhaseResult,
 ): HostedWorkspaceCheckpointReason {
@@ -1204,6 +1251,83 @@ function requireHostedWorkspaceAssistantPhaseCheckpointReason(
     throw new TypeError("Hosted workspace assistant phase checkpoint requires an explicit reason.");
   }
   return result.checkpointReason;
+}
+
+function shouldDeferHostedRuntimeResidueCheckpoint(input: {
+  foregroundCheckpointRequired?: boolean;
+  reason: HostedWorkspaceCheckpointReason;
+}): boolean {
+  if (!DEFERRED_RUNTIME_RESIDUE_CHECKPOINT_REASONS.has(input.reason)) {
+    return false;
+  }
+  if (input.reason !== "outbox_receipt") {
+    return true;
+  }
+  return input.foregroundCheckpointRequired !== true;
+}
+
+function mergeDeferredPostCheckpointWake(input: {
+  assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
+}): void {
+  if (input.assistantPhaseResult.progressed !== true) {
+    return;
+  }
+
+  const nextWakeAt = earliestHostedWorkspaceRunnerWakeAt(
+    Object.hasOwn(input.assistantPhaseResult, "nextWakeAt")
+      ? input.assistantPhaseResult.nextWakeAt ?? null
+      : null,
+    input.postCheckpoint.nextWakeAt ?? null,
+  );
+  if (nextWakeAt !== null) {
+    input.assistantPhaseResult.nextWakeAt = nextWakeAt;
+  }
+}
+
+function earliestHostedWorkspaceRunnerWakeAt(
+  left: string | null,
+  right: string | null,
+): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
+  }
+  if (!Number.isFinite(rightMs)) {
+    return left;
+  }
+  return rightMs < leftMs ? right : left;
+}
+
+function writeHostedRuntimeResidueCheckpointDeferredLog(input: {
+  checkpointPhase: "assistant" | "post_assistant";
+  now?: () => string;
+  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
+  reason: HostedWorkspaceCheckpointReason;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
+}): void {
+  void writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.runtimeLogContext),
+      component: "workspace",
+      eventCode: "checkpoint.runtime_residue_deferred",
+      level: "info",
+      phase: "checkpoint",
+      redactedJson: {
+        checkpointPhase: input.checkpointPhase,
+        checkpointReason: input.reason,
+      },
+    },
+    now: input.now,
+    platform: input.platform,
+  });
 }
 
 function applyExpectedWorkspaceVersionOverride(input: {
