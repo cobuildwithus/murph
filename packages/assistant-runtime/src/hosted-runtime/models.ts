@@ -159,6 +159,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationBeforeStateElapsedMs?: number | null;
   assistantAutomationElapsedMs?: number | null;
   assistantAutomationPassElapsedMs?: number | null;
+  assistantAutomationProgressed?: boolean | null;
   assistantAutomationTotalElapsedMs?: number | null;
   deviceSyncElapsedMs?: number | null;
   deviceSyncProcessed: number;

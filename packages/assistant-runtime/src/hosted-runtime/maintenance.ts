@@ -204,6 +204,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       assistantResult.timings?.beforeStateElapsedMs ?? null,
     assistantAutomationElapsedMs,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
+    assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     deviceSyncElapsedMs,
     deviceSyncProcessed: deviceSyncResult.processedJobs,
