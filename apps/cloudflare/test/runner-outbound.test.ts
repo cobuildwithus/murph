@@ -1667,6 +1667,173 @@ describe("handleRunnerOutboundRequest", () => {
     expect(init?.method).toBe("POST");
   });
 
+  it("passes request abort and the foreground timeout into Linq sends", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const requestController = new AbortController();
+    const abortReason = new Error("request aborted");
+    const fetchMock = vi.fn(async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const providerSignal = init?.signal;
+      assert(providerSignal instanceof AbortSignal);
+      assert.equal(providerSignal.aborted, false);
+      requestController.abort(abortReason);
+      assert.equal(providerSignal.aborted, true);
+      return new Response(JSON.stringify({
+        chat_id: "linq_chat_123",
+        message: {
+          id: "linq_message_123",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH}`, {
+        body: JSON.stringify({
+          message: "hello",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+        signal: requestController.signal,
+      }),
+      createRunnerOutboundEnv({
+        LINQ_API_TOKEN: "linq-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(timeoutSpy).toHaveBeenCalledWith(7_500);
+    timeoutSpy.mockRestore();
+  });
+
+  it.each([
+    {
+      body: {
+        action: "typing",
+        target: "linq_chat_123",
+      },
+      expectedMethod: "POST",
+      expectedUrl: "https://api.linqapp.com/api/partner/v3/chats/linq_chat_123/typing",
+      name: "typing",
+      path: HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
+    },
+    {
+      body: {
+        chatId: "linq_chat_123",
+      },
+      expectedMethod: "POST",
+      expectedUrl: "https://api.linqapp.com/api/partner/v3/chats/linq_chat_123/read",
+      name: "mark-read",
+      path: HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
+    },
+    {
+      body: {
+        messageIds: ["linq_message_123"],
+      },
+      expectedMethod: "DELETE",
+      expectedUrl: "https://api.linqapp.com/api/partner/v3/messages/linq_message_123",
+      name: "delete",
+      path: HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
+    },
+  ])("passes request abort and a short foreground timeout into Linq $name effects", async (testCase) => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const requestController = new AbortController();
+    const abortReason = new Error(`${testCase.name} request aborted`);
+    const fetchMock = vi.fn(async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const providerSignal = init?.signal;
+      assert(providerSignal instanceof AbortSignal);
+      assert.equal(providerSignal.aborted, false);
+      requestController.abort(abortReason);
+      assert.equal(providerSignal.aborted, true);
+      assert.equal(String(input), testCase.expectedUrl);
+      assert.equal(init?.method, testCase.expectedMethod);
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${testCase.path}`, {
+        body: JSON.stringify(testCase.body),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+        signal: requestController.signal,
+      }),
+      createRunnerOutboundEnv({
+        LINQ_API_TOKEN: "linq-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(timeoutSpy).toHaveBeenCalledWith(800);
+    timeoutSpy.mockRestore();
+  });
+
+  it("keeps Linq foreground timeout failures sanitized", async () => {
+    const timeoutController = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutController.signal);
+    const fetchMock = vi.fn((
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) =>
+      new Promise<Response>((_resolve, reject) => {
+        const providerSignal = init?.signal;
+        assert(providerSignal instanceof AbortSignal);
+        providerSignal.addEventListener(
+          "abort",
+          () => reject(providerSignal.reason ?? new Error("provider effect aborted")),
+          { once: true },
+        );
+        timeoutController.abort(new Error("linq-token timeout detail"));
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+        body: JSON.stringify({
+          chatId: "linq_chat_123",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        LINQ_API_TOKEN: "linq-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(502);
+    const payload = await response.json();
+    expect(payload).toEqual({
+      error: "Provider effect failed.",
+    });
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("linq-token");
+    expect(serialized).not.toContain("timeout detail");
+    expect(serialized).not.toContain("linq_chat_123");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(timeoutSpy).toHaveBeenCalledWith(800);
+    timeoutSpy.mockRestore();
+  });
+
   it("recovers stale Linq threads inside the Worker-owned send effect", async () => {
     const fetchMock = vi.fn(async (
       input: RequestInfo | URL,
