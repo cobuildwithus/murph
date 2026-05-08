@@ -188,6 +188,8 @@ R176 reduced cleanly with 3/3 `approve_same_family_sanity_continue_external_sour
 
 R177 materialized that next direction as the external-source validation protocol. It has two target lanes: MIDUS label filling and partner aggregate validation. It predeclares the frozen age/sex reference and clinical-core non-CRP anchor, age 40-79 ten-year all-cause denominator rules, abstention if endpoint/denominator support is insufficient, 11 aggregate metrics, 7 transport stress checks, minimum cell count 11, aggregate-only egress, and no NHANES III calibration/model tuning. R177 is protocol-only; it does not authorize source access, partner execution, external scoring, model mutation, benchmark mutation, product claims, recommendations, or protocol claims.
 
+R178 converted the partner lane into an aggregate-only frozen-evaluator handoff contract. It defines a future authorized external-validation flow where the data holder runs locally, rows stay with the data holder, Murph receives only aggregate receipts, and receipts are rejected for unauthorized data sources, forbidden fields, small-cell leaks, denominator mismatch, or model/calibration mutation. The contract explicitly treats local storage as not overriding source rights: public, user-authorized, or data-holder-authorized sources only; leaked, bypassed, or redistributed controlled rows remain rejected.
+
 Until R135/R123/R124 pass against real evidence and a later source-specific activation gate approves more, Codex must not inspect source packages, dictionaries, codebooks, forms, agreement text, row files, counts, or metrics. Do not send source material to ReviewGPT, score external validation, or use the result for product copy.
 
 ## Operating Rule: ReviewGPT Is Not A Permission Clerk
