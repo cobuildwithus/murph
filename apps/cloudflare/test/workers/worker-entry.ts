@@ -63,6 +63,7 @@ interface TestWakeExecutionResult {
 function toDurableObjectStateLike(ctx: DurableObjectState): DurableObjectStateLike {
   return {
     storage: ctx.storage as DurableObjectStateLike["storage"],
+    waitUntil: (promise) => ctx.waitUntil(promise),
   };
 }
 
