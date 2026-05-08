@@ -319,6 +319,15 @@ export interface ExperimentSchedule {
   weeks: ScheduleWeek[];
 }
 
+export interface ExperimentRunContextEntry {
+  confounders: string[];
+  date: string | null;
+  id: string;
+  kind: "session" | "context";
+  note?: string;
+  symptoms: string[];
+}
+
 export interface ExperimentRunProjection {
   id: string;
   source: "browser-vault";
@@ -337,6 +346,7 @@ export interface ExperimentRunProjection {
   trends: TrendData[];
   timeline: TimelineEvent[];
   schedule?: ExperimentSchedule;
+  sessionContext?: ExperimentRunContextEntry[];
   nextStep?: ExperimentNextStep;
   summary?: string;
   summaryDetail?: string;
@@ -353,6 +363,7 @@ export interface Experiment extends ExperimentProtocol {
   trends: TrendData[];
   timeline: TimelineEvent[];
   schedule?: ExperimentSchedule;
+  sessionContext?: ExperimentRunContextEntry[];
   privateRun?: ExperimentRunProjection;
   nextStep?: ExperimentNextStep;
   summary?: string;

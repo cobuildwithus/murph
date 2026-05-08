@@ -137,6 +137,7 @@ function mapExperimentResultsProjection(
       status,
     }),
     schedule: buildSchedule(results),
+    sessionContext: buildSessionContext(results),
     nextStep: status === "active" || status === "paused"
       ? buildRunNextStep({
           baselineDays: resolveResultBaselineDays(results, protocol),
@@ -447,6 +448,25 @@ function buildSchedule(
     loggedSessions: results.progress?.adherence.loggedSessions ?? schedule?.completedSessions,
     weeks,
   };
+}
+
+function buildSessionContext(
+  results: BrowserVaultExperimentResultsView,
+): ExperimentRunProjection["sessionContext"] {
+  const entries = results.context;
+
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return entries.map((entry) => ({
+    confounders: entry.confounders.slice(),
+    date: entry.date,
+    id: entry.id,
+    kind: entry.kind,
+    note: entry.note ?? undefined,
+    symptoms: entry.symptoms.slice(),
+  }));
 }
 
 function buildScheduleWeeks(input: {

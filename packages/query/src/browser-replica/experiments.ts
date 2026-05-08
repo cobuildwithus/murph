@@ -218,6 +218,15 @@ export interface BrowserVaultExperimentScheduleCell {
   timeZone: string;
 }
 
+export interface BrowserVaultExperimentContextEntry {
+  confounders: string[];
+  date: string | null;
+  id: string;
+  kind: "session" | "context";
+  note: string | null;
+  symptoms: string[];
+}
+
 export interface BrowserVaultExperimentAdherenceResult {
   cells: ExperimentAdherenceCalendarResult["cells"];
   summary: ExperimentAdherenceCalendarResult["summary"];
@@ -270,6 +279,7 @@ export interface BrowserVaultExperimentResultsView {
   adherence: BrowserVaultExperimentAdherenceResult | null;
   asOf: string;
   biomarkers: BrowserVaultExperimentBiomarkerResult[];
+  context: BrowserVaultExperimentContextEntry[];
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
   experiment: BrowserVaultExperimentResultRun;
   outcome: BrowserVaultExperimentOutcomeResult | null;
@@ -283,6 +293,7 @@ interface BrowserVaultExperimentRunContext {
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
   entity: BrowserVaultEntity;
   events: BrowserVaultEntity[];
+  eventTimeZone: string | null;
   adherenceTargets: ExperimentAdherenceTarget[];
   expectedEffects: BrowserVaultExperimentExpectedEffectInput[];
   run: BrowserVaultExperimentResultRun;
@@ -331,11 +342,13 @@ export function selectBrowserVaultExperimentResults(
   const schedule = buildScheduleResult(adherence);
   const progress = buildProgressResult(context, biomarkers, schedule);
   const outcome = buildOutcomeResult(context, biomarkers, progress);
+  const runContext = buildExperimentContextEntries(context);
 
   return {
     adherence,
     asOf,
     biomarkers,
+    context: runContext,
     diagnostics: context.diagnostics,
     experiment: context.run,
     outcome,
@@ -470,6 +483,7 @@ function buildRunContext(
     diagnostics,
     entity,
     events,
+    eventTimeZone: runTimeZone,
     adherenceTargets,
     expectedEffects,
     run,
@@ -1058,6 +1072,111 @@ function summarizeScheduleCells(
     skippedSessions: 0,
     timeZone,
   };
+}
+
+function buildExperimentContextEntries(
+  context: BrowserVaultExperimentRunContext,
+): BrowserVaultExperimentContextEntry[] {
+  return context.events
+    .map((event) => buildExperimentContextEntry(event, context.eventTimeZone))
+    .filter((entry): entry is BrowserVaultExperimentContextEntry => entry !== null)
+    .sort(compareContextEntriesAsc);
+}
+
+function buildExperimentContextEntry(
+  event: BrowserVaultEntity,
+  eventTimeZone: string | null,
+): BrowserVaultExperimentContextEntry | null {
+  if (event.kind !== "intervention_session" && event.kind !== "experiment_context") {
+    return null;
+  }
+
+  const attributes = event.attributes;
+  const date = event.kind === "intervention_session"
+    ? readSessionEventLocalDate(event) ?? readEventLocalDate(event, eventTimeZone)
+    : readEventLocalDate(event, eventTimeZone);
+  const note = readString(attributes.note);
+  const symptoms = readStringArray(attributes.symptoms);
+  const confounders = event.kind === "intervention_session"
+    ? readSessionConfounderLabels(attributes)
+    : readContextConfounderLabels(attributes);
+
+  if (note === null && symptoms.length === 0 && confounders.length === 0) {
+    return null;
+  }
+
+  return {
+    confounders,
+    date,
+    id: event.id,
+    kind: event.kind === "intervention_session" ? "session" : "context",
+    note,
+    symptoms,
+  };
+}
+
+function readSessionConfounderLabels(attributes: JsonRecord): string[] {
+  const labels = readConfounderLabels(attributes.confounders);
+
+  if (attributes.afterExercise === true) {
+    labels.unshift("After exercise");
+  }
+
+  return uniqueStrings(labels);
+}
+
+function readContextConfounderLabels(attributes: JsonRecord): string[] {
+  const severity = readString(attributes.severity);
+  const contextType = readString(attributes.contextType);
+
+  return severity === "potential_confounder" && contextType
+    ? [humanizeLabel(contextType)]
+    : [];
+}
+
+function readConfounderLabels(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return readStringArray(value).map(humanizeLabel);
+  }
+
+  const record = readRecord(value);
+  if (!record) {
+    return [];
+  }
+
+  return Object.entries(record).flatMap(([key, entry]) => {
+    if (entry === false || entry === null || entry === undefined) {
+      return [];
+    }
+
+    if (entry === true) {
+      return [humanizeLabel(key)];
+    }
+
+    if (typeof entry === "string") {
+      const valueText = entry.trim();
+      return valueText.length > 0 ? [`${humanizeLabel(key)}: ${valueText}`] : [];
+    }
+
+    if (typeof entry === "number" && Number.isFinite(entry)) {
+      return [`${humanizeLabel(key)}: ${entry}`];
+    }
+
+    return [humanizeLabel(key)];
+  });
+}
+
+function compareContextEntriesAsc(
+  left: BrowserVaultExperimentContextEntry,
+  right: BrowserVaultExperimentContextEntry,
+): number {
+  const leftDate = left.date ?? "";
+  const rightDate = right.date ?? "";
+  if (leftDate !== rightDate) {
+    return leftDate.localeCompare(rightDate);
+  }
+
+  return left.id.localeCompare(right.id);
 }
 
 function buildProgressResult(
@@ -1879,5 +1998,23 @@ function humanizeBiomarkerKey(value: string): string {
   return label
     .split("-")
     .map((part) => (part.length === 0 ? part : `${part[0]?.toUpperCase()}${part.slice(1)}`))
+    .join(" ");
+}
+
+function humanizeLabel(value: string): string {
+  const label = value.split(":").at(-1) ?? value;
+
+  if (label.trim().length === 0) {
+    return "";
+  }
+
+  return label
+    .replace(/([a-z])([A-Z])/gu, "$1 $2")
+    .replace(/[-_]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .split(" ")
+    .filter((part) => part.length > 0)
+    .map((part) => `${part[0]?.toUpperCase()}${part.slice(1).toLowerCase()}`)
     .join(" ");
 }

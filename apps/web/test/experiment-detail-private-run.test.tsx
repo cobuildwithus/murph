@@ -731,6 +731,144 @@ describe("experiment detail private-run composition", () => {
     expect(scheduleMarkup).not.toContain("1 missed");
   });
 
+  it("renders browser-vault session confounders in private results context", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        additionalEntities: [
+          createSessionEntity({
+            afterExercise: true,
+            confounders: {
+              travel: true,
+              trainingLoad: "heavy",
+            },
+            date: "2026-04-08",
+            experimentId: "exp_sauna_context",
+            experimentSlug: "finnish-sauna",
+            note: "Felt lightheaded near the end.",
+            sessionStatus: "completed",
+            symptoms: ["lightheaded"],
+          }),
+        ],
+        generatedAt: "2026-04-10T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_context",
+            runPlan: {
+              baselineEnd: "2026-04-07",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-12",
+              interventionStart: "2026-04-08",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna context run",
+          }),
+          id: "exp_sauna_context",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Context is available even before outcome data is exported.",
+          tags: ["sauna"],
+          title: "Private sauna context run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun?.sessionContext).toEqual([
+      expect.objectContaining({
+        confounders: ["After exercise", "Travel", "Training Load: heavy"],
+        date: "2026-04-08",
+        note: "Felt lightheaded near the end.",
+        symptoms: ["lightheaded"],
+      }),
+    ]);
+
+    const markup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(markup).toContain("Confounders and notes");
+    expect(markup).toContain("After exercise");
+    expect(markup).toContain("Training Load: heavy");
+    expect(markup).toContain("Felt lightheaded near the end.");
+    expect(markup).toContain("lightheaded");
+  });
+
+  it("renders experiment-context entries in private results context", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        additionalEntities: [
+          createContextEntity({
+            contextType: "late_caffeine",
+            date: "2026-04-09",
+            experimentId: "exp_sauna_context",
+            experimentSlug: "finnish-sauna",
+            note: "Coffee after dinner.",
+            severity: "potential_confounder",
+          }),
+        ],
+        generatedAt: "2026-04-10T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_context",
+            runPlan: {
+              baselineEnd: "2026-04-07",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-12",
+              interventionStart: "2026-04-08",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna context run",
+          }),
+          id: "exp_sauna_context",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Context is available even before outcome data is exported.",
+          tags: ["sauna"],
+          title: "Private sauna context run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    const markup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(markup).toContain("Context note");
+    expect(markup).toContain("Late Caffeine");
+    expect(markup).toContain("Coffee after dinner.");
+  });
+
   it("preserves same-day planned target cells in the schedule UI projection", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -1007,16 +1145,24 @@ function createExperimentFrontmatter(input: {
 }
 
 function createSessionEntity(input: {
+  afterExercise?: boolean;
+  confounders?: Record<string, string | number | boolean | null> | string[];
   date: string;
   experimentId: string;
   experimentSlug: string;
+  note?: string;
   sessionStatus: string;
+  symptoms?: string[];
 }): BrowserVaultEntity {
   return createEntity("event", `evt_${input.date}_${input.sessionStatus}`, {
     attributes: {
+      afterExercise: input.afterExercise,
+      confounders: input.confounders,
       experimentId: input.experimentId,
       experimentSlug: input.experimentSlug,
+      note: input.note,
       sessionStatus: input.sessionStatus,
+      symptoms: input.symptoms,
     },
     date: input.date,
     experimentSlug: input.experimentSlug,
@@ -1026,6 +1172,33 @@ function createSessionEntity(input: {
     occurredAt: `${input.date}T13:00:00.000Z`,
     recordClass: "ledger",
     title: "Sauna session",
+  });
+}
+
+function createContextEntity(input: {
+  contextType: string;
+  date: string;
+  experimentId: string;
+  experimentSlug: string;
+  note?: string;
+  severity: string;
+}): BrowserVaultEntity {
+  return createEntity("event", `evt_context_${input.date}`, {
+    attributes: {
+      contextType: input.contextType,
+      experimentId: input.experimentId,
+      experimentSlug: input.experimentSlug,
+      note: input.note,
+      severity: input.severity,
+    },
+    date: input.date,
+    experimentSlug: input.experimentSlug,
+    kind: "experiment_context",
+    links: [{ targetId: input.experimentId, type: "related_to" }],
+    lookupIds: [`evt_context_${input.date}`],
+    occurredAt: `${input.date}T13:00:00.000Z`,
+    recordClass: "ledger",
+    title: "Experiment context",
   });
 }
 
