@@ -60,7 +60,10 @@ function assertAssistantOutboxDispatch<TExpected extends object>(
   }
 
   assert.match(String(actual.idempotencyKey), /^assistant-outbox:outbox_/u)
-  const { idempotencyKey: _ignored, ...rest } = actual
+  const { idempotencyKey: _ignored, signal: optionalSignal, ...rest } = actual
+  if (optionalSignal !== undefined) {
+    Object.assign(rest, { signal: optionalSignal })
+  }
   assert.deepEqual(rest, expected)
 }
 

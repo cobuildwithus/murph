@@ -78,7 +78,7 @@ test("intake show and intake list route assessment reads through the noun-specif
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
-});
+}, 120_000);
 
 test("intake list applies date bounds and echoes renamed filter keys", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));

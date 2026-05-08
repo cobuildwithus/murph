@@ -235,6 +235,32 @@ describe('inbox attachment evidence adapter', () => {
     })
   })
 
+  it('caps attachment evidence at the input schema limit and marks overflow partial', () => {
+    const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
+      capture: {
+        captureId: 'cap_many',
+        attachments: Array.from({ length: 33 }, (_, index) => {
+          const ordinal = index + 1
+          return createAttachment({
+            attachmentId: `att_${ordinal}`,
+            fileName: `attachment-${ordinal}.txt`,
+            ordinal,
+            storedPath:
+              `raw/inbox/cap_many/attachments/${String(ordinal).padStart(3, '0')}.txt`,
+          })
+        }),
+      },
+      rawArtifactPathForAttachment: ({ normalizedSourcePath }) => normalizedSourcePath,
+      source: 'local-inbox-import',
+    })
+
+    expect(evidence.status).toBe('partial')
+    expect(evidence.reasonCode).toBe('attachment.evidence_partial.attachment_limit')
+    expect(evidence.attachments).toHaveLength(32)
+    expect(evidence.attachments.at(0)?.sourceAttachmentId).toBe('att_1')
+    expect(evidence.attachments.at(-1)?.sourceAttachmentId).toBe('att_32')
+  })
+
   it('omits unsafe paths, filenames, and inline text instead of creating invalid evidence', () => {
     const evidence = createAssistantInputAttachmentEvidenceFromInboxCapture({
       capture: {
@@ -311,6 +337,48 @@ describe('inbox attachment evidence adapter', () => {
     await expect(readFile(path.join(vaultRoot, rawArtifactRefs.get(0)!))).resolves.toEqual(
       Buffer.from('image bytes'),
     )
+  })
+
+  it('materializes raw attachment refs only up to the evidence descriptor limit', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-inbox-evidence-'))
+    tempRoots.push(parentRoot)
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const attachments = Array.from({ length: 33 }, (_, index) => {
+      const ordinal = index + 1
+      return createAttachment({
+        fileName: `attachment-${ordinal}.txt`,
+        ordinal,
+        storedPath:
+          `raw/inbox/cap_many/attachments/${String(ordinal).padStart(3, '0')}.txt`,
+      })
+    })
+    await Promise.all(
+      attachments.map((attachment, index) =>
+        writeVaultFile(
+          vaultRoot,
+          attachment.storedPath!,
+          Buffer.from(`attachment ${index + 1}`),
+        ),
+      ),
+    )
+
+    const rawArtifactRefs = await materializeAssistantInputAttachmentRawArtifactRefs({
+      attachments,
+      inputId: 'ain_11111111111111111111111111111111',
+      vaultRoot,
+    })
+
+    expect(rawArtifactRefs.size).toBe(32)
+    expect(rawArtifactRefs.has(31)).toBe(true)
+    expect(rawArtifactRefs.has(32)).toBe(false)
+    await expect(
+      readFile(
+        path.join(
+          vaultRoot,
+          'raw/assistant-input/ain_11111111111111111111111111111111/attachments/033.txt',
+        ),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('preserves safe source extensions when MIME is missing or generic', async () => {

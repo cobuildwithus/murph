@@ -1783,7 +1783,7 @@ describe('Codex assistant registry helpers', () => {
       codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
       codexResumeFailureErrorKind: 'turn-failed',
       codexResumeFailureErrorMessage:
-        'Codex app-server turn failed. status failed. Authorization: [REDACTED] [REDACTED] at [path]',
+        'Codex app-server turn failed. status failed. Authorization: [REDACTED] at [path]',
       codexResumeFailureErrorMessageLength: expectedError.message.length,
       codexResumeFailureErrorMessagePresent: true,
       codexResumeFailureErrorPhrases: ['codex-turn-failed', 'status-failed'],
