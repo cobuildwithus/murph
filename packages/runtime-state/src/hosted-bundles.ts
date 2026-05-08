@@ -825,6 +825,12 @@ function requireManifestNumber(value: unknown, label: string): number {
 
 export async function snapshotHostedAssistantRuntimeHotState(input: {
   codexHomeSnapshotHashSecret?: string | null;
+  codexContinuityArtifactRefProvider?: (
+    input: HostedBundleArtifactSnapshotInput,
+  ) => HostedBundleArtifactRef | null | Promise<HostedBundleArtifactRef | null>;
+  codexContinuityArtifactSink?: (
+    input: HostedWorkspaceArtifactPersistInput,
+  ) => Promise<void> | void;
   operatorHomeRoot?: string | null;
   prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
   vaultRoot: string;
@@ -859,8 +865,32 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
     hostedCodexContinuity,
     codexHomeSnapshotDiagnostics,
   );
+  const codexContinuityArtifactPaths = createHostedCodexContinuitySnapshotArtifactPathSet(
+    hostedCodexContinuity,
+  );
 
   const bundle = await snapshotHostedBundleRoots({
+    externalizeFile: async (artifact) => {
+      if (!codexContinuityArtifactPaths.has(`${artifact.root}:${artifact.path}`)) {
+        return null;
+      }
+
+      const existingRef = await input.codexContinuityArtifactRefProvider?.(artifact) ?? null;
+      if (existingRef) {
+        return existingRef;
+      }
+
+      if (!input.codexContinuityArtifactSink) {
+        return null;
+      }
+
+      const ref = createHostedWorkspaceArtifactRef(artifact.bytes);
+      await input.codexContinuityArtifactSink({
+        ...artifact,
+        ref,
+      });
+      return ref;
+    },
     kind: "vault",
     roots: [
       {
@@ -1568,10 +1598,9 @@ function measureHostedAssistantRuntimeHotStateBundle(bundle: Uint8Array): {
   let inlineBytes = 0;
 
   for (const file of archive.files) {
-    if (isHostedBundleArtifactEntry(file)) {
-      throw new Error("Hosted assistant runtime hot-state snapshots must not externalize artifacts.");
+    if (!isHostedBundleArtifactEntry(file)) {
+      inlineBytes += Buffer.from(file.contentsBase64, "base64").byteLength;
     }
-    inlineBytes += Buffer.from(file.contentsBase64, "base64").byteLength;
   }
 
   return {
@@ -2099,6 +2128,14 @@ function createHostedCodexContinuitySnapshotExplicitFiles(
   return [...new Set(collection.entries.map((entry) =>
     `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`
   ))].sort((left, right) => left.localeCompare(right));
+}
+
+function createHostedCodexContinuitySnapshotArtifactPathSet(
+  collection: HostedCodexContinuityCollection,
+): Set<string> {
+  return new Set(createHostedCodexContinuitySnapshotExplicitFiles(collection).map((relativePath) =>
+    `${WORKSPACE_OPERATOR_HOME_ROOT}:${relativePath}`
+  ));
 }
 
 function isHostedCodexActiveRolloutSnapshotRelativePath(relativePath: string): boolean {
