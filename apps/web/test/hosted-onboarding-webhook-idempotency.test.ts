@@ -239,7 +239,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-message:evt_123",
+        idempotencyKey: "linq-invite-signup:invite_123",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
@@ -264,6 +264,64 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("uses invite-scoped idempotency for repeated first-contact signup link sends", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: null,
+    });
+    mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
+      billingStatus: HostedBillingStatus.not_started,
+      id: "member_123",
+      suspendedAt: null,
+    });
+    mocks.issueHostedInviteTx.mockResolvedValue({
+      id: "invite_123",
+      inviteCode: "code_first_contact",
+    });
+
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody({
+        eventId: "evt_first_contact_one",
+        messageId: "msg_first_contact_one",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody({
+        eventId: "evt_first_contact_two",
+        messageId: "msg_first_contact_two",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        idempotencyKey: "linq-invite-signup:invite_123",
+        message: buildHostedInviteReply({
+          joinUrl: "https://join.example.test/join/code_first_contact",
+        }),
+        replyToMessageId: "msg_first_contact_one",
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        idempotencyKey: "linq-invite-signup:invite_123",
+        message: buildHostedInviteReply({
+          joinUrl: "https://join.example.test/join/code_first_contact",
+        }),
+        replyToMessageId: "msg_first_contact_two",
+      }),
+    );
   });
 
   it("treats stale generated local crypto identity rows as a first contact miss", async () => {
@@ -435,9 +493,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 });
 
 function buildLinqMessageWebhookBody(input: {
+  eventId?: string;
   eventType?: string;
   from?: string;
   isFromMe?: boolean;
+  messageId?: string;
   service?: string;
   text?: string;
 } = {}): string {
@@ -458,7 +518,7 @@ function buildLinqMessageWebhookBody(input: {
         },
       },
       direction: input.isFromMe ? "outbound" : "inbound",
-      id: "msg_123",
+      id: input.messageId ?? "msg_123",
       parts: [
         {
           type: "text",
@@ -473,7 +533,7 @@ function buildLinqMessageWebhookBody(input: {
       sent_at: "2026-03-26T12:00:00.000Z",
       service,
     },
-    event_id: "evt_123",
+    event_id: input.eventId ?? "evt_123",
     event_type: input.eventType ?? "message.received",
   });
 }
