@@ -592,9 +592,10 @@ describe('assistant channel descriptors and runtime edges', () => {
         },
       ),
     ).rejects.toMatchObject({
-      code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
     })
-    expect(malformedTargetFetch).toHaveBeenCalledTimes(3)
+    expect(malformedTargetFetch).toHaveBeenCalledTimes(1)
 
     await expect(
       startTelegramTypingIndicator(

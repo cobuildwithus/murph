@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
 import { resolveStravaWebhookPreflightResponse } from "../src/providers/strava.ts";
+import { readUrl } from "./helpers.ts";
 import type {
   DeviceSyncAccount,
   DeviceSyncOAuthProvider,
@@ -411,6 +412,64 @@ describe("Strava device-sync provider", () => {
     ).rejects.toMatchObject({
       code: "STRAVA_ACTIVITY_SCOPE_REQUIRED",
     });
+  });
+
+  it("uses token-response scopes as the authority before accepting callback scopes", async () => {
+    const requests: string[] = [];
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = readUrl(input);
+        requests.push(url);
+
+        if (url === "https://www.strava.com/oauth/token") {
+          return new Response(JSON.stringify({
+            access_token: "access-token",
+            expires_in: 3600,
+            refresh_token: "refresh-token",
+            athlete: {
+              id: 12345,
+            },
+            scope: "read",
+          }), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        if (url.startsWith("https://www.strava.com/oauth/deauthorize")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch: ${url}`);
+      }),
+    });
+
+    await expect(
+      provider.oauthAdapter.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
+          state: "state-token-scopes",
+          now: "2026-04-16T00:00:00.000Z",
+          grantedScopes: ["activity:read_all"],
+        },
+        "authorization-code",
+      ),
+    ).rejects.toMatchObject({
+      code: "STRAVA_ACTIVITY_SCOPE_REQUIRED",
+    });
+    expect(requests).toEqual([
+      "https://www.strava.com/oauth/token",
+      "https://www.strava.com/oauth/deauthorize?access_token=access-token",
+    ]);
   });
 
   it("answers Strava webhook verification challenges through the provider-owned preflight seam", async () => {

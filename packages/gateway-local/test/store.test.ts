@@ -504,6 +504,127 @@ test("respondToPermissionInDatabase returns null without rebuilding when the req
   }
 });
 
+test("respondToPermissionInDatabase leaves already resolved requests unchanged", () => {
+  const database = new DatabaseSync(":memory:");
+  ensureGatewayStoreBaseSchema(database);
+
+  database.prepare(`
+    INSERT INTO gateway_permissions (
+      request_id,
+      session_key,
+      action,
+      description,
+      status,
+      requested_at,
+      resolved_at,
+      note
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "permission-approved",
+    null,
+    "send-message",
+    "Already resolved",
+    "approved",
+    "2026-04-08T00:01:00.000Z",
+    "2026-04-08T00:02:00.000Z",
+    "done",
+  );
+
+  let rebuildCalls = 0;
+  try {
+    const resolved = respondToPermissionInDatabase(
+      database,
+      {
+        decision: "deny",
+        note: "should not overwrite",
+        requestId: "permission-approved",
+      },
+      () => ({
+        events: [],
+        nextCursor: 0,
+        snapshot: null,
+      }),
+      () => {
+        rebuildCalls += 1;
+      },
+    );
+
+    assert.equal(rebuildCalls, 0);
+    assert.equal(resolved?.status, "approved");
+    assert.equal(resolved?.resolvedAt, "2026-04-08T00:02:00.000Z");
+    assert.equal(resolved?.note, "done");
+  } finally {
+    database.close();
+  }
+});
+
+test("respondToPermissionInDatabase returns the current row after an open update race", () => {
+  const database = new DatabaseSync(":memory:");
+  ensureGatewayStoreBaseSchema(database);
+
+  database.prepare(`
+    INSERT INTO gateway_permissions (
+      request_id,
+      session_key,
+      action,
+      description,
+      status,
+      requested_at,
+      resolved_at,
+      note
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "permission-race",
+    null,
+    "send-message",
+    "Race",
+    "open",
+    "2026-04-08T00:01:00.000Z",
+    null,
+    null,
+  );
+  database.exec(`
+    CREATE TRIGGER resolve_permission_before_update
+    BEFORE UPDATE ON gateway_permissions
+    WHEN OLD.request_id = 'permission-race' AND OLD.status = 'open'
+    BEGIN
+      UPDATE gateway_permissions
+         SET status = 'approved',
+             resolved_at = '2026-04-08T00:02:00.000Z',
+             note = 'already resolved'
+       WHERE request_id = OLD.request_id;
+      SELECT RAISE(IGNORE);
+    END;
+  `);
+
+  let rebuildCalls = 0;
+  try {
+    const resolved = respondToPermissionInDatabase(
+      database,
+      {
+        decision: "deny",
+        note: "should not overwrite",
+        requestId: "permission-race",
+      },
+      () => ({
+        events: [],
+        nextCursor: 0,
+        snapshot: null,
+      }),
+      () => {
+        rebuildCalls += 1;
+      },
+    );
+
+    assert.equal(rebuildCalls, 0);
+    assert.equal(resolved?.status, "approved");
+    assert.equal(resolved?.resolvedAt, "2026-04-08T00:02:00.000Z");
+    assert.equal(resolved?.note, "already resolved");
+  } finally {
+    database.close();
+  }
+});
+
 test("snapshot rebuild ignores blank aliases and falls back to the latest thread title", () => {
   const database = new DatabaseSync(":memory:");
   ensureGatewayStoreBaseSchema(database);

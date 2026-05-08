@@ -85,6 +85,7 @@ export type NormalizedDeviceBatchOptions = Omit<NormalizedDeviceBatch, "source">
 
 const INTEGER_SAMPLE_STREAMS = new Set(["heart_rate", "steps"]);
 const DELETION_ARTIFACT_IDENTITY_PREFIX = "device-deletion-observation";
+const DELETION_ARTIFACT_PART_MAX_LENGTH = 32;
 
 export interface SyntheticDeletionResourceIdOptions {
   provider: string;
@@ -328,10 +329,12 @@ function buildDeletionArtifactDescriptor(
   const identity = buildDeletionArtifactIdentity(options);
   const artifactParts = [
     options.resourceType,
-    options.resourceId,
-    options.occurredAt,
     options.sourceEventType,
-  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  ]
+    .flatMap((value) => {
+      const part = sanitizeDeletionArtifactPart(value);
+      return part ? [part] : [];
+    });
 
   return {
     content: stripUndefined({
@@ -341,11 +344,19 @@ function buildDeletionArtifactDescriptor(
       occurredAt: options.occurredAt,
       sourceEventType: options.sourceEventType,
     }),
-    fileName: `deletion-${artifactParts
-      .map((value) => value.replace(/[^A-Za-z0-9._-]+/gu, "-"))
-      .join("-")}-${identity}.json`,
+    fileName: `deletion-${[...artifactParts, identity].join("-")}.json`,
     role: ["deletion", ...artifactParts, identity].join(":"),
   };
+}
+
+function sanitizeDeletionArtifactPart(value: string | undefined): string | null {
+  const sanitized = value
+    ?.trim()
+    .replace(/[^A-Za-z0-9._-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, DELETION_ARTIFACT_PART_MAX_LENGTH);
+
+  return sanitized || null;
 }
 
 export function pushObservationEvent(

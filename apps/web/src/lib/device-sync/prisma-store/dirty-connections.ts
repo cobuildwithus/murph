@@ -207,6 +207,15 @@ export class PrismaHostedDirtyConnectionStore {
     userId: string;
     tx?: HostedPrismaTransactionClient;
   }): Promise<HostedDeviceSyncDirtyConnectionRecord | null> {
+    if (!input.tx) {
+      return this.prisma.$transaction((tx) =>
+        this.markDirtyConnectionProcessed({
+          ...input,
+          tx,
+        }),
+      );
+    }
+
     const prisma = input.tx ?? this.prisma;
     await lockDeviceConnectionForDirtyUpdate(prisma, input.connectionId);
     const existing = await prisma.deviceSyncDirtyConnection.findFirst({

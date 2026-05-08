@@ -411,6 +411,19 @@ export async function stopManagedDeviceSyncDaemon(input: {
     })
   }
 
+  const processVerified = await isRecordedManagedDeviceDaemonProcess({
+    baseUrl,
+    dependencies,
+    pid: state.pid,
+  })
+  if (!processVerified) {
+    throw new VaultCliError(
+      'DEVICE_SYNC_DAEMON_IDENTITY_UNVERIFIED',
+      'The recorded device sync daemon process is still running, but Murph could not verify that PID belongs to the managed daemon. Refusing to stop it automatically.',
+      { pid: state.pid, baseUrl },
+    )
+  }
+
   dependencies.killProcess(state.pid, 'SIGTERM')
 
   const stopped = await waitForDeviceDaemonExit(
@@ -442,6 +455,27 @@ export async function stopManagedDeviceSyncDaemon(input: {
       'Murph stopped the managed local device sync daemon.',
     stopped: true,
   })
+}
+
+async function isRecordedManagedDeviceDaemonProcess(input: {
+  baseUrl: string
+  dependencies: DeviceDaemonDependencies
+  pid: number
+}): Promise<boolean> {
+  let expectedBinPath: string
+  try {
+    expectedBinPath = resolveDeviceSyncDaemonBinPath(input.dependencies)
+  } catch {
+    return false
+  }
+
+  const pid = await input.dependencies.findUnmanagedDeviceSyncDaemonPid({
+    baseUrl: input.baseUrl,
+    expectedBinPath,
+    port: readBaseUrlPort(input.baseUrl),
+  })
+
+  return pid === input.pid
 }
 
 function createDeviceDaemonDependencies(

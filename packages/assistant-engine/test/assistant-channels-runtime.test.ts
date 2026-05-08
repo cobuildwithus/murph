@@ -268,6 +268,36 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('does not retry ambiguous Telegram transport failures', async () => {
+    const fetchImplementation = vi.fn(async () => {
+      throw new Error('socket closed after request')
+    })
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: 'hello',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: null,
+      providerMessageIds: [],
+      target: '123',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
   it('rolls back Telegram partial sends against the migrated target when a later chunk fails', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {

@@ -7286,6 +7286,7 @@ describe('assistant automation run loop', () => {
     expect(runLoopMocks.drainAssistantOutbox).toHaveBeenCalledWith({
       vault: '/tmp/assistant-automation-vault',
       limit: undefined,
+      signal: expect.any(AbortSignal),
     })
     expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -1017,10 +1017,16 @@ test.sequential(
           isProcessAlive(pid) {
             return livePids.has(pid)
           },
+          async findUnmanagedDeviceSyncDaemonPid() {
+            return 6161
+          },
           killProcess(pid) {
             signaledPid = pid
             livePids.delete(pid)
             healthy = false
+          },
+          resolveDeviceSyncPackageEntry() {
+            return '/virtual/device-syncd/dist/index.js'
           },
         },
       })

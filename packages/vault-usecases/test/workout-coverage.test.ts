@@ -265,6 +265,20 @@ describe("workout-model", () => {
       ],
     });
 
+    assert.throws(
+      () =>
+        buildWorkoutSessionFromSummary({
+          strengthExercises: [
+            {
+              exercise: "Marathon sets",
+              setCount: 151,
+              repsPerSet: 1,
+            },
+          ],
+        }),
+      /Too big/u,
+    );
+
     const template = createWorkoutTemplate();
     const sessionFromTemplate = buildWorkoutSessionFromTemplate(template, {
       sourceApp: "strong",

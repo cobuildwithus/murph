@@ -41,23 +41,25 @@ describe("PrismaDeviceSyncControlPlaneStore dirty connection state", () => {
     });
     const updateCalls: DirtyConnectionUpdate[] = [];
     let current = cloneDirtyConnectionRecord(existing);
+    const prisma = {
+      $queryRaw: vi.fn(async () => []),
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        findFirst: vi.fn(async () => cloneDirtyConnectionRecord(current)),
+        update: vi.fn(async (input: DirtyConnectionUpdate) => {
+          updateCalls.push(input);
+          current = cloneDirtyConnectionRecord({
+            ...current,
+            firstDirtyAt: input.data.firstDirtyAt ?? current.firstDirtyAt,
+            processedRevision: input.data.processedRevision,
+          });
+          return cloneDirtyConnectionRecord(current);
+        }),
+      },
+    };
 
     const store = new PrismaDeviceSyncControlPlaneStore({
-      prisma: {
-        $queryRaw: vi.fn(async () => []),
-        deviceSyncDirtyConnection: {
-          findFirst: vi.fn(async () => cloneDirtyConnectionRecord(current)),
-          update: vi.fn(async (input: DirtyConnectionUpdate) => {
-            updateCalls.push(input);
-            current = cloneDirtyConnectionRecord({
-              ...current,
-              firstDirtyAt: input.data.firstDirtyAt ?? current.firstDirtyAt,
-              processedRevision: input.data.processedRevision,
-            });
-            return cloneDirtyConnectionRecord(current);
-          }),
-        },
-      } as never,
+      prisma: prisma as never,
     });
 
     const result = await store.markDirtyConnectionProcessed({
@@ -66,6 +68,7 @@ describe("PrismaDeviceSyncControlPlaneStore dirty connection state", () => {
       userId: existing.userId,
     });
 
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0]?.data.processedRevision).toBe(3n);
     expect(updateCalls[0]?.data.firstDirtyAt).toEqual(existing.latestDirtyAt);

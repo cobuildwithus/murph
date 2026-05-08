@@ -375,7 +375,7 @@ export const mealNutritionSchema = z
 
 const activityStrengthExerciseBaseShape = {
   exercise: boundedString(1, 160),
-  setCount: integerSchema(1),
+  setCount: integerSchema(1, 150),
   repsPerSet: integerSchema(1),
   loadDescription: boundedString(1, 240).optional(),
 } satisfies z.ZodRawShape;

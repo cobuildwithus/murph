@@ -345,7 +345,15 @@ function formatWords(value: string): string {
 }
 
 function normalizeRouteId(value: string): string {
-  return decodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "");
+  return safeDecodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "");
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function summarizeBody(body: string): string {

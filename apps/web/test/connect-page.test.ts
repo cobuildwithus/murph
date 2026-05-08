@@ -1097,6 +1097,26 @@ test("ConnectSourcesGrid rejects unsafe connect response URLs before redirecting
 });
 
 test("ConnectPage shows callback success with the original source label", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_oura",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Oura",
+            resourceCount: 1,
+            sourceProviderSlug: "oura",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
@@ -1112,7 +1132,21 @@ test("ConnectPage shows callback success with the original source label", async 
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
 });
 
-test("ConnectPage avoids intermediary provider names when callback source metadata is missing", async () => {
+test("ConnectPage suppresses unverified connected callbacks from query params", async () => {
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "connected",
+    }),
+  }));
+
+  assert.doesNotMatch(markup, /Connected Oura\./);
+  assert.match(markup, /Oura not connected/);
+});
+
+test("ConnectPage ignores connected callback status when callback source metadata is missing", async () => {
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage({
     searchParams: Promise.resolve({
@@ -1121,7 +1155,7 @@ test("ConnectPage avoids intermediary provider names when callback source metada
     }),
   }));
 
-  assert.match(markup, /Connected your wearable source\./);
+  assert.doesNotMatch(markup, /Connected your wearable source\./);
   assert.doesNotMatch(markup, /Junction/u);
 });
 

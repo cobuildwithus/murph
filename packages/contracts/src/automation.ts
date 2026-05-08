@@ -27,8 +27,68 @@ export const automationScheduleKindValues = [
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
+function isValidCronField(
+  field: string,
+  minimum: number,
+  maximum: number,
+): boolean {
+  if (field === "*") {
+    return true;
+  }
+
+  return field.split(",").every((part) => {
+    if (!part) {
+      return false;
+    }
+
+    const segments = part.split("/");
+    if (segments.length > 2) {
+      return false;
+    }
+
+    const [base, stepText] = segments;
+    if (!base) {
+      return false;
+    }
+
+    if (stepText !== undefined && (!/^\d+$/u.test(stepText) || Number(stepText) <= 0)) {
+      return false;
+    }
+
+    if (base === "*") {
+      return true;
+    }
+
+    const range = base.split("-");
+    if (range.length > 2 || range.some((entry) => !/^\d+$/u.test(entry))) {
+      return false;
+    }
+
+    const start = Number(range[0]);
+    const end = range.length === 2 ? Number(range[1]) : start;
+    return Number.isInteger(start) &&
+      Number.isInteger(end) &&
+      start >= minimum &&
+      end <= maximum &&
+      start <= end;
+  });
+}
+
+export function isValidAutomationCronExpression(expression: string): boolean {
+  const fields = expression.trim().split(/\s+/u);
+  if (fields.length !== 5) {
+    return false;
+  }
+
+  return isValidCronField(fields[0] ?? "", 0, 59) &&
+    isValidCronField(fields[1] ?? "", 0, 23) &&
+    isValidCronField(fields[2] ?? "", 1, 31) &&
+    isValidCronField(fields[3] ?? "", 1, 12) &&
+    isValidCronField(fields[4] ?? "", 0, 7);
+}
+
 function isoTimestampSchema() {
-  return z.string().min(1);
+  return z.string().datetime({ offset: true });
 }
 
 export const automationScheduleAtSchema = z
@@ -48,7 +108,10 @@ export const automationScheduleEverySchema = z
 export const automationScheduleCronSchema = z
   .object({
     kind: z.literal("cron"),
-    expression: z.string().min(1),
+    expression: z.string().min(1).refine(
+      isValidAutomationCronExpression,
+      "Expected a five-field cron expression.",
+    ),
   })
   .strict();
 

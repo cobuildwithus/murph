@@ -132,6 +132,68 @@ test("collectCanonicalWearableDataset keeps canonical candidates and suppresses 
   assert.equal(sourceFamilyScore("canonical"), 4);
 });
 
+test("collectCanonicalWearableDataset scopes tombstones to the same source identity", () => {
+  const sharedSource = {
+    provider: "oura",
+    dataSourceId: "wearable_source_oura",
+    normalizerVersion: "test-normalizer.v1",
+    providerResourceId: "activity-1",
+    providerResourceType: "daily_activity",
+    rawArtifactRoles: ["daily-activity"],
+  };
+  const records: CanonicalWearableRecord[] = [
+    {
+      id: "obs_steps_deleted_connection",
+      kind: "observation",
+      schemaVersion: "wearable.canonical_record.v1",
+      dayKey: "2026-04-20",
+      observedAt: "2026-04-20T12:00:00.000Z",
+      source: {
+        ...sharedSource,
+        connectionId: "conn_deleted",
+      },
+      metric: "steps",
+      unit: "count",
+      value: 12000,
+    },
+    {
+      id: "obs_steps_active_connection",
+      kind: "observation",
+      schemaVersion: "wearable.canonical_record.v1",
+      dayKey: "2026-04-20",
+      observedAt: "2026-04-20T12:01:00.000Z",
+      source: {
+        ...sharedSource,
+        connectionId: "conn_active",
+      },
+      metric: "steps",
+      unit: "count",
+      value: 11000,
+    },
+    {
+      id: "tombstone_steps_deleted_connection",
+      kind: "tombstone",
+      schemaVersion: "wearable.canonical_record.v1",
+      dayKey: "2026-04-20",
+      observedAt: "2026-04-20T12:05:00.000Z",
+      source: {
+        ...sharedSource,
+        connectionId: "conn_deleted",
+      },
+      providerResourceType: "daily_activity",
+      providerResourceId: "activity-1",
+      deletedAt: "2026-04-20T12:05:00.000Z",
+    },
+  ];
+
+  const dataset = collectCanonicalWearableDataset(records);
+
+  assert.deepEqual(
+    dataset.metricCandidates.map((candidate) => candidate.recordIds),
+    [["obs_steps_active_connection"]],
+  );
+});
+
 test("collectCanonicalWearableDataset filters Junction-backed canonical records by public source", () => {
   const records: CanonicalWearableRecord[] = [
     {

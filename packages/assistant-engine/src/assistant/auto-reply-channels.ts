@@ -1,5 +1,5 @@
 import type { AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
-import { readAssistantAutomationState, saveAssistantAutomationState } from './store.js'
+import { updateAssistantAutomationState } from './store.js'
 import {
   normalizeAssistantAutoReplyChannels,
   sameAssistantAutoReplyState,
@@ -107,35 +107,33 @@ export async function readLatestAssistantInputSourceCursor(input: {
     : null
 }
 
-export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
+async function resolveManagedAssistantAutoReplyState(input: {
   desiredChannels: readonly string[]
+  hasExplicitLatestInputCursor: boolean
   inputSource?: AssistantInputSource
   isManagedChannel?: (channel: string) => boolean
   latestInputCursor?: AssistantInputCursor | null
   signal?: AbortSignal
+  state: AssistantAutomationState
   vault: string
 }): Promise<{
   changed: boolean
   state: AssistantAutomationState
 }> {
-  const state = await readAssistantAutomationState(input.vault)
-  const currentAutoReply = 'autoReply' in state ? state.autoReply : []
-  const hasExplicitLatestInputCursor = Object.prototype.hasOwnProperty.call(
-    input,
-    'latestInputCursor',
-  )
-  const nextReplyCursor = managedAssistantAutoReplyChannelsNeedCursorSeed({
+  const currentAutoReply = 'autoReply' in input.state ? input.state.autoReply : []
+  const needsCursorSeed = managedAssistantAutoReplyChannelsNeedCursorSeed({
     current: currentAutoReply,
     desiredChannels: input.desiredChannels,
     isManagedChannel: input.isManagedChannel,
   })
-    ? hasExplicitLatestInputCursor
+  const nextReplyCursor = needsCursorSeed
+    ? input.hasExplicitLatestInputCursor
       ? (input.latestInputCursor ?? null)
       : await readLatestAssistantInputSourceCursor({
-        inputSource: input.inputSource,
-        signal: input.signal,
-        vault: input.vault,
-      })
+          inputSource: input.inputSource,
+          signal: input.signal,
+          vault: input.vault,
+        })
     : null
   const enabledAt =
     nextReplyCursor?.createdAt ??
@@ -152,17 +150,55 @@ export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
   if (sameAssistantAutoReplyState(currentAutoReply, nextAutoReply)) {
     return {
       changed: false,
-      state,
+      state: input.state,
     }
   }
 
   return {
     changed: true,
-    state: await saveAssistantAutomationState(input.vault, {
-      ...state,
+    state: {
+      ...input.state,
       autoReply: nextAutoReply,
       updatedAt: new Date().toISOString(),
-    }),
+    },
+  }
+}
+
+export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
+  desiredChannels: readonly string[]
+  inputSource?: AssistantInputSource
+  isManagedChannel?: (channel: string) => boolean
+  latestInputCursor?: AssistantInputCursor | null
+  signal?: AbortSignal
+  vault: string
+}): Promise<{
+  changed: boolean
+  state: AssistantAutomationState
+}> {
+  const hasExplicitLatestInputCursor = Object.prototype.hasOwnProperty.call(
+    input,
+    'latestInputCursor',
+  )
+
+  let changed = false
+  const state = await updateAssistantAutomationState(input.vault, async (state) => {
+    const resolved = await resolveManagedAssistantAutoReplyState({
+      desiredChannels: input.desiredChannels,
+      hasExplicitLatestInputCursor,
+      inputSource: input.inputSource,
+      isManagedChannel: input.isManagedChannel,
+      latestInputCursor: input.latestInputCursor,
+      signal: input.signal,
+      state,
+      vault: input.vault,
+    })
+    changed = resolved.changed
+    return resolved.state
+  })
+
+  return {
+    changed,
+    state,
   }
 }
 
@@ -174,24 +210,32 @@ export async function enableAssistantAutoReplyChannelLocal(input: {
   signal?: AbortSignal
   vault: string
 }): Promise<boolean> {
-  const state = await readAssistantAutomationState(input.vault)
-  const currentAutoReply = 'autoReply' in state ? state.autoReply : []
+  const hasExplicitLatestInputCursor = Object.prototype.hasOwnProperty.call(
+    input,
+    'latestInputCursor',
+  )
+
   const isManagedChannel = input.isManagedChannel ?? defaultManagedChannelPredicate
-  const result = await reconcileManagedAssistantAutoReplyChannelsLocal({
-    desiredChannels: normalizeAssistantAutoReplyChannels([
+  const state = await updateAssistantAutomationState(input.vault, async (state) => {
+    const currentAutoReply = 'autoReply' in state ? state.autoReply : []
+    const desiredChannels = normalizeAssistantAutoReplyChannels([
       ...currentAutoReply
         .filter((entry) => isManagedChannel(entry.channel))
         .map((entry) => entry.channel),
       input.channel,
-    ]),
-    inputSource: input.inputSource,
-    isManagedChannel,
-    ...(Object.prototype.hasOwnProperty.call(input, 'latestInputCursor')
-      ? { latestInputCursor: input.latestInputCursor ?? null }
-      : {}),
-    signal: input.signal,
-    vault: input.vault,
+    ])
+    const resolved = await resolveManagedAssistantAutoReplyState({
+      desiredChannels,
+      hasExplicitLatestInputCursor,
+      inputSource: input.inputSource,
+      isManagedChannel,
+      latestInputCursor: input.latestInputCursor,
+      signal: input.signal,
+      state,
+      vault: input.vault,
+    })
+    return resolved.state
   })
 
-  return result.state.autoReply.some((entry) => entry.channel === input.channel)
+  return state.autoReply.some((entry) => entry.channel === input.channel)
 }

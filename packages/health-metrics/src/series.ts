@@ -24,7 +24,12 @@ import type {
 
 export function listMetricPoints(input: ListMetricPointsInput): MetricPoint[] {
   const definitionFromBiomarker = input.biomarkerKey ? resolveMetricDefinitionForBiomarker(input.biomarkerKey) : null;
-  const metricKey = input.metricKey ? resolveMetricInputKey(input.metricKey) : definitionFromBiomarker?.key ?? null;
+  const requestedMetricKey = input.metricKey !== undefined && input.metricKey !== null;
+  const metricKey = requestedMetricKey ? resolveMetricInputKey(input.metricKey ?? "") : definitionFromBiomarker?.key ?? null;
+  if (requestedMetricKey && !metricKey) {
+    return [];
+  }
+
   const biomarkerKeys = input.biomarkerKey
     ? biomarkerSelectionKeys(input.biomarkerKey, definitionFromBiomarker)
     : null;
@@ -44,9 +49,10 @@ export function buildMetricSeries(input: ListMetricPointsInput): MetricPoint[] {
 
 export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries {
   const definitionFromBiomarker = input.biomarkerKey ? resolveMetricDefinitionForBiomarker(input.biomarkerKey) : null;
-  const requestedMetricKey = input.metricKey ? resolveMetricInputKey(input.metricKey) : definitionFromBiomarker?.key ?? null;
+  const hasRequestedMetricKey = input.metricKey !== undefined && input.metricKey !== null;
+  const requestedMetricKey = hasRequestedMetricKey ? resolveMetricInputKey(input.metricKey ?? "") : definitionFromBiomarker?.key ?? null;
   const points = listMetricPoints(input);
-  const resolvedMetricKey = requestedMetricKey ?? points[0]?.metricKey ?? "unknown";
+  const resolvedMetricKey = requestedMetricKey || points[0]?.metricKey || "unknown";
   const definition = resolveMetricDefinition(resolvedMetricKey) ?? createCustomMetricDefinition(resolvedMetricKey);
   const minimumPoints = input.minimumPoints ?? 0;
   const warnings = collectSeriesWarnings({ definition, minimumPoints, points });

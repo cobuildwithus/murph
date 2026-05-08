@@ -235,6 +235,24 @@ test("selects metric points by policy and exposes provenance warnings", () => {
     biomarkerKey: "biomarker:apolipoprotein-b",
     points: [apoB.point].filter((point): point is MetricPoint => point !== null),
   }).map((point) => point.id), ["metric-point:apob:2026-04-29:lab:0"]);
+
+  const blankMetricKey = selectMetricValue({
+    metricKey: "   ",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:glucose:2026-04-29:lab:0",
+        metricKey: "glucose",
+        observedAt: "2026-04-29T08:00:00.000Z",
+        recordId: "lab_glucose",
+        sourceKind: "test-result",
+        value: 90,
+      }),
+    ],
+  });
+  assert.equal(blankMetricKey.status, "no_data");
+  assert.equal(blankMetricKey.metricKey, "unknown");
+  assert.equal(blankMetricKey.point, null);
 });
 
 test("latest-lab policy does not silently fall back to non-lab event points", () => {
@@ -510,6 +528,24 @@ test("reports empty, insufficient, and warning-rich semantic series states", () 
   });
   assert.equal(noData.status, "no_data");
   assert.deepEqual(noData.provenance.pointIds, []);
+
+  const blankMetricKey = selectMetricSeries({
+    metricKey: "   ",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-04-29",
+        id: "metric-point:glucose:2026-04-29:lab:0",
+        metricKey: "glucose",
+        observedAt: "2026-04-29T08:00:00.000Z",
+        recordId: "lab_glucose",
+        sourceKind: "test-result",
+        value: 90,
+      }),
+    ],
+  });
+  assert.equal(blankMetricKey.status, "no_data");
+  assert.equal(blankMetricKey.metricKey, "unknown");
+  assert.deepEqual(blankMetricKey.rows, []);
 
   const bodyWeight = metricPoint({
     comparator: ">",
@@ -1083,6 +1119,23 @@ test("goal progress covers latest-lab, policy overrides, open ranges, and no-dat
   });
   assert.equal(noData.status, "no_data");
   assert.equal(noData.currentValue, null);
+
+  const blankMetricKey = selectMetricGoalProgress({
+    goalId: "goal_blank",
+    points: [device],
+    target: {
+      comparator: ">=",
+      evaluation: { kind: "selected-value" },
+      kind: "metric",
+      metricKey: "   ",
+      targetId: "blank-metric",
+      unit: "bpm",
+      value: 60,
+    },
+  });
+  assert.equal(blankMetricKey.status, "no_data");
+  assert.equal(blankMetricKey.metricKey, "unknown");
+  assert.deepEqual(blankMetricKey.selectedPointIds, []);
 
   const inRange: GoalMetricTarget = {
     comparator: "between",

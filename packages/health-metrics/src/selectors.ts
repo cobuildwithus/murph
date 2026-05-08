@@ -28,10 +28,15 @@ export function selectMetricValue(input: {
   policyOverride?: MetricSelectionPolicy;
 }): MetricSelection {
   const definitionFromBiomarker = input.biomarkerKey ? resolveMetricDefinitionForBiomarker(input.biomarkerKey) : null;
-  const metricKey = input.metricKey ? resolveMetricInputKey(input.metricKey) : definitionFromBiomarker?.key ?? null;
+  const requestedMetricKey = input.metricKey !== undefined && input.metricKey !== null;
+  const metricKey = requestedMetricKey ? resolveMetricInputKey(input.metricKey ?? "") : definitionFromBiomarker?.key ?? null;
   const biomarkerKeys = input.biomarkerKey
     ? biomarkerSelectionKeys(input.biomarkerKey, definitionFromBiomarker)
     : null;
+  if (requestedMetricKey && !metricKey) {
+    return emptySelection(createCustomMetricDefinition("unknown"), input.biomarkerKey ?? null, "no_data");
+  }
+
   const points = input.points.filter((point) => {
     if (metricKey && point.metricKey !== metricKey) return false;
     if (biomarkerKeys && (!point.biomarkerKey || !biomarkerKeys.includes(point.biomarkerKey))) return false;

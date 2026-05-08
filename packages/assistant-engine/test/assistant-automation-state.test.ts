@@ -22,7 +22,10 @@ import {
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.js'
 import type { AssistantInputSource } from '../src/assistant/input-source.js'
-import { saveAssistantAutomationState } from '../src/assistant/store.js'
+import {
+  readAssistantAutomationState,
+  saveAssistantAutomationState,
+} from '../src/assistant/store.js'
 
 function autoReplyState(
   channel: string,
@@ -464,6 +467,51 @@ test('enableAssistantAutoReplyChannelLocal seeds a newly enabled channel and rep
     })
 
     assert.equal(enabled, true)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('enableAssistantAutoReplyChannelLocal preserves concurrent managed channel updates', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-enable-concurrent-'),
+  )
+
+  try {
+    await saveAssistantAutomationState(vaultRoot, {
+      version: 1,
+      autoReply: [],
+      updatedAt: '2026-04-10T00:00:00.000Z',
+    })
+
+    await Promise.all([
+      enableAssistantAutoReplyChannelLocal({
+        channel: 'email',
+        latestInputCursor: {
+          createdAt: '2026-04-10T06:00:01.000Z',
+          inputId: 'ain_email',
+          occurredAt: '2026-04-10T06:00:00.000Z',
+          sourceKind: 'hosted-mailbox',
+        },
+        vault: vaultRoot,
+      }),
+      enableAssistantAutoReplyChannelLocal({
+        channel: 'telegram',
+        latestInputCursor: {
+          createdAt: '2026-04-10T06:01:01.000Z',
+          inputId: 'ain_telegram',
+          occurredAt: '2026-04-10T06:01:00.000Z',
+          sourceKind: 'hosted-mailbox',
+        },
+        vault: vaultRoot,
+      }),
+    ])
+
+    const state = await readAssistantAutomationState(vaultRoot)
+    assert.deepEqual(
+      state.autoReply.map((entry) => entry.channel),
+      ['email', 'telegram'],
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

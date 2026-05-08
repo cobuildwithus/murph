@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 import { normalizeWearableMetricValue } from "../src/device-providers/metric-catalog.ts";
+import { pushDeletionObservation } from "../src/device-providers/shared-normalization.ts";
 
 import {
   canonicalizeDeviceBatchPayload,
@@ -814,5 +815,40 @@ test("prepareDeviceProviderSnapshotImport keeps raw envelope identity stable acr
   assert.deepEqual(
     first.rawArtifacts?.map((artifact) => artifact.fileName),
     second.rawArtifacts?.map((artifact) => artifact.fileName),
+  );
+});
+
+test("pushDeletionObservation bounds deletion artifact names while preserving event content", () => {
+  const events: DeviceEventPayload[] = [];
+  const rawArtifacts: NonNullable<NormalizedDeviceBatch["rawArtifacts"]> = [];
+  const longResourceType = `${"activity_".repeat(16)}end`;
+  const longSourceEventType = `${"webhook.delete.".repeat(12)}end`;
+
+  pushDeletionObservation(events, rawArtifacts, {
+    makeExternalRef: (resourceType, resourceId, occurredAt, facet) => ({
+      facet,
+      observedAt: occurredAt,
+      resourceId,
+      resourceType,
+      system: "polar",
+    }),
+    occurredAt: "2026-04-20T09:00:00.000Z",
+    provider: "polar",
+    providerDisplayName: "Polar",
+    resourceId: "summary_2026_04_20",
+    resourceType: longResourceType,
+    sourceEventType: longSourceEventType,
+  });
+
+  assert.equal(rawArtifacts.length, 1);
+  assert.ok((rawArtifacts[0]?.fileName.length ?? 0) < 160);
+  assert.match(rawArtifacts[0]?.fileName ?? "", /^deletion-/u);
+  assert.equal(
+    (rawArtifacts[0]?.content as { resourceType?: string } | undefined)?.resourceType,
+    longResourceType,
+  );
+  assert.equal(
+    (events[0]?.fields as { sourceEventType?: string } | undefined)?.sourceEventType,
+    longSourceEventType,
   );
 });

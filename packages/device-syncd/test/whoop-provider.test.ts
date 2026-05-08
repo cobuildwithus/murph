@@ -1066,9 +1066,11 @@ test("WHOOP provider rejects profile responses without a stable user id and tole
       error.code === "WHOOP_PROFILE_INVALID" &&
       error.httpStatus === 502,
   );
+  assert.equal(revokeIndex, 1);
 
   await revokeAccess(createAccount(["offline"]));
   await revokeAccess(createAccount(["offline"]));
+  assert.equal(revokeIndex, 3);
 });
 
 test("WHOOP webhook replay checks use the request context timestamp instead of process wall clock", async () => {

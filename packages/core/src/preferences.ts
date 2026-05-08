@@ -115,12 +115,13 @@ export async function updateWorkoutUnitPreferences(input: {
       workoutUnitPreferences: nextPreferences,
       wearablePreferences: current.wearablePreferences,
     };
+    const validatedDocument = preferencesDocumentSchema.parse(document);
 
     await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
       operationType: "preferences_update",
       summary: "Update canonical workout unit preferences",
-      occurredAt: document.updatedAt,
+      occurredAt: validatedDocument.updatedAt,
       audit: {
         action: "preferences_update",
         commandName: "core.updateWorkoutUnitPreferences",
@@ -129,7 +130,7 @@ export async function updateWorkoutUnitPreferences(input: {
       mutate: async ({ batch }) => {
         await batch.stageTextWrite(
           preferencesDocumentRelativePath,
-          `${JSON.stringify(document, null, 2)}\n`,
+          `${JSON.stringify(validatedDocument, null, 2)}\n`,
           { overwrite: true },
         );
 
@@ -181,12 +182,13 @@ export async function updateWearablePreferences(input: {
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: nextPreferences,
     };
+    const validatedDocument = preferencesDocumentSchema.parse(document);
 
     await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
       operationType: "preferences_update",
       summary: "Update canonical wearable preferences",
-      occurredAt: document.updatedAt,
+      occurredAt: validatedDocument.updatedAt,
       audit: {
         action: "preferences_update",
         commandName: "core.updateWearablePreferences",
@@ -195,7 +197,7 @@ export async function updateWearablePreferences(input: {
       mutate: async ({ batch }) => {
         await batch.stageTextWrite(
           preferencesDocumentRelativePath,
-          `${JSON.stringify(document, null, 2)}\n`,
+          `${JSON.stringify(validatedDocument, null, 2)}\n`,
           { overwrite: true },
         );
 

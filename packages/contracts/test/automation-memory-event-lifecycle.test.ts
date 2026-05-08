@@ -71,6 +71,21 @@ describe("automation contract seams", () => {
     ).toThrow(/Unrecognized key/u);
   });
 
+  it("rejects malformed cron expressions at the automation contract boundary", () => {
+    expect(() =>
+      automationScheduleSchema.parse({
+        expression: "*/2/ignored 8 * * *",
+        kind: "cron",
+      }),
+    ).toThrow(/Expected a five-field cron expression/u);
+    expect(() =>
+      automationScheduleSchema.parse({
+        expression: "5junk 8 * * *",
+        kind: "cron",
+      }),
+    ).toThrow(/Expected a five-field cron expression/u);
+  });
+
   it("accepts canonical recurring schedules without a time zone field", () => {
     expect(
       automationScheduleSchema.parse({
