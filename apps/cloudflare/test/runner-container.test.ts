@@ -575,6 +575,92 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("keeps a warm shell when activity expiry runs in another isolate during active work", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const storage = createContainerStorageDouble();
+      const renewActivityTimeout = vi.fn();
+      let resolveInvocation!: () => void;
+      let markRunnerRequestStarted!: () => void;
+      const invocationReady = new Promise<void>((resolve) => {
+        resolveInvocation = resolve;
+      });
+      const runnerRequestStarted = new Promise<void>((resolve) => {
+        markRunnerRequestStarted = resolve;
+      });
+
+      vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
+      const active = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        state: {
+          storage,
+        },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          markRunnerRequestStarted();
+          await invocationReady;
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+      const coldAlarmIsolate = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        initialStatus: "running",
+        state: {
+          storage,
+        },
+      });
+      Object.assign(coldAlarmIsolate.container, {
+        renewActivityTimeout,
+      });
+
+      const invokePromise = active.container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_activity_cold_isolate"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      await runnerRequestStarted;
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await coldAlarmIsolate.container.onActivityExpired();
+
+      expect(coldAlarmIsolate.destroy).not.toHaveBeenCalled();
+      expect(renewActivityTimeout).toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          message: "Hosted execution container activity expiry was stale; keeping warm shell.",
+          phase: "container.ready",
+        }),
+      );
+
+      resolveInvocation();
+      await expect(invokePromise).resolves.toEqual(createRunnerResult());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not reuse a successful shell when outbound proxy expiration fails", async () => {
     const setOutboundByHosts = vi.fn(async (mapping: Record<string, unknown>) => {
       if (Object.keys(mapping).length === 0) {
@@ -2090,6 +2176,28 @@ function createContainerDouble(input: {
     getState,
     setOutboundByHosts,
     startAndWaitForPorts,
+  };
+}
+
+interface ContainerStorageDouble {
+  delete(key: string): Promise<boolean>;
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+}
+
+function createContainerStorageDouble(): ContainerStorageDouble {
+  const values = new Map<string, unknown>();
+
+  return {
+    async delete(key: string): Promise<boolean> {
+      return values.delete(key);
+    },
+    async get<T>(key: string): Promise<T | undefined> {
+      return values.get(key) as T | undefined;
+    },
+    async put<T>(key: string, value: T): Promise<void> {
+      values.set(key, value);
+    },
   };
 }
 

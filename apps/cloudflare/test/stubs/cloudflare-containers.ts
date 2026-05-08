@@ -1,4 +1,15 @@
+interface TestContainerStorage {
+  delete(key: string): Promise<boolean>;
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+}
+
+interface TestContainerContext {
+  storage: TestContainerStorage;
+}
+
 export class Container {
+  readonly ctx: TestContainerContext;
   defaultPort?: number;
   requiredPorts?: number[];
   envVars: Record<string, string> = {};
@@ -6,7 +17,11 @@ export class Container {
   enableInternet = true;
   pingEndpoint = "ping";
 
-  constructor(..._args: unknown[]) {}
+  constructor(ctx?: { storage?: TestContainerStorage }) {
+    this.ctx = {
+      storage: ctx?.storage ?? createMemoryStorage(),
+    };
+  }
 
   async containerFetch(
     _requestOrUrl: Request | string | URL,
@@ -52,4 +67,20 @@ export function switchPort(request: Request, port: number): Request {
   const headers = new Headers(request.headers);
   headers.set("cf-container-target-port", String(port));
   return new Request(request, { headers });
+}
+
+function createMemoryStorage(): TestContainerStorage {
+  const values = new Map<string, unknown>();
+
+  return {
+    async delete(key: string): Promise<boolean> {
+      return values.delete(key);
+    },
+    async get<T>(key: string): Promise<T | undefined> {
+      return values.get(key) as T | undefined;
+    },
+    async put<T>(key: string, value: T): Promise<void> {
+      values.set(key, value);
+    },
+  };
 }
