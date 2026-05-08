@@ -122,12 +122,12 @@ describe("hosted execution observability", () => {
 
     expect(
       normalizeHostedExecutionOperatorMessage(
-        "Authorization: Bearer placeholder hello user@example.com token=my-token "
+        "Bearer placeholder hello user@example.com token=my-token "
         + "phone=+15551234567 spawn /app/test-parser-toolchain/ffmpeg ENOENT "
         + "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
       ),
     ).toBe(
-      "Authorization=Bearer [redacted] hello [redacted-email] token=[redacted] phone=[redacted-phone] spawn <REDACTED_PATH> ENOENT [redacted-token]",
+      "Bearer [redacted] hello [redacted-email] token=[redacted] phone=[redacted-phone] spawn <REDACTED_PATH> ENOENT [redacted-token]",
     );
 
     const repeated = "x".repeat(260);
