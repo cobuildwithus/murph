@@ -497,7 +497,7 @@ describe("cloudflare worker routes", () => {
     expect(getByName).toHaveBeenCalledWith("member_123--v-version-123");
   });
 
-  it("rejects browser-vault refresh proxy tokens on general local internal proxy routes", async () => {
+  it("rejects dashboard replica refresh proxy tokens on general local internal proxy routes", async () => {
     installOidcJwksFetch();
     const getByName = vi.fn((_name: string) => ({
       async destroyInstance() {},
@@ -1283,10 +1283,10 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
-  it("schedules browser-vault refreshes through the direct Durable Object path", async () => {
+  it("schedules dashboard replica refreshes through the direct Durable Object path", async () => {
     const sourceStateHash = "a".repeat(64);
     const stub = createUserRunnerStub({
-      scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
+      scheduleDashboardReplicaRefreshForUser: vi.fn(async (input: {
         sourceStateHash: string;
         userId: string;
       }) => ({
@@ -1317,7 +1317,7 @@ describe("cloudflare worker routes", () => {
       userId: "member_123",
     });
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
+    expect(stub.scheduleDashboardReplicaRefreshForUser).toHaveBeenCalledWith({
       sourceStateHash,
       userId: "member_123",
     });
@@ -2182,7 +2182,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       userId: "member_123",
       workspace: null,
     })),
-    scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
+    scheduleDashboardReplicaRefreshForUser: vi.fn(async (input: {
       sourceStateHash: string;
       userId: string;
     }) => ({
