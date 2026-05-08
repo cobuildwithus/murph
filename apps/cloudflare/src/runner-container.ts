@@ -47,7 +47,8 @@ const RUNNER_BROWSER_VAULT_REFRESH_URL = "http://container/internal/browser-vaul
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
-const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
+const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
+const RUNNER_CONTAINER_IDLE_FALLBACK_GRACE_MS = 120_000;
 const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
 const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
 const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
@@ -88,7 +89,6 @@ type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest
 
 interface HostedExecutionContainerBrowserVaultRefreshRequest {
   runtime: HostedAssistantRuntimeConfig;
-  signal?: AbortSignal;
   timeoutMs: number;
   userId: string;
 }
@@ -194,7 +194,7 @@ export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
-  sleepAfter = formatRunnerSleepAfter(DEFAULT_RUNNER_IDLE_TTL_MS);
+  sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
 
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -208,7 +208,7 @@ export class RunnerContainer extends Container {
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
-    this.sleepAfter = formatRunnerSleepAfter(readRunnerIdleTtlMs(env));
+    this.sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs(env));
   }
 
   async invoke(
@@ -280,7 +280,7 @@ export class RunnerContainer extends Container {
 
   override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
-      const idleTtlMs = readRunnerIdleTtlMs(this.environment);
+      const idleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
       const now = Date.now();
       const durableLiveness = await this.readRunnerActivityLivenessRecord();
       const durableLastActivityAt = durableLiveness?.lastActivityAt ?? 0;
@@ -430,7 +430,7 @@ export class RunnerContainer extends Container {
           workspaceLeaseGeneration: input.job.request.leaseGeneration,
           workspaceReason: input.job.request.reason,
           workspaceVersion: input.job.request.workspaceVersion,
-          runnerIdleTtlMs: readRunnerIdleTtlMs(this.environment),
+          runnerIdleTtlMs: readRunnerContainerIdleTtlMs(this.environment),
           runnerPort: RUNNER_PORT,
           timeoutMs: input.timeoutMs,
         },
@@ -551,7 +551,7 @@ export class RunnerContainer extends Container {
         details: {
           hasLocalInternalProxyBaseUrl: localInternalProxyBaseUrl !== null,
           readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
-          runnerIdleTtlMs: readRunnerIdleTtlMs(this.environment),
+          runnerIdleTtlMs: readRunnerContainerIdleTtlMs(this.environment),
           runnerPort: RUNNER_PORT,
           timeoutMs: input.timeoutMs,
         },
@@ -582,10 +582,7 @@ export class RunnerContainer extends Container {
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
-          signal: combineRunnerContainerAbortSignals(
-            input.signal ?? null,
-            AbortSignal.timeout(remainingTimeoutMs),
-          ),
+          signal: AbortSignal.timeout(remainingTimeoutMs),
         },
         RUNNER_PORT,
       );
@@ -991,7 +988,7 @@ export class RunnerContainer extends Container {
   }
 
   private startRunnerActivityRenewal(): () => void {
-    const idleTtlMs = readRunnerIdleTtlMs(this.environment);
+    const idleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
     const intervalMs = computeRunnerActivityRenewIntervalMs(idleTtlMs);
     const interval = setInterval(() => {
       this.noteRunnerActivity("invoke-heartbeat");
@@ -1148,7 +1145,6 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   runtime: HostedAssistantRuntimeConfig;
-  signal?: AbortSignal;
   timeoutMs: number;
   userId: string;
 }): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
@@ -1161,7 +1157,6 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(input: 
 
   return container.refreshBrowserVaultReplica({
     runtime: input.runtime,
-    signal: input.signal,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
@@ -1528,55 +1523,15 @@ function parseHostedExecutionContainerInvokeInput(
 function parseHostedExecutionContainerBrowserVaultRefreshInput(
   payload: {
     runtime?: unknown;
-    signal?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
   },
 ): HostedExecutionContainerBrowserVaultRefreshRequest {
   return {
     runtime: readHostedAssistantRuntimeConfig(payload.runtime),
-    ...(payload.signal === undefined
-      ? {}
-      : { signal: readAbortSignal(payload.signal, "payload.signal") }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
-}
-
-function readAbortSignal(value: unknown, label: string): AbortSignal {
-  if (
-    value
-    && typeof value === "object"
-    && typeof (value as { aborted?: unknown }).aborted === "boolean"
-    && typeof (value as { addEventListener?: unknown }).addEventListener === "function"
-  ) {
-    return value as AbortSignal;
-  }
-
-  throw new TypeError(`${label} must be an AbortSignal.`);
-}
-
-function combineRunnerContainerAbortSignals(
-  first: AbortSignal | null,
-  second: AbortSignal,
-): AbortSignal {
-  if (!first) {
-    return second;
-  }
-
-  if (first.aborted) {
-    return first;
-  }
-
-  const controller = new AbortController();
-  const abort = (signal: AbortSignal) => {
-    if (!controller.signal.aborted) {
-      controller.abort(signal.reason);
-    }
-  };
-  first.addEventListener("abort", () => abort(first), { once: true });
-  second.addEventListener("abort", () => abort(second), { once: true });
-  return controller.signal;
 }
 
 function readHostedAssistantRuntimeConfig(value: unknown): HostedAssistantRuntimeConfig {
@@ -1809,11 +1764,11 @@ async function readRunnerContainerStatus(
   }
 }
 
-function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
+function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
   const raw = source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS;
 
   if (raw === undefined || raw === null || raw === "") {
-    return DEFAULT_RUNNER_IDLE_TTL_MS;
+    return DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS + RUNNER_CONTAINER_IDLE_FALLBACK_GRACE_MS;
   }
 
   if (typeof raw !== "string") {
@@ -1827,7 +1782,7 @@ function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
     );
   }
 
-  return parsed;
+  return parsed + RUNNER_CONTAINER_IDLE_FALLBACK_GRACE_MS;
 }
 
 function computeRunnerActivityRenewIntervalMs(idleTtlMs: number): number {

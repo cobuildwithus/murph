@@ -1970,7 +1970,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms.at(-1)).toBe("2026-04-27T00:04:55.000Z");
+    expect(alarms.at(-1)).toBe("2026-04-27T00:05:00.000Z");
 	    expect(
 	      sql.exec(
 	        `SELECT idle_shutdown_checkpoint_due_at,
@@ -1980,7 +1980,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	        "member_123",
 	      ).toArray(),
 	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:55.000Z",
+	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
 	      idle_shutdown_checkpoint_workspace_version: "4",
 	      next_wake_at: null,
 	    }]);
@@ -2064,7 +2064,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(alarms.at(-1)).toBe("2026-04-27T00:04:55.000Z");
+    expect(alarms.at(-1)).toBe("2026-04-27T00:05:00.000Z");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -2074,7 +2074,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:55.000Z",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
       idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: "2026-04-27T00:10:00.000Z",
     }]);
@@ -2355,7 +2355,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("does not finish idle-shutdown cleanup when the runtime only returns scheduled", async () => {
+  it("destroys the warm container when the idle-shutdown runtime only returns scheduled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -2385,7 +2385,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms.at(-1)).toBe("2026-04-27T00:00:45.000Z");
     expect(
       sql.exec(
@@ -2406,7 +2406,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("does not finish idle-shutdown cleanup for an inconsistent checkpoint marker result", async () => {
+  it("destroys the warm container for an inconsistent checkpoint marker result", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -2437,7 +2437,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms.at(-1)).toBe("2026-04-27T00:00:45.000Z");
     expect(
       sql.exec(
@@ -2624,7 +2624,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	      onSetAlarm: async ({ scheduledTimeIso }) => {
 	        if (
 	          nudgedDuringIdleAlarmApplication
-	          || scheduledTimeIso !== "2026-04-27T00:04:55.000Z"
+	          || scheduledTimeIso !== "2026-04-27T00:05:00.000Z"
 	        ) {
 	          return;
 	        }
@@ -2644,8 +2644,8 @@ describe("HostedUserRunner runtime crypto context", () => {
 
 	    expect(nudgedDuringIdleAlarmApplication).toBe(true);
 	    expect(invoke).toHaveBeenCalledOnce();
-	    expect(alarms).toContain("2026-04-27T00:04:55.000Z");
-	    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:04:55.000Z")).toHaveLength(1);
+	    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+	    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:05:00.000Z")).toHaveLength(1);
 	    expect(alarms.at(-1)).toBe(FIXED_NOW);
 	    expect(
 	      sql.exec(
@@ -2711,11 +2711,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     const activeRefresh = createDeferred<Awaited<ReturnType<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >>>();
-    let refreshSignal: AbortSignal | undefined;
+    let refreshInput: Parameters<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >[0] | undefined;
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async (input) => {
-      refreshSignal = input.signal;
+      refreshInput = input;
       return await activeRefresh.promise;
     });
     const destroyGate = createDeferred<void>();
@@ -2748,7 +2750,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(destroyInstance).toHaveBeenCalledOnce();
-    expect(refreshSignal?.aborted).toBe(true);
+    expect(refreshInput).not.toHaveProperty("signal");
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     destroyGate.resolve();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -3227,7 +3229,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(runner.alarm()).resolves.toBeUndefined();
 
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms.at(-1)).toBe("2026-04-27T00:00:30.000Z");
     expect(
       sql.exec(
