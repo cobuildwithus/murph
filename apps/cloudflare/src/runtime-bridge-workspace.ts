@@ -35,19 +35,23 @@ import {
   HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
   HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
   createHostedPortableWorkspaceManifestFromBundle,
+  listHostedBundleInlineFiles,
   readHostedPortableWorkspaceDeltaManifestFromBundle,
   readHostedPortableWorkspaceManifestFromBundle,
+  readHostedWorkspaceSkippedInlineFiles,
   sha256HostedBundleHex,
   snapshotHostedPortableWorkspaceDelta,
   snapshotHostedExecutionContext,
   type HostedBundleArtifactRef,
   type HostedBundleArtifactRestoreInput,
   type HostedBundleArtifactSnapshotInput,
+  type HostedBundleInlineLocation,
   type HostedCodexHomeSnapshotDiagnostics,
   type HostedPortableWorkspaceDeltaManifest,
   type HostedPortableWorkspaceManifest,
   type HostedPortableWorkspaceManifestFile,
   type HostedWorkspaceArtifactPersistInput,
+  type HostedWorkspaceSkippedInlineFile,
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 
@@ -274,10 +278,10 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
     });
   }
 
-  const preservedState = input.request.reason === "idle_shutdown"
-    ? await readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(input)
-    : await readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input);
   try {
+    const preservedState = input.request.reason === "idle_shutdown"
+      ? await readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(input)
+      : await readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input);
     return commitKind === "full_compaction"
       ? await createFullCompactionSnapshot({
           ...input,
@@ -290,7 +294,7 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   } catch (error) {
     if (
       input.request.reason === "idle_shutdown"
-      && error instanceof HostedWorkspaceSnapshotContinuityIncompleteError
+      && isHostedWorkspaceIdleShutdownCheckpointSkippableError(error)
     ) {
       return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
         ...input,
@@ -306,6 +310,26 @@ class HostedWorkspaceWorkingCheckpointBaseUnavailableError extends Error {
     super("Hosted workspace working checkpoint base bundle is missing.");
     this.name = "HostedWorkspaceWorkingCheckpointBaseUnavailableError";
   }
+}
+
+class HostedWorkspaceIdleCompactionPreservedStateUnavailableError extends Error {
+  constructor() {
+    super("Hosted idle compaction skipped because current committed workspace state could not be read.");
+    this.name = "HostedWorkspaceIdleCompactionPreservedStateUnavailableError";
+  }
+}
+
+type HostedWorkspaceIdleShutdownCheckpointSkipError =
+  | HostedWorkspaceIdleCompactionPreservedStateUnavailableError
+  | HostedWorkspaceSnapshotContinuityIncompleteError;
+
+function isHostedWorkspaceIdleShutdownCheckpointSkippableError(
+  error: unknown,
+): error is HostedWorkspaceIdleShutdownCheckpointSkipError {
+  return (
+    error instanceof HostedWorkspaceSnapshotContinuityIncompleteError
+    || error instanceof HostedWorkspaceIdleCompactionPreservedStateUnavailableError
+  );
 }
 
 type HostedWorkspaceFullCheckpointCommitKind = Exclude<
@@ -364,6 +388,23 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
   let leaseCheckCount = 0;
   let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
   const pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[] = [];
+  const skippedInlineFiles = input.preservedState
+    ? await readHostedWorkspaceSkippedInlineFilesBestEffort({
+        vaultRoot: input.vaultRoot,
+      })
+    : [];
+  const preservedArtifacts = input.preservedState
+    ? [
+        ...input.preservedState.preservedArtifacts,
+        ...createHostedWorkspaceBridgePreservedInlineArtifacts({
+          effectiveManifest: input.preservedState.manifest,
+          inlineFiles: input.preservedState.inlineFiles,
+          pendingArtifactPuts,
+          skippedInlineFiles,
+          vaultRoot: input.vaultRoot,
+        }),
+      ]
+    : undefined;
   const snapshotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle({
     readCurrentLease: async () => {
       leaseCheckCount += 1;
@@ -380,7 +421,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
           },
           codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
           operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-          preservedArtifacts: input.preservedState?.preservedArtifacts,
+          preservedArtifacts,
           vaultRoot: input.vaultRoot,
           workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
             workspaceSnapshotSizeDiagnostics = diagnostics;
@@ -497,10 +538,14 @@ async function createWorkingCommitSnapshot(input: {
       ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
   const preservedState = input.currentRefs.snapshotRef
     ? await readHostedWorkspaceEffectivePreservedState({
+        includeInlineFiles: false,
         platform: input.platform,
         snapshotRef: input.currentRefs.snapshotRef,
       })
     : createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest);
+  const skippedInlineFiles = await readHostedWorkspaceSkippedInlineFilesBestEffort({
+    vaultRoot: input.vaultRoot,
+  });
 
   const startedAt = Date.now();
   let externalArtifactPutBytes = 0;
@@ -534,6 +579,10 @@ async function createWorkingCommitSnapshot(input: {
         preservedState.preservedArtifacts,
       ),
       operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+      preservedInlineManifestFiles: createHostedWorkspaceBridgePreservedInlineManifestFiles({
+        effectiveManifest: preservedState.manifest,
+        skippedInlineFiles,
+      }),
       preservedArtifacts: preservedState.preservedArtifacts,
       vaultRoot: input.vaultRoot,
       workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
@@ -756,6 +805,94 @@ function createHostedWorkspaceBridgeMaterializedArtifactPathSet(
   );
 }
 
+async function readHostedWorkspaceSkippedInlineFilesBestEffort(input: {
+  vaultRoot: string;
+}): Promise<HostedWorkspaceSkippedInlineFile[]> {
+  try {
+    return await readHostedWorkspaceSkippedInlineFiles(input);
+  } catch {
+    return [];
+  }
+}
+
+function createHostedWorkspaceBridgePreservedInlineManifestFiles(input: {
+  effectiveManifest: HostedPortableWorkspaceManifest;
+  skippedInlineFiles: readonly HostedWorkspaceSkippedInlineFile[];
+}): HostedPortableWorkspaceManifestFile[] {
+  const skippedFiles = new Map(
+    input.skippedInlineFiles.map((file) => [`${file.root}:${file.path}`, file]),
+  );
+  const preservedFiles: HostedPortableWorkspaceManifestFile[] = [];
+  for (const file of input.effectiveManifest.files) {
+    if (!shouldPreserveHostedWorkspaceBridgeInlineManifestFile(file)) {
+      continue;
+    }
+    const skippedFile = skippedFiles.get(`${file.root}:${file.path}`);
+    if (skippedFile && (file.sha256 !== skippedFile.sha256 || file.size !== skippedFile.size)) {
+      throw new Error("Hosted workspace skipped-inline manifest does not match the current workspace manifest.");
+    }
+    preservedFiles.push(file);
+  }
+  return preservedFiles;
+}
+
+function createHostedWorkspaceBridgePreservedInlineArtifacts(input: {
+  effectiveManifest: HostedPortableWorkspaceManifest;
+  inlineFiles: readonly HostedBundleInlineLocation[];
+  pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[];
+  skippedInlineFiles: readonly HostedWorkspaceSkippedInlineFile[];
+  vaultRoot: string;
+}): HostedBundleArtifactRestoreInput[] {
+  const inlineFiles = new Map(input.inlineFiles.map((file) => [
+    `${file.root}:${file.path}`,
+    file,
+  ]));
+  const artifacts: HostedBundleArtifactRestoreInput[] = [];
+  for (const file of createHostedWorkspaceBridgePreservedInlineManifestFiles({
+    effectiveManifest: input.effectiveManifest,
+    skippedInlineFiles: input.skippedInlineFiles,
+  })) {
+    const inlineFile = inlineFiles.get(`${file.root}:${file.path}`);
+    if (!inlineFile) {
+      throw new Error("Hosted workspace preserved inline file is missing from the committed snapshot.");
+    }
+    if (inlineFile.sha256 !== file.sha256 || inlineFile.size !== file.size) {
+      throw new Error("Hosted workspace preserved inline file does not match the committed manifest.");
+    }
+    const ref = {
+      byteSize: inlineFile.size,
+      sha256: inlineFile.sha256,
+    };
+    artifacts.push({
+      path: file.path,
+      ref,
+      root: file.root,
+    });
+    input.pendingArtifactPuts.push({
+      absolutePath: path.join(input.vaultRoot, file.path),
+      bytes: inlineFile.bytes,
+      path: file.path,
+      ref,
+      root: file.root,
+    });
+  }
+  return artifacts;
+}
+
+function shouldPreserveHostedWorkspaceBridgeInlineManifestFile(
+  file: HostedPortableWorkspaceManifestFile,
+): boolean {
+  return (
+    !file.artifact
+    && file.root === "vault"
+    && file.path.startsWith("raw/")
+    && !shouldRestoreHostedRuntimeBridgeEagerArtifact({
+      path: file.path,
+      root: file.root,
+    })
+  );
+}
+
 function shouldRestoreHostedRuntimeBridgeEagerArtifact(input: {
   path: string;
   root: string;
@@ -785,6 +922,7 @@ function hasHostedRuntimeBridgeEagerArtifactPrefix(
 
 interface HostedWorkspaceEffectivePreservedState {
   artifactRefProvider: (artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null;
+  inlineFiles: HostedBundleInlineLocation[];
   manifest: HostedPortableWorkspaceManifest;
   preservedArtifacts: HostedBundleArtifactRestoreInput[];
 }
@@ -798,6 +936,7 @@ async function readHostedWorkspaceCurrentEffectivePreservedStateBestEffort(input
       return null;
     }
     return await readHostedWorkspaceEffectivePreservedState({
+      includeInlineFiles: false,
       ...input,
       snapshotRef: currentRefs.snapshotRef,
     });
@@ -816,26 +955,23 @@ async function readHostedWorkspaceCurrentEffectivePreservedStateForCompaction(in
   if (!currentRefs.snapshotRef) {
     return null;
   }
-  if (readHostedExecutionSnapshotDeltaRef(currentRefs.snapshotRef)) {
-    return await readHostedWorkspaceEffectivePreservedState({
-      ...input,
-      snapshotRef: currentRefs.snapshotRef,
-    });
-  }
   try {
     return await readHostedWorkspaceEffectivePreservedState({
+      includeInlineFiles: true,
       ...input,
       snapshotRef: currentRefs.snapshotRef,
     });
   } catch {
-    return null;
+    throw new HostedWorkspaceIdleCompactionPreservedStateUnavailableError();
   }
 }
 
 async function readHostedWorkspaceEffectivePreservedState(input: {
+  includeInlineFiles?: boolean;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   snapshotRef: HostedExecutionSnapshotRef | null;
 }): Promise<HostedWorkspaceEffectivePreservedState> {
+  const includeInlineFiles = input.includeInlineFiles === true;
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
   if (!baseSnapshotRef) {
     return createHostedWorkspaceEffectivePreservedStateFromManifest(
@@ -850,6 +986,12 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
   const baseManifest =
     readHostedPortableWorkspaceManifestFromBundle(baseBundle)
       ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+  const baseInlineFiles = includeInlineFiles
+    ? listHostedBundleInlineFiles({
+        bytes: baseBundle,
+        expectedKind: "vault",
+      })
+    : [];
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(input.snapshotRef);
   if (!deltaSnapshotRef) {
     const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
@@ -859,14 +1001,24 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
         throw new HostedWorkspaceWorkingCheckpointBaseUnavailableError();
       }
       const hotManifest = createHostedPortableWorkspaceManifestFromBundle(hotBundle);
+      const hotInlineFiles = includeInlineFiles
+        ? listHostedBundleInlineFiles({
+            bytes: hotBundle,
+            expectedKind: "vault",
+          })
+        : [];
       return createHostedWorkspaceEffectivePreservedStateFromManifest(
         createHostedWorkspaceBridgeOverlayManifest({
           baseManifest,
           overlayManifest: hotManifest,
         }),
+        createHostedWorkspaceBridgeOverlayInlineFiles({
+          baseInlineFiles,
+          overlayInlineFiles: hotInlineFiles,
+        }),
       );
     }
-    return createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest);
+    return createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest, baseInlineFiles);
   }
 
   const deltaBundle = await input.platform.artifactStore.get(deltaSnapshotRef.hash);
@@ -883,14 +1035,23 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
       baseManifest,
       deltaManifest,
     }),
+    includeInlineFiles
+      ? createHostedWorkspaceBridgeWorkingInlineFiles({
+          baseInlineFiles,
+          deltaBundle,
+          deltaManifest,
+        })
+      : [],
   );
 }
 
 function createHostedWorkspaceEffectivePreservedStateFromManifest(
   manifest: HostedPortableWorkspaceManifest,
+  inlineFiles: HostedBundleInlineLocation[] = [],
 ): HostedWorkspaceEffectivePreservedState {
   return {
     artifactRefProvider: createBaseManifestArtifactRefProvider(manifest),
+    inlineFiles,
     manifest,
     preservedArtifacts: createBaseManifestPreservedArtifacts(manifest),
   };
@@ -908,6 +1069,41 @@ function createEmptyHostedPortableWorkspaceManifest(): HostedPortableWorkspaceMa
     policyVersion: HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
     schema: HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
   };
+}
+
+function createHostedWorkspaceBridgeOverlayInlineFiles(input: {
+  baseInlineFiles: readonly HostedBundleInlineLocation[];
+  overlayInlineFiles: readonly HostedBundleInlineLocation[];
+}): HostedBundleInlineLocation[] {
+  const files = new Map(input.baseInlineFiles.map((file) => [
+    `${file.root}:${file.path}`,
+    file,
+  ]));
+  for (const file of input.overlayInlineFiles) {
+    files.set(`${file.root}:${file.path}`, file);
+  }
+  return [...files.values()];
+}
+
+function createHostedWorkspaceBridgeWorkingInlineFiles(input: {
+  baseInlineFiles: readonly HostedBundleInlineLocation[];
+  deltaBundle: Uint8Array | ArrayBuffer;
+  deltaManifest: HostedPortableWorkspaceDeltaManifest;
+}): HostedBundleInlineLocation[] {
+  const files = new Map(input.baseInlineFiles.map((file) => [
+    `${file.root}:${file.path}`,
+    file,
+  ]));
+  for (const tombstone of input.deltaManifest.tombstones) {
+    files.delete(`${tombstone.root}:${tombstone.path}`);
+  }
+  for (const file of listHostedBundleInlineFiles({
+    bytes: input.deltaBundle,
+    expectedKind: "vault",
+  })) {
+    files.set(`${file.root}:${file.path}`, file);
+  }
+  return [...files.values()];
 }
 
 function createHostedWorkspaceEffectiveManifestFromDelta(input: {
@@ -1011,7 +1207,7 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
 
 async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
   codexHomeSnapshotHashSecret: string | null;
-  error: HostedWorkspaceSnapshotContinuityIncompleteError;
+  error: HostedWorkspaceIdleShutdownCheckpointSkipError;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
@@ -1096,12 +1292,15 @@ async function writeHostedCheckpointOptionalSidecarDegradedLog(params: {
 }
 
 async function writeHostedCheckpointIdleShutdownSkippedLog(params: {
-  error: HostedWorkspaceSnapshotContinuityIncompleteError;
+  error: HostedWorkspaceIdleShutdownCheckpointSkipError;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceCheckpointRequest;
 }): Promise<void> {
+  const continuityError = params.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError
+    ? params.error
+    : null;
   console.warn("Hosted idle-shutdown checkpoint snapshot skipped.", {
-    continuityReason: params.error.reason,
+    ...(continuityError ? { continuityReason: continuityError.reason } : {}),
     errorName: params.error.name,
   });
   if (!params.platform.logPort) {
@@ -1110,15 +1309,19 @@ async function writeHostedCheckpointIdleShutdownSkippedLog(params: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: params.request.reason,
-    continuityReason: params.error.reason,
     errorMessage: redactHostedRuntimeDiagnosticText(params.error.message),
     errorName: params.error.name,
-    skipReason: "codex_continuity_incomplete",
+    skipReason: continuityError
+      ? "codex_continuity_incomplete"
+      : "preserved_state_unavailable",
+    ...(continuityError ? { continuityReason: continuityError.reason } : {}),
   };
-  appendHostedCodexHomeSnapshotDiagnostics(
-    redactedJson,
-    params.error.codexHomeSnapshotDiagnostics,
-  );
+  if (continuityError) {
+    appendHostedCodexHomeSnapshotDiagnostics(
+      redactedJson,
+      continuityError.codexHomeSnapshotDiagnostics,
+    );
+  }
 
   try {
     await params.platform.logPort.write({

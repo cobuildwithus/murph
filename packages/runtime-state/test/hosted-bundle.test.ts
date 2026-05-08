@@ -23,9 +23,11 @@ import {
   listHostedBundleArtifacts,
   clearHostedAssistantRuntimeHotState,
   materializeHostedExecutionArtifacts,
+  createHostedPortableWorkspaceManifestFromBundle,
   readHostedPortableWorkspaceDeltaManifestFromBundle,
   readHostedPortableWorkspaceManifestFromBundle,
   readHostedBundleTextFile,
+  readHostedWorkspaceSkippedInlineFiles,
   repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
@@ -41,6 +43,7 @@ import {
   snapshotHostedPortableWorkspaceDelta,
   verifyRestoredHostedCodexContinuityManifest,
   writeHostedBundleTextFile,
+  writeHostedWorkspaceSkippedInlineFiles,
 } from "../src/node/index.ts";
 
 const HOSTED_CHECKPOINT_DEBUG_PATHS_ENV = "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS";
@@ -1636,6 +1639,172 @@ test("hosted workspace working deltas carry forward unmaterialized raw text arti
     assert.equal(
       await readFile(path.join(restored.vaultRoot, "raw", "integrations", "provider", "snapshot.json"), "utf8"),
       rawAttachmentBytes.toString("utf8"),
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted workspace working deltas carry forward skipped inline raw files from legacy bases", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-working-delta-skipped-inline-"));
+
+  try {
+    const baseVaultRoot = path.join(workspaceRoot, "base-vault");
+    const rawPath = path.join(baseVaultRoot, "raw", "integrations", "provider", "legacy.json");
+    await mkdir(path.dirname(rawPath), { recursive: true });
+    await writeFile(path.join(baseVaultRoot, "note.md"), "base\n");
+    await writeFile(rawPath, "{\"legacy\":true}\n");
+
+    const baseBundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [
+        {
+          root: baseVaultRoot,
+          rootKey: "vault",
+        },
+      ],
+    });
+    assert.ok(baseBundle);
+    const baseManifest = createHostedPortableWorkspaceManifestFromBundle(baseBundle);
+    const baseHash = sha256HostedBundleHex(baseBundle);
+    assert.equal(
+      baseManifest.files.some((file) =>
+        file.root === "vault" && file.path === "raw/integrations/provider/legacy.json" && !file.artifact
+      ),
+      true,
+    );
+
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    const restoredVaultRoot = path.join(restoreRoot, "vault");
+    const skippedInlineFiles: Awaited<ReturnType<typeof readHostedWorkspaceSkippedInlineFiles>> = [];
+    await restoreHostedBundleRoots({
+      bytes: baseBundle,
+      expectedKind: "vault",
+      onSkippedInlineFile: (file) => {
+        skippedInlineFiles.push(file);
+      },
+      roots: {
+        vault: restoredVaultRoot,
+      },
+      shouldRestoreInlineFile: ({ path: inlinePath, root }) =>
+        !(root === "vault" && inlinePath.startsWith("raw/")),
+    });
+    await writeHostedWorkspaceSkippedInlineFiles({
+      files: skippedInlineFiles,
+      vaultRoot: restoredVaultRoot,
+    });
+
+    assert.equal(await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"), "base\n");
+    await assert.rejects(readFile(path.join(restoredVaultRoot, "raw", "integrations", "provider", "legacy.json"), "utf8"));
+
+    const skipped = await readHostedWorkspaceSkippedInlineFiles({
+      vaultRoot: restoredVaultRoot,
+    });
+    assert.equal(
+      (await lstat(path.join(
+        restoredVaultRoot,
+        ".runtime",
+        "cache",
+        "hosted-skipped-inline-files.json",
+      ))).mode & 0o777,
+      0o600,
+    );
+    const skippedKeys = new Set(skipped.map((file) => `${file.root}:${file.path}`));
+
+    await writeFile(path.join(restoredVaultRoot, "note.md"), "changed\n");
+    const delta = await snapshotHostedPortableWorkspaceDelta({
+      baseManifest,
+      baseSnapshotHash: baseHash,
+      preservedInlineManifestFiles: baseManifest.files.filter((file) =>
+        skippedKeys.has(`${file.root}:${file.path}`)
+      ),
+      vaultRoot: restoredVaultRoot,
+    });
+    assert.equal(delta.kind, "changed");
+    const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(delta.bundle);
+    assert.ok(deltaManifest);
+    assert.equal(
+      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "note.md"),
+      true,
+    );
+    assert.equal(
+      deltaManifest.upserts.some((file) => file.root === "vault" && file.path === "raw/integrations/provider/legacy.json"),
+      false,
+    );
+    assert.equal(
+      deltaManifest.tombstones.some((file) => file.root === "vault" && file.path === "raw/integrations/provider/legacy.json"),
+      false,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted workspace working deltas can skip non-eager inline raw upserts", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-working-delta-inline-skip-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    await mkdir(path.join(vaultRoot, "bank"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "bank", "memory.md"), "base\n");
+
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      vaultRoot,
+    });
+    const baseManifest = readHostedPortableWorkspaceManifestFromBundle(baseSnapshot.bundle);
+    assert.ok(baseManifest);
+
+    const rawPath = path.join(vaultRoot, "raw", "integrations", "provider", "working.json");
+    await mkdir(path.dirname(rawPath), { recursive: true });
+    await writeFile(rawPath, "{\"delta\":true}\n");
+    const delta = await snapshotHostedPortableWorkspaceDelta({
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      vaultRoot,
+    });
+    assert.equal(delta.kind, "changed");
+    const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(delta.bundle);
+    assert.ok(deltaManifest);
+    assert.equal(
+      deltaManifest.upserts.some((file) =>
+        file.root === "vault"
+        && file.path === "raw/integrations/provider/working.json"
+        && !file.artifact
+      ),
+      true,
+    );
+
+    const restoreVaultRoot = path.join(workspaceRoot, "restore-vault");
+    await restoreHostedBundleRoots({
+      bytes: baseSnapshot.bundle,
+      expectedKind: "vault",
+      roots: {
+        vault: restoreVaultRoot,
+      },
+    });
+
+    const skippedInlineFiles: Awaited<ReturnType<typeof readHostedWorkspaceSkippedInlineFiles>> = [];
+    await restoreHostedWorkspaceWorkingDelta({
+      baseManifest,
+      baseSnapshotHash: sha256HostedBundleHex(baseSnapshot.bundle),
+      bundle: delta.bundle,
+      onSkippedInlineFile: (file) => {
+        skippedInlineFiles.push(file);
+      },
+      roots: {
+        vault: restoreVaultRoot,
+      },
+      shouldRestoreInlineFile: ({ path: inlinePath, root }) =>
+        !(root === "vault" && inlinePath.startsWith("raw/")),
+    });
+
+    assert.equal(await readFile(path.join(restoreVaultRoot, "bank", "memory.md"), "utf8"), "base\n");
+    await assert.rejects(
+      readFile(path.join(restoreVaultRoot, "raw", "integrations", "provider", "working.json"), "utf8"),
+    );
+    assert.deepEqual(
+      skippedInlineFiles.map((file) => `${file.root}:${file.path}`),
+      ["vault:raw/integrations/provider/working.json"],
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });

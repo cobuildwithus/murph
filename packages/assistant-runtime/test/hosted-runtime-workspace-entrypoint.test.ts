@@ -1670,7 +1670,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("compacts restored legacy working snapshots before mailbox import", async () => {
+  test("restores working snapshots without bootstrap checkpoint before mailbox import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
     const sourceCurrentVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-current-"));
@@ -1796,8 +1796,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.deepEqual(events, [
         "workspace.read",
-        "snapshot:activation_bootstrap:3",
-        "workspace.checkpoint",
         "mailbox.fetch",
         "import:4",
         "snapshot:import:4",
@@ -1808,8 +1806,7 @@ describe("hosted workspace runtime entrypoint", () => {
         request.reason,
         request.expectedWorkspaceVersion,
       ]), [
-        ["activation_bootstrap", "9"],
-        ["import", "10"],
+        ["import", "9"],
       ]);
       assert.equal(
         await readFile(path.join(vaultRoot, "note.md"), "utf8"),

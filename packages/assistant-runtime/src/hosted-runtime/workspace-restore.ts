@@ -31,6 +31,9 @@ import {
   restoreHostedBundleRoots,
   restoreHostedWorkspaceWorkingDelta,
   verifyRestoredHostedCodexContinuityManifest,
+  readHostedWorkspaceSkippedInlineFiles,
+  writeHostedWorkspaceSkippedInlineFiles,
+  type HostedWorkspaceSkippedInlineFile,
 } from "@murphai/runtime-state/node";
 import {
   buildHostedRuntimeLogContextFields,
@@ -63,7 +66,6 @@ export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 export interface HostedWorkspaceRuntimeRestoreResult
   extends HostedRestoredExecutionContext {
   mode: HostedWorkspaceRuntimeRestoreMode;
-  appliedWorkingDelta: boolean;
 }
 
 export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
@@ -108,7 +110,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     return {
       ...restored,
-      appliedWorkingDelta: false,
       mode: "null-bootstrap",
     };
   }
@@ -159,6 +160,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         platform: input.platform,
         ref: baseSnapshotRef,
         restored,
+        trackSkippedInlineFiles: true,
       });
       const baseProvidesCodexProviderContinuity = hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
         bundle: baseRepair.bundle,
@@ -232,6 +234,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       platform: input.platform,
       ref: deltaSnapshotRef,
     });
+    const skippedInlineFiles: HostedWorkspaceSkippedInlineFile[] = [];
     await restoreHostedWorkspaceWorkingDelta({
       artifactResolver: createHostedArtifactResolver({
         artifactStore: input.platform.artifactStore,
@@ -239,12 +242,22 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       baseManifest,
       baseSnapshotHash: baseSnapshotRef.hash,
       bundle: deltaBundle,
+      onSkippedInlineFile: (file) => {
+        skippedInlineFiles.push(file);
+      },
       roots: {
         [HOSTED_OPERATOR_HOME_ROOT_KEY]: restored.operatorHomeRoot,
         vault: restored.vaultRoot,
       },
       shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
+      shouldRestoreInlineFile: shouldRestoreHostedRuntimeInlineFile,
     });
+    if (skippedInlineFiles.length > 0) {
+      await appendHostedWorkspaceSkippedInlineFiles({
+        files: skippedInlineFiles,
+        vaultRoot: restored.vaultRoot,
+      });
+    }
     await verifyRestoredHostedCodexContinuityManifest(restored.operatorHomeRoot, {
       assistantStateRoot: resolveAssistantStatePaths(restored.vaultRoot).assistantStateRoot,
     });
@@ -258,7 +271,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
   return {
     ...restored,
-    appliedWorkingDelta: Boolean(deltaSnapshotRef),
     mode: "snapshot",
   };
 }
@@ -296,6 +308,7 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
     platform: input.input.platform,
     ref: input.hotSnapshotRef,
     restored: input.restored,
+    trackSkippedInlineFiles: false,
   });
 }
 
@@ -765,11 +778,13 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
   platform: HostedRuntimePlatform;
   ref: HostedExecutionBundleRef;
   restored: HostedRestoredExecutionContext;
+  trackSkippedInlineFiles: boolean;
 }): Promise<void> {
   const bundle = input.bundle ?? await readHostedWorkspaceRuntimeBundle({
     platform: input.platform,
     ref: input.ref,
   });
+  const skippedInlineFiles: HostedWorkspaceSkippedInlineFile[] = [];
 
   await clearHostedCodexContinuityRestoreRoot(input.restored.operatorHomeRoot);
   try {
@@ -783,8 +798,20 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
         [HOSTED_OPERATOR_HOME_ROOT_KEY]: input.restored.operatorHomeRoot,
         vault: input.restored.vaultRoot,
       },
+      onSkippedInlineFile: input.trackSkippedInlineFiles
+        ? (file) => {
+            skippedInlineFiles.push(file);
+          }
+        : undefined,
       shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
+      shouldRestoreInlineFile: shouldRestoreHostedRuntimeInlineFile,
     });
+    if (input.trackSkippedInlineFiles) {
+      await writeHostedWorkspaceSkippedInlineFiles({
+        files: skippedInlineFiles,
+        vaultRoot: input.restored.vaultRoot,
+      });
+    }
     await verifyRestoredHostedCodexContinuityManifest(input.restored.operatorHomeRoot, {
       assistantStateRoot: resolveAssistantStatePaths(input.restored.vaultRoot).assistantStateRoot,
     });
@@ -792,6 +819,39 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
     await clearHostedCodexContinuityRestoreRoot(input.restored.operatorHomeRoot);
     throw error;
   }
+}
+
+async function appendHostedWorkspaceSkippedInlineFiles(input: {
+  files: readonly HostedWorkspaceSkippedInlineFile[];
+  vaultRoot: string;
+}): Promise<void> {
+  if (input.files.length === 0) {
+    return;
+  }
+
+  let existing: HostedWorkspaceSkippedInlineFile[] = [];
+  try {
+    existing = await readHostedWorkspaceSkippedInlineFiles({
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      throw error;
+    }
+  }
+
+  const files = new Map<string, HostedWorkspaceSkippedInlineFile>();
+  for (const file of existing) {
+    files.set(`${file.root}:${file.path}`, file);
+  }
+  for (const file of input.files) {
+    files.set(`${file.root}:${file.path}`, file);
+  }
+
+  await writeHostedWorkspaceSkippedInlineFiles({
+    files: [...files.values()],
+    vaultRoot: input.vaultRoot,
+  });
 }
 
 async function readHostedWorkspaceRuntimeBundle(input: {
@@ -827,6 +887,17 @@ function shouldRestoreHostedRuntimeEagerArtifact(input: {
     || hasHostedRuntimeEagerArtifactPrefix(input.path, "derived/inbox")
     || hasHostedRuntimeEagerArtifactPrefix(input.path, "derived/assistant-input")
   );
+}
+
+function shouldRestoreHostedRuntimeInlineFile(input: {
+  path: string;
+  root: string;
+}): boolean {
+  if (input.root !== "vault" || !input.path.startsWith("raw/")) {
+    return true;
+  }
+
+  return shouldRestoreHostedRuntimeEagerArtifact(input);
 }
 
 function hasHostedRuntimeEagerArtifactPrefix(

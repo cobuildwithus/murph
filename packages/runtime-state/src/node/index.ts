@@ -13,11 +13,13 @@ export {
   hasHostedBundleArtifactPath,
   HOSTED_BUNDLE_SCHEMA,
   listHostedBundleArtifacts,
+  listHostedBundleInlineFiles,
   readHostedBundleTextFile,
   sha256HostedBundleHex,
   writeHostedBundleTextFile,
   type HostedBundleArtifactLocation,
   type HostedBundleArtifactRef,
+  type HostedBundleInlineLocation,
 } from "../hosted-bundle.ts";
 export * from "../hosted-bundle-node.ts";
 export * from "../assistant-state-fs.ts";

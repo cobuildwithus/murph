@@ -24,6 +24,14 @@ export interface HostedBundleArtifactLocation {
   root: string;
 }
 
+export interface HostedBundleInlineLocation {
+  bytes: Uint8Array;
+  path: string;
+  root: string;
+  sha256: string;
+  size: number;
+}
+
 export interface HostedBundleArchiveInlineFile {
   contentsBase64: string;
   path: string;
@@ -164,6 +172,37 @@ export function listHostedBundleArtifacts(input: {
       ref: entry.artifact,
       root: entry.root,
     }));
+}
+
+export function listHostedBundleInlineFiles(input: {
+  bytes: Uint8Array | ArrayBuffer | null;
+  expectedKind: HostedExecutionBundleKind;
+}): HostedBundleInlineLocation[] {
+  if (!input.bytes) {
+    return [];
+  }
+
+  const archive = parseHostedBundleArchive(input.bytes);
+
+  if (archive.kind !== input.expectedKind) {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected ${input.expectedKind}, got ${archive.kind}.`,
+    );
+  }
+
+  return archive.files.flatMap((entry) => {
+    if (isHostedBundleArtifactEntry(entry)) {
+      return [];
+    }
+    const bytes = Buffer.from(entry.contentsBase64, "base64");
+    return [{
+      bytes,
+      path: entry.path,
+      root: entry.root,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.byteLength,
+    }];
+  });
 }
 
 export function encodeHostedBundleBase64(value: Uint8Array | ArrayBuffer | null): string | null {
