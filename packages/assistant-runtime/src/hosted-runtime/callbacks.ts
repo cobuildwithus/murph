@@ -19,6 +19,7 @@ import {
   sendLinqMessage,
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
+  resetAssistantOutboxPreparedDispatchById,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
 } from "@murphai/assistant-engine";
@@ -338,6 +339,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
     vault: input.vaultRoot,
   });
+  let providerDispatchEntered = false;
   try {
     assertHostedDeliveryLiveness(input.signal);
     const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
@@ -366,6 +368,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }
 
           await assertHostedDeliveryLiveNow(input);
+          providerDispatchEntered = true;
           const result = await input.effectsPort.sendEmail({
             idempotencyKey: request.idempotencyKey ?? null,
             identityId: request.identityId ?? null,
@@ -380,6 +383,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryLiveNow(input);
+          providerDispatchEntered = true;
           const result = input.effectsPort.sendTelegram
             ? await input.effectsPort.sendTelegram({
                 idempotencyKey: request.idempotencyKey ?? null,
@@ -412,6 +416,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               targetKind: request.targetKind ?? null,
               wake: input.wake,
             });
+          providerDispatchEntered = true;
           const result = input.effectsPort.sendLinq
             ? await input.effectsPort.sendLinq({
                 directRecipientPhoneNumber,
@@ -443,6 +448,21 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       wake: input.wake,
     });
   } catch (error) {
+    if (shouldResetHostedPreparedForegroundDeliveryOnAbort({
+      assistantDeliveryEffect: input.assistantDeliveryEffect,
+      mirrorState,
+      providerDispatchEntered,
+      signal: input.signal,
+    })) {
+      await resetAssistantOutboxPreparedDispatchById({
+        deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
+        deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
+        intentId: input.assistantDeliveryEffect.effectId,
+        preparedAt: mirrorState.sendingStartedAt,
+        resetAt: new Date(),
+        vault: input.vaultRoot,
+      });
+    }
     const enrichedError = attachHostedAssistantDeliveryDispatchDetails(error, {
       effectId: input.assistantDeliveryEffect.effectId,
       fingerprint: input.assistantDeliveryEffect.fingerprint,
@@ -467,6 +487,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     });
     throw enrichedError;
   }
+}
+
+function shouldResetHostedPreparedForegroundDeliveryOnAbort(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
+  providerDispatchEntered: boolean;
+  signal: AbortSignal | null;
+}): boolean {
+  return input.signal?.aborted === true
+    && input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+    && input.mirrorState.intent?.status === "sending"
+    && input.mirrorState.sendingStartedAt !== null
+    && !input.providerDispatchEntered;
 }
 
 function readHostedWakeDirectLinqRecipientForDelivery(input: {

@@ -56,6 +56,7 @@ import {
   markAssistantOutboxIntentMirrorTerminal,
   markAssistantOutboxIntentSent,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
+  resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
   updateAssistantOutboxAfterDispatchFailure,
 } from './outbox/dispatch-state.js'
@@ -957,6 +958,35 @@ export async function markAssistantOutboxIntentMirrorRetryableById(input: {
     failedAt: input.failedAt ?? new Date(),
     intent,
     intentPath,
+    vault: input.vault,
+  })
+}
+
+export async function resetAssistantOutboxPreparedDispatchById(input: {
+  deliveryIdempotencyKey?: string | null
+  deliveryTransportIdempotent: boolean
+  intentId: string
+  preparedAt?: string | null
+  resetAt?: Date
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantState(paths)
+  const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
+  if (!intent) {
+    return null
+  }
+
+  return resetAssistantOutboxPreparedDispatch({
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    intent,
+    intentPath,
+    preparedAt: input.preparedAt,
+    resetAt: input.resetAt ?? new Date(),
     vault: input.vault,
   })
 }
