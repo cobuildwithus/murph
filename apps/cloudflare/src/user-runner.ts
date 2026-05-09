@@ -55,7 +55,6 @@ import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
   refreshHostedExecutionContainerBrowserVaultReplica,
-  resolveHostedExecutionBrowserVaultRefreshRunnerContainerName,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -497,16 +496,10 @@ export class HostedUserRunner {
   async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
     let runningRecord = await this.stateStore.readState();
-    const abortedBrowserVaultRefresh = this.browserVaultRefreshCoordinator.abortForForegroundWork({
+    this.browserVaultRefreshCoordinator.abortForForegroundWork({
       reason: "pending_nudge",
       userId: runningRecord.userId,
     });
-    if (abortedBrowserVaultRefresh) {
-      this.destroyBrowserVaultRefreshContainerBestEffort({
-        reason: "pending_nudge",
-        userId: runningRecord.userId,
-      });
-    }
     if (!activeInThisIsolate && runningRecord.inFlight) {
       const recovery = await this.stateStore.clearStaleInvocationIfExpired({
         nowMs: Date.now(),
@@ -800,16 +793,10 @@ export class HostedUserRunner {
       };
     }
 
-    const abortedBrowserVaultRefresh = this.browserVaultRefreshCoordinator.abortForForegroundWork({
+    this.browserVaultRefreshCoordinator.abortForForegroundWork({
       reason: "foreground_invocation",
       userId: initialRecord.userId,
     });
-    if (abortedBrowserVaultRefresh) {
-      this.destroyBrowserVaultRefreshContainerBestEffort({
-        reason: "foreground_invocation",
-        userId: initialRecord.userId,
-      });
-    }
     let lease: RunnerInvocationLease;
     try {
       lease = await this.stateStore.beginInvocation({
@@ -2115,68 +2102,6 @@ export class HostedUserRunner {
     }
   }
 
-  private destroyBrowserVaultRefreshContainerBestEffort(input: {
-    reason: "foreground_invocation" | "pending_nudge";
-    userId: string;
-  }): void {
-    const destroy = this.destroyBrowserVaultRefreshContainer(input);
-    try {
-      this.state.waitUntil?.(destroy);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        level: "warn",
-        message: "Hosted runner could not register browser-vault refresh container cleanup.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-    }
-    void destroy.catch(() => undefined);
-  }
-
-  private async destroyBrowserVaultRefreshContainer(input: {
-    reason: "foreground_invocation" | "pending_nudge" | "refresh_finished";
-    userId: string;
-  }): Promise<void> {
-    if (!this.runnerContainerNamespace) {
-      return;
-    }
-
-    try {
-      const destroyed = await destroyHostedExecutionContainer({
-        runnerContainerName: resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
-          source: this.runnerRuntimeEnvSource,
-          userId: input.userId,
-        }),
-        runnerContainerNamespace: this.runnerContainerNamespace,
-        userId: input.userId,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          destroyErrorCode: destroyed.errorCode,
-          destroyAttempted: destroyed.attempted,
-          destroyOk: destroyed.ok,
-          reason: input.reason,
-        },
-        level: destroyed.ok ? "info" : "warn",
-        message: "Hosted runner cleaned up browser-vault refresh container.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        level: "warn",
-        message: "Hosted runner could not clean up browser-vault refresh container.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-    }
-  }
-
   private async scheduleHostedWakeRetryAlarm(input: {
     respectMaxAttempts?: boolean;
     retryDelayMs?: number;
@@ -2242,7 +2167,7 @@ export class HostedUserRunner {
       rewritePlatformUrlsForContainer: true,
       runnerSecrets,
     });
-    const runnerContainerName = resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
+    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
       source: this.runnerRuntimeEnvSource,
       userId: input.userId,
     });
@@ -2252,22 +2177,14 @@ export class HostedUserRunner {
       return;
     }
 
-    let generated: Awaited<ReturnType<typeof refreshHostedExecutionContainerBrowserVaultReplica>>;
-    try {
-      generated = await refreshHostedExecutionContainerBrowserVaultReplica({
-        runnerContainerName,
-        runnerContainerNamespace: this.runnerContainerNamespace,
-        runtime: runtimeConfig,
-        signal: input.signal,
-        timeoutMs: this.env.runnerTimeoutMs,
-        userId: input.userId,
-      });
-    } finally {
-      await this.destroyBrowserVaultRefreshContainer({
-        reason: "refresh_finished",
-        userId: input.userId,
-      });
-    }
+    const generated = await refreshHostedExecutionContainerBrowserVaultReplica({
+      runnerContainerName,
+      runnerContainerNamespace: this.runnerContainerNamespace,
+      runtime: runtimeConfig,
+      signal: input.signal,
+      timeoutMs: this.env.runnerTimeoutMs,
+      userId: input.userId,
+    });
 
     if (input.signal.aborted) {
       return;

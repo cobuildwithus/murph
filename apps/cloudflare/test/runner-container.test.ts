@@ -23,7 +23,6 @@ import {
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
   refreshHostedExecutionContainerBrowserVaultReplica,
-  resolveHostedExecutionBrowserVaultRefreshRunnerContainerName,
   resolveHostedExecutionRunnerContainerName,
   RunnerContainer,
 } from "../src/runner-container.ts";
@@ -2218,7 +2217,7 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("keeps AbortSignal values local to browser-vault refresh container RPC", async () => {
+  it("keeps AbortSignal values local to browser-vault refresh RPC", async () => {
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async () => ({ status: "already_fresh" }));
@@ -2356,14 +2355,6 @@ describe("RunnerContainer", () => {
       },
       userId: "member_123",
     })).toBe("member_123--v-version-123");
-    expect(resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
-      source: {
-        CF_VERSION_METADATA: {
-          id: " version/123 ",
-        },
-      },
-      userId: "member_123",
-    })).toBe("member_123--v-version-123--browser-vault-refresh");
   });
 
   it("falls back to the user id when worker version metadata is unavailable", () => {
