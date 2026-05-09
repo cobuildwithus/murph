@@ -35,6 +35,7 @@ function createDeployEnvironment() {
     maxEventAttempts: "3",
     retryDelayMs: "30000",
     runnerCommitTimeoutMs: "30000",
+    runnerDestroyTimeoutMs: "30000",
     runnerReadyTimeoutMs: "20000",
     runnerTimeoutMs: "600000",
     traceHeadSamplingRate: 0.1,
