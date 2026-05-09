@@ -307,46 +307,35 @@ async function writeHostedMemberLinqBindingTx(input: {
     telegramUserId: null,
   });
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await clearHostedMemberLinqChatConflicts({
-        linqChatLookupKey,
-        memberId: input.memberId,
-        tx: input.prisma,
-      });
+  await clearHostedMemberLinqChatConflicts({
+    linqChatLookupKey,
+    memberId: input.memberId,
+    tx: input.prisma,
+  });
 
-      await input.prisma.hostedMemberRouting.upsert({
-        where: {
-          memberId: input.memberId,
-        },
-        create: buildHostedMemberLinqBindingCreateData({
-          kind: input.kind,
-          linqChatLookupKey,
-          memberId: input.memberId,
-          participantContact: input.participantContact,
-          participantContactObservedAt: input.participantContactObservedAt,
-          recipientPhoneLookupKey,
-          routingPrivateColumns,
-        }),
-        update: buildHostedMemberLinqBindingUpdateData({
-          clearPending: input.clearPending,
-          kind: input.kind,
-          linqChatLookupKey,
-          participantContact: input.participantContact,
-          participantContactObservedAt: input.participantContactObservedAt,
-          recipientPhoneLookupKey,
-          routingPrivateColumns,
-        }),
-      });
-      return;
-    } catch (error) {
-      if (attempt === 0 && isPrismaUniqueConstraintError(error)) {
-        continue;
-      }
-
-      throw error;
-    }
-  }
+  await input.prisma.hostedMemberRouting.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: buildHostedMemberLinqBindingCreateData({
+      kind: input.kind,
+      linqChatLookupKey,
+      memberId: input.memberId,
+      participantContact: input.participantContact,
+      participantContactObservedAt: input.participantContactObservedAt,
+      recipientPhoneLookupKey,
+      routingPrivateColumns,
+    }),
+    update: buildHostedMemberLinqBindingUpdateData({
+      clearPending: input.clearPending,
+      kind: input.kind,
+      linqChatLookupKey,
+      participantContact: input.participantContact,
+      participantContactObservedAt: input.participantContactObservedAt,
+      recipientPhoneLookupKey,
+      routingPrivateColumns,
+    }),
+  });
 }
 
 function buildHostedMemberLinqBindingCreateData(input: {
@@ -512,10 +501,4 @@ function buildHostedRecipientPhoneLookupEntries(
   }
 
   return entries;
-}
-
-function isPrismaUniqueConstraintError(
-  error: unknown,
-): error is Prisma.PrismaClientKnownRequestError {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }

@@ -994,7 +994,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("retries once when the exclusive Linq binding races another writer", async () => {
+  it("does not retry Linq binding writes inside the same transaction after a unique race", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn()
       .mockRejectedValueOnce(
@@ -1018,10 +1018,12 @@ describe("hosted-member-store", () => {
         prisma,
         recipientPhone: "+15550100001",
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({
+      code: "P2002",
+    });
 
-    expect(updateMany).toHaveBeenCalledTimes(4);
-    expect(upsert).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(upsert).toHaveBeenCalledTimes(1);
   });
 
   it("upserts a home Linq recipient phone without creating a home chat binding", async () => {

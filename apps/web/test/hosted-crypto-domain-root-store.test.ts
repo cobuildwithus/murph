@@ -437,6 +437,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
   };
   const hostedMemberIdentity = Object.assign({}, tx.prisma.hostedMemberIdentity, {
     findFirst: async (): Promise<null> => null,
+    findMany: async (): Promise<[]> => [],
   });
 
   return {

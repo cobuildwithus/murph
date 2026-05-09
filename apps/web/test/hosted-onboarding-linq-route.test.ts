@@ -57,7 +57,7 @@ describe("hosted onboarding Linq webhook route", () => {
     });
   });
 
-  it("forwards the public request signal into the hosted Linq webhook service", async () => {
+  it("does not bind durable Linq webhook handling to the public request abort signal", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
       method: "POST",
       body: JSON.stringify({
@@ -77,7 +77,6 @@ describe("hosted onboarding Linq webhook route", () => {
         ok: true,
       }),
       signature: "sha256=test",
-      signal: request.signal,
       timestamp: "1711278000",
     });
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(

@@ -88,7 +88,7 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     ?? state.connectedSource?.providerLabel
     ?? callback.providerLabel
     ?? "Device";
-  const connected = callback.status === "connected";
+  const connected = callback.status === "connected" && state.connectedSource !== null;
   const failed = callback.status === "error";
   const title = failed
     ? `${providerLabel} connection did not finish`
@@ -169,7 +169,7 @@ async function loadCompletionState(input: {
     );
 
     return {
-      contactAction: input.callback.status === "connected"
+      contactAction: input.callback.status === "connected" && connectedSource !== null
         ? resolvePreferredContactAction({
             hasTelegramRouting: Boolean(routing?.telegramThreadId || routing?.telegramUserId),
             messageBody,

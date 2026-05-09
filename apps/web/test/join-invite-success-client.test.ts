@@ -101,7 +101,7 @@ test("activating success page explains when vault and assistant setup is still r
   assert.match(markup, /We&#x27;ll keep checking automatically/);
 });
 
-test("checkout-stage success page stays blank before redirecting returned sessions", () => {
+test("checkout-stage success page stays blank while the returned session is being verified", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("checkout"),
@@ -140,7 +140,7 @@ test("checkout-stage success page reconciles the returned session once and redir
   await view.cleanup();
 });
 
-test("checkout-stage success page redirects home before returned session reconciliation completes", async () => {
+test("checkout-stage success page waits for returned session reconciliation before opening home", async () => {
   let resolveFetch!: (response: Response) => void;
   const fetchMock = vi.fn<typeof fetch>().mockImplementation(
     () =>
@@ -156,7 +156,7 @@ test("checkout-stage success page redirects home before returned session reconci
   await act(async () => {});
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).not.toHaveBeenCalled();
   expect(view.container.textContent ?? "").toBe("");
 
   resolveFetch(
@@ -167,12 +167,12 @@ test("checkout-stage success page redirects home before returned session reconci
 
   await act(async () => {});
 
-  expect(view.routerReplace).toHaveBeenCalledTimes(1);
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
 
-test("activating success page reconciles the returned session and redirects home", async () => {
+test("activating success page keeps waiting when returned session reconciliation is still pending", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify(createStatus("activating")), {
       status: 200,
@@ -193,7 +193,7 @@ test("activating success page reconciles the returned session and redirects home
     }),
     method: "POST",
   }));
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).not.toHaveBeenCalled();
 
   await view.cleanup();
 });

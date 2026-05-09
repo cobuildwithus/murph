@@ -1,6 +1,10 @@
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { readHostedDomainRootEnvelopeByRootKeyIdOrThrow } from "@/src/lib/hosted-crypto/domain-root-store";
-import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import {
+  isHostedDomainRootEnvelopeUnavailableError,
+  readHostedDomainRootEnvelopeByRootKeyIdOrThrow,
+} from "@/src/lib/hosted-crypto/domain-root-store";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { jsonError, jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 type HostedRuntimeCryptoRootDomain = "ingress" | "runtime";
@@ -24,12 +28,25 @@ export const POST = withJsonError(async (request: Request) => {
     return Response.json({ error: "hosted_workspace_not_provisioned" }, { status: 403 });
   }
 
-  const envelope = await readHostedDomainRootEnvelopeByRootKeyIdOrThrow({
-    domain: body.domain,
-    prisma,
-    rootKeyId: body.rootKeyId,
-    userId,
-  });
+  let envelope: Awaited<ReturnType<typeof readHostedDomainRootEnvelopeByRootKeyIdOrThrow>>;
+  try {
+    envelope = await readHostedDomainRootEnvelopeByRootKeyIdOrThrow({
+      domain: body.domain,
+      prisma,
+      rootKeyId: body.rootKeyId,
+      userId,
+    });
+  } catch (error) {
+    if (isHostedDomainRootEnvelopeUnavailableError(error)) {
+      return jsonError(hostedOnboardingError({
+        code: "HOSTED_RUNTIME_CRYPTO_ROOT_NOT_FOUND",
+        httpStatus: 404,
+        message: "Hosted runtime crypto root is not available.",
+      }));
+    }
+
+    throw error;
+  }
 
   return jsonOk({
     domain: body.domain,
