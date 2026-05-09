@@ -387,6 +387,8 @@ type HostedWorkspaceCheckpointCommitKind =
   | "working_unchanged";
 type HostedWorkspaceCheckpointSnapshotMode = "delta" | "full";
 type HostedWorkspaceCheckpointPolicy = "full" | "working_delta";
+const HOSTED_WORKSPACE_ARTIFACT_PUT_CONCURRENCY = 32;
+
 async function createFullSeedSnapshot(
   input: HostedWorkspaceBridgeFullSnapshotInput,
 ): Promise<{
@@ -510,14 +512,12 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
       writeBundle: async ({ bundle }) => {
         const hash = sha256HostedBundleHex(bundle);
         bundlePutBytes = bundle.byteLength;
-        for (const artifact of pendingArtifactPuts) {
-          externalArtifactPutCount += 1;
-          externalArtifactPutBytes += artifact.bytes.byteLength;
-          await input.platform.artifactStore.put({
-            bytes: artifact.bytes,
-            sha256: artifact.ref.sha256,
-          });
-        }
+        const artifactPutMetrics = await putHostedWorkspaceArtifacts({
+          artifactStore: input.platform.artifactStore,
+          artifacts: pendingArtifactPuts,
+        });
+        externalArtifactPutBytes = artifactPutMetrics.putBytes;
+        externalArtifactPutCount = artifactPutMetrics.putCount;
         await input.platform.artifactStore.put({
           bytes: bundle,
           sha256: hash,
@@ -645,14 +645,12 @@ async function createWorkingDeltaSnapshot(
       const hash = sha256HostedBundleHex(bundle);
       bundlePutBytes = bundle.byteLength;
       bundlePutCount = 1;
-      for (const artifact of pendingArtifactPuts) {
-        externalArtifactPutCount += 1;
-        externalArtifactPutBytes += artifact.bytes.byteLength;
-        await input.platform.artifactStore.put({
-          bytes: artifact.bytes,
-          sha256: artifact.ref.sha256,
-        });
-      }
+      const artifactPutMetrics = await putHostedWorkspaceArtifacts({
+        artifactStore: input.platform.artifactStore,
+        artifacts: pendingArtifactPuts,
+      });
+      externalArtifactPutBytes = artifactPutMetrics.putBytes;
+      externalArtifactPutCount = artifactPutMetrics.putCount;
       await input.platform.artifactStore.put({
         bytes: bundle,
         sha256: hash,
@@ -698,6 +696,68 @@ function requireHostedWorkspaceDirectBundleSnapshotRef(
   }
 
   return snapshotRef;
+}
+
+async function putHostedWorkspaceArtifacts(input: {
+  artifactStore: HostedWorkspaceRuntimeJobOptions["platform"]["artifactStore"];
+  artifacts: readonly HostedWorkspaceArtifactPersistInput[];
+}): Promise<{
+  putBytes: number;
+  putCount: number;
+}> {
+  if (input.artifacts.length === 0) {
+    return {
+      putBytes: 0,
+      putCount: 0,
+    };
+  }
+
+  const artifactByHash = new Map<string, HostedWorkspaceArtifactPersistInput>();
+  for (const artifact of input.artifacts) {
+    artifactByHash.set(artifact.ref.sha256, artifact);
+  }
+  const artifacts = [...artifactByHash.values()];
+  let nextArtifactIndex = 0;
+  let putBytes = 0;
+  let putCount = 0;
+  let firstError: unknown = null;
+
+  async function putNextArtifact(): Promise<void> {
+    while (!firstError) {
+      const index = nextArtifactIndex;
+      nextArtifactIndex += 1;
+      if (index >= artifacts.length) {
+        return;
+      }
+
+      const artifact = artifacts[index];
+      if (!artifact) {
+        return;
+      }
+      try {
+        await input.artifactStore.put({
+          bytes: artifact.bytes,
+          sha256: artifact.ref.sha256,
+        });
+        putBytes += artifact.bytes.byteLength;
+        putCount += 1;
+      } catch (error) {
+        firstError = error;
+      }
+    }
+  }
+
+  const workerCount = Math.min(HOSTED_WORKSPACE_ARTIFACT_PUT_CONCURRENCY, artifacts.length);
+  await Promise.all(Array.from({ length: workerCount }, putNextArtifact));
+
+  if (firstError) {
+    throw firstError;
+  }
+
+  return {
+    putBytes,
+    putCount,
+  };
 }
 
 function createBaseManifestArtifactRefProvider(

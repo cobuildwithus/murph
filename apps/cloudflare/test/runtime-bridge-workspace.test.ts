@@ -241,6 +241,65 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     })).toBe("workspace changed\n");
   });
 
+  it("persists working delta artifacts with bounded concurrency", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const artifactBundles = new Map<string, Uint8Array>();
+    const baseSnapshotRef = await createStoredBaseSnapshotRef({
+      artifactBundles,
+      vaultRoot,
+    });
+    const rawRoot = path.join(vaultRoot, "raw", "captures");
+    await mkdir(rawRoot, { recursive: true });
+    for (let index = 0; index < 40; index += 1) {
+      await writeFile(path.join(rawRoot, `capture-${index}.bin`), `artifact-${index}\n`, "utf8");
+    }
+
+    let activePuts = 0;
+    let maxActivePuts = 0;
+    const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
+      activePuts += 1;
+      maxActivePuts = Math.max(maxActivePuts, activePuts);
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      artifactBundles.set(sha256, bytes);
+      activePuts -= 1;
+    });
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: baseSnapshotRef,
+          version: "7",
+        }),
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkingSnapshotRef(result.snapshotRef);
+
+    expect(snapshotRef.delta.hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(putArtifact).toHaveBeenCalledTimes(41);
+    expect(maxActivePuts).toBeGreaterThan(1);
+    expect(maxActivePuts).toBeLessThanOrEqual(32);
+  });
+
   it("writes full seed checkpoints when there is no base snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
