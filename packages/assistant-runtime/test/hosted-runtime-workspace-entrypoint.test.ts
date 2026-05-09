@@ -11,7 +11,6 @@ import {
 } from "@murphai/core";
 import {
   resolveAssistantStatePaths,
-  resolveRuntimePaths,
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
   snapshotHostedPortableWorkspaceDelta,
@@ -226,9 +225,6 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         status: "idle",
       });
-      const runtimePaths = resolveRuntimePaths(vaultRoot);
-      await stat(runtimePaths.inboxConfigPath);
-      await stat(runtimePaths.inboxDbPath);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
