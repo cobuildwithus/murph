@@ -444,6 +444,50 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("preserves local internal proxy heartbeat liveness when the body is absent", async () => {
+    installOidcJwksFetch();
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true as const,
+      pendingNudge: true,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub({
+      recordActiveInvocationHeartbeat,
+    }), {
+      ALLOW_LOCAL_INTERNAL_PROXY: "true",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+    });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/runner-control.worker/internal/active-invocation/heartbeat",
+        {
+          headers: {
+            ...ACTIVE_INVOCATION_LEASE_HEADERS,
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          },
+          method: "POST",
+        },
+      ),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+      pendingNudge: true,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "attempt_current",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
+  });
+
   it("checks local internal proxy tokens against the version-scoped runner container", async () => {
     installOidcJwksFetch();
     const getByName = vi.fn((_name: string) => ({

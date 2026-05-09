@@ -56,9 +56,14 @@ Done:
 - After the live warm probe still failed to reply quickly, found the next blocker: retry exhaustion state could survive the fresh external nudge that was supposed to restart runner work, especially when the nudge waited behind another active invocation.
 - Patched fresh nudge handling to reset exhausted retry/error state atomically when marking pending work, and added regressions for idle exhausted retry restart plus persisted-active pending nudge drain after ownership clears.
 - Focused runner alarm verification passed. Full Cloudflare verification reached typecheck and hosted-local E2E, but repeated attempts hit unrelated socket-reset/timeouts in `container-entrypoint.test.ts`; the individually failing container-entrypoint cases passed in isolation.
+- Deployed the fresh-nudge retry reset, then live probing exposed the next blocker: runtime liveness reached the hosted heartbeat path but failed closed as `malformed_request` before any Linq typing/outbound delivery.
+- Reviewed the redacted live evidence with Pro and an inspection subagent. The smallest fix is to treat the heartbeat JSON body as diagnostic/transport payload and the active lease headers or trusted proxy context as equivalent lease proof, while still rejecting disagreement between proofs.
+- Patched runner-control heartbeat handling to resolve lease proof from body, headers, or proxy context, keep stale-proof mismatch checks, and log only safe metadata when no proof exists.
+- Added regressions for header-only heartbeats, proxy-context heartbeats, body/header mismatch rejection, local internal proxy no-body heartbeat liveness, and local runtime heartbeat body preservation.
+- Focused heartbeat/local-proxy verification and Cloudflare typecheck passed; full Cloudflare verification still reproduces an unrelated `container-entrypoint.test.ts` timeout flake.
 
 Now:
-- Commit and push the fresh-nudge retry reset, run another Pro review in the open ChatGPT thread, then deploy Cloudflare immediately.
+- Run final verification around the heartbeat fix, commit/push to main, run another Pro review in the open ChatGPT thread, then deploy Cloudflare immediately.
 
 Next:
 - Recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
@@ -76,6 +81,10 @@ Working set (files/ids/commands):
 - `packages/assistant-runtime/src/hosted-runtime.ts`
 - `packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`
 - `apps/cloudflare/test/runner-outbound.test.ts`
+- `apps/cloudflare/src/runner-outbound.ts`
+- `apps/cloudflare/src/runner-outbound/heartbeat.ts`
+- `apps/cloudflare/test/index.test.ts`
+- `apps/cloudflare/test/runner-platform.test.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `pnpm cf:deploy:immediate`
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-webhook-workflows.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts apps/web/test/hosted-execution-handoff.test.ts`
