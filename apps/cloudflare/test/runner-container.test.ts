@@ -585,6 +585,58 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("fails active workspace invocations when the container lifecycle stops", async () => {
+    let markRunnerRequestStarted!: () => void;
+    const runnerRequestStarted = new Promise<void>((resolve) => {
+      markRunnerRequestStarted = resolve;
+    });
+    const hangingRunnerResponse = new Promise<Response>(() => undefined);
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      markRunnerRequestStarted();
+      return await hangingRunnerResponse;
+    });
+    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+      containerFetch,
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_container_stop_during_work"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted;
+
+    container.onStop({ exitCode: 0, reason: "exit" });
+
+    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          activeWorkspaceInvocationAborted: true,
+          lifecycleStage: "onStop",
+        }),
+        level: "warn",
+        message: "Hosted execution container stopped during active work.",
+        phase: "failed",
+      }),
+    );
+  });
+
   it("runs fallback cleanup when activity expiry fires from another isolate during active work", async () => {
     vi.useFakeTimers();
 
