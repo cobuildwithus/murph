@@ -630,7 +630,6 @@ export class HostedUserRunner {
     });
     const preemptedActiveInvocation = activeInThisIsolate && runningRecord.inFlight
       ? this.preemptActiveWorkspaceInvocationForPendingNudge({
-          deferredCheckpointRequired: runningRecord.deferredCheckpointRequired,
           userId: record.userId,
         })
       : false;
@@ -1298,7 +1297,6 @@ export class HostedUserRunner {
   }
 
   private preemptActiveWorkspaceInvocationForPendingNudge(input: {
-    deferredCheckpointRequired: boolean;
     userId: string;
   }): boolean {
     const abortController = this.activeWorkspaceInvocationAbortController;
@@ -1307,7 +1305,6 @@ export class HostedUserRunner {
       !abortController
       || abortController.signal.aborted
       || !shouldPreemptActiveWorkspaceInvocationForNudge({
-        deferredCheckpointRequired: input.deferredCheckpointRequired,
         reason,
       })
     ) {
@@ -1378,7 +1375,6 @@ export class HostedUserRunner {
       || !invocation
       || !isHostedWorkspaceInvocationReasonValue(invocation.reason)
       || !shouldPreemptActiveWorkspaceInvocationForNudge({
-        deferredCheckpointRequired: input.record.deferredCheckpointRequired,
         reason: invocation.reason,
       })
     ) {
@@ -2854,13 +2850,8 @@ function shouldRunHostedRunnerInvocation(input: {
 }
 
 function shouldPreemptActiveWorkspaceInvocationForNudge(input: {
-  deferredCheckpointRequired: boolean;
   reason: HostedWorkspaceInvocationReason | null;
 }): boolean {
-  if (input.deferredCheckpointRequired) {
-    return false;
-  }
-
   return input.reason === "alarm"
     || input.reason === "retry"
     || input.reason === "idle_shutdown_checkpoint";
