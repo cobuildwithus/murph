@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { rm } from "node:fs/promises";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface SpawnOptionsForTest {
   cwd: string;
@@ -32,6 +32,14 @@ const spawnSyncMock = vi.hoisted(() =>
 const cleanupHostedRunnerContainersMock = vi.hoisted(() =>
   vi.fn<(input: CleanupInputForTest) => Promise<void>>(async () => {}),
 );
+const controlledEnvKeys = [
+  "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+  "MURPH_DEV_LINQ_WEBHOOK_TUNNEL",
+  "MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER",
+  "MURPH_HOSTED_LOCAL_RUN_ID",
+  "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID",
+] as const;
+const originalEnv = new Map<string, string | undefined>();
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
@@ -43,6 +51,14 @@ vi.mock("../../../scripts/dev-hosted-local/runtime.ts", () => ({
 }));
 
 describe("run-hosted-local-e2e", () => {
+  beforeEach(() => {
+    originalEnv.clear();
+    for (const key of controlledEnvKeys) {
+      originalEnv.set(key, process.env[key]);
+      delete process.env[key];
+    }
+  });
+
   afterEach(async () => {
     const artifactDirs = new Set<string>();
     for (const [, , options] of spawnMock.mock.calls) {
@@ -69,6 +85,7 @@ describe("run-hosted-local-e2e", () => {
         rm(artifactDir, { force: true, recursive: true }),
       ),
     );
+    restoreControlledEnv();
   });
 
   it("runs the full-stack hosted-local files in one vitest process and cleans up once", async () => {
@@ -131,7 +148,7 @@ function expectVitestSpawnCall(): void {
   expect(typeof options?.cwd).toBe("string");
   expect(options?.env === process.env).toBe(false);
   expect(options?.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
-  expect(options?.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("120000");
+  expect(options?.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe(expectedRunnerTimeoutMs());
   expect(options?.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("1");
   expect(options?.env.MURPH_HOSTED_LOCAL_RUN_ID).toEqual(expect.any(String));
   expect(options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID).toBe(
@@ -143,6 +160,22 @@ function expectVitestSpawnCall(): void {
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_BUNDLE).toBe("1");
   expect(options?.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE).toBe("1");
   expect(options?.stdio).toBe("inherit");
+}
+
+function expectedRunnerTimeoutMs(): string {
+  return process.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || "120000";
+}
+
+function restoreControlledEnv(): void {
+  for (const key of controlledEnvKeys) {
+    const value = originalEnv.get(key);
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  originalEnv.clear();
 }
 
 function expectSingleCleanupCall(): void {

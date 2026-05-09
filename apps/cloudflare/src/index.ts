@@ -613,7 +613,9 @@ function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefin
   }
 
   const logLimit = Number.parseInt(rawLogLimit, 10);
-  return Number.isSafeInteger(logLimit) && logLimit > 0 ? { logLimit } : undefined;
+  return Number.isSafeInteger(logLimit) && logLimit > 0
+    ? { logLimit: Math.min(logLimit, 50) }
+    : undefined;
 }
 
 async function handleDeployContainerSmokeRoute(

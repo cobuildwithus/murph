@@ -883,6 +883,15 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
   for (const field of HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS) {
     rejectHostedWorkspaceInvocationRemovedField(record, field);
   }
+  const reason = parseHostedWorkspaceInvocationReason(record.reason);
+  if (
+    record.checkpointNextWakeAt !== undefined
+    && reason !== "idle_shutdown_checkpoint"
+  ) {
+    throw new TypeError(
+      "Hosted workspace invocation request checkpointNextWakeAt is only supported for idle_shutdown_checkpoint.",
+    );
+  }
 
   return {
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
@@ -906,7 +915,7 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
       record.leaseGeneration,
       "Hosted workspace invocation request leaseGeneration",
     ),
-    reason: parseHostedWorkspaceInvocationReason(record.reason),
+    reason,
     userId: requireString(record.userId, "Hosted workspace invocation request userId"),
     workspaceVersion: requireNonNegativeBigIntString(
       record.workspaceVersion,

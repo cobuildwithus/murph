@@ -194,7 +194,6 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
-      checkpointNextWakeAt: null,
       leaseGeneration: "7",
       reason: "nudge",
       userId: "member_123",
@@ -205,7 +204,6 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
-      checkpointNextWakeAt: null,
       leaseGeneration: "7",
       reason: "nudge",
       userId: "member_123",
@@ -226,6 +224,16 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
       workspaceVersion: "4",
     });
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      attemptId: "attempt_3",
+      checkpointNextWakeAt: null,
+      leaseGeneration: "9",
+      reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).toThrow(
+      "Hosted workspace invocation request checkpointNextWakeAt is only supported for idle_shutdown_checkpoint.",
+    );
     for (const field of [
       "committedSeq",
       "events",

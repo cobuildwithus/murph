@@ -954,11 +954,19 @@ export class HostedUserRunner {
               result,
               resultStatus: result.status,
               userId: initialRecord.userId,
+              workspaceVersion,
             });
           } catch (error) {
-            await this.runtimeAlarmScheduler.syncNextWake({
-              preferredWakeAt: result.nextWakeAt ?? null,
-            });
+            if (result.deferredCheckpointRequired === true) {
+              await this.stateStore.markDeferredCheckpointRequired();
+              await this.scheduleHostedWakeRetryAlarm({
+                userId: initialRecord.userId,
+              });
+            } else {
+              await this.runtimeAlarmScheduler.syncNextWake({
+                preferredWakeAt: result.nextWakeAt ?? null,
+              });
+            }
             emitHostedExecutionStructuredLog({
               component: "hosted.runner",
               error,
@@ -1709,6 +1717,7 @@ export class HostedUserRunner {
     result: HostedWorkspaceInvocationResult;
     resultStatus: HostedWorkspaceInvocationResult["status"];
     userId: string;
+    workspaceVersion: string;
   }): Promise<void> {
     const record = input.result.deferredCheckpointRequired === true
       ? await this.stateStore.markDeferredCheckpointRequired()
@@ -1748,6 +1757,7 @@ export class HostedUserRunner {
         deferredCheckpointRequired: record.deferredCheckpointRequired,
         nextWakeAt: input.fallbackNextWakeAt,
         userId: input.userId,
+        workspaceVersion: input.workspaceVersion,
       });
       if (idleSchedule?.kind === "scheduled") {
         emitHostedExecutionStructuredLog({
@@ -1872,13 +1882,16 @@ export class HostedUserRunner {
     }
     const workspace = workspaceRead.workspace;
     const idleCheckpointDueAt = input.record.idleShutdownCheckpointDueAt;
+    const workspaceVersionMatches = workspace
+      ? workspace.version === input.expectedWorkspaceVersion
+      : input.expectedWorkspaceVersion === "0"
+        && latestRecord.deferredCheckpointRequired;
     const recordWakePreemptsIdleCheckpoint =
       latestRecord.nextWakeAt && idleCheckpointDueAt
         ? Date.parse(latestRecord.nextWakeAt) <= Date.parse(idleCheckpointDueAt)
         : Boolean(latestRecord.nextWakeAt);
     if (
-      !workspace
-      || workspace.version !== input.expectedWorkspaceVersion
+      !workspaceVersionMatches
       || recordWakePreemptsIdleCheckpoint
     ) {
       await this.stateStore.clearIdleShutdownCheckpoint();
@@ -1892,7 +1905,7 @@ export class HostedUserRunner {
           hasNextWake: Boolean(latestRecord.nextWakeAt),
           nextWakePreemptsIdleCheckpoint: Boolean(recordWakePreemptsIdleCheckpoint),
           hasWorkspace: Boolean(workspace),
-          workspaceVersionMatches: workspace?.version === input.expectedWorkspaceVersion,
+          workspaceVersionMatches,
         },
         message: "Hosted runner skipped stale idle-shutdown checkpoint alarm.",
         phase: "scheduled",
@@ -1914,6 +1927,7 @@ export class HostedUserRunner {
     deferredCheckpointRequired: boolean;
     nextWakeAt: string | null;
     userId: string;
+    workspaceVersion: string;
   }): Promise<
     | {
       kind: "deferred";
@@ -1947,10 +1961,19 @@ export class HostedUserRunner {
       input.nextWakeAt
         ? Date.parse(input.nextWakeAt) <= Date.parse(dueAt)
         : false;
+    const nullWorkspaceCheckpointAllowed =
+      input.deferredCheckpointRequired
+      && input.workspaceVersion === "0";
+    const checkpointWorkspaceVersion = workspace?.version
+      ?? (nullWorkspaceCheckpointAllowed ? input.workspaceVersion : null);
     if (
-      !workspace
+      !checkpointWorkspaceVersion
       || workspaceWakePreemptsIdleCheckpoint
-      || (!input.deferredCheckpointRequired && isHostedWorkspaceBaseOnlySnapshot(workspace))
+      || (
+        workspace !== null
+        && !input.deferredCheckpointRequired
+        && isHostedWorkspaceBaseOnlySnapshot(workspace)
+      )
     ) {
       if (input.nextWakeAt) {
         const record = await this.runtimeAlarmScheduler.syncNextWake({
@@ -1972,7 +1995,7 @@ export class HostedUserRunner {
 
     const scheduledCheckpoint = await this.stateStore.scheduleIdleShutdownCheckpointIfStillQuiet({
       dueAt,
-      workspaceVersion: workspace.version,
+      workspaceVersion: checkpointWorkspaceVersion,
     });
     if (!scheduledCheckpoint.scheduled) {
       const record = await this.syncPendingWorkAlarm(scheduledCheckpoint.record);

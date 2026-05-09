@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
@@ -302,7 +303,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
         await input.scenario.buildFailureMessage(input.userId, [
           `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
           `expected path: ${input.expectedPath}`,
-          `observed requests: ${JSON.stringify(observedRequests)}`,
+          `observed requests: ${JSON.stringify(summarizeObservedLinqRequests(observedRequests))}`,
         ]),
       );
   };
@@ -684,6 +685,30 @@ function buildHostedLocalLinqVoiceMemoBytes(): Uint8Array {
     0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x7f,
     0x00, 0x80, 0x00, 0x00,
   ]);
+}
+
+function summarizeObservedLinqRequests(
+  requests: readonly ObservedLinqRequest[],
+): Array<{
+  bodyBytes: number;
+  bodySha256Prefix: string;
+  method: string;
+  path: string;
+}> {
+  return requests.map((request) => ({
+    bodyBytes: Buffer.byteLength(request.body, "utf8"),
+    bodySha256Prefix: createHash("sha256").update(request.body).digest("hex").slice(0, 12),
+    method: request.method,
+    path: readObservedRequestPath(request.url),
+  }));
+}
+
+function readObservedRequestPath(rawUrl: string): string {
+  try {
+    return new URL(rawUrl, "http://localhost").pathname;
+  } catch {
+    return "[invalid-url]";
+  }
 }
 
 function requireBoundTcpPort(server: HttpServer, label: string): number {
