@@ -216,6 +216,7 @@ export class RunnerContainer extends Container {
   private browserVaultRefreshAbortController: AbortController | null = null;
   private browserVaultRefreshCompletion: Promise<void> | null = null;
   private browserVaultRefreshAttemptId: string | null = null;
+  private workspaceInvocationAbortController: AbortController | null = null;
   private readonly pendingBrowserVaultRefreshAborts = new Set<string>();
   private activeInvocationCount = 0;
   private lastRunnerActivityAt = 0;
@@ -235,6 +236,8 @@ export class RunnerContainer extends Container {
   }
 
   async destroyInstance(): Promise<void> {
+    this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
+    this.browserVaultRefreshAbortController?.abort(new Error("browser-vault refresh container destroyed"));
     await this.stopWarmContainer();
   }
 
@@ -449,6 +452,8 @@ export class RunnerContainer extends Container {
     let completedSuccessfully = false;
     this.currentLogContext = logContext;
     this.activeInvocationCount += 1;
+    const operationAbortController = new AbortController();
+    this.workspaceInvocationAbortController = operationAbortController;
     const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
     await this.noteRunnerActivityDurably("invoke-started");
 
@@ -473,6 +478,7 @@ export class RunnerContainer extends Container {
       });
       const runnerControlToken = await this.ensureContainerReady(input);
       await this.noteRunnerActivityDurably("container-ready");
+      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       this.runnerOutboundProxyState = outboundProxyState;
       await this.installOutboundHandlers(outboundProxyState);
 
@@ -503,7 +509,10 @@ export class RunnerContainer extends Container {
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
-          signal: AbortSignal.timeout(remainingTimeoutMs),
+          signal: combineRunnerContainerAbortSignals(
+            operationAbortController.signal,
+            AbortSignal.timeout(remainingTimeoutMs),
+          ),
         },
         RUNNER_PORT,
       );
@@ -550,6 +559,9 @@ export class RunnerContainer extends Container {
         await this.noteRunnerActivityDurably("invoke-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
+        }
+        if (this.workspaceInvocationAbortController === operationAbortController) {
+          this.workspaceInvocationAbortController = null;
         }
       }
     }
