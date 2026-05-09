@@ -1,11 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  getPrisma: vi.fn(),
-  hostedWebSession: {
+const mocks = vi.hoisted(() => {
+  const hostedWebSession = {
     create: vi.fn(),
-  },
-}));
+    deleteMany: vi.fn(),
+    findMany: vi.fn(),
+  };
+  const transactionClient = {
+    $queryRaw: vi.fn(),
+    hostedWebSession,
+  };
+  const prismaClient = {
+    $transaction: vi.fn(),
+    hostedWebSession,
+  };
+
+  return {
+    getPrisma: vi.fn(),
+    hostedWebSession,
+    prismaClient,
+    transactionClient,
+  };
+});
 
 vi.mock("server-only", () => ({}));
 
@@ -17,10 +33,15 @@ describe("hosted app session production cookie", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NODE_ENV", "production");
-    mocks.getPrisma.mockReturnValue({
-      hostedWebSession: mocks.hostedWebSession,
-    });
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.prismaClient.$transaction.mockImplementation(
+      async (callback: (tx: typeof mocks.transactionClient) => Promise<unknown>) =>
+        callback(mocks.transactionClient),
+    );
     mocks.hostedWebSession.create.mockResolvedValue({});
+    mocks.hostedWebSession.deleteMany.mockResolvedValue({ count: 0 });
+    mocks.hostedWebSession.findMany.mockResolvedValue([]);
+    mocks.transactionClient.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
   });
 
   it("uses the __Host cookie name and Secure flag in production", async () => {

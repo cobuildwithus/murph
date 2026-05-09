@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
+import { type Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 import { cache } from "react";
 
@@ -14,6 +15,10 @@ import {
   readHostedMemberCoreState,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "./shared";
 
 export interface HostedAppSession {
   expiresAt: Date;
@@ -29,6 +34,7 @@ const HOSTED_APP_SESSION_ID_PREFIX = "hws_";
 const HOSTED_APP_SESSION_TOKEN_BYTES = 32;
 const HOSTED_APP_SESSION_ID_BYTES = 16;
 const HOSTED_APP_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const HOSTED_APP_SESSION_ACTIVE_LIMIT = 20;
 
 export const HOSTED_APP_SESSION_COOKIE_NAME =
   process.env.NODE_ENV === "production"
@@ -37,6 +43,10 @@ export const HOSTED_APP_SESSION_COOKIE_NAME =
 
 export function getHostedAppSessionMaxAgeSeconds(): number {
   return HOSTED_APP_SESSION_MAX_AGE_SECONDS;
+}
+
+export function getHostedAppSessionActiveLimit(): number {
+  return HOSTED_APP_SESSION_ACTIVE_LIMIT;
 }
 
 const resolveHostedAppSessionFromCookies = cache(async (): Promise<HostedAppSession | null> => {
@@ -100,18 +110,28 @@ export async function issueHostedAppSession(input: {
   const sessionId = generateHostedAppSessionId();
   const expiresAt = new Date(now.getTime() + HOSTED_APP_SESSION_MAX_AGE_SECONDS * 1000);
 
-  await getPrisma().hostedWebSession.create({
-    data: {
-      id: sessionId,
+  await getPrisma().$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    await tx.hostedWebSession.create({
+      data: {
+        id: sessionId,
+        memberId: input.memberId,
+        privyUserId: input.privyUserId,
+        tokenHash: hashHostedAppSessionToken(token),
+        createdAt: now,
+        updatedAt: now,
+        lastSeenAt: now,
+        expiresAt,
+      },
+    });
+    await deleteHostedAppSessionOverflowTx({
       memberId: input.memberId,
+      now,
       privyUserId: input.privyUserId,
-      tokenHash: hashHostedAppSessionToken(token),
-      createdAt: now,
-      updatedAt: now,
-      lastSeenAt: now,
-      expiresAt,
-    },
-  });
+      sessionId,
+      tx,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return {
     cookie: buildHostedAppSessionCookie(token, HOSTED_APP_SESSION_MAX_AGE_SECONDS),
@@ -196,6 +216,54 @@ function generateHostedAppSessionId(): string {
 
 function hashHostedAppSessionToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+async function deleteHostedAppSessionOverflowTx(input: {
+  memberId: string;
+  now: Date;
+  privyUserId: string;
+  sessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const retainedExistingSessions = await input.tx.hostedWebSession.findMany({
+    where: {
+      expiresAt: {
+        gt: input.now,
+      },
+      id: {
+        not: input.sessionId,
+      },
+      memberId: input.memberId,
+      privyUserId: input.privyUserId,
+      revokedAt: null,
+    },
+    orderBy: [
+      { createdAt: "desc" },
+      { id: "desc" },
+    ],
+    select: {
+      id: true,
+    },
+    take: HOSTED_APP_SESSION_ACTIVE_LIMIT - 1,
+  });
+  const retainedSessionIds = [
+    input.sessionId,
+    ...retainedExistingSessions.map((session) => session.id),
+  ];
+
+  await input.tx.hostedWebSession.deleteMany({
+    where: {
+      expiresAt: {
+        gt: input.now,
+      },
+      id: {
+        notIn: retainedSessionIds,
+      },
+      memberId: input.memberId,
+      privyUserId: input.privyUserId,
+      revokedAt: null,
+    },
+  });
 }
 
 function normalizeHostedAppSessionToken(value: string | null | undefined): string | null {
