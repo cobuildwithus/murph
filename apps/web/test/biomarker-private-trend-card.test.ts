@@ -74,7 +74,7 @@ test("the biomarker overview mounts the browser-vault private card", () => {
 });
 
 test("the biomarker overview lets the metric catalog decide private trend support", () => {
-  const biomarker = resolveHealthCommonsBiomarkerOverview("apolipoprotein-b");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
   const unsupportedBiomarker = {
     ...biomarker,
@@ -367,7 +367,7 @@ test("renders a no-data state when the browser-vault replica has no matching row
 });
 
 test("renders an unsupported state for biomarkers without browser-vault metric bindings", () => {
-  const biomarker = resolveHealthCommonsBiomarkerOverview("apolipoprotein-b");
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
   assert.ok(biomarker);
   const unsupportedBiomarker = {
     ...biomarker,

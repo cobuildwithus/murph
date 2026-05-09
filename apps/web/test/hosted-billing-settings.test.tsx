@@ -15,6 +15,13 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
 }));
 
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuth: () => ({
+    authenticated: true,
+    openAuthDialog: () => {},
+  }),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.routerRefresh,
@@ -87,8 +94,8 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Manage subscription/);
-    assert.match(markup, /Upgrade to Edge/);
     assert.match(markup, /Pulse/);
+    assert.doesNotMatch(markup, /Upgrade to Edge/);
     assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
@@ -106,7 +113,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Manage subscription/);
     assert.match(markup, /Pulse trial/);
-    assert.match(markup, /Start Pulse plan/);
+    assert.doesNotMatch(markup, /Start Pulse plan/);
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
@@ -138,12 +145,12 @@ describe("HostedBillingSettings", () => {
     const root = rendered.container.firstElementChild;
     assert.ok(root);
     assert.equal(root.tagName, "DIV");
-    const [actionsRow, helperRow] = [...root.children];
-    assert.ok(actionsRow);
-    assert.equal(actionsRow.tagName, "DIV");
+    const [manageButton, helperRow] = [...root.children];
+    assert.ok(manageButton);
+    assert.equal(manageButton.tagName, "BUTTON");
     assert.ok(helperRow);
     assert.equal(helperRow.tagName, "P");
-    assert.match(actionsRow.textContent ?? "", /Manage subscription/);
+    assert.match(manageButton.textContent ?? "", /Manage subscription/);
     assert.equal(helperRow.textContent, "You're on a free trial");
 
     await rendered.cleanup();
@@ -162,9 +169,9 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.doesNotMatch(markup, /Upgrade to Edge/);
-    assert.match(markup, /Switch to Pulse/);
     assert.match(markup, /Edge/);
     assert.match(markup, /Manage subscription/);
+    assert.doesNotMatch(markup, /Switch to Pulse/);
     assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
@@ -348,7 +355,7 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
-  test("disables the billing portal action while the upgrade request is pending", async () => {
+  test("keeps the upgrade confirmation request pending until the API resolves", async () => {
     const pendingUpgrade = createDeferred<{
       billingPlanCode: "launch_edge_monthly";
       status: "upgraded";
@@ -358,11 +365,14 @@ describe("HostedBillingSettings", () => {
     const rendered = await renderClientComponent(createElement(HostedBillingSettingsAction, {
       showUpgrade: true,
     }));
-    const buttons = [...rendered.container.querySelectorAll("button")];
-    const upgradeButton = buttons.find((button) => button.textContent?.includes("Upgrade to Edge"));
-    const manageButton = buttons.find((button) => button.textContent?.includes("Manage subscription"));
+    const manageButton = findButtonByText(rendered.window.document, "Manage subscription", rendered.window);
+
+    await act(async () => {
+      manageButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    const upgradeButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
     assert.ok(upgradeButton instanceof rendered.window.HTMLButtonElement);
-    assert.ok(manageButton instanceof rendered.window.HTMLButtonElement);
 
     await act(async () => {
       upgradeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
@@ -372,7 +382,8 @@ describe("HostedBillingSettings", () => {
       confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
 
-    assert.equal(manageButton.disabled, true);
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
 
     pendingUpgrade.resolve({
       billingPlanCode: "launch_edge_monthly",

@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
+import { SettingsContactLink } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
@@ -32,6 +33,7 @@ export function HostedAccountSettingsCards({
   const telegramUserId = account.telegram.telegramUserId;
   const emailAddress = account.email.address;
   const emailVerified = Boolean(account.email.verifiedAt);
+  const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
 
   return (
     <>
@@ -40,6 +42,11 @@ export function HostedAccountSettingsCards({
           label="Phone"
           value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
           empty={!phoneNumber}
+          meta={murphSmsHref ? (
+            <SettingsContactLink href={murphSmsHref} label="Text Murph">
+              Text Murph
+            </SettingsContactLink>
+          ) : null}
           action={
             <Button type="button" size="default" variant={phoneNumber ? "ghost" : "default"} onClick={() => setLinkMode("phone")}>
               {phoneNumber ? (phoneVerified ? "Change" : "Verify") : "Link phone"}
@@ -86,6 +93,7 @@ function SettingsRow(props: {
   action?: ReactNode;
   empty?: boolean;
   label: string;
+  meta?: ReactNode;
   value: string;
 }) {
   return (
@@ -97,6 +105,7 @@ function SettingsRow(props: {
         <p className={`font-serif text-base tracking-tight ${props.empty ? "text-muted-foreground" : "text-foreground"}`}>
           {props.value}
         </p>
+        {props.meta ? <div className="mt-1">{props.meta}</div> : null}
       </div>
       {props.action ? <div className="shrink-0">{props.action}</div> : null}
     </div>
