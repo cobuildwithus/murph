@@ -350,13 +350,56 @@ function buildAssistantCurrentDateContextText(input: {
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
+  const humanReadableCurrentLocalDate = formatAssistantHumanReadableLocalDate(
+    input.currentLocalDate
+  );
+
   return joinPromptSections(
     `The user's canonical timezone for this vault is ${input.currentTimeZone}.
-Today's date for the user is ${input.currentLocalDate}.`,
+Today's date for the user is ${humanReadableCurrentLocalDate}.
+In user-facing prose, refer to dates with a month name and day, such as "April 3" or "April 3, 2026" when the year matters, instead of raw ISO dates. Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.`,
     input.currentMurphProductBaseUrl
       ? `Current Murph product base URL for user-facing app links: ${input.currentMurphProductBaseUrl}`
       : null
   );
+}
+
+function formatAssistantHumanReadableLocalDate(localDate: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(localDate.trim());
+  if (!match) {
+    return localDate;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return localDate;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return localDate;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(date);
 }
 
 export function resolveAssistantMurphProductBaseUrl(

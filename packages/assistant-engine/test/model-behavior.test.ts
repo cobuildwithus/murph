@@ -309,6 +309,33 @@ describe('assistant user-facing wording guidance', () => {
 })
 
 describe('assistant system prompt cache stability', () => {
+  it('renders current date context with natural user-facing date guidance', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      currentLocalDate: '2026-04-03',
+    }))
+    const notificationPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          currentLocalDate: '2026-04-03',
+        }),
+      ).prompt
+
+    expect(prompt).toContain('Today\'s date for the user is April 3, 2026.')
+    expect(prompt).toContain(
+      'In user-facing prose, refer to dates with a month name and day',
+    )
+    expect(prompt).toContain(
+      'Keep ISO dates for command arguments, filenames, frontmatter, ids, or other machine-readable fields.',
+    )
+    expect(prompt).not.toContain('Today\'s date for the user is 2026-04-03.')
+    expect(notificationPrompt).toContain(
+      'Today\'s date for the user is April 3, 2026.',
+    )
+    expect(notificationPrompt).not.toContain(
+      'Today\'s date for the user is 2026-04-03.',
+    )
+  })
+
   it('keeps the common Codex route prefix stable across dynamic turn context', () => {
     const cacheInput = {
       toolSchemaHash: 'assistant-tool-schema-common-codex-test',
