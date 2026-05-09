@@ -46,9 +46,8 @@ describe("hosted app session production cookie", () => {
 
   it("uses the __Host cookie name and Secure flag in production", async () => {
     const {
-      HOSTED_APP_SESSION_COOKIE_NAME,
-      buildHostedAppSessionClearCookie,
       issueHostedAppSession,
+      revokeHostedAppSessionFromRequest,
     } = await import("@/src/lib/hosted-onboarding/app-session");
 
     const result = await issueHostedAppSession({
@@ -56,14 +55,18 @@ describe("hosted app session production cookie", () => {
       now: new Date("2026-05-02T00:00:00.000Z"),
       privyUserId: "did:privy:user_123",
     });
+    const clearCookie = await revokeHostedAppSessionFromRequest({
+      now: new Date("2026-05-02T00:00:00.000Z"),
+      reason: "logout",
+      request: new Request("https://join.example.test/settings"),
+    });
 
-    expect(HOSTED_APP_SESSION_COOKIE_NAME).toBe("__Host-murph-session");
     expect(result.cookie).toContain("__Host-murph-session=murph_session_");
     expect(result.cookie).toContain("Path=/");
     expect(result.cookie).toContain("HttpOnly");
     expect(result.cookie).toContain("SameSite=Lax");
     expect(result.cookie).toContain("Secure");
-    expect(buildHostedAppSessionClearCookie()).toBe(
+    expect(clearCookie).toBe(
       "__Host-murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
     );
   });

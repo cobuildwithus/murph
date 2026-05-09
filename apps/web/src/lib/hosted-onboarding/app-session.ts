@@ -34,20 +34,12 @@ const HOSTED_APP_SESSION_ID_PREFIX = "hws_";
 const HOSTED_APP_SESSION_TOKEN_BYTES = 32;
 const HOSTED_APP_SESSION_ID_BYTES = 16;
 const HOSTED_APP_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
-const HOSTED_APP_SESSION_ACTIVE_LIMIT = 20;
+const HOSTED_APP_SESSION_ROW_LIMIT = 20;
 
-export const HOSTED_APP_SESSION_COOKIE_NAME =
+const HOSTED_APP_SESSION_COOKIE_NAME =
   process.env.NODE_ENV === "production"
     ? HOSTED_APP_SESSION_COOKIE_NAME_PRODUCTION
     : HOSTED_APP_SESSION_COOKIE_NAME_DEVELOPMENT;
-
-export function getHostedAppSessionMaxAgeSeconds(): number {
-  return HOSTED_APP_SESSION_MAX_AGE_SECONDS;
-}
-
-export function getHostedAppSessionActiveLimit(): number {
-  return HOSTED_APP_SESSION_ACTIVE_LIMIT;
-}
 
 const resolveHostedAppSessionFromCookies = cache(async (): Promise<HostedAppSession | null> => {
   const cookieStore = await cookies();
@@ -126,7 +118,6 @@ export async function issueHostedAppSession(input: {
     });
     await deleteHostedAppSessionOverflowTx({
       memberId: input.memberId,
-      now,
       privyUserId: input.privyUserId,
       sessionId,
       tx,
@@ -164,7 +155,7 @@ export async function revokeHostedAppSessionFromRequest(input: {
   return buildHostedAppSessionClearCookie();
 }
 
-export function buildHostedAppSessionClearCookie(): string {
+function buildHostedAppSessionClearCookie(): string {
   return buildCookie({
     maxAgeSeconds: 0,
     name: HOSTED_APP_SESSION_COOKIE_NAME,
@@ -220,22 +211,17 @@ function hashHostedAppSessionToken(token: string): string {
 
 async function deleteHostedAppSessionOverflowTx(input: {
   memberId: string;
-  now: Date;
   privyUserId: string;
   sessionId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const retainedExistingSessions = await input.tx.hostedWebSession.findMany({
     where: {
-      expiresAt: {
-        gt: input.now,
-      },
       id: {
         not: input.sessionId,
       },
       memberId: input.memberId,
       privyUserId: input.privyUserId,
-      revokedAt: null,
     },
     orderBy: [
       { createdAt: "desc" },
@@ -244,7 +230,7 @@ async function deleteHostedAppSessionOverflowTx(input: {
     select: {
       id: true,
     },
-    take: HOSTED_APP_SESSION_ACTIVE_LIMIT - 1,
+    take: HOSTED_APP_SESSION_ROW_LIMIT - 1,
   });
   const retainedSessionIds = [
     input.sessionId,
@@ -253,15 +239,11 @@ async function deleteHostedAppSessionOverflowTx(input: {
 
   await input.tx.hostedWebSession.deleteMany({
     where: {
-      expiresAt: {
-        gt: input.now,
-      },
       id: {
         notIn: retainedSessionIds,
       },
       memberId: input.memberId,
       privyUserId: input.privyUserId,
-      revokedAt: null,
     },
   });
 }

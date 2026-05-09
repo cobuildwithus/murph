@@ -317,6 +317,7 @@ model HostedWebSession {
   member       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
+  @@index([memberId, privyUserId, createdAt, id])
   @@index([privyUserId])
   @@index([expiresAt])
   @@index([revokedAt])
