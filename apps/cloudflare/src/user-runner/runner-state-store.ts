@@ -968,7 +968,8 @@ function normalizeLeaseGeneration(value: number | null): number {
 
 function isIdleShutdownCheckpointBlockedByPendingNudge(meta: RunnerMetaBundleRow): boolean {
   return meta.active_invocation_reason === "idle_shutdown_checkpoint"
-    && meta.pending_nudge === 1;
+    && meta.pending_nudge === 1
+    && meta.deferred_checkpoint_required !== 1;
 }
 
 function isHostedWorkspaceInvocationReasonValue(

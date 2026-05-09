@@ -610,6 +610,7 @@ export class HostedUserRunner {
     });
     const preemptedActiveInvocation = activeInThisIsolate && runningRecord.inFlight
       ? this.preemptActiveWorkspaceInvocationForPendingNudge({
+          deferredCheckpointRequired: runningRecord.deferredCheckpointRequired,
           userId: record.userId,
         })
       : false;
@@ -1277,6 +1278,7 @@ export class HostedUserRunner {
   }
 
   private preemptActiveWorkspaceInvocationForPendingNudge(input: {
+    deferredCheckpointRequired: boolean;
     userId: string;
   }): boolean {
     const abortController = this.activeWorkspaceInvocationAbortController;
@@ -1284,7 +1286,10 @@ export class HostedUserRunner {
     if (
       !abortController
       || abortController.signal.aborted
-      || !shouldPreemptActiveWorkspaceInvocationForNudge(reason)
+      || !shouldPreemptActiveWorkspaceInvocationForNudge({
+        deferredCheckpointRequired: input.deferredCheckpointRequired,
+        reason,
+      })
     ) {
       return false;
     }
@@ -1352,7 +1357,10 @@ export class HostedUserRunner {
       !input.record.inFlight
       || !invocation
       || !isHostedWorkspaceInvocationReasonValue(invocation.reason)
-      || !shouldPreemptActiveWorkspaceInvocationForNudge(invocation.reason)
+      || !shouldPreemptActiveWorkspaceInvocationForNudge({
+        deferredCheckpointRequired: input.record.deferredCheckpointRequired,
+        reason: invocation.reason,
+      })
     ) {
       return {
         preempted: false,
@@ -2825,12 +2833,20 @@ function shouldRunHostedRunnerInvocation(input: {
     || input.dueWake === true;
 }
 
-function shouldPreemptActiveWorkspaceInvocationForNudge(
-  reason: HostedWorkspaceInvocationReason | null,
-): boolean {
-  return reason === "alarm"
-    || reason === "retry"
-    || reason === "idle_shutdown_checkpoint";
+function shouldPreemptActiveWorkspaceInvocationForNudge(input: {
+  deferredCheckpointRequired: boolean;
+  reason: HostedWorkspaceInvocationReason | null;
+}): boolean {
+  if (
+    input.reason === "idle_shutdown_checkpoint"
+    && input.deferredCheckpointRequired
+  ) {
+    return false;
+  }
+
+  return input.reason === "alarm"
+    || input.reason === "retry"
+    || input.reason === "idle_shutdown_checkpoint";
 }
 
 function isHostedWorkspaceInvocationReasonValue(

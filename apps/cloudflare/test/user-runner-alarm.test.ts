@@ -851,6 +851,92 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   });
 
+  it("lets active deferred idle checkpoints finish when a foreground nudge arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("deferred-active"),
+      version: "4",
+    });
+    const activeCheckpoint = createDeferred<{
+      idleShutdownCheckpointed: true;
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return activeCheckpoint.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET deferred_checkpoint_required = 1,
+           idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    const activeRun = runner.alarm();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await expect(runner.ownsActiveInvocationLease({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).resolves.toBe(true);
+
+    activeCheckpoint.resolve({
+      idleShutdownCheckpointed: true,
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toBeUndefined();
+    await flushDetachedRunnerDrive();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      pending_nudge: 0,
+    }]);
+  });
+
   it("treats alarms during a live invocation as recovery-only while the pending nudge follows after completion", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1635,6 +1721,76 @@ describe("HostedUserRunner runtime crypto context", () => {
       active_invocation_reason: null,
       in_flight: 0,
       pending_nudge: 0,
+    }]);
+  });
+
+  it("preserves persisted deferred idle checkpoints when a foreground nudge arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        deferred_checkpoint_required = 1,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-26T23:59:59.500Z",
+      "idle_shutdown_checkpoint",
+      "2026-04-26T23:59:30.000Z",
+      "4",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
+    await expect(runner.ownsActiveInvocationLease({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).resolves.toBe(true);
+    expect(
+      sql.exec(
+        `SELECT
+          active_invocation_id,
+          active_invocation_reason,
+          deferred_checkpoint_required,
+          in_flight,
+          pending_nudge
+        FROM runner_meta
+        WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      active_invocation_id: "workspace-invocation-1",
+      active_invocation_reason: "idle_shutdown_checkpoint",
+      deferred_checkpoint_required: 1,
+      in_flight: 1,
+      pending_nudge: 1,
     }]);
   });
 
