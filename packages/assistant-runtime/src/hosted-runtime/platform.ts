@@ -246,14 +246,6 @@ export interface HostedRuntimeWorkspacePort {
   ): Promise<HostedWorkspaceCheckpointResponse>;
 }
 
-export interface HostedRuntimeCodexContinuityPort {
-  scheduleSnapshot(input: {
-    operatorHomeRoot: string;
-    requestId: string;
-    vaultRoot: string;
-  }): void;
-}
-
 export interface HostedRuntimeLogPort {
   write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
 }
@@ -278,7 +270,6 @@ export type HostedRuntimeActiveTurnInputCheckpoint = (
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
-  codexContinuityPort?: HostedRuntimeCodexContinuityPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   issueExportPort?: HostedRuntimeIssueExportPort | null;

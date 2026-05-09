@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-05
+Last verified: 2026-05-09
 
 ## Decision
 
@@ -262,20 +262,11 @@ only. Legacy working `{base, delta}` and layered `{base, hot}` refs remain
 restorable during migration, but new bridge snapshots are idle-shutdown
 full/base bundles only.
 
-Tiny Codex continuity is a separate foreground-adjacent path. After a
-foreground assistant pass, the runtime may schedule a best-effort background
-Codex continuity snapshot that reads only known assistant session resume
-requirements plus their referenced hosted Codex rollout JSONL files, then writes
-one small hosted bundle containing those rollout files and the continuity
-manifest. That tiny artifact must not call the workspace checkpoint builder,
-must not write a portable workspace manifest, and must not scan `vault/raw/**`,
-`vault/derived/**`, projections, caches, temp roots, or the whole Codex home.
-For the tiny artifact to become an independent restore path, the runtime must
-also publish a durable, web-owned `codexContinuityRef` that restore can discover
-without a workspace checkpoint. Until that ref exists, the artifact is
-best-effort continuity evidence and the next `idle_shutdown` full/base
-checkpoint remains the durable path that can include or supersede the same
-continuity state.
+Foreground assistant turns do not publish a separate Codex continuity artifact
+or workspace pointer. Provider-native continuity remains a workspace snapshot
+concern: if a container dies before the next idle-shutdown full/base snapshot,
+restore must still be correct from durable mailbox, transcript, and assistant
+runtime state even if provider-native resume optimization is unavailable.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. Foreground work does not generate or publish browser-vault replicas

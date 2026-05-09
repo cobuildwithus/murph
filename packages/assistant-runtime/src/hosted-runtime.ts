@@ -112,7 +112,6 @@ export type {
   HostedRuntimeActiveTurnInputMailboxRefresh,
   HostedRuntimeActiveTurnInputMailboxRefreshInput,
   HostedRuntimeBrowserVaultReplicaPort,
-  HostedRuntimeCodexContinuityPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
@@ -597,13 +596,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       await hostedCliBridge?.stop();
     }
     assertRuntimeLiveness();
-    scheduleHostedCodexContinuitySnapshotAfterForegroundTurn({
-      operatorHomeRoot: restored.operatorHomeRoot,
-      platform: guardedRuntime.platform,
-      requestId,
-      result,
-      vaultRoot: restored.vaultRoot,
-    });
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
@@ -982,34 +974,6 @@ function assertWorkspaceRunVersionMatchesRequest(input: {
     actualWorkspaceVersion,
     expectedWorkspaceVersion: input.expectedWorkspaceVersion,
   });
-}
-
-function scheduleHostedCodexContinuitySnapshotAfterForegroundTurn(input: {
-  operatorHomeRoot: string;
-  platform: HostedRuntimePlatform;
-  requestId: string;
-  result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
-  vaultRoot: string;
-}): void {
-  if (input.result.assistantPhaseResult?.progressed !== true) {
-    return;
-  }
-  const port = input.platform.codexContinuityPort ?? null;
-  if (!port) {
-    return;
-  }
-
-  try {
-    port.scheduleSnapshot({
-      operatorHomeRoot: input.operatorHomeRoot,
-      requestId: input.requestId,
-      vaultRoot: input.vaultRoot,
-    });
-  } catch (error: unknown) {
-    console.warn("Hosted Codex continuity background snapshot scheduling failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
-  }
 }
 
 function assertWorkspaceRunUserMatchesRequest(input: {
