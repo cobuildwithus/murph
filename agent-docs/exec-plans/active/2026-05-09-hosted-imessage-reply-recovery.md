@@ -34,9 +34,11 @@ Done:
 - Patched deferred checkpoint scheduling to keep the normal fast drain, but move the checkpoint to at-or-before the retry wake when that wake is earlier/already due, and added a regression for the scheduling-time collision.
 - After the deploy, confirmed the checkpoint alarm started but was preempted by foreground nudge handling while the deferred mailbox checkpoint was still in flight; the nudge also made the idle checkpoint lease look invalid, so the durable imported sequence stayed at 444.
 - Patched foreground-nudge preemption and lease ownership so deferred idle-shutdown checkpoints can finish and then drain the queued nudge, with regressions for active same-isolate and persisted active checkpoint cases.
+- After the deploy, confirmed mailbox import reached seq 546 in-memory but the durable imported watermark still stayed at 444 because optional browser-vault refresh alarms could fire before a pending deferred idle checkpoint and consume the alarm slot.
+- Patched optional browser-vault refresh scheduling/alarm handling so stale or early optional alarms yield to pending deferred idle-shutdown checkpoints, with a regression for pending refresh plus future idle checkpoint.
 
 Now:
-- Commit/push/deploy the deferred-checkpoint nudge-preemption fix, then recheck the live mailbox high-watermark and iMessage reply path.
+- Commit/push/deploy the optional-refresh/deferred-checkpoint ordering fix, then recheck the live mailbox high-watermark and iMessage reply path.
 
 Next:
 - Watch the lagged hosted mailbox recover, then verify cold/warm iMessage reply scenarios after provider capacity is available.
@@ -52,3 +54,5 @@ Working set (files/ids/commands):
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `pnpm cf:deploy:immediate`
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts`
+- `pnpm -C apps/cloudflare typecheck`
+- `pnpm typecheck`

@@ -329,6 +329,26 @@ export class HostedUserRunner {
       return;
     }
 
+    if (
+      dueAlarm.kind === "none"
+      && !record.inFlight
+      && !record.pendingNudge
+      && record.deferredCheckpointRequired
+      && record.idleShutdownCheckpointDueAt
+    ) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          idleShutdownCheckpointDueAt: record.idleShutdownCheckpointDueAt,
+        },
+        message: "Hosted runner yielded optional alarm work to pending idle-shutdown checkpoint.",
+        phase: "scheduled",
+        userId: record.userId,
+      });
+      return;
+    }
+
     const browserVaultRefreshStarted = dueAlarm.kind === "none"
       ? await this.browserVaultRefreshCoordinator.tryStart({
         userId: record.userId,

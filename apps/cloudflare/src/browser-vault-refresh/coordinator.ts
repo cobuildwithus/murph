@@ -137,7 +137,7 @@ export class BrowserVaultRefreshCoordinator {
       if (
         typeof existingAlarmAtMs !== "number"
         || !Number.isFinite(existingAlarmAtMs)
-        || existingAlarmAtMs > runnerAlarmFireAtMs
+        || existingAlarmAtMs !== runnerAlarmFireAtMs
       ) {
         await this.deps.state.storage.setAlarm(new Date(runnerAlarmFireAtMs));
       }
