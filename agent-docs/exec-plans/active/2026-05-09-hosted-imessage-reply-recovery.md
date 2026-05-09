@@ -53,9 +53,12 @@ Done:
 - A follow-up live warm iMessage probe exposed a same-isolate recovery race: alarm/nudge recovery could clear a still-running local invocation before the foreground runner reached Linq/outbound delivery.
 - Patched local active-invocation recovery so alarms only sync a recovery wake while the live invocation owns its timeout/failure path, removed the stale live-abort branch, and preserved persisted-orphan replay coverage.
 - Added focused regressions for live invocation timeout ownership, active idle-checkpoint preservation, and persisted cold-restore replay; full Cloudflare verification passed.
+- After the live warm probe still failed to reply quickly, found the next blocker: retry exhaustion state could survive the fresh external nudge that was supposed to restart runner work, especially when the nudge waited behind another active invocation.
+- Patched fresh nudge handling to reset exhausted retry/error state atomically when marking pending work, and added regressions for idle exhausted retry restart plus persisted-active pending nudge drain after ownership clears.
+- Focused runner alarm verification passed. Full Cloudflare verification reached typecheck and hosted-local E2E, but repeated attempts hit unrelated socket-reset/timeouts in `container-entrypoint.test.ts`; the individually failing container-entrypoint cases passed in isolation.
 
 Now:
-- Commit and push the active-invocation recovery fix, run another Pro review in the open ChatGPT thread, then deploy Cloudflare immediately.
+- Commit and push the fresh-nudge retry reset, run another Pro review in the open ChatGPT thread, then deploy Cloudflare immediately.
 
 Next:
 - Recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.

@@ -389,8 +389,13 @@ export class RunnerStateStore {
 
   async markPendingInvocationNudge(input: {
     preferredWakeAt?: string | null;
+    resetRetryFailureCount?: boolean;
   } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
+    if (input.resetRetryFailureCount === true) {
+      this.clearLastErrorMetaSync(meta);
+      meta.retry_failure_count = 0;
+    }
     meta.pending_nudge = 1;
     meta.pending_work = 1;
     this.setAlarmMetaSync(meta, {

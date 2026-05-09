@@ -1952,6 +1952,116 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("resets exhausted retries when a fresh nudge waits behind another isolate invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      maxEventAttempts: 2,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        last_error_at = ?,
+        last_error_code = ?,
+        lease_generation = 1,
+        retry_failure_count = 2
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-26T23:59:59.500Z",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "2026-04-26T23:59:58.000Z",
+      "HostedExecutionRuntimeError",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                last_error_at,
+                last_error_code,
+                next_wake_at,
+                pending_nudge,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 1,
+      last_error_at: null,
+      last_error_code: null,
+      next_wake_at: "2026-04-27T00:00:01.000Z",
+      pending_nudge: 1,
+      retry_failure_count: 0,
+    }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          alreadyRunning: true,
+          retryFailureCountReset: true,
+        }),
+        message: "Hosted runner nudge accepted.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = NULL,
+        active_invocation_expires_at = NULL,
+        active_invocation_last_heartbeat_at = NULL,
+        active_invocation_orphan_observed_at = NULL,
+        active_invocation_reason = NULL,
+        active_invocation_started_at = NULL,
+        active_workspace_version = NULL,
+        in_flight = 0
+      WHERE user_id = ?`,
+      "member_123",
+    );
+    vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("alarm");
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                next_wake_at,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      next_wake_at: null,
+      pending_nudge: 0,
+      pending_work: 0,
+      retry_failure_count: 0,
+    }]);
+  });
+
   it("moves persisted pending nudges to recovery while another isolate is active", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2604,6 +2714,77 @@ describe("HostedUserRunner runtime crypto context", () => {
         }),
         message: "Hosted runner retry attempts exhausted; waiting for a fresh nudge before retrying.",
         phase: "failed",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("lets a fresh nudge restart work after retry attempts are exhausted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length <= 2) {
+        throw new Error("Hosted runner container timed out.");
+      }
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      maxEventAttempts: 2,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toThrow(
+      "Hosted runner container timed out.",
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(runner.alarm()).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(
+      sql.exec(
+        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: null,
+      retry_failure_count: 2,
+    }]);
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(3));
+    await flushDetachedRunnerDrive();
+
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                next_wake_at,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      next_wake_at: null,
+      pending_nudge: 0,
+      pending_work: 0,
+      retry_failure_count: 0,
+    }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          retryFailureCountReset: true,
+        }),
+        message: "Hosted runner nudge accepted.",
+        phase: "scheduled",
         userId: "member_123",
       }),
     );
