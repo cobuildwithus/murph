@@ -637,6 +637,122 @@ describe("RunnerContainer", () => {
     );
   });
 
+  it("fails active workspace invocations when lifecycle status becomes stopped", async () => {
+    let currentStatus: "running" | "stopped" | "stopped_with_code" = "stopped";
+    let markRunnerRequestStarted!: () => void;
+    const runnerRequestStarted = new Promise<void>((resolve) => {
+      markRunnerRequestStarted = resolve;
+    });
+    const hangingRunnerResponse = new Promise<Response>(() => undefined);
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      markRunnerRequestStarted();
+      return await hangingRunnerResponse;
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status: currentStatus,
+    }));
+    const startAndWaitForPorts = vi.fn(async () => {
+      currentStatus = "running";
+    });
+    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+      containerFetch,
+      getState,
+      startAndWaitForPorts,
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_container_status_stop_during_work"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted;
+    currentStatus = "stopped_with_code";
+
+    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          lifecycleStage: "active-request-status-watch",
+          statusAfterStop: "stopped_with_code",
+        }),
+        level: "warn",
+        message: "Hosted execution container stopped before workspace request settled.",
+        phase: "failed",
+      }),
+    );
+  });
+
+  it("fails active workspace invocations when lifecycle status reports a missing shell", async () => {
+    let currentStatus: "running" | "stopped" = "stopped";
+    let statusMissing = false;
+    let markRunnerRequestStarted!: () => void;
+    const runnerRequestStarted = new Promise<void>((resolve) => {
+      markRunnerRequestStarted = resolve;
+    });
+    const hangingRunnerResponse = new Promise<Response>(() => undefined);
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      markRunnerRequestStarted();
+      return await hangingRunnerResponse;
+    });
+    const getState = vi.fn(async () => {
+      if (statusMissing) {
+        throw new Error("No such container");
+      }
+      return {
+        lastChange: Date.now(),
+        status: currentStatus,
+      };
+    });
+    const startAndWaitForPorts = vi.fn(async () => {
+      currentStatus = "running";
+    });
+    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+      containerFetch,
+      getState,
+      startAndWaitForPorts,
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_container_missing_during_work"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted;
+    statusMissing = true;
+
+    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+  });
+
   it("runs fallback cleanup when activity expiry fires from another isolate during active work", async () => {
     vi.useFakeTimers();
 
