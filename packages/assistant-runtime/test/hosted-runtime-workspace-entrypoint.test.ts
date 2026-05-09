@@ -1432,72 +1432,6 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("schedules tiny Codex continuity after a foreground assistant pass without checkpointing", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const events: string[] = [];
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const codexContinuitySnapshots: Array<{
-      operatorHomeRoot: string;
-      requestId: string;
-      vaultRoot: string;
-    }> = [];
-
-    try {
-      await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            reason: "alarm",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            throw new Error("Foreground run should not build workspace checkpoint snapshots.");
-          },
-          async importItem() {
-            throw new Error("Mailbox import should not run without mailbox items.");
-          },
-          platform: createPlatform({
-            codexContinuitySnapshots,
-            events,
-            mailboxPort: createMailboxPort({
-              events,
-              items: [],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                version: "0",
-              }),
-            }),
-          }),
-          async runAssistantPhase(input) {
-            events.push("assistant");
-            await writeFile(path.join(input.restored.vaultRoot, "turn.txt"), "reply\n", "utf8");
-            return {
-              checkpointReason: "assistant_runtime_commit",
-              progressed: true,
-            };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.deepEqual(checkpointRequests, []);
-      assert.deepEqual(events.slice(0, 3), [
-        "workspace.read",
-        "mailbox.fetch",
-        "assistant",
-      ]);
-      assert.equal(events.filter((event) => event === "codex-continuity.snapshot").length, 1);
-      assert.equal(codexContinuitySnapshots.length, 1);
-      assert.equal(codexContinuitySnapshots[0]?.vaultRoot, vaultRoot);
-      assert.match(path.basename(codexContinuitySnapshots[0]?.operatorHomeRoot ?? ""), /operator-home$/);
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
   test("keeps exact hosted canonical writes local without foreground workspace checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -4030,11 +3964,6 @@ function createPlatform(input: {
   artifactGetCalls?: string[];
   artifactLabelsByHash?: ReadonlyMap<string, string>;
   artifactPutCalls?: Array<{ byteLength: number; sha256: string }>;
-  codexContinuitySnapshots?: Array<{
-    operatorHomeRoot: string;
-    requestId: string;
-    vaultRoot: string;
-  }>;
   events?: string[];
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort | null;
@@ -4089,16 +4018,6 @@ function createPlatform(input: {
         }
       : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
-    ...(input.codexContinuitySnapshots
-      ? {
-          codexContinuityPort: {
-            scheduleSnapshot(snapshotInput) {
-              input.codexContinuitySnapshots?.push(snapshotInput);
-              input.events?.push("codex-continuity.snapshot");
-            },
-          },
-        }
-      : {}),
     ...(input.runtimeLivenessIntervalMs
       ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
       : {}),

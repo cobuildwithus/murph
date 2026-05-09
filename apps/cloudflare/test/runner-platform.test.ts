@@ -1,12 +1,8 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -1314,65 +1310,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
-  });
-
-  it("uploads tiny Codex continuity artifacts with active lease headers", async () => {
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "runner-platform-codex-continuity-"));
-
-    try {
-      const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
-      const vaultRoot = path.join(workspaceRoot, "vault");
-      const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
-      const threadId = "00000000-0000-4000-8000-000000000047";
-      const rolloutRelativePath =
-        `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`;
-      await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), { recursive: true });
-      await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
-      await writeFile(
-        path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
-        "{\"rollout\":\"platform\"}\n",
-        "utf8",
-      );
-      await writeFile(
-        path.join(assistantRoot, "sessions", "session.json"),
-        JSON.stringify({
-          resumeState: {
-            codexRolloutRelativePath: rolloutRelativePath,
-            providerSessionId: threadId,
-          },
-        }),
-        "utf8",
-      );
-      const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-      const platform = buildHostedExecutionRuntimePlatform({
-        boundUserId: "member_123",
-        fetchImpl: fetchMock as typeof fetch,
-        internalWorkerProxyToken: "runner-proxy-token",
-        workspaceCheckpointBridge: {
-          readCurrentLease: () => ({
-            attemptId: "attempt_1",
-            leaseGeneration: "9",
-            userId: "member_123",
-            workspaceVersion: "5",
-          }),
-        },
-      });
-
-      platform.codexContinuityPort!.scheduleSnapshot({
-        operatorHomeRoot,
-        requestId: "request_1",
-        vaultRoot,
-      });
-
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      const artifactRequest = requireFetchRequest(fetchMock.mock.calls[0], "Codex continuity artifact upload");
-      expect(artifactRequest.url).toMatch(/^http:\/\/artifacts\.worker\/objects\/[a-f0-9]{64}$/u);
-      expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
-      expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
-      expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
-    } finally {
-      await rm(workspaceRoot, { force: true, recursive: true });
-    }
   });
 
   it("writes browser-vault replicas through the Cloudflare internal store with active lease headers", async () => {

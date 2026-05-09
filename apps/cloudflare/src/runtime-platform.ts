@@ -9,7 +9,6 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   sha256HostedBundleHex,
-  snapshotHostedCodexContinuityArtifact,
 } from "@murphai/runtime-state/node";
 import {
   emitHostedExecutionStructuredLog,
@@ -273,49 +272,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
-    ...(input.workspaceCheckpointBridge
-      ? {
-          codexContinuityPort: {
-            scheduleSnapshot({ operatorHomeRoot, vaultRoot }) {
-              const workspaceCheckpointBridge = input.workspaceCheckpointBridge;
-              if (!workspaceCheckpointBridge) {
-                return;
-              }
-              setTimeout(() => {
-                void (async () => {
-                  const assertSnapshotLive = async () => {
-                    await requireHostedRuntimeActiveLeaseHeaders(
-                      workspaceCheckpointBridge,
-                      "Hosted Codex continuity snapshot",
-                    );
-                  };
-                  const snapshot = await snapshotHostedCodexContinuityArtifact({
-                    assertSnapshotLive,
-                    operatorHomeRoot,
-                    vaultRoot,
-                  });
-                  if (snapshot.threadCount === 0) {
-                    return;
-                  }
-                  await assertSnapshotLive();
-                  const sha256 = sha256HostedBundleHex(snapshot.bundle);
-                  await putArtifactOnce(
-                    {
-                      bytes: snapshot.bundle,
-                      sha256,
-                    },
-                    { requireActiveLease: true },
-                  );
-                })().catch((error: unknown) => {
-                  console.warn("Hosted Codex continuity background snapshot failed.", {
-                    errorName: error instanceof Error ? error.name : typeof error,
-                  });
-                });
-              }, 0);
-            },
-          },
-        }
-      : {}),
     ...(input.internalWorkerProxyToken && (
       input.workspaceCheckpointBridge
       || input.browserVaultRefreshSourceStateHash

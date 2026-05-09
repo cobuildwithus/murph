@@ -68,9 +68,6 @@ const HOSTED_HOT_STATE_MAX_FILES = 5_000;
 const HOSTED_HOT_STATE_MAX_INLINE_BYTES = 16 * 1024 * 1024;
 const HOSTED_HOT_STATE_MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
 const HOSTED_CODEX_CONTINUITY_SNAPSHOT_MAX_ATTEMPTS = 2;
-const HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_THREADS = 64;
-const HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_ROLLOUT_BYTES = 2 * 1024 * 1024;
-const HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_BUNDLE_BYTES = 3 * 1024 * 1024;
 
 const HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS = [
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/accepted-turn-inputs`,
@@ -135,13 +132,6 @@ export interface HostedAssistantRuntimeHotStateSnapshot {
   inlineBytes: number;
 }
 
-export interface HostedCodexContinuityArtifactSnapshot {
-  bundle: Uint8Array;
-  bundleBytes: number;
-  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null;
-  threadCount: number;
-}
-
 export interface HostedWorkspaceSnapshotProviderContinuityAnalysis {
   hasCodexProviderContinuity: boolean;
   hasProviderResumeState: boolean;
@@ -178,17 +168,6 @@ export class HostedAssistantRuntimeHotStateBudgetExceededError extends Error {
   ) {
     super("Hosted assistant runtime hot-state snapshot exceeded its budget.");
     this.name = "HostedAssistantRuntimeHotStateBudgetExceededError";
-  }
-}
-
-export class HostedCodexContinuityArtifactBudgetExceededError extends Error {
-  constructor(
-    public readonly metric: "bundle_bytes" | "rollout_bytes" | "threads",
-    public readonly limit: number,
-    public readonly actual: number,
-  ) {
-    super(`Hosted Codex continuity artifact budget exceeded for ${metric}: ${actual} > ${limit}.`);
-    this.name = "HostedCodexContinuityArtifactBudgetExceededError";
   }
 }
 
@@ -1433,99 +1412,6 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
   throw new Error("Hosted assistant runtime hot-state snapshot retry loop did not return.");
 }
 
-export async function snapshotHostedCodexContinuityArtifact(input: {
-  assertSnapshotLive?: () => Promise<void> | void;
-  codexHomeSnapshotHashSecret?: string | null;
-  operatorHomeRoot?: string | null;
-  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
-  vaultRoot: string;
-}): Promise<HostedCodexContinuityArtifactSnapshot> {
-  for (let attempt = 1; attempt <= HOSTED_CODEX_CONTINUITY_SNAPSHOT_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      return await snapshotHostedCodexContinuityArtifactOnce(input);
-    } catch (error) {
-      if (
-        attempt < HOSTED_CODEX_CONTINUITY_SNAPSHOT_MAX_ATTEMPTS
-        && error instanceof HostedCodexContinuitySnapshotDriftError
-      ) {
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw new Error("Hosted Codex continuity artifact snapshot retry loop did not return.");
-}
-
-async function snapshotHostedCodexContinuityArtifactOnce(input: {
-  assertSnapshotLive?: () => Promise<void> | void;
-  codexHomeSnapshotHashSecret?: string | null;
-  operatorHomeRoot?: string | null;
-  prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
-  vaultRoot: string;
-}): Promise<HostedCodexContinuityArtifactSnapshot> {
-  const vaultRoot = path.resolve(input.vaultRoot);
-  const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
-  const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
-  const workspaceSnapshotHashSecret =
-    normalizeHostedCodexHomeSnapshotHashSecret(input.codexHomeSnapshotHashSecret);
-  await input.assertSnapshotLive?.();
-  const preparedCodexContinuity = await prepareHostedCodexContinuitySnapshot({
-    assistantStateRoot,
-    prepareCodexContinuitySnapshot: input.prepareCodexContinuitySnapshot,
-  });
-  const hostedCodexContinuity = operatorHomeRoot
-    ? await collectHostedCodexContinuity({
-        assistantStateRoot,
-        hashSecret: workspaceSnapshotHashSecret,
-        operatorHomeRoot,
-        preparedThreads: preparedCodexContinuity.preparedThreads,
-      })
-    : await collectMissingHostedCodexContinuity(assistantStateRoot);
-  hostedCodexContinuity.flushFailed ||= preparedCodexContinuity.flushFailed;
-  const codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
-    collection: hostedCodexContinuity,
-    hashSecret: workspaceSnapshotHashSecret,
-  });
-  assertHostedCodexContinuityComplete(
-    hostedCodexContinuity,
-    codexHomeSnapshotDiagnostics,
-  );
-  const rolloutBytes = hostedCodexContinuity.entries.reduce(
-    (total, entry) => total + entry.byteSize,
-    0,
-  );
-  assertHostedCodexContinuityArtifactBudget({
-    bundleBytes: 0,
-    rolloutBytes,
-    threadCount: hostedCodexContinuity.entries.length,
-  });
-
-  await input.assertSnapshotLive?.();
-  const files = await createHostedCodexContinuityArtifactArchiveFiles(
-    hostedCodexContinuity,
-    codexHomeSnapshotDiagnostics,
-  );
-  await input.assertSnapshotLive?.();
-  const bundle = serializeHostedBundleArchive({
-    files,
-    kind: "vault",
-    schema: HOSTED_BUNDLE_SCHEMA,
-  });
-  assertHostedCodexContinuityArtifactBudget({
-    bundleBytes: bundle.byteLength,
-    rolloutBytes,
-    threadCount: hostedCodexContinuity.entries.length,
-  });
-
-  return {
-    bundle,
-    bundleBytes: bundle.byteLength,
-    codexHomeSnapshotDiagnostics,
-    threadCount: hostedCodexContinuity.entries.length,
-  };
-}
-
 async function snapshotHostedAssistantRuntimeHotStateOnce(input: {
   assertSnapshotLive?: () => Promise<void> | void;
   codexHomeSnapshotHashSecret?: string | null;
@@ -1658,44 +1544,6 @@ async function snapshotHostedAssistantRuntimeHotStateOnce(input: {
     fileCount: metrics.fileCount,
     inlineBytes: metrics.inlineBytes,
   };
-}
-
-async function createHostedCodexContinuityArtifactArchiveFiles(
-  collection: HostedCodexContinuityCollection,
-  codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null,
-): Promise<HostedBundleArchiveFile[]> {
-  if (collection.entries.length === 0) {
-    return [];
-  }
-
-  const files: HostedBundleArchiveFile[] = [];
-  const verifiedEntries: HostedCodexContinuityEntry[] = [];
-  for (const entry of collection.entries) {
-    const bytes = new Uint8Array(await readFile(entry.absolutePath));
-    const sha256 = sha256BytesHex(bytes);
-    if (sha256 !== entry.sha256 || bytes.byteLength !== entry.byteSize) {
-      throw new HostedCodexContinuitySnapshotDriftError(codexHomeSnapshotDiagnostics);
-    }
-    verifiedEntries.push(entry);
-    files.push({
-      contentsBase64: Buffer.from(bytes).toString("base64"),
-      path: `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`,
-      root: WORKSPACE_OPERATOR_HOME_ROOT,
-    });
-  }
-
-  files.push({
-    contentsBase64: Buffer.from(
-      JSON.stringify(createHostedCodexContinuityManifest(verifiedEntries)) + "\n",
-      "utf8",
-    ).toString("base64"),
-    path: HOSTED_CODEX_CONTINUITY_MANIFEST_RELATIVE_PATH,
-    root: WORKSPACE_OPERATOR_HOME_ROOT,
-  });
-
-  return files.sort((left, right) =>
-    hostedPortableWorkspaceArchiveFileKey(left)
-      .localeCompare(hostedPortableWorkspaceArchiveFileKey(right)));
 }
 
 export async function clearHostedAssistantRuntimeHotState(input: {
@@ -2599,36 +2447,6 @@ function assertHostedAssistantRuntimeHotStateBudget(input: {
     throw new HostedAssistantRuntimeHotStateBudgetExceededError(
       "bundle_bytes",
       HOSTED_HOT_STATE_MAX_BUNDLE_BYTES,
-      input.bundleBytes,
-    );
-  }
-}
-
-function assertHostedCodexContinuityArtifactBudget(input: {
-  bundleBytes: number;
-  rolloutBytes: number;
-  threadCount: number;
-}): void {
-  if (input.threadCount > HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_THREADS) {
-    throw new HostedCodexContinuityArtifactBudgetExceededError(
-      "threads",
-      HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_THREADS,
-      input.threadCount,
-    );
-  }
-
-  if (input.rolloutBytes > HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_ROLLOUT_BYTES) {
-    throw new HostedCodexContinuityArtifactBudgetExceededError(
-      "rollout_bytes",
-      HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_ROLLOUT_BYTES,
-      input.rolloutBytes,
-    );
-  }
-
-  if (input.bundleBytes > HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_BUNDLE_BYTES) {
-    throw new HostedCodexContinuityArtifactBudgetExceededError(
-      "bundle_bytes",
-      HOSTED_CODEX_CONTINUITY_ARTIFACT_MAX_BUNDLE_BYTES,
       input.bundleBytes,
     );
   }
