@@ -529,14 +529,34 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       vaultRoot: restored.vaultRoot,
       workspace: workspaceRead.workspace,
     };
-    const initialMailboxImport = await raceHostedRuntimeLiveness(
-      importHostedMailboxForWorkspaceRunner({
-        checkpointRequestBuilder: foregroundCheckpointRequestBuilder,
-        checkpointReason: "import",
-        deferCheckpoint: true,
-        input: baseRunnerInput,
-        requestId,
+    const baseRuntimeEnv = {
+      ...guardedRuntime.forwardedEnv,
+      ...guardedRuntime.userEnv,
+    };
+    const hostedCodexRuntime = await raceHostedRuntimeLiveness(
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot: restored.operatorHomeRoot,
+        runtimeEnv: baseRuntimeEnv,
       }),
+      livenessAbortController.signal,
+    );
+    assertRuntimeLiveness();
+    const initialMailboxImport = await raceHostedRuntimeLiveness(
+      withHostedProcessEnvironment(
+        {
+          envOverrides: hostedCodexRuntime.runtimeEnv,
+          operatorHomeRoot: restored.operatorHomeRoot,
+          vaultRoot: restored.vaultRoot,
+        },
+        async () =>
+          importHostedMailboxForWorkspaceRunner({
+            checkpointRequestBuilder: foregroundCheckpointRequestBuilder,
+            checkpointReason: "import",
+            deferCheckpoint: true,
+            input: baseRunnerInput,
+            requestId,
+          }),
+      ),
       livenessAbortController.signal,
     );
     assertRuntimeLiveness();
@@ -550,18 +570,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         rebuild: !inboxReady && restored.restoreWasCold,
         requestId,
         vaultRoot: restored.vaultRoot,
-      }),
-      livenessAbortController.signal,
-    );
-    assertRuntimeLiveness();
-    const baseRuntimeEnv = {
-      ...guardedRuntime.forwardedEnv,
-      ...guardedRuntime.userEnv,
-    };
-    const hostedCodexRuntime = await raceHostedRuntimeLiveness(
-      prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: baseRuntimeEnv,
       }),
       livenessAbortController.signal,
     );

@@ -106,7 +106,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
   });
 
-  it("nudges the Linq runner directly but still starts the pointer workflow", async () => {
+  it("starts the Linq runner direct nudge before pointer workflow bookkeeping", async () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -148,8 +148,56 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
     });
     expect(
-      workflowMocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0],
-    ).toBeLessThan(nudgeUserRunner.mock.invocationCallOrder[0]);
+      mailboxStoreMocks.readHostedMailboxItemOwnerById.mock.invocationCallOrder[0],
+    ).toBeLessThan(workflowMocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0]);
+  });
+
+  it("does not wait for pointer workflow start before nudging the runner", async () => {
+    const workflowStart = createDeferred<{ runId: string }>();
+    workflowMocks.startHostedWebhookNudgeWorkflow.mockReturnValueOnce(workflowStart.promise);
+    const nudgeUserRunner = vi.fn().mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "1",
+    });
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+      deleteUserData: vi.fn(),
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner,
+      scheduleBrowserVaultRefresh: vi.fn(),
+    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
+
+    const handoff = maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_inline_gap",
+      mailboxItemId: "mailbox_123",
+      response: {
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      source: "linq",
+      userId: "user-123",
+    });
+
+    await vi.waitFor(() => expect(nudgeUserRunner).toHaveBeenCalledWith("user-123"));
+    let settled = false;
+    void handoff.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    workflowStart.resolve({
+      runId: "workflow-run-123",
+    });
+    await expect(handoff).resolves.toMatchObject({
+      reason: "workflow-started",
+      runnerNudgeAccepted: true,
+      started: true,
+      workflowStarted: true,
+    });
   });
 
   it("starts the Linq pointer workflow when direct nudge config is unavailable", async () => {
@@ -395,6 +443,16 @@ describe("nudgeHostedRunnerBestEffort", () => {
     });
   });
 });
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
 
 describe("deleteHostedRunnerUserDataBestEffort", () => {
   beforeEach(() => {

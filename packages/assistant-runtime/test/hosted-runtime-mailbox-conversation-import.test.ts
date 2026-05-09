@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
 } from "@murphai/hosted-execution/contracts";
@@ -27,6 +28,9 @@ import {
   listAssistantInputEvents,
   updateAssistantInputAttachmentEvidence,
 } from "@murphai/assistant-engine";
+import {
+  readAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 import {
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
@@ -58,6 +62,13 @@ import type {
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_conversation_import";
 const HASHED_IDENTIFIER_PATTERN = /^hid_[0-9a-f]{32}$/u;
+const HOSTED_ASSISTANT_SEED_ENV = {
+  HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
+  HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+  HOSTED_ASSISTANT_PROVIDER: "openai",
+  HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+  HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
+} as const;
 const tempRoots: string[] = [];
 
 afterEach(async () => {
@@ -191,6 +202,130 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(afterProjection.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
+  });
+
+  test("self-heals Linq auto-reply before staging a mailbox input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-admission-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_admission",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_admission",
+          parts: [
+            {
+              type: "text",
+              value: "quick ack",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        item,
+        runtime: createRuntime({
+          userEnv: HOSTED_ASSISTANT_SEED_ENV,
+        }),
+        async stageAssistantInputEvent() {
+          const state = await readAssistantAutomationState(vaultRoot);
+          assert.deepEqual(
+            state.autoReply.map((entry) => ({
+              channel: entry.channel,
+              eligibleAfter: entry.eligibleAfter,
+            })),
+            [{
+              channel: "linq",
+              eligibleAfter: null,
+            }],
+          );
+          return {
+            inputId: "input_linq_admission",
+            async recordProjection() {},
+          };
+        },
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(outcome.assistantInputId !== null, true);
+    const state = await readAssistantAutomationState(vaultRoot);
+    assert.deepEqual(
+      state.autoReply.map((entry) => ({
+        channel: entry.channel,
+        eligibleAfter: entry.eligibleAfter,
+      })),
+      [{
+        channel: "linq",
+        eligibleAfter: null,
+      }],
+    );
+  });
+
+  test("does not self-heal consent-gated WhatsApp auto-reply during mailbox import", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-whatsapp-admission-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "whatsapp",
+        whatsappMessage: {
+          fromWaId: "15550100001",
+          messageId: "wamid.admission",
+          phoneNumberId: "phone-number-id",
+          schema: "murph.hosted-whatsapp-message.v1",
+          text: "quick ack",
+          threadId: "15550100001",
+        },
+      },
+    });
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        item,
+        runtime: createRuntime({
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: false,
+              telegramBotConfigured: false,
+              whatsappCloudApiConfigured: true,
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [
+              {
+                capabilityReady: true,
+                channel: "whatsapp",
+                memberChannel: "whatsapp",
+              },
+            ],
+          },
+          userEnv: HOSTED_ASSISTANT_SEED_ENV,
+        }),
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    const state = await readAssistantAutomationState(vaultRoot);
+    assert.equal(
+      state.autoReply.some((entry) => entry.channel === "whatsapp"),
+      false,
+    );
   });
 
   test("uses the Linq email contact lookup as the assistant conversation identity seed", async () => {
@@ -2406,12 +2541,15 @@ async function writeVaultFile(
   await writeFile(absolutePath, bytes);
 }
 
-function createRuntime(): Pick<
+function createRuntime(input: Partial<Pick<
+  NormalizedHostedAssistantRuntimeConfig,
+  "forwardedEnv" | "platformEnv" | "resolvedConfig" | "userEnv"
+>> = {}): Pick<
   NormalizedHostedAssistantRuntimeConfig,
   "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 > {
   return {
-    forwardedEnv: {},
+    forwardedEnv: input.forwardedEnv ?? {},
     platform: {
       artifactStore: {
         async get() {
@@ -2426,8 +2564,8 @@ function createRuntime(): Pick<
         async sendEmail() {},
       },
     },
-    platformEnv: {},
-    resolvedConfig: {
+    platformEnv: input.platformEnv ?? {},
+    resolvedConfig: input.resolvedConfig ?? {
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
@@ -2452,6 +2590,24 @@ function createRuntime(): Pick<
         },
       ],
     },
-    userEnv: {},
+    userEnv: input.userEnv ?? {},
   };
+}
+
+async function withOperatorHomeRoot<T>(
+  operatorHomeRoot: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const previousHome = process.env.HOME;
+  process.env.HOME = operatorHomeRoot;
+
+  try {
+    return await run();
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+  }
 }

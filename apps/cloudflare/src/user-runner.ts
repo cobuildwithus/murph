@@ -1119,6 +1119,31 @@ export class HostedUserRunner {
     return record;
   }
 
+  private async queuePendingNudgeContinuationAfterInvocation(input: {
+    record: RunnerStateRecord;
+    userId: string;
+  }): Promise<RunnerStateRecord> {
+    if (!input.record.pendingNudge) {
+      return input.record;
+    }
+
+    this.pendingRunnerDriveAfterInvocation = {
+      aiUsageAllowDecision: null,
+      reason: "nudge",
+      userId: input.userId,
+    };
+
+    if (input.record.idleShutdownCheckpointDueAt) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
+    }
+
+    return await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: new Date(
+        Date.now() + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
+      ).toISOString(),
+    });
+  }
+
   private async clearExpiredActiveInvocationForRecovery(): Promise<{
     attemptId: string | null;
     cleared: boolean;
@@ -1716,7 +1741,12 @@ export class HostedUserRunner {
 
     const record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
-      const scheduledRecord = await this.syncPendingWorkAlarm(record);
+      const scheduledRecord = record.pendingNudge
+        ? await this.queuePendingNudgeContinuationAfterInvocation({
+            record,
+            userId: input.userId,
+          })
+        : await this.syncPendingWorkAlarm(record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -1782,7 +1812,12 @@ export class HostedUserRunner {
   }): Promise<void> {
     const record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
-      const scheduledRecord = await this.syncPendingWorkAlarm(record);
+      const scheduledRecord = record.pendingNudge
+        ? await this.queuePendingNudgeContinuationAfterInvocation({
+            record,
+            userId: input.userId,
+          })
+        : await this.syncPendingWorkAlarm(record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -1808,8 +1843,10 @@ export class HostedUserRunner {
     const postCleanupRecord = await this.stateStore.readState();
     if (postCleanupRecord.pendingNudge || postCleanupRecord.inFlight) {
       const record = postCleanupRecord.pendingNudge
-        ? await this.reschedulePendingNudgeAfterInvocationLiveness(postCleanupRecord)
-          ?? postCleanupRecord
+        ? await this.queuePendingNudgeContinuationAfterInvocation({
+            record: postCleanupRecord,
+            userId: input.userId,
+          })
         : await this.syncInvocationRecoveryAlarm(postCleanupRecord);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",

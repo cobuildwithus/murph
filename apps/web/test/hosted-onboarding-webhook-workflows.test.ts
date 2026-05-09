@@ -264,7 +264,7 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("waits for checkpoint progress without nudging again", async () => {
+  it("re-nudges while the latest mailbox pointer is still uncheckpointed", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
       hostedMailboxConversationImportedSeq: "0",
       hostedMailboxSystemImportedSeq: "0",
@@ -275,8 +275,35 @@ describe("hosted onboarding webhook workflows", () => {
       source: "linq",
     })).rejects.toBeInstanceOf(RetryableError);
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
     expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits without re-nudging when an older mailbox pointer is still uncheckpointed", async () => {
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(
+      buildHostedMailboxItemCheckpoint({
+        laneSeq: "4",
+      }),
+    );
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "0",
+      hostedMailboxSystemImportedSeq: "0",
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([{
+      lane: "conversation",
+      maxSeq: "5",
+    }]);
+
+    await expect(waitHostedWebhookMailboxItemCheckpointStep({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    })).rejects.toBeInstanceOf(RetryableError);
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("uses the mailbox item's lane when checking checkpoint progress", async () => {
@@ -294,7 +321,15 @@ describe("hosted onboarding webhook workflows", () => {
       source: "device-sync",
     })).rejects.toBeInstanceOf(RetryableError);
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "device-sync.wake:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+    expect(mocks.readHostedMailboxMaxSeqByLane).toHaveBeenCalledWith({
+      lanes: ["system"],
+      userId: "member_123",
+    });
 
     vi.clearAllMocks();
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(buildHostedMailboxItemCheckpoint({
