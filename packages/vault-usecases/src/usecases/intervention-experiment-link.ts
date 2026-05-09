@@ -68,7 +68,7 @@ export async function resolveInterventionExperimentLink(
   if (input.allowOutOfWindow === true && input.experiment === undefined) {
     throw new VaultCliError(
       'invalid_option',
-      '--allow-out-of-window only applies with --experiment <slug>.',
+      '--allow-out-of-window only applies with --experiment <slug-or-id>.',
     )
   }
 
@@ -86,6 +86,10 @@ export async function resolveInterventionExperimentLink(
       localDate,
       requireActive: false,
       allowOutOfWindow: input.allowOutOfWindow === true,
+    })
+    assertExperimentMatchesIntervention({
+      experiment,
+      interventionType: input.interventionType,
     })
 
     return {
@@ -112,7 +116,7 @@ export async function resolveInterventionExperimentLink(
     const slugs = candidates.map((candidate) => candidate.experimentSlug).join(', ')
     throw new VaultCliError(
       'invalid_option',
-      `Multiple active experiments match "${input.interventionType}": ${slugs}. Pass --experiment <slug> or --skip-experiment-link.`,
+      `Multiple active experiments match "${input.interventionType}": ${slugs}. Pass --experiment <slug-or-id> or --skip-experiment-link.`,
       {
         candidates: candidates.map((candidate) => candidate.experimentSlug),
         interventionType: input.interventionType,
@@ -156,6 +160,7 @@ export async function attachInterventionSessionToExperiment(input: {
   const event = requireInterventionSessionEvent(readModel, input.eventId)
   const experiment = requireExperimentCandidateByLookup(readModel, input.experiment)
   const localDate = resolveExistingEventLocalDate(readModel, event)
+  const interventionType = readInterventionType(event)
 
   assertExperimentCanBeLinked({
     experiment,
@@ -163,9 +168,10 @@ export async function attachInterventionSessionToExperiment(input: {
     requireActive: false,
     allowOutOfWindow: input.allowOutOfWindow === true,
   })
+  assertExperimentMatchesIntervention({ experiment, interventionType })
 
   const current = readCurrentExperimentLink(event)
-  if (current && current.experimentId !== experiment.experimentId) {
+  if (current && !sameExperimentLink(current, experiment)) {
     if (input.replace !== true) {
       throw new VaultCliError(
         'invalid_option',
@@ -278,6 +284,18 @@ function requireInterventionSessionEvent(
   return event
 }
 
+function readInterventionType(event: QueryCanonicalEntity): string {
+  const interventionType = event.attributes.interventionType
+  if (typeof interventionType === 'string' && interventionType.length > 0) {
+    return interventionType
+  }
+
+  throw new VaultCliError(
+    'invalid_payload',
+    `Intervention session ${event.entityId} has no interventionType.`,
+  )
+}
+
 function requireExperimentCandidateByLookup(
   readModel: QueryVaultReadModel,
   lookup: string,
@@ -338,6 +356,47 @@ function assertExperimentCanBeLinked(input: {
   }
 }
 
+function assertExperimentMatchesIntervention(input: {
+  experiment: ExperimentCandidate
+  interventionType: string
+}) {
+  if (
+    experimentMatchesIntervention(
+      input.experiment.frontmatter,
+      input.interventionType,
+    )
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    `Intervention type "${input.interventionType}" does not match experiment "${input.experiment.experimentSlug}". For a new capture, pass --type with a matching intervention type or choose a different experiment. For an existing session, edit the session type after detaching the experiment link, or attach a matching experiment.`,
+  )
+}
+
+function sameExperimentLink(
+  current: InterventionExperimentLinkTarget,
+  target: InterventionExperimentLinkTarget,
+): boolean {
+  if (
+    current.experimentId.length > 0 &&
+    current.experimentId !== target.experimentId
+  ) {
+    return false
+  }
+
+  if (
+    current.experimentSlug.length > 0 &&
+    current.experimentSlug !== target.experimentSlug
+  ) {
+    return false
+  }
+
+  return current.experimentId === target.experimentId ||
+    current.experimentSlug === target.experimentSlug
+}
+
 function isInInterventionWindow(
   frontmatter: ExperimentFrontmatter,
   localDate: string,
@@ -369,22 +428,7 @@ function experimentMatchesIntervention(
 
 function expandInterventionAliases(value: string | null | undefined): Set<string> {
   const slug = slugifyInterventionValue(value)
-  const aliases = new Set<string>()
-  if (!slug) {
-    return aliases
-  }
-
-  aliases.add(slug)
-
-  const parts = slug.split('-')
-  if (parts.includes('sauna')) {
-    aliases.add('sauna')
-  }
-  if (parts.includes('magnesium')) {
-    aliases.add('magnesium')
-  }
-
-  return aliases
+  return slug ? new Set([slug]) : new Set()
 }
 
 function slugifyInterventionValue(value: string | null | undefined): string | null {

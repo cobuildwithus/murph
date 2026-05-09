@@ -4,7 +4,6 @@ import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   interventionAddResultSchema,
   occurredAtOptionSchema,
-  slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
@@ -28,6 +27,11 @@ const regimenIdSchema = z
 const interventionLookupSchema = z
   .string()
   .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical intervention event id in evt_* form.')
+const experimentLookupSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(160)
 
 export function registerInterventionCommands(
   cli: Cli.Cli,
@@ -97,10 +101,10 @@ export function registerInterventionCommands(
         .describe(
           'Optional regimen id to relate this intervention session back to one active therapy or habit.',
         ),
-      experiment: slugSchema
+      experiment: experimentLookupSchema
         .optional()
         .describe(
-          'Optional experiment slug to link explicitly. Omit for automatic single-match linking.',
+          'Optional experiment slug or id to link explicitly. Omit for automatic single-match linking.',
         ),
       skipExperimentLink: z
         .boolean()

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -112,7 +112,11 @@ async function runSliceCliRaw(args: string[]) {
   return output.join('').trim()
 }
 
-async function createActiveSaunaExperiment(vaultRoot: string, slug: string) {
+async function createActiveExperiment(
+  vaultRoot: string,
+  slug: string,
+  modality = 'sauna',
+) {
   const result = await runSliceCli<{
     experimentId: string
     slug: string
@@ -132,7 +136,7 @@ async function createActiveSaunaExperiment(vaultRoot: string, slug: string) {
     '--intervention-end',
     '2026-04-14',
     '--modality',
-    'sauna',
+    modality,
     '--primary-biomarker-key',
     'biomarker:resting-heart-rate',
     '--vault',
@@ -140,6 +144,10 @@ async function createActiveSaunaExperiment(vaultRoot: string, slug: string) {
   ])
   assert.equal(result.ok, true, result.ok ? undefined : result.error.message)
   return requireData(result)
+}
+
+async function createActiveSaunaExperiment(vaultRoot: string, slug: string) {
+  return createActiveExperiment(vaultRoot, slug, 'sauna')
 }
 
 function assertEntityExperimentLink(
@@ -188,6 +196,16 @@ test('intervention edit/delete schemas expose typed mutation options', async () 
   assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
   assert.deepEqual(editSchema.options.required, ['vault'])
   assert.deepEqual(deleteSchema.options.required, ['vault'])
+})
+
+test('experiment session attach schema exposes repair flags', async () => {
+  const schema = JSON.parse(
+    await runSliceCliRaw(['experiment', 'session', 'attach', '--schema']),
+  ) as SchemaEnvelope
+
+  assert.equal('replace' in schema.options.properties, true)
+  assert.equal('allowOutOfWindow' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
 })
 
 test('intervention add help uses a positional text argument', async () => {
@@ -401,6 +419,18 @@ test.sequential(
         experiment.experimentId,
         'sauna-rhr',
       )
+
+      const typeEdit = await runSliceCli<unknown>([
+        'intervention',
+        'edit',
+        requireData(sauna).eventId,
+        '--type',
+        'hbot',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(typeEdit.ok, false)
+      assert.match(typeEdit.error.message ?? '', /experiment session detach <eventId>/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -463,13 +493,14 @@ test.sequential(
         'explicit-sauna',
       )
       await createActiveSaunaExperiment(vaultRoot, 'alternate-sauna')
+      await createActiveExperiment(vaultRoot, 'explicit-hbot', 'hbot')
 
       const explicit = await runSliceCli<InterventionAddEnvelope>([
         'intervention',
         'add',
         '20 min sauna after lifting.',
         '--experiment',
-        'explicit-sauna',
+        experiment.experimentId,
         '--occurred-at',
         '2026-04-03T18:00:00.000Z',
         '--vault',
@@ -479,6 +510,20 @@ test.sequential(
       assert.equal(requireData(explicit).experimentId, experiment.experimentId)
       assert.equal(requireData(explicit).experimentSlug, 'explicit-sauna')
       assert.equal(requireData(explicit).experimentLinkMode, 'explicit')
+
+      const mismatch = await runSliceCli<unknown>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--experiment',
+        'explicit-hbot',
+        '--occurred-at',
+        '2026-04-03T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mismatch.ok, false)
+      assert.match(mismatch.error.message ?? '', /does not match experiment/u)
 
       const optedOut = await runSliceCli<InterventionAddEnvelope>([
         'intervention',
@@ -504,6 +549,17 @@ test.sequential(
       ])
       assert.equal(shownOptOut.ok, true)
       assertEntityExperimentLink(requireData(shownOptOut).entity, null)
+
+      const list = await runSliceCli<{ count: number }>([
+        'event',
+        'list',
+        '--kind',
+        'intervention_session',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(list.ok, true)
+      assert.equal(requireData(list).count, 2)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -617,6 +673,17 @@ test.sequential(
       ])
       assert.equal(skipOverrideConflict.ok, false)
       assert.match(skipOverrideConflict.error.message ?? '', /either --allow-out-of-window/u)
+
+      const list = await runSliceCli<{ count: number }>([
+        'event',
+        'list',
+        '--kind',
+        'intervention_session',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(list.ok, true)
+      assert.equal(requireData(list).count, 2)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -637,6 +704,7 @@ test.sequential(
         const created = await createActiveSaunaExperiment(vaultRoot, slug)
         experiments[slug] = created.experimentId
       }
+      const hbotExperiment = await createActiveExperiment(vaultRoot, 'hbot-one', 'hbot')
 
       const created = await runSliceCli<InterventionAddEnvelope>([
         'intervention',
@@ -651,6 +719,18 @@ test.sequential(
         vaultRoot,
       ])
       assert.equal(created.ok, true)
+
+      const mismatchedAttach = await runSliceCli<unknown>([
+        'experiment',
+        'session',
+        'attach',
+        hbotExperiment.slug,
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mismatchedAttach.ok, false)
+      assert.match(mismatchedAttach.error.message ?? '', /does not match experiment/u)
 
       const outOfWindow = await runSliceCli<InterventionAddEnvelope>([
         'intervention',
@@ -720,6 +800,62 @@ test.sequential(
       assert.equal(requireData(attached).experimentId, experiments['sauna-one'])
       assert.equal(requireData(attached).experimentSlug, 'sauna-one')
       assert.equal(requireData(attached).linked, true)
+
+      const slugOnlyPayloadPath = path.join(vaultRoot, 'slug-only-event.json')
+      await writeFile(
+        slugOnlyPayloadPath,
+        JSON.stringify({
+          kind: 'intervention_session',
+          occurredAt: '2026-04-03T18:00:00.000Z',
+          source: 'manual',
+          title: '20-minute sauna',
+          interventionType: 'sauna',
+          durationMinutes: 20,
+          experimentSlug: 'sauna-one',
+          note: 'Imported sauna session with a partial experiment link.',
+        }),
+        'utf8',
+      )
+      const slugOnly = await runSliceCli<{ eventId: string }>([
+        'event',
+        'import-json',
+        '--input',
+        `@${slugOnlyPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(slugOnly.ok, true)
+
+      const slugOnlyTypeEdit = await runSliceCli<unknown>([
+        'intervention',
+        'edit',
+        requireData(slugOnly).eventId,
+        '--type',
+        'hbot',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(slugOnlyTypeEdit.ok, false)
+      assert.match(
+        slugOnlyTypeEdit.error.message ?? '',
+        /experiment session attach <experiment> <eventId> --replace/u,
+      )
+
+      const repairedSlugOnly = await runSliceCli<{
+        experimentId: string
+        experimentSlug: string
+      }>([
+        'experiment',
+        'session',
+        'attach',
+        'sauna-one',
+        requireData(slugOnly).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(repairedSlugOnly.ok, true)
+      assert.equal(requireData(repairedSlugOnly).experimentId, experiments['sauna-one'])
+      assert.equal(requireData(repairedSlugOnly).experimentSlug, 'sauna-one')
 
       const relinkBlocked = await runSliceCli<unknown>([
         'experiment',
@@ -903,6 +1039,70 @@ test.sequential(
       ])
       assert.equal(missing.ok, false)
       assert.equal(missing.error?.code, 'not_found')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'intervention edit repairs stale regimen links when clearing regimen state',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-cli-intervention-regimen-repair-'),
+    )
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const payloadPath = path.join(vaultRoot, 'stale-regimen-event.json')
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          kind: 'intervention_session',
+          occurredAt: '2026-04-03T18:00:00.000Z',
+          source: 'manual',
+          title: '20-minute sauna',
+          interventionType: 'sauna',
+          durationMinutes: 20,
+          note: 'Imported sauna session with a stale regimen link.',
+          links: [
+            {
+              type: 'related_to',
+              targetId: 'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+            },
+          ],
+        }),
+        'utf8',
+      )
+
+      const imported = await runSliceCli<{ eventId: string }>([
+        'event',
+        'import-json',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(imported.ok, true)
+
+      const edited = await runSliceCli<ShowEnvelope>([
+        'intervention',
+        'edit',
+        requireData(imported).eventId,
+        '--clear-regimen-id',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(edited.ok, true)
+      assert.deepEqual(requireData(edited).entity.links.map((link) => link.id), [])
+      assert.equal(requireData(edited).entity.data.regimenId, undefined)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
