@@ -127,7 +127,7 @@ export function buildHostedWranglerDeployConfig(
       head_sampling_rate: environment.logHeadSamplingRate,
       logs: {
         enabled: true,
-        invocation_logs: true,
+        invocation_logs: false,
         persist: true,
         head_sampling_rate: environment.logHeadSamplingRate,
       },
