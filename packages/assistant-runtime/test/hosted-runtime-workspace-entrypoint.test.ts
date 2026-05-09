@@ -376,9 +376,10 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("does not mark idle-shutdown checkpointed when no workspace exists", async () => {
+  test("checkpoints null-bootstrap idle-shutdown work when no workspace row exists", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
     const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -393,8 +394,16 @@ describe("hosted workspace runtime entrypoint", () => {
           },
         }),
         {
-          async createCheckpointSnapshot() {
-            throw new Error("Idle-shutdown checkpoint must not snapshot without a workspace.");
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/null-bootstrap-idle-shutdown.bundle.json",
+                size: 640,
+              }),
+            };
           },
           async importItem() {
             throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
@@ -402,7 +411,7 @@ describe("hosted workspace runtime entrypoint", () => {
           platform: createPlatform({
             mailboxPort: null,
             workspacePort: createWorkspacePort({
-              checkpointRequests: [],
+              checkpointRequests,
               events,
               workspace: null,
             }),
@@ -411,8 +420,15 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(events, ["workspace.read"]);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "snapshot:idle_shutdown",
+        "workspace.checkpoint",
+      ]);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
       assert.deepEqual(result, {
+        idleShutdownCheckpointed: true,
         status: "idle",
       });
     } finally {
@@ -3948,10 +3964,22 @@ describe("hosted workspace runtime entrypoint", () => {
     const idleParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: {
         ...createWorkspaceRunRequest(),
+        checkpointNextWakeAt: "2026-04-20T08:10:00.000Z",
         reason: "idle_shutdown_checkpoint",
       },
     });
     assert.equal(idleParsed.request.reason, "idle_shutdown_checkpoint");
+    assert.equal(idleParsed.request.checkpointNextWakeAt, "2026-04-20T08:10:00.000Z");
+    expect(() =>
+      parseHostedAssistantWorkspaceRuntimeJobInput({
+        request: {
+          ...createWorkspaceRunRequest(),
+          checkpointNextWakeAt: null,
+        },
+      })
+    ).toThrow(
+      "Hosted assistant workspace runtime job request.checkpointNextWakeAt is only supported for idle_shutdown_checkpoint.",
+    );
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({

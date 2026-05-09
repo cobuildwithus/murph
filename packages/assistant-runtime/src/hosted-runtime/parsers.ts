@@ -66,6 +66,18 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
     "wake",
     "Hosted assistant workspace runtime job request",
   );
+  const reason = parseHostedWorkspaceInvocationReason(
+    record.reason,
+    "Hosted assistant workspace runtime job request.reason",
+  );
+  if (
+    record.checkpointNextWakeAt !== undefined
+    && reason !== "idle_shutdown_checkpoint"
+  ) {
+    throw new TypeError(
+      "Hosted assistant workspace runtime job request.checkpointNextWakeAt is only supported for idle_shutdown_checkpoint.",
+    );
+  }
 
   return {
     attemptId: requireString(
@@ -80,14 +92,19 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
             "Hosted assistant workspace runtime job request.budget",
           ),
         }),
+    ...(record.checkpointNextWakeAt === undefined
+      ? {}
+      : {
+          checkpointNextWakeAt: readNullableString(
+            record.checkpointNextWakeAt,
+            "Hosted assistant workspace runtime job request.checkpointNextWakeAt",
+          ),
+        }),
     leaseGeneration: requireNonNegativeBigIntString(
       record.leaseGeneration,
       "Hosted assistant workspace runtime job request.leaseGeneration",
     ),
-    reason: parseHostedWorkspaceInvocationReason(
-      record.reason,
-      "Hosted assistant workspace runtime job request.reason",
-    ),
+    reason,
     userId: requireString(
       record.userId,
       "Hosted assistant workspace runtime job request.userId",

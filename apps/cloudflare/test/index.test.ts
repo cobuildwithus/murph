@@ -1104,7 +1104,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const statusResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=999", {
         method: "GET",
       })),
       createWorkerEnv(stub),
@@ -1117,6 +1117,7 @@ describe("cloudflare worker routes", () => {
       workspace: null,
     });
     expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
+    expect(stub.runnerStatus).toHaveBeenCalledWith({ logLimit: 50 });
 
     const eventStatusResponse = await worker.fetch(
       await signControlRequest(new Request(
