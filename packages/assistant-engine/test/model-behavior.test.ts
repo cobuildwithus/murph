@@ -584,10 +584,14 @@ describe('assistant experiment onboarding guidance', () => {
       'supports a custom run baseline window with `--baseline-start`, `--baseline-end`, and `--baseline-days`',
     )
     expect(prompt).toContain(
-      'It does not have a dedicated typed flag for baseline lab id/date',
+      'write observed panels to `analysisPlan.measurementAnchors`',
     )
-    expect(prompt).toContain('--setup-answer baseline_lipid_panel_date=<YYYY-MM-DD>')
-    expect(prompt).toContain('--setup-answer baseline_lipid_panel_id=<evt_id>')
+    expect(prompt).toContain(
+      '--analysis-anchor role=baseline,kind=lab_panel,recordId=<evt_id>,biomarkerKeys=<biomarker:key>',
+    )
+    expect(prompt).toContain(
+      '--planned-measurement role=followup,kind=lab_panel,window=<YYYY-MM-DD>..<YYYY-MM-DD>,biomarkerKeys=<biomarker:key>',
+    )
     expect(prompt).toContain('vault-cli experiment start <slug> --custom')
     expect(prompt).not.toContain('vault-cli experiment start <slug> --protocol-key')
     expect(prompt).toContain('vault-cli experiment edit <id>')

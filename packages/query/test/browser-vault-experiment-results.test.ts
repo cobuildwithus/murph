@@ -201,6 +201,82 @@ test("builds active baseline results using generatedAt as the default asOf", () 
   assert.equal(Object.hasOwn(result, "events"), false);
 });
 
+test("uses measurement anchors for lab-backed browser experiment results outside run windows", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-08-02T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_psyllium",
+          slug: "psyllium-ldl",
+          status: "completed",
+          analysisPlan: {
+            primaryBiomarkerKey: "biomarker:ldl-c",
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                role: "baseline",
+                kind: "lab_panel",
+                recordId: "evt_lipid_baseline",
+                biomarkerKeys: ["biomarker:ldl-c"],
+                observedOn: "2026-04-23",
+              },
+              {
+                role: "followup",
+                kind: "lab_panel",
+                recordId: "evt_lipid_followup",
+                biomarkerKeys: ["biomarker:ldl-c"],
+                observedOn: "2026-08-02",
+              },
+            ],
+          },
+          runPlan: {
+            baselineStart: "2026-05-02",
+            baselineEnd: "2026-05-08",
+            interventionStart: "2026-05-09",
+            interventionEnd: "2026-08-01",
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:ldl-c",
+          date: "2026-04-23",
+          metricKey: "ldl-c",
+          recordIds: ["evt_lipid_baseline"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 140,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:ldl-c",
+          date: "2026-08-02",
+          metricKey: "ldl-c",
+          recordIds: ["evt_lipid_followup"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 120,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "psyllium-ldl", {
+    asOf: "2026-08-02T12:00:00.000Z",
+  });
+
+  assert.ok(result);
+  assert.equal(result.biomarkers[0]?.baseline.mean, 140);
+  assert.equal(result.biomarkers[0]?.baseline.start, "2026-04-23");
+  assert.equal(result.biomarkers[0]?.intervention.mean, 120);
+  assert.equal(result.biomarkers[0]?.intervention.start, "2026-08-02");
+  assert.equal(result.biomarkers[0]?.deltaAbs, -20);
+  assert.deepEqual(result.biomarkers[0]?.points.map((point) => point.phase), [
+    "baseline",
+    "intervention",
+  ]);
+});
+
 test("reports missing browser setup without pretending wearable data is missing", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -1157,6 +1233,68 @@ test("uses adherence target rollups for browser progress targets", () => {
   assert.equal(result.progress?.adherence.status, "met_target");
 });
 
+test("treats measurement anchors as browser analysis windows when run windows are absent", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-08-02T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_anchor_only",
+          slug: "anchor-only-ldl",
+          omitRunPlan: true,
+          analysisPlan: {
+            primaryBiomarkerKey: "biomarker:ldl-c",
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                role: "baseline",
+                kind: "lab_panel",
+                recordId: "evt_anchor_only_baseline",
+                biomarkerKeys: ["biomarker:ldl-c"],
+              },
+              {
+                role: "followup",
+                kind: "lab_panel",
+                recordId: "evt_anchor_only_followup",
+                biomarkerKeys: ["biomarker:ldl-c"],
+              },
+            ],
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:ldl-c",
+          date: "2026-04-23",
+          metricKey: "ldl-c",
+          recordIds: ["evt_anchor_only_baseline"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 140,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:ldl-c",
+          date: "2026-08-02",
+          metricKey: "ldl-c",
+          recordIds: ["evt_anchor_only_followup"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 120,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "anchor-only-ldl");
+
+  assert.ok(result);
+  assert.deepEqual(result.progress?.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.equal(result.biomarkers[0]?.deltaAbs, -20);
+});
+
 function createReplica(input: {
   entities?: BrowserVaultEntity[];
   generatedAt?: string;
@@ -1323,13 +1461,17 @@ function restingHeartRateRows(entries: readonly (readonly [string, number])[]): 
 }
 
 function metricRow(input: {
+  biomarkerKey?: string | null;
   date: string;
   metricKey: string;
+  recordIds?: string[];
+  sourceKind?: string;
   unit: string;
   value: number;
 }): BrowserVaultMetricRow {
   return {
-    biomarkerKey: input.metricKey === "resting-heart-rate" ? "biomarker:resting-heart-rate" : null,
+    biomarkerKey: input.biomarkerKey ??
+      (input.metricKey === "resting-heart-rate" ? "biomarker:resting-heart-rate" : null),
     confidence: "medium",
     context: {},
     date: input.date,
@@ -1338,10 +1480,10 @@ function metricRow(input: {
     metricKey: input.metricKey,
     observedAt: `${input.date}T00:00:00.000Z`,
     pointIds: [`metric-point:${input.metricKey}:${input.date}`],
-    recordIds: [],
+    recordIds: input.recordIds ?? [],
     rowSchema: "murph.browser-vault.metric-row.v1",
     sourceFamily: "derived",
-    sourceKind: "wearable-summary",
+    sourceKind: input.sourceKind ?? "wearable-summary",
     sourceLabel: "Wearable summary",
     statistic: "value",
     unit: input.unit,

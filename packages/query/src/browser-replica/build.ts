@@ -62,12 +62,18 @@ export async function createBrowserVaultReplica(
   const weeklySampleSummaries = projectWeeklySampleSummaries(input.vault, generatedAt);
   const allMetricPoints = buildMetricProjection(input.vault).metricPoints;
   const requestedMetrics = collectRequestedBrowserVaultMetrics(input.vault.entities);
-  const selectionMetricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultRequestedMetricPoint(point, requestedMetrics)
-  );
+  const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(input.vault.entities);
+  const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(input.vault.entities);
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultMetricRowPoint(point, requestedMetrics) && point.effectiveDate >= cutoff
+    isBrowserVaultMetricRowPoint(point, requestedMetrics) &&
+    (point.effectiveDate >= cutoff || isAnchoredBrowserMetricPoint(point, anchoredMetricRecords))
+  );
+  const selectionMetricPoints = allMetricPoints.filter((point) =>
+    isBrowserVaultRequestedMetricPoint(point, requestedMetrics) &&
+    (point.effectiveDate >= cutoff ||
+      isAnchoredBrowserMetricPoint(point, anchoredMetricRecords) ||
+      isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetrics))
   );
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
@@ -173,6 +179,12 @@ function collectRequestedBrowserVaultMetrics(entities: readonly CanonicalEntity[
       metricKey: definition.key,
       biomarkerKey: definition.biomarkerKey,
     })),
+    ...collectExplicitBrowserVaultMetrics(entities),
+  ]);
+}
+
+function collectExplicitBrowserVaultMetrics(entities: readonly CanonicalEntity[]): BrowserVaultRequestedMetric[] {
+  return dedupeRequestedMetrics([
     ...entities.flatMap(privateMetricBindingRequests),
     ...entities.filter(isActiveGoalEntity).flatMap((entity) =>
       parseGoalMetricTargets(entity).map((target) => ({
@@ -199,6 +211,57 @@ function privateMetricBindingRequests(entity: CanonicalEntity): BrowserVaultRequ
       biomarkerKey: readOptionalString(record.biomarkerKey) ?? entityBiomarkerKey,
     }];
   });
+}
+
+function collectExperimentMeasurementAnchorRecords(
+  entities: readonly CanonicalEntity[],
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const records = new Map<string, Set<string>>();
+  for (const entity of entities) {
+    if (entity.family !== "experiment") {
+      continue;
+    }
+
+    const source = entity.frontmatter ?? entity.attributes;
+    const analysisPlan = source.analysisPlan;
+    if (!analysisPlan || typeof analysisPlan !== "object" || Array.isArray(analysisPlan)) {
+      continue;
+    }
+
+    const anchors = (analysisPlan as Record<string, unknown>).measurementAnchors;
+    if (!Array.isArray(anchors)) {
+      continue;
+    }
+
+    for (const anchor of anchors) {
+      if (!anchor || typeof anchor !== "object" || Array.isArray(anchor)) {
+        continue;
+      }
+      const recordId = readOptionalString((anchor as Record<string, unknown>).recordId);
+      const biomarkerKeys = readStringArray((anchor as Record<string, unknown>).biomarkerKeys);
+      if (recordId && biomarkerKeys.length > 0) {
+        const existing = records.get(recordId) ?? new Set<string>();
+        for (const biomarkerKey of biomarkerKeys) {
+          existing.add(biomarkerKey);
+        }
+        records.set(recordId, existing);
+      }
+    }
+  }
+
+  return records;
+}
+
+function isAnchoredBrowserMetricPoint(
+  point: MetricPoint,
+  anchoredRecords: ReadonlyMap<string, ReadonlySet<string>>,
+): boolean {
+  const biomarkerKeys = anchoredRecords.get(point.source.recordId);
+  if (!biomarkerKeys || !point.biomarkerKey) {
+    return false;
+  }
+
+  return biomarkerKeys.has(point.biomarkerKey);
 }
 
 function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[]): BrowserVaultRequestedMetric[] {
@@ -239,6 +302,16 @@ function isActiveGoalEntity(entity: CanonicalEntity): boolean {
 
 function readOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(readOptionalString)
+    .filter((entry): entry is string => entry !== null);
 }
 
 

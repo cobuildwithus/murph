@@ -168,6 +168,34 @@ function makeObservation(input: {
   });
 }
 
+function makeLabResult(input: {
+  biomarkerSlug: string;
+  collectedAt: string;
+  entityId: string;
+  unit: string;
+  value: number;
+}): CanonicalEntity {
+  return makeEntity({
+    entityId: input.entityId,
+    family: "event",
+    kind: "test",
+    recordClass: "ledger",
+    occurredAt: input.collectedAt,
+    date: input.collectedAt.slice(0, 10),
+    title: "Lab result",
+    attributes: {
+      collectedAt: input.collectedAt,
+      results: [{
+        analyte: input.biomarkerSlug,
+        biomarkerSlug: input.biomarkerSlug,
+        unit: input.unit,
+        value: input.value,
+      }],
+      source: "manual",
+    },
+  });
+}
+
 function makeSample(input: {
   entityId: string;
   dayKey: string;
@@ -446,6 +474,114 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
     reason: "Logged sessions are behind the current target pace.",
     shouldNotifyUser: true,
   });
+});
+
+test("experiment analysis uses lab measurement anchors separately from run baseline windows", () => {
+  const experiment = makeExperiment("completed", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",
+    slug: "psyllium-ldl",
+    startedOn: "2026-05-09",
+    runPlan: {
+      baselineStart: "2026-05-02",
+      baselineEnd: "2026-05-08",
+      interventionStart: "2026-05-09",
+      interventionEnd: "2026-08-01",
+      modality: "psyllium",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:ldl-c",
+      desiredDirection: "decrease",
+      measurementAnchors: [
+        {
+          role: "baseline",
+          kind: "lab_panel",
+          recordId: "evt_lipid_baseline",
+          biomarkerKeys: ["biomarker:ldl-c"],
+          observedOn: "2026-04-23",
+        },
+        {
+          role: "followup",
+          kind: "lab_panel",
+          recordId: "evt_lipid_followup",
+          biomarkerKeys: ["biomarker:ldl-c"],
+          observedOn: "2026-08-02",
+        },
+      ],
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-lab-anchors",
+    metadata: null,
+    entities: [
+      experiment,
+      makeLabResult({
+        biomarkerSlug: "ldl-c",
+        collectedAt: "2026-04-23T08:00:00.000Z",
+        entityId: "evt_lipid_baseline",
+        unit: "mg/dL",
+        value: 140,
+      }),
+      makeLabResult({
+        biomarkerSlug: "ldl-c",
+        collectedAt: "2026-08-02T08:00:00.000Z",
+        entityId: "evt_lipid_followup",
+        unit: "mg/dL",
+        value: 120,
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "psyllium-ldl", {
+    asOf: "2026-08-02",
+  });
+  assert.equal(progress.analysisReadiness.status, "ready");
+  assert.deepEqual(progress.windows, {
+    baselineEnd: "2026-05-08",
+    baselineStart: "2026-05-02",
+    interventionEnd: "2026-08-01",
+    interventionStart: "2026-05-09",
+  });
+  assert.deepEqual(progress.dataCoverage, {
+    baselineDaysAvailable: 1,
+    interventionDaysAvailable: 1,
+    primaryBiomarkerKey: "biomarker:ldl-c",
+    primaryMetricDaysAvailable: 2,
+    status: "partial",
+    wearableProviders: [],
+  });
+  assert.deepEqual(progress.signals[0], {
+    baselineDayCount: 1,
+    baselineMean: 140,
+    baseline: {
+      daysWithData: 1,
+      mean: 140,
+      totalDays: 1,
+      unit: "mg/dL",
+    },
+    biomarkerKey: "biomarker:ldl-c",
+    completeness: "partial",
+    deltaAbs: -20,
+    deltaPct: -14.29,
+    expectedDirection: "decrease",
+    interventionDayCount: 1,
+    interventionMean: 120,
+    intervention: {
+      daysWithData: 1,
+      mean: 120,
+      totalDays: 1,
+      unit: "mg/dL",
+    },
+    label: "Ldl C",
+    movedAsExpected: true,
+    unit: "mg/dL",
+  });
+
+  const outcome = analyzeExperimentOutcome(vault, "psyllium-ldl", {
+    asOf: "2026-08-02",
+  });
+  assert.equal(outcome.metricResults[0]?.baselineMean, 140);
+  assert.equal(outcome.metricResults[0]?.interventionMean, 120);
+  assert.equal(outcome.metricResults[0]?.deltaAbs, -20);
 });
 
 test("experiment progress treats incomplete setup as setup-missing rather than missing wearable data", () => {

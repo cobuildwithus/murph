@@ -36,7 +36,11 @@ import {
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
+import {
+  normalizeExperimentMeasurementAnchorFlagOption,
+  normalizeExperimentPlannedMeasurementFlagOption,
+  normalizeRepeatableFlagOption,
+} from '@murphai/vault-usecases'
 import { commonListLimitOptionSchema } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
@@ -491,6 +495,8 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
     secondaryBiomarkerKey?: string[]
     desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
     expectedDirection?: string[]
+    analysisAnchor?: string[]
+    plannedMeasurement?: string[]
     analysisNote?: string[]
     remindersEnabled?: boolean
     missedLogFollowup?: z.infer<typeof experimentMissedLogFollowupSchema>
@@ -647,6 +653,14 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
         secondaryBiomarkerKeys.length > 0 ? secondaryBiomarkerKeys : undefined,
       desiredDirection,
       expectedDirections,
+      measurementAnchors: normalizeExperimentMeasurementAnchorFlagOption(
+        input.options.analysisAnchor,
+        undefined,
+      ),
+      plannedMeasurements: normalizeExperimentPlannedMeasurementFlagOption(
+        input.options.plannedMeasurement,
+        undefined,
+      ),
       notes: input.options.analysisNote,
     }),
   )
@@ -1195,6 +1209,12 @@ export function registerExperimentCommands(
       expectedDirection: repeatableTextOptionSchema(
         'Per-biomarker expected direction as biomarker:key=increase|decrease|stabilize. Repeat --expected-direction for multiple biomarkers.',
       ),
+      analysisAnchor: repeatableTextOptionSchema(
+        'Observed analysis measurement anchor as role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:key. Repeat --analysis-anchor for multiple records.',
+      ),
+      plannedMeasurement: repeatableTextOptionSchema(
+        'Planned analysis measurement as role=followup,kind=lab_panel,window=YYYY-MM-DD..YYYY-MM-DD,biomarkerKeys=biomarker:key. Repeat --planned-measurement for multiple records.',
+      ),
       analysisNote: repeatableTextOptionSchema(
         'Analysis plan note. Repeat --analysis-note for multiple values.',
       ),
@@ -1241,6 +1261,8 @@ export function registerExperimentCommands(
             options.expectedDirection,
             'expected-direction',
           ),
+          analysisAnchor: options.analysisAnchor,
+          plannedMeasurement: options.plannedMeasurement,
           analysisNote: normalizeRepeatableFlagOption(
             options.analysisNote,
             'analysis-note',
@@ -1431,6 +1453,12 @@ export function registerExperimentCommands(
       expectedDirection: repeatableTextOptionSchema(
         'Per-biomarker expected direction as biomarker:key=increase|decrease|stabilize. Repeat --expected-direction for multiple biomarkers.',
       ),
+      analysisAnchor: repeatableTextOptionSchema(
+        'Observed analysis measurement anchor as role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:key. Repeat --analysis-anchor for multiple records.',
+      ),
+      plannedMeasurement: repeatableTextOptionSchema(
+        'Planned analysis measurement as role=followup,kind=lab_panel,window=YYYY-MM-DD..YYYY-MM-DD,biomarkerKeys=biomarker:key. Repeat --planned-measurement for multiple records.',
+      ),
       analysisNote: repeatableTextOptionSchema(
         'Analysis plan note. Repeat --analysis-note for multiple values.',
       ),
@@ -1516,6 +1544,8 @@ export function registerExperimentCommands(
         options.secondaryBiomarkerKey !== undefined ||
         options.desiredDirection !== undefined ||
         options.expectedDirection !== undefined ||
+        options.analysisAnchor !== undefined ||
+        options.plannedMeasurement !== undefined ||
         options.analysisNote !== undefined ||
         options.onboardingCompletedAt !== undefined ||
         options.setupAnswer !== undefined ||
@@ -1591,6 +1621,8 @@ export function registerExperimentCommands(
                 options.secondaryBiomarkerKey !== undefined ||
                 options.desiredDirection !== undefined ||
                 options.expectedDirection !== undefined ||
+                options.analysisAnchor !== undefined ||
+                options.plannedMeasurement !== undefined ||
                 options.analysisNote !== undefined,
             },
           })
@@ -1661,6 +1693,8 @@ export function registerExperimentCommands(
           options.expectedDirection,
           'expected-direction',
         ),
+        analysisAnchor: options.analysisAnchor,
+        plannedMeasurement: options.plannedMeasurement,
         analysisNote: normalizeRepeatableFlagOption(
           options.analysisNote,
           'analysis-note',

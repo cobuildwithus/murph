@@ -702,6 +702,18 @@ function buildBiomarkerResult(
     });
   }
 
+  const anchoredResult = buildAnchoredBiomarkerResult({
+    biomarkerKey,
+    client,
+    context,
+    expectedEffect,
+    label,
+    sourceMetric,
+  });
+  if (anchoredResult) {
+    return anchoredResult;
+  }
+
   const metricRows = collectMetricRows(client, sourceMetric, metricWindow);
   const metricSeriesPoints = metricRows.map(browserMetricRowToSeriesPoint);
   const points = metricRowsToExperimentPoints(metricRows, sourceMetric, metricWindow);
@@ -772,6 +784,123 @@ function buildBiomarkerResult(
 
 type BrowserVaultMetricRowWithValue = BrowserVaultMetricRow & { value: number };
 
+interface BrowserMeasurementAnchor {
+  observedOn: string | null;
+  recordId: string;
+  role: "baseline" | "followup";
+}
+
+function buildAnchoredBiomarkerResult(input: {
+  biomarkerKey: string;
+  client: BrowserVaultQueryClient;
+  context: BrowserVaultExperimentRunContext;
+  expectedEffect: BrowserVaultExperimentExpectedEffect;
+  label: string;
+  sourceMetric: BrowserVaultExperimentMetricSource;
+}): BrowserVaultExperimentBiomarkerResult | null {
+  if (!hasMeasurementPlanForBiomarker(input.context.entity.attributes, input.biomarkerKey)) {
+    return null;
+  }
+
+  const baselineAnchors = readMeasurementAnchors(
+    input.context.entity.attributes,
+    input.biomarkerKey,
+    "baseline",
+  );
+  const followupAnchors = readMeasurementAnchors(
+    input.context.entity.attributes,
+    input.biomarkerKey,
+    "followup",
+  );
+  const baselineRows = collectAnchoredMetricRows(
+    input.client,
+    input.sourceMetric,
+    baselineAnchors,
+  );
+  const followupRows = collectAnchoredMetricRows(
+    input.client,
+    input.sourceMetric,
+    followupAnchors,
+  );
+  const baselinePoints = metricRowsToAnchoredExperimentPoints(
+    baselineRows,
+    input.sourceMetric,
+    "baseline",
+  );
+  const interventionPoints = metricRowsToAnchoredExperimentPoints(
+    followupRows,
+    input.sourceMetric,
+    "intervention",
+  );
+  const plannedFollowupWindow = readPlannedMeasurementWindow(
+    input.context.entity.attributes,
+    input.biomarkerKey,
+    "followup",
+  );
+  const baseline = summarizeAnchoredMetricWindow(
+    baselinePoints,
+    baselineAnchors.length,
+    null,
+  );
+  const intervention = summarizeAnchoredMetricWindow(
+    interventionPoints,
+    followupAnchors.length || plannedFollowupWindow.totalDays,
+    plannedFollowupWindow,
+  );
+  const deltaAbs =
+    baseline.mean !== null && intervention.mean !== null
+      ? round(intervention.mean - baseline.mean)
+      : null;
+  const deltaPct =
+    baseline.mean !== null &&
+    intervention.mean !== null &&
+    baseline.mean !== 0
+      ? round(((intervention.mean - baseline.mean) / Math.abs(baseline.mean)) * 100)
+      : null;
+  const points = [...baselinePoints, ...interventionPoints];
+  const status = resolveBiomarkerStatus({
+    points,
+    sourceMetric: input.sourceMetric,
+    windowUnavailable: baselineAnchors.length === 0 && followupAnchors.length === 0,
+  });
+  const unit = intervention.unit ?? baseline.unit;
+
+  if (status === "no_data") {
+    input.context.diagnostics.push({
+      biomarkerKey: input.biomarkerKey,
+      code: "sparse_data",
+      message: `${input.label} has measurement anchors but no matching browser metric rows.`,
+      severity: "info",
+    });
+  }
+
+  if (status === "unavailable") {
+    input.context.diagnostics.push({
+      biomarkerKey: input.biomarkerKey,
+      code: "no_window",
+      message: `${input.label} has a measurement plan but no observed measurement anchors yet.`,
+      severity: "warning",
+    });
+  }
+
+  return {
+    baseline,
+    biomarkerKey: input.biomarkerKey,
+    completeness: classifyMetricCompleteness(baseline.daysWithData, intervention.daysWithData),
+    deltaAbs,
+    deltaPct,
+    expectedEffect: input.expectedEffect,
+    intervention,
+    label: input.label,
+    movedAsExpected: movedAsExpected(deltaAbs, input.expectedEffect.direction),
+    points,
+    sourceMetric: input.sourceMetric,
+    status,
+    statusReason: buildBiomarkerStatusReason(status, input.label),
+    unit,
+  };
+}
+
 function collectMetricRows(
   client: BrowserVaultQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
@@ -785,6 +914,24 @@ function collectMetricRows(
     }
   }
   return [...byDate.values()].sort(compareMetricRowsAsc);
+}
+
+function collectAnchoredMetricRows(
+  client: BrowserVaultQueryClient,
+  sourceMetric: BrowserVaultExperimentMetricSource,
+  anchors: readonly BrowserMeasurementAnchor[],
+): BrowserVaultMetricRowWithValue[] {
+  const anchorIds = new Set(anchors.map((anchor) => anchor.recordId));
+  if (anchorIds.size === 0) {
+    return [];
+  }
+
+  return client.metrics.series({ metricKey: sourceMetric.metricKey })
+    .filter((row): row is BrowserVaultMetricRowWithValue =>
+      hasNumericMetricValue(row) &&
+      row.recordIds.some((recordId) => anchorIds.has(recordId))
+    )
+    .sort(compareMetricRowsAsc);
 }
 
 function metricRowsToExperimentPoints(
@@ -803,6 +950,40 @@ function metricRowsToExperimentPoints(
       value: row.value,
     }] : [];
   });
+}
+
+function metricRowsToAnchoredExperimentPoints(
+  rows: readonly BrowserVaultMetricRowWithValue[],
+  sourceMetric: BrowserVaultExperimentMetricSource,
+  phase: BrowserVaultExperimentMetricPoint["phase"],
+): BrowserVaultExperimentMetricPoint[] {
+  return rows.map((row) => ({
+    confidence: row.confidence,
+    date: row.date,
+    metricKey: sourceMetric.metricKey,
+    phase,
+    unit: row.unit,
+    value: row.value,
+  }));
+}
+
+function summarizeAnchoredMetricWindow(
+  points: readonly BrowserVaultExperimentMetricPoint[],
+  totalDays: number,
+  fallbackWindow: { end: string | null; start: string | null; totalDays: number } | null,
+): BrowserVaultExperimentMetricWindowSummary {
+  const values = points.map((point) => point.value);
+  const unit = points[0]?.unit ?? null;
+  const dates = points.map((point) => point.date).sort((left, right) => left.localeCompare(right));
+
+  return {
+    daysWithData: points.length,
+    end: dates.at(-1) ?? fallbackWindow?.end ?? null,
+    mean: values.length > 0 ? round(values.reduce((sum, value) => sum + value, 0) / values.length) : null,
+    start: dates[0] ?? fallbackWindow?.start ?? null,
+    totalDays,
+    unit,
+  };
 }
 
 function hasNumericMetricValue(row: BrowserVaultMetricRow): row is BrowserVaultMetricRowWithValue {
@@ -1276,16 +1457,33 @@ function buildBrowserAnalysisReadiness(
   if (!readString(analysisPlan?.primaryBiomarkerKey)) {
     blockingReasons.push("missing_primary_biomarker");
   }
-  if (
-    !context.run.windows.baselineStart ||
-    !context.run.windows.baselineEnd ||
-    !context.run.windows.interventionStart ||
-    !context.run.windows.interventionEnd
-  ) {
+  if (!hasBrowserAnalysisMetricWindow(context)) {
     blockingReasons.push("missing_metric_window");
   }
 
   return readinessResult(blockingReasons);
+}
+
+function hasBrowserAnalysisMetricWindow(context: BrowserVaultExperimentRunContext): boolean {
+  const primaryBiomarkerKey = readString(readRecord(context.entity.attributes.analysisPlan)?.primaryBiomarkerKey);
+  if (!primaryBiomarkerKey) {
+    return false;
+  }
+
+  if (hasMeasurementPlanForBiomarker(context.entity.attributes, primaryBiomarkerKey)) {
+    return (
+      readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "baseline").length > 0 &&
+      (readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "followup").length > 0 ||
+        readPlannedMeasurementWindow(context.entity.attributes, primaryBiomarkerKey, "followup").totalDays > 0)
+    );
+  }
+
+  return (
+    context.run.windows.baselineStart !== null &&
+    context.run.windows.baselineEnd !== null &&
+    context.run.windows.interventionStart !== null &&
+    context.run.windows.interventionEnd !== null
+  );
 }
 
 function buildOutcomeResult(
@@ -1340,6 +1538,71 @@ function collectBiomarkerKeys(attributes: JsonRecord): string[] {
   }
 
   return uniqueStrings(keys);
+}
+
+function hasMeasurementPlanForBiomarker(attributes: JsonRecord, biomarkerKey: string): boolean {
+  return (
+    readMeasurementAnchors(attributes, biomarkerKey, "baseline").length > 0 ||
+    readMeasurementAnchors(attributes, biomarkerKey, "followup").length > 0 ||
+    readPlannedMeasurementWindow(attributes, biomarkerKey, "baseline").totalDays > 0 ||
+    readPlannedMeasurementWindow(attributes, biomarkerKey, "followup").totalDays > 0
+  );
+}
+
+function readMeasurementAnchors(
+  attributes: JsonRecord,
+  biomarkerKey: string,
+  role: "baseline" | "followup",
+): BrowserMeasurementAnchor[] {
+  const analysisPlan = readRecord(attributes.analysisPlan);
+  return readArray(analysisPlan?.measurementAnchors).flatMap((value) => {
+    const record = readRecord(value);
+    if (!record || readString(record.role) !== role) {
+      return [];
+    }
+    if (!readStringArray(record.biomarkerKeys).includes(biomarkerKey)) {
+      return [];
+    }
+
+    const recordId = readString(record.recordId);
+    if (!recordId) {
+      return [];
+    }
+
+    return [{
+      observedOn: readIsoDate(record.observedOn),
+      recordId,
+      role,
+    }];
+  });
+}
+
+function readPlannedMeasurementWindow(
+  attributes: JsonRecord,
+  biomarkerKey: string,
+  role: "baseline" | "followup",
+): { end: string | null; start: string | null; totalDays: number } {
+  const analysisPlan = readRecord(attributes.analysisPlan);
+  for (const value of readArray(analysisPlan?.plannedMeasurements)) {
+    const record = readRecord(value);
+    const targetWindow = readRecord(record?.targetWindow);
+    if (!record || !targetWindow || readString(record.role) !== role) {
+      continue;
+    }
+    if (!readStringArray(record.biomarkerKeys).includes(biomarkerKey)) {
+      continue;
+    }
+
+    const start = readIsoDate(targetWindow.start);
+    const end = readIsoDate(targetWindow.end);
+    return {
+      end,
+      start,
+      totalDays: dateRange(start, end).length,
+    };
+  }
+
+  return { end: null, start: null, totalDays: 0 };
 }
 
 function resolveBiomarkerMetricSource(

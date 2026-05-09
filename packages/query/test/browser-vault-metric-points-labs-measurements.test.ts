@@ -456,6 +456,93 @@ test("browser-vault metric selections can use old requested points while metric 
   assert.equal(Number((progress.currentValue ?? NaN).toFixed(1)), 81.6);
 });
 
+test("browser-vault metric rows keep old lab points when experiment measurement anchors request them", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-05-02T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEvent("evt_anchor_apob_baseline", "test", {
+          occurredAt: "2024-01-01T08:00:00.000Z",
+          title: "Baseline lipid panel",
+          attributes: {
+            collectedAt: "2024-01-01T08:00:00.000Z",
+            labName: "Function Health",
+            results: [{
+              analyte: "Apolipoprotein B",
+              biomarkerSlug: "apob",
+              unit: "mg/dL",
+              value: 101,
+            }],
+            source: "manual",
+          },
+        }),
+        createEvent("evt_unanchored_glucose_old", "test", {
+          occurredAt: "2024-01-01T08:05:00.000Z",
+          title: "Old glucose panel",
+          attributes: {
+            collectedAt: "2024-01-01T08:05:00.000Z",
+            labName: "Function Health",
+            results: [{
+              analyte: "Glucose",
+              biomarkerSlug: "glucose",
+              unit: "mg/dL",
+              value: 86,
+            }],
+            source: "manual",
+          },
+        }),
+        {
+          attributes: {},
+          body: null,
+          date: "2026-05-02",
+          entityId: "exp_apob_anchor",
+          experimentSlug: "apob-anchor",
+          family: "experiment",
+          frontmatter: {
+            analysisPlan: {
+              primaryBiomarkerKey: "biomarker:apob",
+              measurementAnchors: [{
+                role: "baseline",
+                kind: "lab_panel",
+                recordId: "evt_anchor_apob_baseline",
+                biomarkerKeys: ["biomarker:apob"],
+                observedOn: "2024-01-01",
+              }],
+            },
+            status: "active",
+          },
+          kind: "experiment_entry",
+          links: [],
+          lookupIds: ["exp_apob_anchor", "apob-anchor"],
+          occurredAt: "2026-05-02T00:00:00.000Z",
+          path: "bank/experiments/apob-anchor.md",
+          primaryLookupId: "exp_apob_anchor",
+          recordClass: "bank",
+          relatedIds: [],
+          status: "active",
+          stream: null,
+          tags: [],
+          title: "ApoB anchor experiment",
+        } satisfies CanonicalEntity,
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+
+  const apobSeries = client.metrics.series({ metricKey: "apob" });
+  assert.deepEqual(apobSeries.map((point) => [point.date, point.value, point.recordIds]), [
+    ["2024-01-01", 101, ["evt_anchor_apob_baseline"]],
+  ]);
+  assert.deepEqual(client.metrics.series({ metricKey: "glucose" }), []);
+  assert.equal(replica.metricSelectionRows.some((row) =>
+    row.metricKey === "glucose" && row.recordIds.includes("evt_unanchored_glucose_old")
+  ), false);
+});
+
 test("query projection rebuild stores shared event and wearable metric points in the projection table", async () => {
   const vaultRoot = await createMetricPointProjectionVault();
 

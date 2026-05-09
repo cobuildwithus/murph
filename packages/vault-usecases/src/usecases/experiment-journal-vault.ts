@@ -56,6 +56,10 @@ import {
   stringArray,
   uniqueStrings,
 } from './vault-usecase-helpers.js'
+import {
+  normalizeExperimentMeasurementAnchorFlagOption,
+  normalizeExperimentPlannedMeasurementFlagOption,
+} from '../option-utils.js'
 import { upsertEventRecord } from './provider-event.js'
 import {
   attachInterventionSessionToExperiment,
@@ -303,6 +307,8 @@ export interface ApplyExperimentOnboardingRecordInput {
   secondaryBiomarkerKey?: readonly string[]
   desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
   expectedDirection?: readonly string[]
+  analysisAnchor?: readonly string[]
+  plannedMeasurement?: readonly string[]
   analysisNote?: readonly string[]
   onboardingCompletedAt?: string
   setupAnswer?: readonly string[]
@@ -2293,6 +2299,22 @@ function buildAnalysisPlanForOnboardingApply(
   )
   if (expectedDirections !== undefined) {
     patch.expectedDirections = expectedDirections
+  }
+
+  const measurementAnchors = normalizeExperimentMeasurementAnchorFlagOption(
+    input.analysisAnchor,
+    existing?.measurementAnchors,
+  )
+  if (measurementAnchors !== undefined) {
+    patch.measurementAnchors = measurementAnchors
+  }
+
+  const plannedMeasurements = normalizeExperimentPlannedMeasurementFlagOption(
+    input.plannedMeasurement,
+    existing?.plannedMeasurements,
+  )
+  if (plannedMeasurements !== undefined) {
+    patch.plannedMeasurements = plannedMeasurements
   }
 
   const notes = normalizeTextListOption(input.analysisNote, 'analysis-note')

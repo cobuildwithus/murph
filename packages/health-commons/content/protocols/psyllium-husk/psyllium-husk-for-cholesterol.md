@@ -311,7 +311,7 @@ experimentOnboarding:
     notes:
       - "Do not turn this into a runnable experiment unless baseline labs and follow-up lab logistics are explicit or the user accepts a planning-only setup."
       - "Do not re-ask stable context the vault already answers unless it changes safety, dose, measurement fidelity, or consent."
-      - "If a usable lipid panel is already in the vault, treat that panel as baseline lab evidence and save its date/id in setup answers or context notes; keep this distinct from the 7-day pre-intervention run-in window created by plan defaults."
+      - "If a usable lipid panel is already in the vault, treat that panel as baseline lab evidence and save its event id/date in analysisPlan.measurementAnchors; keep this distinct from the 7-day pre-intervention run-in window created by plan defaults."
   safetyScreen:
     cautionLevel: "moderate"
     mode: "ask_compact_then_expand_if_positive"
@@ -366,11 +366,11 @@ experimentOnboarding:
       purpose: "measurement_fidelity"
       valueType: "free_text"
       askPolicy: "ask_if_unknown"
-      required: true
-      question: "What is the date of the baseline lipid panel Murph should use, or do you need to schedule one before starting? If Murph already found a usable panel in the vault, confirm that panel instead of asking the user to re-enter it."
+      required: false
+      question: "If no usable lipid panel is already anchored in analysisPlan.measurementAnchors, what baseline lipid panel date should Murph use, or do you need to schedule one before starting?"
       target:
-        object: "onboardingCapture"
-        field: "baselineLipidPanelDate"
+        object: "analysisPlan"
+        field: "measurementAnchors"
     -
       id: "followup_lab_feasibility"
       label: "Follow-up lab feasibility"
