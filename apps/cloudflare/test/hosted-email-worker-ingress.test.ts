@@ -171,7 +171,7 @@ describe("hosted email worker ingress", () => {
     });
   });
 
-  it("rejects alias ingress from an unauthorized sender before raw-message persistence and dispatch", async () => {
+  it("rejects alias ingress when the web-owned alias lookup misses before raw-message persistence and dispatch", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(
@@ -231,23 +231,8 @@ describe("hosted email worker ingress", () => {
     );
   });
 
-  it("does not treat forged raw authentication-result headers as provider-authenticated sender proof", async () => {
+  it("does not treat forged raw authentication-result headers as direct-public sender proof", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
-      JSON.stringify({ ok: true }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
-    const replyAliasAddress = await createHostedEmailUserAddress({
-      config: createHostedEmailConfig(),
-      userId: "user_123",
-      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
-      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
-    });
     const setReject = vi.fn();
 
     await handleHostedEmailIngress({
@@ -259,24 +244,34 @@ describe("hosted email worker ingress", () => {
           "ARC-Authentication-Results: i=1; mx.cloudflare.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=owner@example.com",
         ],
         from: "Owner <owner@example.com>",
-        to: replyAliasAddress,
+        to: "assistant@mail.example.test",
       }),
       setReject,
-      to: replyAliasAddress,
+      to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket));
 
-    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
-    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
-  it("fails closed when no trusted sender verifier is configured", async () => {
+  it("accepts signed reply-alias ingress when no trusted sender verifier is configured", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(
         JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user_123",
+        }),
         {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -302,12 +297,13 @@ describe("hosted email worker ingress", () => {
       to: replyAliasAddress,
     }, createWorkerEnv(bucket));
 
-    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
-  it("persists and nudges alias ingress only after the web-owned verified-email authorization succeeds", async () => {
+  it("persists and nudges alias ingress only after the web-owned signed alias lookup succeeds", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(new Response(

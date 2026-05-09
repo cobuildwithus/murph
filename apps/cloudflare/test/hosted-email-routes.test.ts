@@ -136,11 +136,72 @@ describe("hosted email route callbacks", () => {
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toEqual({
-      authorization: "verified-email",
+      authorization: "signed-reply-alias",
       identityId: "current@reply.example.com",
       routeAddress: address,
       userId: "user-123",
     });
+  });
+
+  it("resolves signed reply aliases without requiring an authenticated sender verdict", async () => {
+    const config = createHostedEmailTestConfig();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user-123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+
+    const address = await createHostedEmailUserAddress({
+      config,
+      userId: "user-123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(resolveHostedEmailInboundRoute({
+      config,
+      authenticatedSender: null,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      to: address,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).resolves.toEqual({
+      authorization: "signed-reply-alias",
+      identityId: "murph@reply.example.com",
+      routeAddress: address,
+      userId: "user-123",
+    });
+
+    const resolveCall = webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[1]?.[0];
+    expect(resolveCall).toEqual(expect.objectContaining({
+      body: expect.any(String),
+    }));
+    const aliasResolveBody = JSON.parse(String(resolveCall?.body));
+    expect(aliasResolveBody).toMatchObject({
+      aliasKey: expect.any(String),
+    });
+    expect(aliasResolveBody).not.toHaveProperty("authenticatedSender");
+    expect(aliasResolveBody).not.toHaveProperty("envelopeFrom");
+    expect(aliasResolveBody).not.toHaveProperty("hasRepeatedHeaderFrom");
+    expect(aliasResolveBody).not.toHaveProperty("headerFrom");
   });
 
   it("returns null when the web-owned alias lookup misses", async () => {

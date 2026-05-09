@@ -4,7 +4,6 @@ import {
 } from "@murphai/hosted-execution/hosted-email";
 import {
   isHostedEmailAuthenticatedSenderVerdictAccepted,
-  isHostedEmailInboundSenderAuthorized,
   resolveHostedEmailDirectSenderLookupAddress,
 } from "@murphai/runtime-state";
 
@@ -19,7 +18,6 @@ import {
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  readHostedMemberEmailAuthorization,
   readHostedMemberCoreState,
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -42,9 +40,6 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedEmailRouteResolutionCallbackRequest(
     await readOptionalJsonObject(request),
   );
-  if (!isHostedEmailAuthenticatedSenderVerdictAccepted(body.authenticatedSender)) {
-    return jsonOk({ userId: null });
-  }
 
   const prisma = getPrisma();
   const aliasKey = body.aliasKey?.trim() ?? "";
@@ -63,22 +58,13 @@ export const POST = withJsonError(async (request: Request) => {
       return jsonOk({ userId: null });
     }
 
-    const emailAuthorization = await readHostedMemberEmailAuthorization({
-      memberId,
-      prisma,
-    });
-
     return jsonOk({
-      userId: isHostedEmailInboundSenderAuthorized({
-        authenticatedSender: body.authenticatedSender,
-        envelopeFrom: body.envelopeFrom,
-        hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
-        headerFrom: body.headerFrom,
-        verifiedEmailAddress: emailAuthorization?.verifiedEmail?.address ?? null,
-      })
-        ? memberId
-        : null,
+      userId: memberId,
     });
+  }
+
+  if (!isHostedEmailAuthenticatedSenderVerdictAccepted(body.authenticatedSender)) {
+    return jsonOk({ userId: null });
   }
 
   const senderAddress = resolveHostedEmailDirectSenderLookupAddress({

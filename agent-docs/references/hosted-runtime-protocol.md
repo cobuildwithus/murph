@@ -127,10 +127,12 @@ verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
 drains any receipt-local side effects, and attempts to start a Vercel Workflow
 with only `{ mailboxItemId, source }` to nudge the per-user Cloudflare runner.
-Cloudflare Email ingress verifies the authorized email route and sender, stores
-the encrypted raw message, appends the canonical encrypted mailbox item through
-web, and attempts to start the same pointer-only nudge workflow through a signed
-web callback.
+Cloudflare Email ingress verifies either a signed reply alias for an active
+member or the fixed public sender route plus a trusted authenticated-sender
+verdict, stores the encrypted raw message, appends the canonical encrypted
+mailbox item through web, and attempts to start the same pointer-only nudge
+workflow through a signed web callback. Signed reply aliases are private routing
+capabilities; they do not prove SMTP sender identity.
 Raw provider bodies, raw email messages, message content, verification headers,
 provider secrets, and decrypted mailbox payloads must not be Vercel Workflow
 inputs or outputs. If the pointer workflow cannot be accepted after the mailbox

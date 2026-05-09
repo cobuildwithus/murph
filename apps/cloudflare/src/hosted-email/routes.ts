@@ -38,7 +38,7 @@ import {
 export { isHostedEmailPublicSenderAddress } from "./route-addressing.ts";
 
 export interface HostedEmailInboundRoute {
-  authorization: "direct-public-sender" | "verified-email";
+  authorization: "direct-public-sender" | "signed-reply-alias";
   identityId: string;
   routeAddress: string;
   userId: string;
@@ -203,7 +203,7 @@ export async function resolveHostedEmailInboundRoute(
   }
 
   return {
-    authorization: "verified-email",
+    authorization: "signed-reply-alias",
     identityId: configuredSender,
     routeAddress: candidate.address,
     userId,
@@ -249,7 +249,10 @@ async function resolveHostedEmailRouteUserId(input: {
     webControlBaseUrl?: string | null;
   };
 }): Promise<string | null> {
-  if (!isHostedEmailAuthenticatedSenderVerdictAccepted(input.context.authenticatedSender)) {
+  if (
+    input.aliasKey === null
+    && !isHostedEmailAuthenticatedSenderVerdictAccepted(input.context.authenticatedSender)
+  ) {
     return null;
   }
 
@@ -266,13 +269,14 @@ async function resolveHostedEmailRouteUserId(input: {
         ? { allowHttpHosts: input.context.webControlAllowHttpHosts }
         : {}),
       baseUrl: input.context.webControlBaseUrl,
-      body: JSON.stringify({
-        ...(input.aliasKey ? { aliasKey: input.aliasKey } : {}),
-        authenticatedSender: input.context.authenticatedSender ?? null,
-        envelopeFrom: input.context.envelopeFrom ?? null,
-        hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
-        headerFrom: input.context.headerFrom ?? null,
-      }),
+      body: JSON.stringify(input.aliasKey
+        ? { aliasKey: input.aliasKey }
+        : {
+            authenticatedSender: input.context.authenticatedSender ?? null,
+            envelopeFrom: input.context.envelopeFrom ?? null,
+            hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
+            headerFrom: input.context.headerFrom ?? null,
+          }),
       boundUserId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
       callbackSigning: input.context.webCallbackSigning,
       fetchImpl: input.context.fetchImpl,
