@@ -37,6 +37,19 @@ const WEB_UNWRAP_DOMAINS = new Set<HostedCryptoDomain>(["control", "device", "in
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_POLICY_VERSION = "hosted-runtime-crypto-context-policy:v1";
 
+export class HostedDomainRootEnvelopeUnavailableError extends Error {
+  constructor(input: { domain: HostedCryptoDomain }) {
+    super(`Hosted ${input.domain} domain root envelope is not available for decrypt.`);
+    this.name = "HostedDomainRootEnvelopeUnavailableError";
+  }
+}
+
+export function isHostedDomainRootEnvelopeUnavailableError(
+  error: unknown,
+): error is HostedDomainRootEnvelopeUnavailableError {
+  return error instanceof HostedDomainRootEnvelopeUnavailableError;
+}
+
 interface HostedUserCryptoEnvelopeRow {
   id: string;
   userId: string;
@@ -541,7 +554,9 @@ export async function readHostedDomainRootEnvelopeByRootKeyIdOrThrow(input: {
     userId: input.userId,
   });
   if (!row) {
-    throw new Error(`Hosted ${input.domain} domain root envelope ${input.rootKeyId} is not available for decrypt.`);
+    throw new HostedDomainRootEnvelopeUnavailableError({
+      domain: input.domain,
+    });
   }
   return parseAssertAndVerifyEnvelope(row, input);
 }

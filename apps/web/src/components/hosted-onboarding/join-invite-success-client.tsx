@@ -253,13 +253,7 @@ function shouldRedirectHostedInviteSuccessToHome(input: {
   sessionId: string | null;
   status: HostedInviteStatusPayload;
 }): boolean {
-  const canOpenHome = input.status.stage === "active"
-    || (
-      input.sessionId !== null
-      && shouldRequestHostedBillingSuccess(input.status.stage)
-    );
-
-  return canOpenHome
+  return input.status.stage === "active"
     && input.status.session.authenticated
     && input.status.session.matchesInvite;
 }

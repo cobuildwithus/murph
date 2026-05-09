@@ -339,12 +339,38 @@ test("HomePage keeps the no-member fallback generic", async () => {
     }),
   }));
 
-  assert.match(markup, /WHOOP is connected/);
+  assert.match(markup, /Device connection complete/);
   assert.match(markup, /Open Murph to confirm your connected sources\./);
+  assert.doesNotMatch(markup, /WHOOP is connected/);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   expect(mocks.buildHostedDeviceSyncSettingsResponse).not.toHaveBeenCalled();
   expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+});
+
+test("HomePage does not trust connected query state without a matching active source", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-03T22:05:48.000Z",
+    ok: true,
+    sources: [],
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      deviceSyncCompletion: "1",
+      deviceSyncProvider: "whoop",
+      deviceSyncStatus: "connected",
+    }),
+  }));
+
+  assert.match(markup, /Device connection complete/);
+  assert.match(markup, /Open Murph to confirm your connected sources\./);
+  assert.doesNotMatch(markup, /WHOOP is connected/);
+  assert.doesNotMatch(markup, /href="sms:/);
+  assert.doesNotMatch(markup, /t\.me\/murph_bot/);
+  assert.doesNotMatch(markup, />Text Murph</);
+  assert.doesNotMatch(markup, />Open Telegram</);
 });
 
 test("HomePage does not offer a messaging success CTA after callback errors", async () => {

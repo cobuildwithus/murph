@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
@@ -808,6 +807,17 @@ function makeInviteRecord() {
   };
 }
 
+interface HostedMemberIdentityFindInput {
+  include?: Record<string, unknown>;
+  where: Record<string, unknown>;
+}
+
+interface HostedMemberIdentityTestDelegate {
+  createMany?: ReturnType<typeof vi.fn>;
+  findFirst?: (input: HostedMemberIdentityFindInput) => Promise<unknown> | unknown;
+  findMany?: (input: HostedMemberIdentityFindInput) => Promise<unknown[]> | unknown[];
+}
+
 function asRootPrisma<T extends object>(tx: T): T & {
   $transaction: ReturnType<typeof vi.fn>;
 } {
@@ -815,9 +825,7 @@ function asRootPrisma<T extends object>(tx: T): T & {
     hostedMember?: {
       delete?: ReturnType<typeof vi.fn>;
     };
-    hostedMemberIdentity?: {
-      createMany?: ReturnType<typeof vi.fn>;
-    };
+    hostedMemberIdentity?: HostedMemberIdentityTestDelegate;
     hostedMemberRouting?: {
       createMany?: ReturnType<typeof vi.fn>;
     };
@@ -827,6 +835,10 @@ function asRootPrisma<T extends object>(tx: T): T & {
   prisma.hostedMember.delete ??= vi.fn().mockResolvedValue({});
   if (prisma.hostedMemberIdentity) {
     prisma.hostedMemberIdentity.createMany ??= vi.fn().mockResolvedValue({ count: 1 });
+    prisma.hostedMemberIdentity.findMany ??= vi.fn(async (input: HostedMemberIdentityFindInput) => {
+      const identity = await prisma.hostedMemberIdentity?.findFirst?.(input);
+      return identity ? [identity] : [];
+    });
   }
   if (prisma.hostedMemberRouting) {
     prisma.hostedMemberRouting.createMany ??= vi.fn().mockResolvedValue({ count: 1 });
