@@ -32,9 +32,11 @@ Done:
 - Found the Linq reply delivery failure was also being made terminal: idempotent Linq POST sends were marked non-retryable on transient 5xx/transport failures, so one provider/effect 502 could permanently fail the outbox reply.
 - After the next deploy, confirmed the new Worker was live but the lagged runner still replayed 444->494/494->544 because a newly scheduled deferred checkpoint used a one-second delay while the workspace retry wake was already due; that retry wake then cleared the checkpoint before it could run.
 - Patched deferred checkpoint scheduling to keep the normal fast drain, but move the checkpoint to at-or-before the retry wake when that wake is earlier/already due, and added a regression for the scheduling-time collision.
+- After the deploy, confirmed the checkpoint alarm started but was preempted by foreground nudge handling while the deferred mailbox checkpoint was still in flight; the nudge also made the idle checkpoint lease look invalid, so the durable imported sequence stayed at 444.
+- Patched foreground-nudge preemption and lease ownership so deferred idle-shutdown checkpoints can finish and then drain the queued nudge, with regressions for active same-isolate and persisted active checkpoint cases.
 
 Now:
-- Commit/push/deploy the scheduling-time deferred-checkpoint priority fix, then recheck the live mailbox high-watermark and iMessage reply path.
+- Commit/push/deploy the deferred-checkpoint nudge-preemption fix, then recheck the live mailbox high-watermark and iMessage reply path.
 
 Next:
 - Watch the lagged hosted mailbox recover, then verify cold/warm iMessage reply scenarios after provider capacity is available.
