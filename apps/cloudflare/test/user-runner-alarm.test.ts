@@ -3302,6 +3302,80 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("schedules deferred idle-shutdown checkpoints before an already-due workspace wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      nextWakeAt: FIXED_NOW,
+      snapshotRef: createLayeredSnapshotRef("deferred-idle-before-due-wake"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return {
+          deferredCheckpointRequired: true,
+          nextWakeAt: FIXED_NOW,
+          status: "scheduled" as const,
+        };
+      }
+
+      return {
+        idleShutdownCheckpointed: true,
+        nextWakeAt: FIXED_NOW,
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "scheduled",
+    });
+
+    expect(alarms).toContain(FIXED_NOW);
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 1,
+      idle_shutdown_checkpoint_due_at: FIXED_NOW,
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: FIXED_NOW,
+    }]);
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe(FIXED_NOW);
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      next_wake_at: FIXED_NOW,
+    }]);
+  });
+
   it("does not retry a committed idle-shutdown checkpoint when cleanup alarm deletion fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

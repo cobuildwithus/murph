@@ -2057,8 +2057,17 @@ export class HostedUserRunner {
         : false;
     const shouldDrainBeforeNextWake =
       input.drainBeforeNextWake === true && workspaceWakePreemptsIdleWindow;
-    const dueAt = shouldDrainBeforeNextWake
-      ? new Date(Date.now() + DEFERRED_CHECKPOINT_DRAIN_DELAY_MS).toISOString()
+    const delayedDeferredCheckpointDueAt = new Date(
+      Date.now() + DEFERRED_CHECKPOINT_DRAIN_DELAY_MS,
+    ).toISOString();
+    const dueAt = shouldDrainBeforeNextWake && input.nextWakeAt
+      ? earliestIsoDate(
+        delayedDeferredCheckpointDueAt,
+        resolvePreemptingIdleShutdownCheckpointDueAt({
+          nextWakeAt: input.nextWakeAt,
+          nowMs: Date.now(),
+        }),
+      ) ?? delayedDeferredCheckpointDueAt
       : idleCheckpointDueAt;
     const workspaceWakePreemptsIdleCheckpoint =
       workspaceWakePreemptsIdleWindow && !shouldDrainBeforeNextWake;
