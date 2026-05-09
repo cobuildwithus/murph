@@ -851,6 +851,74 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   });
 
+  it("lets active deferred alarm work finish when a foreground nudge arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeInvocation = createDeferred<{
+      deferredCheckpointRequired: true;
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return activeInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET deferred_checkpoint_required = 1
+       WHERE user_id = ?`,
+      "member_123",
+    );
+
+    const activeRun = runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await expect(runner.ownsActiveInvocationLease({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "0",
+    })).resolves.toBe(true);
+
+    activeInvocation.resolve({
+      deferredCheckpointRequired: true,
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      deferredCheckpointRequired: true,
+      status: "idle",
+    });
+    await flushDetachedRunnerDrive();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(destroyInstance).not.toHaveBeenCalled();
+  });
+
   it("lets active deferred idle checkpoints finish when a foreground nudge arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

@@ -2837,10 +2837,7 @@ function shouldPreemptActiveWorkspaceInvocationForNudge(input: {
   deferredCheckpointRequired: boolean;
   reason: HostedWorkspaceInvocationReason | null;
 }): boolean {
-  if (
-    input.reason === "idle_shutdown_checkpoint"
-    && input.deferredCheckpointRequired
-  ) {
+  if (input.deferredCheckpointRequired) {
     return false;
   }
 
