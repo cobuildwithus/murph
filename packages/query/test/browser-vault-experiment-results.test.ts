@@ -1295,6 +1295,147 @@ test("treats measurement anchors as browser analysis windows when run windows ar
   assert.equal(result.biomarkers[0]?.deltaAbs, -20);
 });
 
+test("treats lab measurement plans as setup-ready without a run baseline window", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-05-10T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_lab_no_run_in",
+          slug: "lab-no-run-in",
+          runPlan: {
+            interventionStart: "2026-05-09",
+            interventionEnd: "2026-08-01",
+          },
+          analysisPlan: {
+            primaryBiomarkerKey: "biomarker:ldl-c",
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                role: "baseline",
+                kind: "lab_panel",
+                recordId: "evt_lab_no_run_in_baseline",
+                biomarkerKeys: ["biomarker:ldl-c"],
+              },
+            ],
+            plannedMeasurements: [
+              {
+                role: "followup",
+                kind: "lab_panel",
+                biomarkerKeys: ["biomarker:ldl-c"],
+                targetWindow: {
+                  start: "2026-07-26",
+                  end: "2026-08-08",
+                },
+              },
+            ],
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:ldl-c",
+          date: "2026-04-23",
+          metricKey: "ldl-c",
+          recordIds: ["evt_lab_no_run_in_baseline"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 140,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "lab-no-run-in", {
+    asOf: "2026-05-10T12:00:00.000Z",
+  });
+
+  assert.ok(result);
+  assert.equal(result.progress?.phase, "intervention");
+  assert.equal(result.progress?.dayInRun, 2);
+  assert.deepEqual(result.progress?.setupReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.deepEqual(result.progress?.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.equal(result.progress?.windows.baselineStart, null);
+  assert.equal(result.progress?.windows.baselineEnd, null);
+});
+
+test("requires complete lab measurement windows before skipping browser run baselines", () => {
+  const cases = [
+    {
+      slug: "browser-baseline-only",
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:ldl-c",
+        desiredDirection: "decrease",
+        measurementAnchors: [
+          {
+            role: "baseline",
+            kind: "lab_panel",
+            recordId: "evt_browser_baseline_only",
+            biomarkerKeys: ["biomarker:ldl-c"],
+          },
+        ],
+      },
+    },
+    {
+      slug: "browser-followup-only",
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:ldl-c",
+        desiredDirection: "decrease",
+        plannedMeasurements: [
+          {
+            role: "followup",
+            kind: "lab_panel",
+            biomarkerKeys: ["biomarker:ldl-c"],
+            targetWindow: {
+              start: "2026-07-26",
+              end: "2026-08-08",
+            },
+          },
+        ],
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const client = createBrowserVaultQueryClient(
+      createReplica({
+        generatedAt: "2026-05-10T12:00:00.000Z",
+        entities: [
+          experimentEntity({
+            id: `exp_${testCase.slug.replaceAll("-", "_")}`,
+            slug: testCase.slug,
+            runPlan: {
+              interventionStart: "2026-05-09",
+              interventionEnd: "2026-08-01",
+            },
+            analysisPlan: testCase.analysisPlan,
+          }),
+        ],
+      }),
+    );
+
+    const result = selectBrowserVaultExperimentResults(client, testCase.slug, {
+      asOf: "2026-05-10T12:00:00.000Z",
+    });
+
+    assert.ok(result);
+    assert.deepEqual(result.progress?.setupReadiness, {
+      status: "incomplete",
+      blockingReasons: ["missing_baseline_window"],
+    });
+    assert.deepEqual(result.progress?.analysisReadiness, {
+      status: "incomplete",
+      blockingReasons: ["missing_metric_window"],
+    });
+  }
+});
+
 function createReplica(input: {
   entities?: BrowserVaultEntity[];
   generatedAt?: string;

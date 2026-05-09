@@ -447,16 +447,12 @@ function buildRunContext(
   const asOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
   const startedOn = readString(attributes.startedOn) ?? entity.date ?? extractDate(entity.occurredAt);
   const completedAt = readString(attributes.completedAt) ?? readString(attributes.endedOn);
-  const hasCompleteWindows =
-    windows.baselineStart !== null &&
-    windows.baselineEnd !== null &&
-    windows.interventionStart !== null &&
-    windows.interventionEnd !== null;
+  const runStart = windows.baselineStart ?? windows.interventionStart;
   const run = {
     commonsProtocolRef: cloneRecordOrNull(attributes.commonsProtocolRef),
     completedAt,
-    dayInRun: hasCompleteWindows
-      ? computeDayInRun(windows.baselineStart, asOfDate)
+    dayInRun: windows.interventionStart !== null && windows.interventionEnd !== null
+      ? computeDayInRun(runStart, asOfDate)
       : null,
     effectiveProtocolSnapshot: cloneRecordOrNull(attributes.effectiveProtocolSnapshot),
     id: readString(attributes.experimentId) ?? entity.id,
@@ -1410,7 +1406,7 @@ function buildProgressResult(
       interventionDaysAvailable: primaryInterventionDays,
       primaryBiomarkerKey: primary?.biomarkerKey ?? null,
       primaryMetricDaysAvailable: primaryBaselineDays + primaryInterventionDays,
-      status: classifyCoverageStatus(context.run.phase, primary, context.run.windows),
+      status: classifyCoverageStatus(context, primary),
     },
     setupReadiness: buildBrowserSetupReadiness(context),
     analysisReadiness: buildBrowserAnalysisReadiness(context),
@@ -1435,7 +1431,10 @@ function buildBrowserSetupReadiness(
   if (!readRecord(context.entity.attributes.runPlan)) {
     blockingReasons.push("missing_run_plan");
   }
-  if (!context.run.windows.baselineStart || !context.run.windows.baselineEnd) {
+  if (
+    !hasCompleteBrowserPrimaryPointMeasurementWindow(context) &&
+    (!context.run.windows.baselineStart || !context.run.windows.baselineEnd)
+  ) {
     blockingReasons.push("missing_baseline_window");
   }
   if (!context.run.windows.interventionStart || !context.run.windows.interventionEnd) {
@@ -1470,12 +1469,8 @@ function hasBrowserAnalysisMetricWindow(context: BrowserVaultExperimentRunContex
     return false;
   }
 
-  if (hasMeasurementPlanForBiomarker(context.entity.attributes, primaryBiomarkerKey)) {
-    return (
-      readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "baseline").length > 0 &&
-      (readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "followup").length > 0 ||
-        readPlannedMeasurementWindow(context.entity.attributes, primaryBiomarkerKey, "followup").totalDays > 0)
-    );
+  if (hasCompleteBrowserPrimaryPointMeasurementWindow(context)) {
+    return true;
   }
 
   return (
@@ -1483,6 +1478,26 @@ function hasBrowserAnalysisMetricWindow(context: BrowserVaultExperimentRunContex
     context.run.windows.baselineEnd !== null &&
     context.run.windows.interventionStart !== null &&
     context.run.windows.interventionEnd !== null
+  );
+}
+
+function hasCompleteBrowserPrimaryPointMeasurementWindow(
+  context: BrowserVaultExperimentRunContext,
+): boolean {
+  const primaryBiomarkerKey = readString(
+    readRecord(context.entity.attributes.analysisPlan)?.primaryBiomarkerKey,
+  );
+  return Boolean(
+    primaryBiomarkerKey &&
+      readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "baseline")
+        .length > 0 &&
+      (readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "followup")
+        .length > 0 ||
+        readPlannedMeasurementWindow(
+          context.entity.attributes,
+          primaryBiomarkerKey,
+          "followup",
+        ).totalDays > 0),
   );
 }
 
@@ -1871,25 +1886,35 @@ function classifyAdherenceStatus(input: {
 }
 
 function classifyCoverageStatus(
-  phase: BrowserVaultExperimentProgressPhase,
+  context: BrowserVaultExperimentRunContext,
   primary: BrowserVaultExperimentBiomarkerResult | null,
-  windows: BrowserVaultExperimentRunWindows,
 ): BrowserVaultExperimentCoverageStatus {
   const baselineDays = primary?.baseline.daysWithData ?? 0;
   const interventionDays = primary?.intervention.daysWithData ?? 0;
   const totalDays = baselineDays + interventionDays;
   const hasCompleteWindows =
-    windows.baselineStart !== null &&
-    windows.baselineEnd !== null &&
-    windows.interventionStart !== null &&
-    windows.interventionEnd !== null;
+    context.run.windows.baselineStart !== null &&
+    context.run.windows.baselineEnd !== null &&
+    context.run.windows.interventionStart !== null &&
+    context.run.windows.interventionEnd !== null;
+  const hasPointMeasurementData =
+    hasCompleteBrowserPrimaryPointMeasurementWindow(context) &&
+    baselineDays >= 1 &&
+    interventionDays >= 1;
 
   if (totalDays === 0) {
     return hasCompleteWindows && primary !== null ? "no_data" : "insufficient";
   }
 
   if (
-    (phase === "review_due" || phase === "completed") &&
+    hasPointMeasurementData &&
+    (context.run.phase === "review_due" || context.run.phase === "completed")
+  ) {
+    return "ready_for_review";
+  }
+
+  if (
+    (context.run.phase === "review_due" || context.run.phase === "completed") &&
     baselineDays >= 3 &&
     interventionDays >= 3
   ) {
@@ -1929,8 +1954,6 @@ function resolveExperimentPhase(
   }
 
   if (
-    windows.baselineStart === null ||
-    windows.baselineEnd === null ||
     windows.interventionStart === null ||
     windows.interventionEnd === null
   ) {
@@ -1945,7 +1968,16 @@ function resolveExperimentPhase(
     return "intervention";
   }
 
-  return "baseline";
+  if (
+    windows.baselineStart !== null &&
+    windows.baselineEnd !== null &&
+    asOfDate >= windows.baselineStart &&
+    asOfDate <= windows.baselineEnd
+  ) {
+    return "baseline";
+  }
+
+  return "planned";
 }
 
 function computeExpectedSessionsByNow(

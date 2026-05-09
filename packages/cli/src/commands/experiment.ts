@@ -420,20 +420,23 @@ function resolveStartWindows(input: {
   baselineStart?: string
   baselineEnd?: string
   baselineDays?: number
+  clearBaselineWindow?: boolean
   interventionStart?: string
   interventionEnd?: string
   interventionDays?: number
 }) {
-  let baselineStart = input.baselineStart
-  let baselineEnd = input.baselineEnd
+  let baselineStart = input.clearBaselineWindow ? undefined : input.baselineStart
+  let baselineEnd = input.clearBaselineWindow ? undefined : input.baselineEnd
   let interventionStart = input.interventionStart
   let interventionEnd = input.interventionEnd
+  const baselineDays = input.baselineDays
+  const hasBaselineDays = baselineDays !== undefined && baselineDays > 0
 
-  if (baselineStart && input.baselineDays !== undefined) {
-    baselineEnd ??= shiftLocalDate(baselineStart, input.baselineDays - 1)
+  if (baselineStart && hasBaselineDays) {
+    baselineEnd ??= shiftLocalDate(baselineStart, baselineDays - 1)
   }
-  if (baselineEnd && input.baselineDays !== undefined) {
-    baselineStart ??= shiftLocalDate(baselineEnd, 1 - input.baselineDays)
+  if (baselineEnd && hasBaselineDays) {
+    baselineStart ??= shiftLocalDate(baselineEnd, 1 - baselineDays)
   }
   if (interventionStart && input.interventionDays !== undefined) {
     interventionEnd ??= shiftLocalDate(interventionStart, input.interventionDays - 1)
@@ -441,9 +444,9 @@ function resolveStartWindows(input: {
   if (interventionEnd && input.interventionDays !== undefined) {
     interventionStart ??= shiftLocalDate(interventionEnd, 1 - input.interventionDays)
   }
-  if (!baselineEnd && interventionStart && input.baselineDays !== undefined) {
+  if (!baselineEnd && interventionStart && hasBaselineDays) {
     baselineEnd = shiftLocalDate(interventionStart, -1)
-    baselineStart ??= shiftLocalDate(baselineEnd, 1 - input.baselineDays)
+    baselineStart ??= shiftLocalDate(baselineEnd, 1 - baselineDays)
   }
   if (!interventionStart && baselineEnd) {
     interventionStart = shiftLocalDate(baselineEnd, 1)
@@ -554,6 +557,7 @@ function buildExperimentPlanPayloadFromTypedOptions(input: {
     baselineStart: input.options.baselineStart,
     baselineEnd: input.options.baselineEnd,
     baselineDays,
+    clearBaselineWindow: input.options.baselineDays === 0,
     interventionStart: input.options.interventionStart,
     interventionEnd: input.options.interventionEnd,
     interventionDays,
@@ -738,6 +742,7 @@ async function hydrateExperimentProtocolDefaults(input: {
   void relatedIds
   const current = experimentFrontmatterSchema.parse(frontmatterData)
   const protocolKey = input.options.protocolKey ?? current.commonsProtocolRef?.key
+  const clearBaselineWindow = input.options.baselineDays === 0
 
   if (protocolKey === undefined) {
     throw new VaultCliError(
@@ -762,6 +767,9 @@ async function hydrateExperimentProtocolDefaults(input: {
   })
 
   const defaultRunPlan = experimentRunPlanSchema.parse(payload.runPlan)
+  const currentRunPlan = clearBaselineWindow
+    ? omitRunBaselineWindow(current.runPlan)
+    : current.runPlan
   const defaultAnalysisPlan =
     input.options.skipAnalysisPlanDefaults === true
       ? undefined
@@ -796,7 +804,7 @@ async function hydrateExperimentProtocolDefaults(input: {
       effectiveProtocolSnapshotSchema.parse(payload.effectiveProtocolSnapshot),
     runPlan: experimentRunPlanSchema.parse({
       ...defaultRunPlan,
-      ...(current.runPlan ?? {}),
+      ...(currentRunPlan ?? {}),
       logging: defaultRunLogging,
       baseline: defaultRunBaseline,
     }),
@@ -812,6 +820,19 @@ async function hydrateExperimentProtocolDefaults(input: {
       ...(current.assistantSupport ?? {}),
     }),
   })
+}
+
+function omitRunBaselineWindow(
+  runPlan: z.infer<typeof experimentRunPlanSchema> | undefined,
+) {
+  if (runPlan === undefined) {
+    return undefined
+  }
+
+  const { baselineStart, baselineEnd, ...withoutRunBaselineWindow } = runPlan
+  void baselineStart
+  void baselineEnd
+  return withoutRunBaselineWindow
 }
 
 type ExperimentSessionConfounderValue = string | number | boolean | null

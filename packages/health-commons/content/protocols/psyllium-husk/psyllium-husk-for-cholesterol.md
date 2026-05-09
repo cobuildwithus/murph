@@ -157,8 +157,8 @@ testPlans:
 
   -
     planId: "lipid-panel-12-week"
-    durationDays: 91
-    baselineDays: 7
+    durationDays: 84
+    baselineDays: 0
     interventionDays: 84
     primaryBiomarkerKey: "biomarker:ldl-c"
     secondaryBiomarkerKeys:
@@ -175,8 +175,8 @@ testPlans:
       - "Interpret only with product, dose, adherence, medication, diet, weight, and fasting-status notes visible."
   -
     planId: "lipid-panel-8-week-minimum"
-    durationDays: 63
-    baselineDays: 7
+    durationDays: 56
+    baselineDays: 0
     interventionDays: 56
     primaryBiomarkerKey: "biomarker:ldl-c"
     secondaryBiomarkerKeys:
@@ -311,7 +311,7 @@ experimentOnboarding:
     notes:
       - "Do not turn this into a runnable experiment unless baseline labs and follow-up lab logistics are explicit or the user accepts a planning-only setup."
       - "Do not re-ask stable context the vault already answers unless it changes safety, dose, measurement fidelity, or consent."
-      - "If a usable lipid panel is already in the vault, treat that panel as baseline lab evidence and save its event id/date in analysisPlan.measurementAnchors; keep this distinct from the 7-day pre-intervention run-in window created by plan defaults."
+      - "If a usable lipid panel is already in the vault, treat that panel as baseline lab evidence and save its event id/date in analysisPlan.measurementAnchors. Do not create a pre-intervention run-in window unless the user explicitly wants daily logging before the first dose."
   safetyScreen:
     cautionLevel: "moderate"
     mode: "ask_compact_then_expand_if_positive"
@@ -494,7 +494,6 @@ experimentOnboarding:
         field: "reminderPolicy"
   planDefaults:
     testPlanId: "lipid-panel-12-week"
-    baselineDays: 7
     interventionDays: 84
     sessionsPerWeek: 14
     targetSessions: 168
@@ -1134,7 +1133,7 @@ Powder, granules, cereal/food vehicles, and capsules should remain explicit setu
 
 Use LDL-C as the primary endpoint. Non-HDL-C, ApoB, and total cholesterol are useful secondary endpoints when available. Triglycerides and HDL-C should be watched as context because findings are mixed or less consistent for this protocol.
 
-The default test plan is 7 baseline days plus 84 intervention days, with a lipid panel before the first dose and another around 8–12 weeks after stable dosing. The lab result is hard to interpret unless Murph can also see product, dose, adherence, lipid medication changes, diet changes, weight changes, and fasting or non-fasting status.
+The default test plan is an 84-day intervention, with a baseline lipid panel before the first dose and another around 8–12 weeks after stable dosing. There is no default daily baseline window for LDL-C; use a pre-intervention run-in only when the user explicitly wants daily logging before starting. The lab result is hard to interpret unless Murph can also see product, dose, adherence, lipid medication changes, diet changes, weight changes, and fasting or non-fasting status.
 
 ## Safety first
 

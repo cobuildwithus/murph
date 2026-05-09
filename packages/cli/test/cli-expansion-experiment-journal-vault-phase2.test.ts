@@ -506,6 +506,8 @@ test.sequential(
         'planned',
         '--intervention-start',
         '2026-05-08',
+        '--baseline-days',
+        '0',
         '--intervention-days',
         '14',
         '--primary-biomarker-key',
@@ -514,6 +516,24 @@ test.sequential(
         vaultRoot,
       ])
       assert.equal(created.ok, true)
+
+      const shownAfterCreate = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'experiment',
+        'show',
+        'sauna-daily',
+        '--vault',
+        vaultRoot,
+      ])
+      const initialRunPlan = requireRecord(
+        requireData(shownAfterCreate).entity.data.runPlan,
+        'initial runPlan',
+      )
+      assert.equal('baselineStart' in initialRunPlan, false)
+      assert.equal('baselineEnd' in initialRunPlan, false)
 
       const noOptions = await runSliceCli([
         'experiment',
@@ -906,6 +926,37 @@ test.sequential(
       assert.equal(partialSetupAnswers.heat_source, 'infrared sauna')
       assert.equal(partialAssistantSupport.reminderOptionId, 'evening_reminder')
       assert.equal(partialAssistantSupport.missedLogFollowup, 'opt_in_only')
+
+      const clearedBaselineWindow = await runSliceCli([
+        'experiment',
+        'edit',
+        'sauna-daily',
+        '--baseline-days',
+        '0',
+        '--vault',
+        vaultRoot,
+      ])
+      const shownAfterClearBaselineWindow = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'experiment',
+        'show',
+        'sauna-daily',
+        '--vault',
+        vaultRoot,
+      ])
+      const clearedRunPlan = requireRecord(
+        requireData(shownAfterClearBaselineWindow).entity.data.runPlan,
+        'cleared runPlan',
+      )
+
+      assert.equal(clearedBaselineWindow.ok, true)
+      assert.equal('baselineStart' in clearedRunPlan, false)
+      assert.equal('baselineEnd' in clearedRunPlan, false)
+      assert.equal(clearedRunPlan.interventionStart, '2026-05-08')
+      assert.equal(clearedRunPlan.interventionEnd, '2026-05-21')
 
       const scheduleFlagApply = await runSliceCli([
         'experiment',

@@ -546,7 +546,7 @@ test("experiment analysis uses lab measurement anchors separately from run basel
     interventionDaysAvailable: 1,
     primaryBiomarkerKey: "biomarker:ldl-c",
     primaryMetricDaysAvailable: 2,
-    status: "partial",
+    status: "ready_for_review",
     wearableProviders: [],
   });
   assert.deepEqual(progress.signals[0], {
@@ -582,6 +582,152 @@ test("experiment analysis uses lab measurement anchors separately from run basel
   assert.equal(outcome.metricResults[0]?.baselineMean, 140);
   assert.equal(outcome.metricResults[0]?.interventionMean, 120);
   assert.equal(outcome.metricResults[0]?.deltaAbs, -20);
+});
+
+test("lab-backed experiments do not require a run baseline window", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",
+    slug: "psyllium-no-run-in",
+    startedOn: "2026-05-09",
+    runPlan: {
+      interventionStart: "2026-05-09",
+      interventionEnd: "2026-08-01",
+      modality: "psyllium",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:ldl-c",
+      desiredDirection: "decrease",
+      measurementAnchors: [
+        {
+          role: "baseline",
+          kind: "lab_panel",
+          recordId: "evt_lipid_baseline",
+          biomarkerKeys: ["biomarker:ldl-c"],
+          observedOn: "2026-04-23",
+        },
+      ],
+      plannedMeasurements: [
+        {
+          role: "followup",
+          kind: "lab_panel",
+          biomarkerKeys: ["biomarker:ldl-c"],
+          targetWindow: {
+            start: "2026-07-26",
+            end: "2026-08-08",
+          },
+        },
+      ],
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-lab-no-run-in",
+    metadata: null,
+    entities: [
+      experiment,
+      makeLabResult({
+        biomarkerSlug: "ldl-c",
+        collectedAt: "2026-04-23T08:00:00.000Z",
+        entityId: "evt_lipid_baseline",
+        unit: "mg/dL",
+        value: 140,
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "psyllium-no-run-in", {
+    asOf: "2026-05-10",
+  });
+
+  assert.deepEqual(progress.setupReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.deepEqual(progress.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.equal(progress.phase, "intervention");
+  assert.equal(progress.dayInRun, 2);
+  assert.deepEqual(progress.windows, {
+    baselineEnd: null,
+    baselineStart: null,
+    interventionEnd: "2026-08-01",
+    interventionStart: "2026-05-09",
+  });
+});
+
+test("one-sided lab measurement plans still need a run baseline window", () => {
+  const cases = [
+    {
+      slug: "psyllium-baseline-only",
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:ldl-c",
+        desiredDirection: "decrease",
+        measurementAnchors: [
+          {
+            role: "baseline",
+            kind: "lab_panel",
+            recordId: "evt_baseline_only",
+            biomarkerKeys: ["biomarker:ldl-c"],
+            observedOn: "2026-04-23",
+          },
+        ],
+      },
+    },
+    {
+      slug: "psyllium-followup-only",
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:ldl-c",
+        desiredDirection: "decrease",
+        plannedMeasurements: [
+          {
+            role: "followup",
+            kind: "lab_panel",
+            biomarkerKeys: ["biomarker:ldl-c"],
+            targetWindow: {
+              start: "2026-07-26",
+              end: "2026-08-08",
+            },
+          },
+        ],
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const vault = createVaultReadModel({
+      vaultRoot: `/virtual/experiment-analysis-${testCase.slug}`,
+      metadata: null,
+      entities: [
+        makeExperiment("active", {
+          experimentId: testCase.experimentId,
+          slug: testCase.slug,
+          startedOn: "2026-05-09",
+          runPlan: {
+            interventionStart: "2026-05-09",
+            interventionEnd: "2026-08-01",
+            modality: "psyllium",
+          },
+          analysisPlan: testCase.analysisPlan,
+        }),
+      ],
+    });
+
+    const progress = summarizeExperimentProgress(vault, testCase.slug, {
+      asOf: "2026-05-10",
+    });
+
+    assert.deepEqual(progress.setupReadiness, {
+      status: "incomplete",
+      blockingReasons: ["missing_baseline_window"],
+    });
+    assert.deepEqual(progress.analysisReadiness, {
+      status: "incomplete",
+      blockingReasons: ["missing_metric_window"],
+    });
+  }
 });
 
 test("experiment progress treats incomplete setup as setup-missing rather than missing wearable data", () => {
