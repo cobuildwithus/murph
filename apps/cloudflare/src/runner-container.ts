@@ -494,7 +494,23 @@ export class RunnerContainer extends Container {
         },
         RUNNER_PORT,
       );
-      const response = await raceRunnerContainerOperationAbort(runnerRequest, requestSignal);
+      const stopWatcherAbortController = new AbortController();
+      const stoppedContainer = watchWorkspaceRequestContainerStop({
+        container: this,
+        operationAbortController,
+        signal: stopWatcherAbortController.signal,
+        userId: routeUserId,
+      });
+      let response: Response;
+      try {
+        response = await raceRunnerContainerOperationAbort(
+          Promise.race([runnerRequest, stoppedContainer]),
+          requestSignal,
+        );
+      } finally {
+        stopWatcherAbortController.abort();
+        void stoppedContainer.catch(() => undefined);
+      }
       this.noteRunnerActivity("runner-response-received");
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1848,6 +1864,64 @@ async function waitForRunnerContainerStop(
     pollCount,
     timeoutMs,
   });
+}
+
+async function watchWorkspaceRequestContainerStop(input: {
+  container: RunnerContainer;
+  operationAbortController: AbortController;
+  signal: AbortSignal;
+  userId: string;
+}): Promise<never> {
+  const observedStatuses: string[] = [];
+  let statusReadFailureLogged = false;
+  while (!input.signal.aborted && !input.operationAbortController.signal.aborted) {
+    await sleep(RUNNER_WAIT_INTERVAL_MS);
+    if (input.signal.aborted || input.operationAbortController.signal.aborted) {
+      break;
+    }
+
+    let status: string | null;
+    try {
+      status = await readRunnerContainerStatus(input.container);
+    } catch (error) {
+      if (!statusReadFailureLogged) {
+        statusReadFailureLogged = true;
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          error,
+          level: "warn",
+          message: "Hosted execution container could not poll active request lifecycle status.",
+          phase: "container.ready",
+          userId: input.userId,
+        });
+      }
+      continue;
+    }
+
+    appendObservedRunnerContainerStatus(observedStatuses, status);
+    if (!isRunnerContainerStopped(status)) {
+      continue;
+    }
+
+    const error = new Error(`workspace invocation container stopped during active work (${status})`);
+    input.operationAbortController.abort(error);
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        lifecycleStage: "active-request-status-watch",
+        observedStatuses,
+        statusAfterStop: status,
+      },
+      error,
+      level: "warn",
+      message: "Hosted execution container stopped before workspace request settled.",
+      phase: "failed",
+      userId: input.userId,
+    });
+    throw error;
+  }
+
+  throw new DOMException("The container status watch was aborted.", "AbortError");
 }
 
 class HostedRunnerContainerStopTimeoutError extends Error {

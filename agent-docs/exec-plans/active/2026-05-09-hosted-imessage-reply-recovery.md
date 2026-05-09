@@ -64,9 +64,12 @@ Done:
 - Deployed the heartbeat fix, then live warm probing exposed the next blocker: the workspace invocation was prepared, the RunnerContainer lifecycle reported a clean stop a few seconds later, and the UserRunner remained active without liveness, outbound, completion, or failure logs.
 - Patched workspace invocation fetches so container lifecycle stop aborts active work and the Durable Object invocation races the request against the abort signal instead of waiting forever on a dead shell.
 - Added a RunnerContainer regression where a never-resolving workspace request is stopped by `onStop()` and must fail/clean up rather than leaving the invocation active.
+- Deployed the same-isolate lifecycle-stop fix; the live warm probe still missed the latency target and logs showed terminal container status without enough same-isolate lifecycle locality to wake the request reliably.
+- Extended the fix with a workspace-request status watcher so stopped or missing child shells abort the active invocation even when the lifecycle hook cannot see the in-memory request controller.
+- Added stopped-status and missing-container regressions for hanging workspace requests; full Cloudflare verification passed with 944 tests.
 
 Now:
-- Run verification around the container-stop active-work fix, commit/push to main, retry Pro in the open ChatGPT thread if the page becomes usable, then deploy Cloudflare immediately.
+- Commit/push the status-watcher hardening, retry Pro in the open ChatGPT thread if the page becomes usable, then deploy Cloudflare immediately.
 
 Next:
 - Recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
