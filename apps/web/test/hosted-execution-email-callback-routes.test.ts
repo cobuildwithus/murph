@@ -170,22 +170,12 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
-  it("accepts a signed alias-route resolution callback and returns the member only when the sender matches the canonical verified email", async () => {
+  it("accepts a signed alias-route resolution callback without provider sender authentication", async () => {
     mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
-      memberId: "member_123",
-      verifiedEmail: {
-        address: "owner@example.com",
-        lookupKey: "lookup_owner",
-        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
-      },
-    });
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
         aliasKey: "replyalias1234",
-        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
@@ -200,14 +190,11 @@ describe("hosted execution email callback routes", () => {
       prisma: prismaClient,
       replyAliasLookupKey: "replyalias1234",
     });
-    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: prismaClient,
-    });
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: prismaClient,
     });
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       userId: "member_123",
     });
@@ -235,48 +222,8 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
-  it("returns userId null for alias-route resolution when the sender matches but lacks provider authentication", async () => {
+  it("uses the signed alias owner instead of trusting envelope or header sender fields", async () => {
     mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
-      memberId: "member_123",
-      verifiedEmail: {
-        address: "owner@example.com",
-        lookupKey: "lookup_owner",
-        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
-      },
-    });
-
-    const response = await resolveRoute.POST(await createSignedCallbackRequest({
-      body: JSON.stringify({
-        aliasKey: "replyalias1234",
-        envelopeFrom: "owner@example.com",
-        hasRepeatedHeaderFrom: false,
-        headerFrom: "Owner <owner@example.com>",
-      }),
-      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
-      privateJwkJson: currentPrivateJwkJson,
-      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
-    }));
-
-    expect(response.status).toBe(200);
-    expect(mocks.readHostedMemberIdByReplyAliasLookupKey).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      userId: null,
-    });
-  });
-
-  it("returns userId null for alias-route resolution when the sender does not match the canonical verified email", async () => {
-    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
-      memberId: "member_123",
-      verifiedEmail: {
-        address: "owner@example.com",
-        lookupKey: "lookup_owner",
-        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
-      },
-    });
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
@@ -292,8 +239,32 @@ describe("hosted execution email callback routes", () => {
     }));
 
     expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberIdByReplyAliasLookupKey).toHaveBeenCalledWith({
+      prisma: prismaClient,
+      replyAliasLookupKey: "replyalias1234",
+    });
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
-      userId: null,
+      userId: "member_123",
+    });
+  });
+
+  it("resolves signed aliases even when raw sender metadata is absent", async () => {
+    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        aliasKey: "replyalias1234",
+      }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      userId: "member_123",
     });
   });
 
@@ -394,6 +365,29 @@ describe("hosted execution email callback routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      userId: null,
+    });
+  });
+
+  it("returns userId null for direct-public sender resolution when envelope and header senders do not match", async () => {
+    mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_456");
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        authenticatedSender: AUTHENTICATED_SENDER,
+        envelopeFrom: "owner@example.com",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Attacker <attacker@example.com>",
+      }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       userId: null,
     });
