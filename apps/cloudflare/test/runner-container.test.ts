@@ -416,7 +416,7 @@ describe("RunnerContainer", () => {
     expect(readRunnerMethodsByHost(mapping ?? {})).not.toHaveProperty("localhost");
   });
 
-  it("keeps activity expiry idempotent after warm reuse and cold-starts the next run", async () => {
+  it("uses activity expiry as fallback cleanup after warm reuse and cold-starts the next run", async () => {
     const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
       createContainerDouble();
 
@@ -440,6 +440,13 @@ describe("RunnerContainer", () => {
       vi.setSystemTime(new Date("2026-05-06T00:07:01.000Z"));
       await container.onActivityExpired();
       expect(destroy).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          message: "Hosted execution container activity expired; running fallback cleanup.",
+          phase: "container.ready",
+        }),
+      );
 
       await container.invoke({
         job: {
@@ -469,7 +476,7 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("keeps a warm shell when a stale activity expiry fires just after work completed", async () => {
+  it("does not renew or keep the warm shell when activity expiry fires after work completed", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble();
     Object.assign(container, {
@@ -488,8 +495,12 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/workspace-invocation")
     );
     const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
+    renewActivityTimeout.mockClear();
 
     await container.onActivityExpired();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+
     await container.invoke({
       job: {
         kind: "workspace-invocation",
@@ -503,14 +514,12 @@ describe("RunnerContainer", () => {
     );
     const secondToken = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
 
-    expect(destroy).not.toHaveBeenCalled();
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(secondToken).toBe(firstToken);
-    expect(renewActivityTimeout).toHaveBeenCalled();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(secondToken).not.toBe(firstToken);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
-        message: "Hosted execution container activity expiry was stale; keeping warm shell.",
+        message: "Hosted execution container activity expired; running fallback cleanup.",
         phase: "container.ready",
       }),
     );
@@ -576,12 +585,11 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("keeps a warm shell when activity expiry runs in another isolate during active work", async () => {
+  it("runs fallback cleanup when activity expiry fires from another isolate during active work", async () => {
     vi.useFakeTimers();
 
     try {
       const storage = createContainerStorageDouble();
-      const renewActivityTimeout = vi.fn();
       let resolveInvocation!: () => void;
       let markRunnerRequestStarted!: () => void;
       const invocationReady = new Promise<void>((resolve) => {
@@ -628,9 +636,6 @@ describe("RunnerContainer", () => {
           storage,
         },
       });
-      Object.assign(coldAlarmIsolate.container, {
-        renewActivityTimeout,
-      });
 
       const invokePromise = active.container.invoke({
         job: {
@@ -645,12 +650,11 @@ describe("RunnerContainer", () => {
 
       await coldAlarmIsolate.container.onActivityExpired();
 
-      expect(coldAlarmIsolate.destroy).not.toHaveBeenCalled();
-      expect(renewActivityTimeout).toHaveBeenCalled();
+      expect(coldAlarmIsolate.destroy).toHaveBeenCalledTimes(1);
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "container",
-          message: "Hosted execution container activity expiry was stale; keeping warm shell.",
+          message: "Hosted execution container activity expired; running fallback cleanup.",
           phase: "container.ready",
         }),
       );

@@ -60,7 +60,7 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("rejects every non-full checkpoint reason before snapshot side effects", async () => {
+  it("rejects every non-idle checkpoint reason before snapshot side effects", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -92,60 +92,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS.filter((reason) =>
-      reason !== "activation_bootstrap" && reason !== "idle_shutdown"
+      reason !== "idle_shutdown"
     )) {
       await expect(createOptions().createCheckpointSnapshot(createCheckpointInput(reason)))
-        .rejects.toThrow("Hosted workspace checkpoint snapshots are activation-bootstrap or idle-shutdown only.");
+        .rejects.toThrow("Hosted workspace snapshot construction is idle-shutdown only.");
     }
 
     expect(readWorkspace).not.toHaveBeenCalled();
     expect(putArtifact).not.toHaveBeenCalled();
     expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
-  });
-
-  it("allows activation bootstrap full checkpoint snapshots", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
-    cleanupPaths.push(vaultRoot);
-    await writeFile(path.join(vaultRoot, "activation.md"), "activation bootstrap\n", "utf8");
-    const putArtifact = vi.fn(async () => {});
-    const readWorkspace = vi.fn(async () => createWorkspaceReadResponse({
-      snapshotRef: null,
-      version: "7",
-    }));
-
-    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      platform: createPlatform({
-        putArtifact,
-        readWorkspace,
-      }),
-      readCurrentLease: () => ({
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        userId: "member_1",
-        workspaceVersion: "7",
-      }),
-      request: {
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        reason: "nudge",
-        userId: "member_1",
-        workspaceVersion: "7",
-      },
-      runtime: {},
-      vaultRoot,
-    });
-
-    const result = await options.createCheckpointSnapshot(
-      createCheckpointInput("activation_bootstrap"),
-    );
-
-    const snapshotRef = result.snapshotRef;
-    if (!snapshotRef || !("hash" in snapshotRef)) {
-      throw new Error("Expected activation bootstrap to produce a base bundle ref.");
-    }
-    expect(snapshotRef.hash).toMatch(/^[a-f0-9]{64}$/u);
-    expect(readWorkspace).toHaveBeenCalledOnce();
-    expect(putArtifact).toHaveBeenCalled();
   });
 
   it("lets web CAS own workspace version conflicts", async () => {
@@ -184,7 +139,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).toHaveBeenCalled();
   });
 
-  it("writes idle shutdown working deltas without the browser-vault replica port", async () => {
+  it("writes idle shutdown full compactions without the browser-vault replica port", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -225,23 +180,25 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireWorkingSnapshotRef(result.snapshotRef);
+    const snapshotRef = requireBundleRef(result.snapshotRef);
 
-    expect(snapshotRef.base).toEqual(baseSnapshotRef);
-    expect(snapshotRef.delta.key).toMatch(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u);
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(result.snapshotRef).not.toHaveProperty("schema");
+    expect(result.snapshotRef).not.toHaveProperty("delta");
+    expect(result.snapshotRef).not.toHaveProperty("hot");
     expect(result).not.toHaveProperty("browserVaultReplicaRef");
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.delta.hash,
+      sha256: snapshotRef.hash,
     }));
     expect(readHostedBundleTextFile({
-      bytes: artifactBundles.get(snapshotRef.delta.hash) ?? null,
+      bytes: artifactBundles.get(snapshotRef.hash) ?? null,
       expectedKind: "vault",
       path: "note.md",
       root: "vault",
     })).toBe("workspace changed\n");
   });
 
-  it("persists working delta artifacts with bounded concurrency", async () => {
+  it("persists full snapshot artifacts with bounded concurrency", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -292,9 +249,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireWorkingSnapshotRef(result.snapshotRef);
+    const snapshotRef = requireBundleRef(result.snapshotRef);
 
-    expect(snapshotRef.delta.hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(snapshotRef.hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(result.snapshotRef).not.toHaveProperty("schema");
+    expect(result.snapshotRef).not.toHaveProperty("delta");
+    expect(result.snapshotRef).not.toHaveProperty("hot");
     expect(putArtifact).toHaveBeenCalledTimes(41);
     expect(maxActivePuts).toBeGreaterThan(1);
     expect(maxActivePuts).toBeLessThanOrEqual(32);
@@ -367,7 +327,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(writeLog).toHaveBeenCalled();
   });
 
-  it("skips idle shutdown full snapshots that have dangling Codex resume state", async () => {
+  it("fails idle shutdown full snapshots that have dangling Codex resume state", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     cleanupPaths.push(vaultRoot, baseVaultRoot);
@@ -434,9 +394,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .resolves.toEqual({
-        snapshotRef: baseSnapshotRef,
-      });
+      .rejects.toThrow("Hosted Codex continuity snapshot is missing required rollout state.");
 
     expect(putArtifact).not.toHaveBeenCalled();
     expect(writeLog).toHaveBeenCalledWith({
@@ -444,11 +402,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         expect.objectContaining({
           attemptId: "attempt_1",
           component: "workspace",
-          eventCode: "checkpoint.idle_shutdown_snapshot_skipped",
+          eventCode: "workspace.codex_home_snapshot_failed",
           leaseGeneration: "4",
-          level: "warn",
+          level: "error",
           phase: "checkpoint",
-          redactedJson: {
+          redactedJson: expect.objectContaining({
             checkpointReason: "idle_shutdown",
             codexResumeArchivedUnsupportedCount: 0,
             codexResumeFlushFailed: false,
@@ -461,15 +419,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
             continuityReason: "codex_home_missing",
             errorMessage: "Hosted Codex continuity snapshot is missing required rollout state.",
             errorName: "HostedWorkspaceSnapshotContinuityIncompleteError",
-            skipReason: "codex_continuity_incomplete",
-          },
+            snapshotMode: "full",
+          }),
           workspaceVersion: "8",
         }),
       ],
     });
   });
 
-  it("skips idle shutdown compaction when current committed snapshot state is unavailable", async () => {
+  it("fails idle shutdown compaction when current committed snapshot state is unavailable", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "local filesystem only\n", "utf8");
@@ -507,23 +465,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .resolves.toEqual({
-        snapshotRef: baseSnapshotRef,
-      });
+      .rejects.toThrow("Hosted workspace committed snapshot state is missing.");
 
     expect(putArtifact).not.toHaveBeenCalled();
-    expect(writeLog).toHaveBeenCalledWith({
-      entries: [
-        expect.objectContaining({
-          eventCode: "checkpoint.idle_shutdown_snapshot_skipped",
-          redactedJson: expect.objectContaining({
-            checkpointReason: "idle_shutdown",
-            errorName: "HostedWorkspaceIdleCompactionPreservedStateUnavailableError",
-            skipReason: "preserved_state_unavailable",
-          }),
-        }),
-      ],
-    });
+    expect(writeLog).not.toHaveBeenCalled();
   });
 
   it("aborts idle shutdown full snapshot publication when the checkpoint lease goes stale", async () => {
@@ -565,7 +510,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
-  it("refreshes legacy working refs during idle shutdown with a new working delta", async () => {
+  it("compacts legacy working refs during idle shutdown into a direct full snapshot", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(baseVaultRoot, vaultRoot);
@@ -609,21 +554,23 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const workingRef = requireWorkingSnapshotRef(result.snapshotRef);
-    expect(workingRef.base).toEqual(legacyWorkingRef.base);
-    expect(workingRef.delta.key).toMatch(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u);
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(result.snapshotRef).not.toHaveProperty("schema");
+    expect(result.snapshotRef).not.toHaveProperty("delta");
+    expect(result.snapshotRef).not.toHaveProperty("hot");
     expect(readHostedBundleTextFile({
-      bytes: artifactBundles.get(workingRef.delta.hash) ?? null,
+      bytes: artifactBundles.get(snapshotRef.hash) ?? null,
       expectedKind: "vault",
       path: "note.md",
       root: "vault",
     })).toBe("latest working state\n");
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: workingRef.delta.hash,
+      sha256: snapshotRef.hash,
     }));
   });
 
-  it("writes working deltas for legacy layered refs with hot preserved inline files", async () => {
+  it("compacts legacy layered refs with hot preserved inline files into a direct full snapshot", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const hotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-hot-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
@@ -679,18 +626,20 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const workingRef = requireWorkingSnapshotRef(result.snapshotRef);
-    expect(workingRef.base).toEqual(legacyLayeredRef.base);
-    expect(workingRef.delta.key).toMatch(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u);
-    const deltaBundle = artifactBundles.get(workingRef.delta.hash) ?? null;
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(result.snapshotRef).not.toHaveProperty("schema");
+    expect(result.snapshotRef).not.toHaveProperty("delta");
+    expect(result.snapshotRef).not.toHaveProperty("hot");
+    const bundle = artifactBundles.get(snapshotRef.hash) ?? null;
     expect(readHostedBundleTextFile({
-      bytes: deltaBundle,
+      bytes: bundle,
       expectedKind: "vault",
       path: preservedPath,
       root: "vault",
     })).toBeNull();
     expect(listHostedBundleArtifacts({
-      bytes: deltaBundle,
+      bytes: bundle,
       expectedKind: "vault",
     })).toContainEqual({
       path: preservedPath,
@@ -765,16 +714,20 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const workingRef = requireWorkingSnapshotRef(result.snapshotRef);
-    const deltaBundle = artifactBundles.get(workingRef.delta.hash) ?? null;
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
+    expect(result.snapshotRef).not.toHaveProperty("schema");
+    expect(result.snapshotRef).not.toHaveProperty("delta");
+    expect(result.snapshotRef).not.toHaveProperty("hot");
+    const bundle = artifactBundles.get(snapshotRef.hash) ?? null;
     expect(readHostedBundleTextFile({
-      bytes: deltaBundle,
+      bytes: bundle,
       expectedKind: "vault",
       path: preservedPath,
       root: "vault",
     })).toBeNull();
     expect(listHostedBundleArtifacts({
-      bytes: deltaBundle,
+      bytes: bundle,
       expectedKind: "vault",
     })).not.toContainEqual({
       path: preservedPath,
@@ -1781,22 +1734,5 @@ function requireBundleRef(value: unknown) {
     key: record.key,
     size: record.size,
     updatedAt: record.updatedAt,
-  };
-}
-
-function requireWorkingSnapshotRef(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Expected a hosted execution working snapshot ref.");
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.schema !== HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA) {
-    throw new TypeError("Expected a hosted execution working snapshot ref.");
-  }
-
-  return {
-    base: requireBundleRef(record.base),
-    delta: requireBundleRef(record.delta),
-    schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
   };
 }

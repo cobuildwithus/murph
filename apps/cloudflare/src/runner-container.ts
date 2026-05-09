@@ -57,8 +57,6 @@ const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const RUNNER_CONTROL_TOKEN_STORAGE_KEY = "runner-container-control-token:v1";
 const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
-const RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY = "runner-container-activity-liveness:v1";
-const RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION = 1;
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -180,13 +178,6 @@ interface RunnerActivityTimeoutRenewable {
   renewActivityTimeout(): void;
 }
 
-interface RunnerActivityLivenessRecord {
-  activeInvocationCount: number;
-  lastActivityAt: number;
-  schemaVersion: typeof RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION;
-  updatedAt: number;
-}
-
 interface RunnerControlTokenRecord {
   schemaVersion: typeof RUNNER_CONTROL_TOKEN_SCHEMA_VERSION;
   token: string;
@@ -218,8 +209,6 @@ export class RunnerContainer extends Container {
   private browserVaultRefreshAttemptId: string | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
   private readonly pendingBrowserVaultRefreshAborts = new Set<string>();
-  private activeInvocationCount = 0;
-  private lastRunnerActivityAt = 0;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
@@ -316,53 +305,15 @@ export class RunnerContainer extends Container {
 
   override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
-      const idleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
-      const now = Date.now();
-      const durableLiveness = await this.readRunnerActivityLivenessRecord();
-      const durableLastActivityAt = durableLiveness?.lastActivityAt ?? 0;
-      const durableLivenessAgeMs = durableLastActivityAt > 0
-        ? Math.max(0, now - durableLastActivityAt)
-        : null;
-      const durableActiveInvocationCount =
-        durableLivenessAgeMs !== null
-          && durableLivenessAgeMs <= computeRunnerActivityLivenessFreshMs(idleTtlMs)
-          ? durableLiveness?.activeInvocationCount ?? 0
-          : 0;
-      const effectiveActiveInvocationCount = Math.max(
-        this.activeInvocationCount,
-        durableActiveInvocationCount,
-      );
-      const effectiveLastActivityAt = Math.max(this.lastRunnerActivityAt, durableLastActivityAt);
-      const idleElapsedMs = effectiveLastActivityAt > 0
-        ? Math.max(0, now - effectiveLastActivityAt)
-        : null;
-
-      if (
-        effectiveActiveInvocationCount > 0
-        || (idleElapsedMs !== null && idleElapsedMs < idleTtlMs)
-      ) {
-        const activityTimeoutRenewed = this.noteRunnerActivity("activity-expired-stale");
-        await this.writeRunnerActivityLivenessRecord({
-          activeInvocationCount: effectiveActiveInvocationCount,
-          lastActivityAt: this.lastRunnerActivityAt,
-        });
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            activeInvocationCount: this.activeInvocationCount,
-            activityTimeoutRenewed,
-            durableActiveInvocationCount,
-            durableLivenessAgeMs,
-            idleElapsedMs,
-            runnerIdleTtlMs: idleTtlMs,
-          },
-          message: "Hosted execution container activity expiry was stale; keeping warm shell.",
-          phase: "container.ready",
-          userId: this.currentLogContext?.userId,
-        });
-        return;
-      }
-
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          lifecycleStage: "activity-expired-fallback-cleanup",
+        },
+        message: "Hosted execution container activity expired; running fallback cleanup.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
       await this.stopWarmContainer({ failClosed: false });
     });
   }
@@ -451,11 +402,10 @@ export class RunnerContainer extends Container {
     };
     let completedSuccessfully = false;
     this.currentLogContext = logContext;
-    this.activeInvocationCount += 1;
     const operationAbortController = new AbortController();
     this.workspaceInvocationAbortController = operationAbortController;
     const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
-    await this.noteRunnerActivityDurably("invoke-started");
+    this.noteRunnerActivity("invoke-started");
 
     try {
       const startTime = Date.now();
@@ -477,13 +427,13 @@ export class RunnerContainer extends Container {
         userId: routeUserId,
       });
       const runnerControlToken = await this.ensureContainerReady(input);
-      await this.noteRunnerActivityDurably("container-ready");
+      this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       this.runnerOutboundProxyState = outboundProxyState;
       await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
-      await this.noteRunnerActivityDurably("runner-request-starting");
+      this.noteRunnerActivity("runner-request-starting");
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -516,7 +466,7 @@ export class RunnerContainer extends Container {
         },
         RUNNER_PORT,
       );
-      await this.noteRunnerActivityDurably("runner-response-received");
+      this.noteRunnerActivity("runner-response-received");
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -555,8 +505,7 @@ export class RunnerContainer extends Container {
         }
       } finally {
         stopRunnerActivityRenewal();
-        this.activeInvocationCount = Math.max(0, this.activeInvocationCount - 1);
-        await this.noteRunnerActivityDurably("invoke-finished");
+        this.noteRunnerActivity("invoke-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
@@ -591,9 +540,8 @@ export class RunnerContainer extends Container {
       completeRefresh = resolve;
     });
     this.currentLogContext = logContext;
-    this.activeInvocationCount += 1;
     const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
-    await this.noteRunnerActivityDurably("browser-vault-refresh-started");
+    this.noteRunnerActivity("browser-vault-refresh-started");
 
     try {
       const startTime = Date.now();
@@ -611,7 +559,7 @@ export class RunnerContainer extends Container {
         userId: input.userId,
       });
       const runnerControlToken = await this.ensureContainerReady(input);
-      await this.noteRunnerActivityDurably("container-ready");
+      this.noteRunnerActivity("container-ready");
       if (this.pendingBrowserVaultRefreshAborts.delete(input.attemptId)) {
         operationAbortController.abort(new Error("browser-vault refresh preempted"));
       }
@@ -645,7 +593,7 @@ export class RunnerContainer extends Container {
         },
         RUNNER_PORT,
       );
-      await this.noteRunnerActivityDurably("browser-vault-refresh-response-received");
+      this.noteRunnerActivity("browser-vault-refresh-response-received");
 
       if (!response.ok) {
         throw await classifyHostedRunnerContainerErrorResponse(response);
@@ -672,8 +620,7 @@ export class RunnerContainer extends Container {
         }
       } finally {
         stopRunnerActivityRenewal();
-        this.activeInvocationCount = Math.max(0, this.activeInvocationCount - 1);
-        await this.noteRunnerActivityDurably("browser-vault-refresh-finished");
+        this.noteRunnerActivity("browser-vault-refresh-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
@@ -1057,7 +1004,6 @@ export class RunnerContainer extends Container {
     this.runnerOutboundProxyState = null;
     this.installedRunnerOutboundProxyState = null;
     await this.clearRunnerControlToken();
-    await this.clearRunnerActivityLivenessRecord();
     await this.destroyIfRunning({ failClosed });
   }
 
@@ -1066,10 +1012,6 @@ export class RunnerContainer extends Container {
     const intervalMs = computeRunnerActivityRenewIntervalMs(idleTtlMs);
     const interval = setInterval(() => {
       this.noteRunnerActivity("invoke-heartbeat");
-      this.deferRunnerActivityLivenessWrite({
-        activeInvocationCount: this.activeInvocationCount,
-        lastActivityAt: this.lastRunnerActivityAt,
-      });
     }, intervalMs);
 
     return () => {
@@ -1077,17 +1019,7 @@ export class RunnerContainer extends Container {
     };
   }
 
-  private async noteRunnerActivityDurably(stage: string): Promise<boolean> {
-    const activityTimeoutRenewed = this.noteRunnerActivity(stage);
-    await this.writeRunnerActivityLivenessRecord({
-      activeInvocationCount: this.activeInvocationCount,
-      lastActivityAt: this.lastRunnerActivityAt,
-    });
-    return activityTimeoutRenewed;
-  }
-
   private noteRunnerActivity(stage: string): boolean {
-    this.lastRunnerActivityAt = Date.now();
     const renewActivityTimeout =
       (this as RunnerContainer & Partial<RunnerActivityTimeoutRenewable>).renewActivityTimeout;
 
@@ -1111,23 +1043,6 @@ export class RunnerContainer extends Container {
         userId: this.currentLogContext?.userId,
       });
       return false;
-    }
-  }
-
-  private async readRunnerActivityLivenessRecord(): Promise<RunnerActivityLivenessRecord | null> {
-    try {
-      const value = await this.ctx.storage.get<unknown>(RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY);
-      return parseRunnerActivityLivenessRecord(value);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container could not read activity liveness.",
-        phase: "container.ready",
-        userId: this.currentLogContext?.userId,
-      });
-      return null;
     }
   }
 
@@ -1182,53 +1097,6 @@ export class RunnerContainer extends Container {
         userId: this.currentLogContext?.userId,
       });
     }
-  }
-
-  private async writeRunnerActivityLivenessRecord(input: {
-    activeInvocationCount: number;
-    lastActivityAt: number;
-  }): Promise<void> {
-    const record: RunnerActivityLivenessRecord = {
-      activeInvocationCount: Math.max(0, input.activeInvocationCount),
-      lastActivityAt: input.lastActivityAt,
-      schemaVersion: RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION,
-      updatedAt: Date.now(),
-    };
-
-    try {
-      await this.ctx.storage.put(RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY, record);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container could not write activity liveness.",
-        phase: "container.ready",
-        userId: this.currentLogContext?.userId,
-      });
-    }
-  }
-
-  private async clearRunnerActivityLivenessRecord(): Promise<void> {
-    try {
-      await this.ctx.storage.delete(RUNNER_ACTIVITY_LIVENESS_STORAGE_KEY);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container could not clear activity liveness.",
-        phase: "container.ready",
-        userId: this.currentLogContext?.userId,
-      });
-    }
-  }
-
-  private deferRunnerActivityLivenessWrite(input: {
-    activeInvocationCount: number;
-    lastActivityAt: number;
-  }): void {
-    void this.writeRunnerActivityLivenessRecord(input);
   }
 
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
@@ -2014,10 +1882,6 @@ function computeRunnerActivityRenewIntervalMs(idleTtlMs: number): number {
   );
 }
 
-function computeRunnerActivityLivenessFreshMs(idleTtlMs: number): number {
-  return Math.max(1_000, computeRunnerActivityRenewIntervalMs(idleTtlMs) * 3);
-}
-
 function parseRunnerControlTokenRecord(value: unknown): RunnerControlTokenRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -2036,29 +1900,6 @@ function parseRunnerControlTokenRecord(value: unknown): RunnerControlTokenRecord
   return {
     schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
     token: record.token,
-    updatedAt: record.updatedAt,
-  };
-}
-
-function parseRunnerActivityLivenessRecord(value: unknown): RunnerActivityLivenessRecord | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (
-    record.schemaVersion !== RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION
-    || !isSafeNonNegativeInteger(record.activeInvocationCount)
-    || !isSafeNonNegativeInteger(record.lastActivityAt)
-    || !isSafeNonNegativeInteger(record.updatedAt)
-  ) {
-    return null;
-  }
-
-  return {
-    activeInvocationCount: record.activeInvocationCount,
-    lastActivityAt: record.lastActivityAt,
-    schemaVersion: RUNNER_ACTIVITY_LIVENESS_SCHEMA_VERSION,
     updatedAt: record.updatedAt,
   };
 }

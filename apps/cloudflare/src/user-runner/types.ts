@@ -35,13 +35,36 @@ export interface DurableObjectStateLike {
   waitUntil?(promise: Promise<unknown>): void;
 }
 
+export type RunnerAlarmKind = "work" | "idle_checkpoint";
+
 export interface RunnerStateRecord {
+  active: {
+    attemptId: string;
+    expiresAt: string;
+    leaseGeneration: string;
+    reason: string | null;
+    startedAt: string;
+    workspaceVersion: string | null;
+  } | null;
+  alarm: {
+    checkpointNextWakeAt: string | null;
+    dueAt: string;
+    kind: RunnerAlarmKind;
+    workspaceVersion: string | null;
+  } | null;
   bundleRef: HostedExecutionBundleRef | null;
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt: string | null;
   lastErrorCode: string | null;
   lastInvocationAt: string | null;
+  pendingWork: boolean;
+  retry: {
+    count: number;
+    lastErrorAt: string | null;
+    lastErrorCode: string | null;
+  };
+  schema: "murph.hosted-runner.v2";
   deferredCheckpointRequired: boolean;
   idleShutdownCheckpointDueAt: string | null;
   idleShutdownCheckpointWorkspaceVersion: string | null;

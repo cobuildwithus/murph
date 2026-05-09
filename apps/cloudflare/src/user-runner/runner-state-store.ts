@@ -14,24 +14,15 @@ import {
 } from "./runner-state-helpers.js";
 import {
   type DurableObjectStateLike,
+  type RunnerAlarmKind,
   type RunnerStateRecord,
 } from "./types.js";
 
 type RunnerMetaBundleRow = RunnerMetaRow;
 
-const PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY =
-  "runner:pending-browser-vault-refresh:v1";
-const PENDING_BROWSER_VAULT_REFRESH_SCHEMA =
-  "murph.hosted-runner.pending-browser-vault-refresh.v1";
-
-interface PendingBrowserVaultRefreshRecord {
-  schema: typeof PENDING_BROWSER_VAULT_REFRESH_SCHEMA;
-  slotId: string;
-  updatedAt: string;
-}
-
 export interface RunnerInvocationLease {
   attemptId: string;
+  expiresAt: string;
   leaseGeneration: string;
   reason: HostedWorkspaceInvocationReason;
   startedAt: string;
@@ -61,12 +52,13 @@ export type RunnerDueAlarm =
     record: RunnerStateRecord;
   }
   | {
-    kind: "drain";
+    kind: "work";
     record: RunnerStateRecord;
   }
   | {
+    checkpointNextWakeAt: string | null;
     idleWorkspaceVersion: string;
-    kind: "idle_shutdown_checkpoint";
+    kind: "idle_checkpoint";
     record: RunnerStateRecord;
   };
 
@@ -90,15 +82,6 @@ export type RunnerInvocationHeartbeatResult =
       | "wrong_user";
       record: RunnerStateRecord;
     };
-
-function createPendingBrowserVaultRefreshSlotId(): string {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID === "function") {
-    return randomUUID.call(globalThis.crypto);
-  }
-
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
 
 export class RunnerStateStore {
   private userId: string | null = null;
@@ -142,78 +125,13 @@ export class RunnerStateStore {
     }
 
     if (!meta) {
-      await this.state.storage.delete(PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY);
       this.userId = null;
       return { deleted: false };
     }
 
     this.sql.exec("DELETE FROM runner_meta WHERE singleton = 1");
-    await this.state.storage.delete(PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY);
     this.userId = null;
     return { deleted: true };
-  }
-
-  async scheduleBrowserVaultRefresh(): Promise<{
-    deduped: boolean;
-  }> {
-    const current = await this.readPendingBrowserVaultRefresh();
-    await this.state.storage.put<PendingBrowserVaultRefreshRecord>(
-      PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
-      {
-        schema: PENDING_BROWSER_VAULT_REFRESH_SCHEMA,
-        slotId: createPendingBrowserVaultRefreshSlotId(),
-        updatedAt: new Date().toISOString(),
-      },
-    );
-
-    return {
-      deduped: Boolean(current),
-    };
-  }
-
-  async readPendingBrowserVaultRefresh(): Promise<{
-    slotId: string | null;
-    updatedAt: string | null;
-  } | null> {
-    const value = await this.state.storage.get<unknown>(
-      PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY,
-    );
-
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return null;
-    }
-
-    const record = value as Partial<PendingBrowserVaultRefreshRecord>;
-    return record.schema === PENDING_BROWSER_VAULT_REFRESH_SCHEMA
-      ? {
-          slotId: typeof record.slotId === "string" ? record.slotId : null,
-          updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null,
-        }
-      : null;
-  }
-
-  async clearPendingBrowserVaultRefresh(input: {
-    slotId?: string | null;
-    updatedAt?: string | null;
-  } = {}): Promise<boolean> {
-    const current = await this.readPendingBrowserVaultRefresh();
-    if (!current) {
-      return false;
-    }
-    if (
-      Object.prototype.hasOwnProperty.call(input, "slotId")
-      && current.slotId !== input.slotId
-    ) {
-      return false;
-    }
-    if (
-      Object.prototype.hasOwnProperty.call(input, "updatedAt")
-      && current.updatedAt !== input.updatedAt
-    ) {
-      return false;
-    }
-
-    return await this.state.storage.delete(PENDING_BROWSER_VAULT_REFRESH_STORAGE_KEY);
   }
 
   async assertStateForUser(userId: string): Promise<void> {
@@ -228,60 +146,74 @@ export class RunnerStateStore {
 
   async consumeDueRunnerAlarm(nowMs: number): Promise<RunnerDueAlarm> {
     const meta = this.requireMetaRowSync();
-    const nextWakeAtMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;
-    const idleCheckpointDueAtMs = meta.idle_shutdown_checkpoint_due_at
-      ? Date.parse(meta.idle_shutdown_checkpoint_due_at)
-      : Number.NaN;
+    this.syncLegacyAlarmIntoV2MetaSync(meta);
+    const hasPendingWork = meta.pending_work === 1 || meta.pending_nudge === 1;
+    const alarm = this.readStateFromMetaSync(meta).alarm;
+    const dueAtMs = alarm ? Date.parse(alarm.dueAt) : Number.NaN;
+    if (!alarm) {
+      if (hasPendingWork) {
+        return {
+          kind: "work",
+          record: this.readStateFromMetaSync(meta),
+        };
+      }
+      return {
+        kind: "none",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
 
-    const idleCheckpointDue =
-      Number.isFinite(idleCheckpointDueAtMs) && idleCheckpointDueAtMs <= nowMs;
-    const deferredIdleCheckpointShouldDrainFirst =
-      meta.deferred_checkpoint_required === 1
-      && meta.pending_nudge !== 1
-      && meta.in_flight !== 1;
-
-    if (
-      idleCheckpointDue
-      && (
-        !Number.isFinite(nextWakeAtMs)
-        || idleCheckpointDueAtMs < nextWakeAtMs
-        || deferredIdleCheckpointShouldDrainFirst
-      )
-    ) {
-      if (!meta.idle_shutdown_checkpoint_workspace_version) {
-        this.clearIdleShutdownCheckpointMetaSync(meta);
-        this.writeMetaRowSync(meta);
+    if (alarm.kind === "work") {
+      if (!hasPendingWork && (!Number.isFinite(dueAtMs) || dueAtMs > nowMs)) {
         return {
           kind: "none",
           record: this.readStateFromMetaSync(meta),
         };
       }
-
-      const idleWorkspaceVersion = meta.idle_shutdown_checkpoint_workspace_version;
+      this.clearAlarmMetaSync(meta);
+      this.writeMetaRowSync(meta);
       return {
-        idleWorkspaceVersion,
-        kind: "idle_shutdown_checkpoint",
+        kind: "work",
         record: this.readStateFromMetaSync(meta),
       };
     }
 
-    if (Number.isFinite(nextWakeAtMs) && nextWakeAtMs <= nowMs) {
-      meta.next_wake_at = null;
+    if (hasPendingWork) {
+      this.clearAlarmMetaSync(meta);
       this.writeMetaRowSync(meta);
       return {
-        kind: "drain",
+        kind: "work",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    if (!Number.isFinite(dueAtMs) || dueAtMs > nowMs) {
+      return {
+        kind: "none",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    if (!alarm.workspaceVersion) {
+      this.clearAlarmMetaSync(meta);
+      this.writeMetaRowSync(meta);
+      return {
+        kind: "none",
         record: this.readStateFromMetaSync(meta),
       };
     }
 
     return {
-      kind: "none",
+      checkpointNextWakeAt: alarm.checkpointNextWakeAt,
+      idleWorkspaceVersion: alarm.workspaceVersion,
+      kind: "idle_checkpoint",
       record: this.readStateFromMetaSync(meta),
     };
   }
 
   async beginInvocation(input: {
     consumePendingNudge?: boolean;
+    expiresAt?: string | null;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<RunnerInvocationLease> {
@@ -294,11 +226,14 @@ export class RunnerStateStore {
 
     const nextLeaseGeneration = normalizeLeaseGeneration(meta.lease_generation) + 1;
     const startedAt = new Date().toISOString();
+    const expiresAt = normalizeOptionalIsoDateString(input.expiresAt ?? null)
+      ?? new Date(Date.parse(startedAt) + 30 * 60_000).toISOString();
     const attemptId = `workspace-invocation-${nextLeaseGeneration}`;
 
     meta.in_flight = 1;
     meta.lease_generation = nextLeaseGeneration;
     meta.active_invocation_id = attemptId;
+    meta.active_invocation_expires_at = expiresAt;
     meta.active_invocation_last_heartbeat_at = null;
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = input.reason;
@@ -306,15 +241,15 @@ export class RunnerStateStore {
     meta.active_workspace_version = null;
     if (input.consumePendingNudge !== false) {
       meta.pending_nudge = 0;
+      meta.pending_work = 0;
     }
-    if (input.reason !== "idle_shutdown_checkpoint") {
-      this.clearIdleShutdownCheckpointMetaSync(meta);
-    }
+    this.clearAlarmMetaSync(meta);
     this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
+      expiresAt,
       leaseGeneration: nextLeaseGeneration.toString(),
       reason: input.reason,
       startedAt,
@@ -350,6 +285,7 @@ export class RunnerStateStore {
       throw new Error("Hosted runner has no active invocation to age for test.");
     }
     meta.active_invocation_started_at = normalizeIsoDateString(input.startedAt);
+    meta.active_invocation_expires_at = normalizeIsoDateString(input.startedAt);
     meta.active_invocation_last_heartbeat_at = null;
     meta.active_invocation_orphan_observed_at = null;
     this.writeMetaRowSync(meta);
@@ -420,34 +356,6 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async preemptActiveInvocation(input: {
-    attemptId: string;
-    reason: HostedWorkspaceInvocationReason;
-  }): Promise<{
-    preempted: boolean;
-    record: RunnerStateRecord;
-  }> {
-    const meta = this.requireMetaRowSync();
-    if (
-      meta.active_invocation_id !== input.attemptId
-      || meta.active_invocation_reason !== input.reason
-    ) {
-      return {
-        preempted: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    this.clearActiveInvocationMetaSync(meta);
-    meta.in_flight = 0;
-    this.writeMetaRowSync(meta);
-
-    return {
-      preempted: true,
-      record: this.readStateFromMetaSync(meta),
-    };
-  }
-
   async clearActiveInvocationForUserDeletion(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
@@ -470,6 +378,7 @@ export class RunnerStateStore {
     this.clearActiveInvocationMetaSync(meta);
     meta.in_flight = 0;
     meta.pending_nudge = 0;
+    meta.pending_work = 0;
     this.writeMetaRowSync(meta);
 
     return {
@@ -483,28 +392,55 @@ export class RunnerStateStore {
   } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     meta.pending_nudge = 1;
-    this.clearIdleShutdownCheckpointMetaSync(meta);
-    meta.next_wake_at = resolveRunnerNextWakeAt({
-      preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
+    meta.pending_work = 1;
+    this.setAlarmMetaSync(meta, {
+      dueAt: resolveRunnerNextWakeAt({
+        preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
+      }) ?? new Date().toISOString(),
+      kind: "work",
+      workspaceVersion: null,
     });
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
   }
 
+  async scheduleAlarm(input: {
+    checkpointNextWakeAt?: string | null;
+    dueAt: string;
+    kind: RunnerAlarmKind;
+    workspaceVersion?: string | null;
+  }): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    this.setAlarmMetaSync(meta, {
+      checkpointNextWakeAt: input.checkpointNextWakeAt ?? null,
+      dueAt: input.dueAt,
+      kind: input.kind,
+      workspaceVersion: input.workspaceVersion ?? null,
+    });
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
   async scheduleIdleShutdownCheckpoint(input: {
+    checkpointNextWakeAt?: string | null;
     dueAt: string;
     workspaceVersion: string;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    meta.idle_shutdown_checkpoint_due_at = normalizeIsoDateString(input.dueAt);
-    meta.idle_shutdown_checkpoint_workspace_version = input.workspaceVersion;
+    this.setAlarmMetaSync(meta, {
+      checkpointNextWakeAt: input.checkpointNextWakeAt ?? null,
+      dueAt: input.dueAt,
+      kind: "idle_checkpoint",
+      workspaceVersion: input.workspaceVersion,
+    });
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
   }
 
   async scheduleIdleShutdownCheckpointIfStillQuiet(input: {
+    checkpointNextWakeAt?: string | null;
     dueAt: string;
     workspaceVersion: string;
   }): Promise<
@@ -526,8 +462,12 @@ export class RunnerStateStore {
       };
     }
 
-    meta.idle_shutdown_checkpoint_due_at = normalizeIsoDateString(input.dueAt);
-    meta.idle_shutdown_checkpoint_workspace_version = input.workspaceVersion;
+    this.setAlarmMetaSync(meta, {
+      checkpointNextWakeAt: input.checkpointNextWakeAt ?? null,
+      dueAt: input.dueAt,
+      kind: "idle_checkpoint",
+      workspaceVersion: input.workspaceVersion,
+    });
     this.writeMetaRowSync(meta);
 
     return {
@@ -538,7 +478,10 @@ export class RunnerStateStore {
 
   async clearIdleShutdownCheckpoint(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    this.clearIdleShutdownCheckpointMetaSync(meta);
+    this.syncLegacyAlarmIntoV2MetaSync(meta);
+    if (this.readRunnerAlarmKindFromMetaSync(meta) === "idle_checkpoint") {
+      this.clearAlarmMetaSync(meta);
+    }
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -571,6 +514,13 @@ export class RunnerStateStore {
     workspaceVersion?: string | null;
   }): Promise<RunnerInvocationLeaseOwnershipResult> {
     const meta = this.requireMetaRowSync();
+    if (this.clearActiveInvocationIfExpiredSync(meta, Date.now())) {
+      return {
+        clearedOrphanObservation: false,
+        owns: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     const lease = this.readActiveInvocationLeaseSync(meta);
     if (
       !lease
@@ -589,7 +539,7 @@ export class RunnerStateStore {
       input.workspaceVersion === undefined
       || input.workspaceVersion === null
       || lease.workspaceVersion === input.workspaceVersion
-    ) && !isIdleShutdownCheckpointBlockedByPendingNudge(meta);
+    );
     const clearedOrphanObservation = ownsLease
       && meta.active_invocation_orphan_observed_at !== null;
     if (ownsLease) {
@@ -612,6 +562,13 @@ export class RunnerStateStore {
     workspaceVersion: string;
   }): Promise<RunnerInvocationCheckpointResult> {
     const meta = this.requireMetaRowSync();
+    if (this.clearActiveInvocationIfExpiredSync(meta, Date.now())) {
+      return {
+        clearedOrphanObservation: false,
+        recorded: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     const lease = this.readActiveInvocationLeaseSync(meta);
     if (
       !lease
@@ -619,14 +576,6 @@ export class RunnerStateStore {
       || lease.leaseGeneration !== input.leaseGeneration
       || lease.userId !== input.userId
     ) {
-      return {
-        clearedOrphanObservation: false,
-        recorded: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    if (isIdleShutdownCheckpointBlockedByPendingNudge(meta)) {
       return {
         clearedOrphanObservation: false,
         recorded: false,
@@ -653,6 +602,13 @@ export class RunnerStateStore {
     userId: string;
   }): Promise<RunnerInvocationHeartbeatResult> {
     const meta = this.requireMetaRowSync();
+    if (this.clearActiveInvocationIfExpiredSync(meta, input.nowMs ?? Date.now())) {
+      return {
+        ok: false,
+        reason: "no_active_invocation",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     const lease = this.readActiveInvocationLeaseSync(meta);
     if (!lease) {
       return {
@@ -711,9 +667,14 @@ export class RunnerStateStore {
       };
     }
 
+    const expiresAtMs = meta.active_invocation_expires_at
+      ? Date.parse(meta.active_invocation_expires_at)
+      : Number.NaN;
     const startedAtMs = Date.parse(startedAt);
     const isHardExpired = !Number.isFinite(startedAtMs)
-      || input.nowMs - startedAtMs >= input.timeoutMs;
+      || (Number.isFinite(expiresAtMs)
+        ? input.nowMs >= expiresAtMs
+        : input.nowMs - startedAtMs >= input.timeoutMs);
     const orphanGraceMs = input.orphanGraceMs ?? null;
     let isOrphanExpired = false;
     if (!isHardExpired && orphanGraceMs !== null) {
@@ -761,9 +722,18 @@ export class RunnerStateStore {
     preferredWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    meta.next_wake_at = resolveRunnerNextWakeAt({
+    const nextWakeAt = resolveRunnerNextWakeAt({
       preferredWakeAt: input.preferredWakeAt ?? null,
     });
+    if (nextWakeAt) {
+      this.setAlarmMetaSync(meta, {
+        dueAt: nextWakeAt,
+        kind: "work",
+        workspaceVersion: null,
+      });
+    } else if (this.readRunnerAlarmKindFromMetaSync(meta) === "work") {
+      this.clearAlarmMetaSync(meta);
+    }
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -774,6 +744,7 @@ export class RunnerStateStore {
   }
 
   private readStateFromMetaSync(meta: RunnerMetaBundleRow): RunnerStateRecord {
+    this.syncLegacyAlarmIntoV2MetaSync(meta);
     return projectRunnerStateRecord({
       bundleRef: null,
       meta,
@@ -815,11 +786,16 @@ export class RunnerStateStore {
       `SELECT
         user_id,
         active_invocation_id,
+        active_invocation_expires_at,
         active_invocation_last_heartbeat_at,
         active_invocation_orphan_observed_at,
         active_invocation_reason,
         active_invocation_started_at,
         active_workspace_version,
+        alarm_kind,
+        alarm_due_at,
+        alarm_workspace_version,
+        alarm_checkpoint_next_wake_at,
         lease_generation,
         in_flight,
         last_error_at,
@@ -830,6 +806,7 @@ export class RunnerStateStore {
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
+        pending_work,
         retry_failure_count
       FROM runner_meta
       WHERE singleton = 1`,
@@ -848,11 +825,16 @@ export class RunnerStateStore {
         singleton,
         user_id,
         active_invocation_id,
+        active_invocation_expires_at,
         active_invocation_last_heartbeat_at,
         active_invocation_orphan_observed_at,
         active_invocation_reason,
         active_invocation_started_at,
         active_workspace_version,
+        alarm_kind,
+        alarm_due_at,
+        alarm_workspace_version,
+        alarm_checkpoint_next_wake_at,
         lease_generation,
         in_flight,
         last_error_at,
@@ -863,16 +845,22 @@ export class RunnerStateStore {
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
+        pending_work,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
+      meta.active_invocation_expires_at,
       meta.active_invocation_last_heartbeat_at,
       meta.active_invocation_orphan_observed_at,
       meta.active_invocation_reason,
       meta.active_invocation_started_at,
       meta.active_workspace_version,
+      meta.alarm_kind,
+      meta.alarm_due_at,
+      meta.alarm_workspace_version,
+      meta.alarm_checkpoint_next_wake_at,
       meta.lease_generation,
       meta.in_flight,
       meta.last_error_at,
@@ -883,6 +871,7 @@ export class RunnerStateStore {
       meta.idle_shutdown_checkpoint_workspace_version,
       meta.next_wake_at,
       meta.pending_nudge,
+      meta.pending_work,
       normalizeRetryFailureCount(meta.retry_failure_count),
     );
   }
@@ -905,8 +894,31 @@ export class RunnerStateStore {
     return true;
   }
 
+  private clearActiveInvocationIfExpiredSync(meta: RunnerMetaRow, nowMs: number): boolean {
+    const lease = this.readActiveInvocationLeaseSync(meta);
+    if (!lease) {
+      return false;
+    }
+
+    const expiresAtMs = Date.parse(lease.expiresAt);
+    if (Number.isFinite(expiresAtMs) && nowMs < expiresAtMs) {
+      return false;
+    }
+
+    this.clearActiveInvocationMetaSync(meta);
+    meta.in_flight = 0;
+    meta.last_error_at = new Date(nowMs).toISOString();
+    meta.last_error_code = deriveHostedExecutionErrorCode(
+      new Error("Hosted workspace invocation timed out."),
+    );
+    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
+    this.writeMetaRowSync(meta);
+    return true;
+  }
+
   private clearActiveInvocationMetaSync(meta: RunnerMetaRow): void {
     meta.active_invocation_id = null;
+    meta.active_invocation_expires_at = null;
     meta.active_invocation_last_heartbeat_at = null;
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = null;
@@ -928,9 +940,73 @@ export class RunnerStateStore {
     meta.last_error_code = null;
   }
 
-  private clearIdleShutdownCheckpointMetaSync(meta: RunnerMetaRow): void {
+  private clearAlarmMetaSync(meta: RunnerMetaRow): void {
+    meta.alarm_kind = null;
+    meta.alarm_due_at = null;
+    meta.alarm_workspace_version = null;
+    meta.alarm_checkpoint_next_wake_at = null;
+    meta.next_wake_at = null;
     meta.idle_shutdown_checkpoint_due_at = null;
     meta.idle_shutdown_checkpoint_workspace_version = null;
+  }
+
+  private setAlarmMetaSync(
+    meta: RunnerMetaRow,
+    input: {
+      checkpointNextWakeAt?: string | null;
+      dueAt: string;
+      kind: RunnerAlarmKind;
+      workspaceVersion: string | null;
+    },
+  ): void {
+    const dueAt = normalizeIsoDateString(input.dueAt);
+    const checkpointNextWakeAt = normalizeOptionalIsoDateString(
+      input.checkpointNextWakeAt ?? null,
+    );
+    meta.alarm_kind = input.kind;
+    meta.alarm_due_at = dueAt;
+    meta.alarm_workspace_version = input.workspaceVersion;
+    meta.alarm_checkpoint_next_wake_at = checkpointNextWakeAt;
+    if (input.kind === "work") {
+      meta.next_wake_at = dueAt;
+      meta.idle_shutdown_checkpoint_due_at = null;
+      meta.idle_shutdown_checkpoint_workspace_version = null;
+      return;
+    }
+
+    meta.next_wake_at = checkpointNextWakeAt;
+    meta.idle_shutdown_checkpoint_due_at = dueAt;
+    meta.idle_shutdown_checkpoint_workspace_version = input.workspaceVersion;
+  }
+
+  private syncLegacyAlarmIntoV2MetaSync(meta: RunnerMetaRow): void {
+    if (this.readRunnerAlarmKindFromMetaSync(meta) !== null) {
+      return;
+    }
+
+    if (meta.idle_shutdown_checkpoint_due_at) {
+      this.setAlarmMetaSync(meta, {
+        checkpointNextWakeAt: meta.next_wake_at,
+        dueAt: meta.idle_shutdown_checkpoint_due_at,
+        kind: "idle_checkpoint",
+        workspaceVersion: meta.idle_shutdown_checkpoint_workspace_version,
+      });
+      return;
+    }
+
+    if (meta.next_wake_at) {
+      this.setAlarmMetaSync(meta, {
+        dueAt: meta.next_wake_at,
+        kind: "work",
+        workspaceVersion: null,
+      });
+    }
+  }
+
+  private readRunnerAlarmKindFromMetaSync(meta: RunnerMetaRow): RunnerAlarmKind | null {
+    return meta.alarm_kind === "work" || meta.alarm_kind === "idle_checkpoint"
+      ? meta.alarm_kind
+      : null;
   }
 
   private readActiveInvocationLeaseSync(meta: RunnerMetaRow): RunnerInvocationLease | null {
@@ -944,6 +1020,8 @@ export class RunnerStateStore {
 
     return {
       attemptId: meta.active_invocation_id,
+      expiresAt: meta.active_invocation_expires_at
+        ?? new Date(Date.parse(meta.active_invocation_started_at) + 30 * 60_000).toISOString(),
       leaseGeneration: normalizeLeaseGeneration(meta.lease_generation).toString(),
       reason: meta.active_invocation_reason,
       startedAt: meta.active_invocation_started_at,
@@ -966,12 +1044,6 @@ function normalizeLeaseGeneration(value: number | null): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
-function isIdleShutdownCheckpointBlockedByPendingNudge(meta: RunnerMetaBundleRow): boolean {
-  return meta.active_invocation_reason === "idle_shutdown_checkpoint"
-    && meta.pending_nudge === 1
-    && meta.deferred_checkpoint_required !== 1;
-}
-
 function isHostedWorkspaceInvocationReasonValue(
   value: unknown,
 ): value is HostedWorkspaceInvocationReason {
@@ -989,4 +1061,12 @@ function normalizeIsoDateString(value: string): string {
   }
 
   return parsed.toISOString();
+}
+
+function normalizeOptionalIsoDateString(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  return normalizeIsoDateString(value);
 }

@@ -277,7 +277,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     ?? await importHostedMailboxForWorkspaceRunner({
       checkpointRequestBuilder: checkpointRequestSession,
       checkpointReason: "import",
-      deferCheckpoint: Boolean(input.runAssistantPhase),
+      deferCheckpoint: true,
       input,
       requestId: input.requestId,
     });
@@ -941,7 +941,7 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
   expectedUserId: string;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   now?: () => string;
-  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort" | "workspacePort">;
+  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
   runtimeLogContext?: HostedRuntimeLogContext | null;
 }): Promise<{ deferred: boolean }> {
   if (input.assistantPhaseResult.progressed !== true) {
@@ -951,34 +951,9 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
   const checkpointReason = requireHostedWorkspaceAssistantPhaseCheckpointReason(
     input.assistantPhaseResult,
   );
-  if (checkpointReason === "activation_bootstrap") {
-    const redactedStatus = {
-      ...buildHostedMailboxImportRedactedStatus(input.initialMailboxImport.importResult),
-      ...(input.assistantPhaseResult.redactedStatus ?? {}),
-    };
-    const request = await input.checkpointRequestBuilder.createRequest({
-      importResult: input.initialMailboxImport.importResult,
-      nextWakeAt: null,
-      nextWakeReason: null,
-      previousState: input.initialMailboxImport.previousState,
-      reason: checkpointReason,
-      redactedStatus,
-      state: input.initialMailboxImport.state,
-    });
-    const checkpoint = await input.platform.workspacePort.checkpoint(request);
-    if (checkpoint.workspace.userId !== input.expectedUserId) {
-      throw new HostedMailboxImportCheckpointUserMismatchError({
-        actualUserId: checkpoint.workspace.userId,
-        expectedUserId: input.expectedUserId,
-      });
-    }
-    if (!checkpoint.checkpointed) {
-      throw new HostedMailboxImportCheckpointConflictError(checkpoint);
-    }
-    input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
-    return { deferred: false };
-  }
-
+  void input.checkpointRequestBuilder;
+  void input.expectedUserId;
+  void input.initialMailboxImport;
   await writeHostedForegroundCheckpointDeferredLog({
     checkpointPhase: "assistant",
     now: input.now,

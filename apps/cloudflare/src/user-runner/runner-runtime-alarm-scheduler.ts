@@ -34,18 +34,5 @@ export class RunnerRuntimeAlarmScheduler {
 }
 
 function readEarliestRunnerAlarmAt(record: RunnerStateRecord): string | null {
-  return earliestIsoDate(record.nextWakeAt, record.idleShutdownCheckpointDueAt);
-}
-
-function earliestIsoDate(left: string | null, right: string | null): string | null {
-  const leftMs = left ? Date.parse(left) : Number.NaN;
-  const rightMs = right ? Date.parse(right) : Number.NaN;
-  if (!Number.isFinite(leftMs)) {
-    return Number.isFinite(rightMs) ? right : null;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return left;
-  }
-
-  return rightMs < leftMs ? right : left;
+  return record.alarm?.dueAt ?? null;
 }

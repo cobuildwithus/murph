@@ -496,28 +496,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const foregroundWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
       read: () => guardedWorkspacePort.read!(),
       async checkpoint(request) {
-        if (request.reason === "activation_bootstrap") {
-          const response = await guardedWorkspacePort.checkpoint!(request);
-          await recordHotRestoreCache(response);
-          return response;
-        }
+        void request;
         throw new Error("Foreground hosted runner must not checkpoint workspace.");
       },
     };
     const foregroundCheckpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder = {
       async createRequest(requestInput) {
-        if (requestInput.reason === "activation_bootstrap") {
-          return await createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-            createSnapshot: createLivenessGuardedCheckpointSnapshot,
-            metadata: {
-              attemptId: input.request.attemptId,
-              expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
-              leaseGeneration: input.request.leaseGeneration,
-              nextWakeAt: null,
-              nextWakeReason: null,
-            },
-          }).createRequest(requestInput);
-        }
+        void requestInput;
         throw new Error(
           "Foreground hosted runner must not build workspace checkpoint snapshots.",
         );

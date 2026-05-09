@@ -154,7 +154,8 @@ describe("HostedUserRunner alarm routing", () => {
         component: "hosted.runner",
         details: expect.objectContaining({
           pendingNudge: true,
-          runnerNextWakePresent: true,
+          runnerAlarmKind: "work",
+          runnerNextWakePresent: false,
         }),
         message: "Hosted runner alarm starting workspace invocation.",
         phase: "wake.running",
@@ -286,7 +287,6 @@ describe("HostedUserRunner alarm routing", () => {
     await flushDetachedRunnerDrive();
 
     expect(alarms[0]).toBe("2026-04-27T00:00:01.000Z");
-    expect(alarms).toContain("deleted");
     const retryAlarm = alarms.at(-1);
     expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeGreaterThanOrEqual(1_000);
     expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeLessThan(1_100);
@@ -808,7 +808,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toContain("2026-04-27T00:00:30.100Z");
   });
 
-  it("preempts a lower-priority alarm invocation when a foreground nudge arrives", async () => {
+  it("queues nudge work behind a lower-priority alarm invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const activeInvocation = createDeferred<{
@@ -842,16 +842,23 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
     });
 
-    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalledOnce());
+    expect(destroyInstance).not.toHaveBeenCalled();
+    activeInvocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
     await expect(activeRun).resolves.toMatchObject({
-      status: "scheduled",
+      status: "idle",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
   });
 
-  it("preempts active deferred alarm work when a foreground nudge arrives", async () => {
+  it("lets active deferred alarm work finish when a foreground nudge arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const activeInvocation = createDeferred<{
@@ -892,19 +899,34 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       alreadyRunning: true,
+      immediateDriveStarted: false,
     });
 
-    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalledOnce());
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await expect(runner.ownsActiveInvocationLease({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "0",
+    })).resolves.toBe(true);
+
+    activeInvocation.resolve({
+      deferredCheckpointRequired: true,
+      nextWakeAt: null,
+      status: "idle",
+    });
     await expect(activeRun).resolves.toMatchObject({
-      status: "scheduled",
+      deferredCheckpointRequired: true,
+      status: "idle",
     });
     await flushDetachedRunnerDrive();
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(destroyInstance).not.toHaveBeenCalled();
   });
 
-  it("preempts active deferred idle checkpoints when a foreground nudge arrives", async () => {
+  it("lets active deferred idle checkpoints finish when a foreground nudge arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -950,28 +972,42 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       alreadyRunning: true,
+      immediateDriveStarted: false,
     });
 
-    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalledOnce());
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await expect(runner.ownsActiveInvocationLease({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).resolves.toBe(true);
+
+    activeCheckpoint.resolve({
+      idleShutdownCheckpointed: true,
+      nextWakeAt: null,
+      status: "idle",
+    });
     await expect(activeRun).resolves.toBeUndefined();
     await flushDetachedRunnerDrive();
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(alarms).toContain("2026-04-27T00:00:01.100Z");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
                 idle_shutdown_checkpoint_due_at,
                 idle_shutdown_checkpoint_workspace_version,
-      pending_nudge
+                pending_nudge
          FROM runner_meta WHERE user_id = ?`,
         "member_123",
       ).toArray(),
     ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.100Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
       pending_nudge: 0,
     }]);
   });
@@ -1376,38 +1412,45 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("replays from a durable alarm when a local active invocation is still locked after timeout", async () => {
+  it("replays from a durable alarm after cold restore clears an expired active invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const firstInvocation = createDeferred<{
-      nextWakeAt: null;
-      status: "idle";
-    }>();
-    let callCount = 0;
-    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
-      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-        callCount += 1;
-        if (callCount === 1) {
-          return await firstInvocation.promise;
-        }
-        return {
-          nextWakeAt: null,
-          status: "idle" as const,
-        };
-      }),
+    const workspace = createWorkspaceState({
+      snapshotRef: createBundleRef("cold-restore-replay"),
+      version: "4",
+    });
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+        idleShutdownCheckpointed: true,
+        nextWakeAt: null,
+        status: "idle" as const,
+      })),
       runnerTimeoutMs: 1_000,
     });
     await runner.bindUser("member_123");
-
-    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     sql.exec(
       `UPDATE runner_meta
-       SET next_wake_at = ?,
+       SET active_invocation_expires_at = ?,
+           active_invocation_id = ?,
+           active_invocation_reason = ?,
+           active_invocation_started_at = ?,
+           active_workspace_version = ?,
+           alarm_due_at = ?,
+           alarm_kind = ?,
+           alarm_workspace_version = ?,
            idle_shutdown_checkpoint_due_at = ?,
-           idle_shutdown_checkpoint_workspace_version = ?
+           idle_shutdown_checkpoint_workspace_version = ?,
+           in_flight = 1,
+           lease_generation = 1
        WHERE user_id = ?`,
+      "2026-04-27T00:00:01.000Z",
+      "workspace-invocation-1",
+      "manual",
       FIXED_NOW,
+      "4",
+      FIXED_NOW,
+      "idle_checkpoint",
+      "4",
       FIXED_NOW,
       "4",
       "member_123",
@@ -1416,7 +1459,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(runner.alarm()).resolves.toBeUndefined();
 
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(alarms).toEqual(["deleted"]);
     expect(
       sql.exec(
@@ -1433,8 +1477,6 @@ describe("HostedUserRunner runtime crypto context", () => {
       idle_shutdown_checkpoint_due_at: null,
       idle_shutdown_checkpoint_workspace_version: null,
     }]);
-
-    await expect(activeRun).rejects.toThrow("Hosted runner invocation lease expired.");
   });
 
   it("syncs only a recovery alarm when runUntilIdleOrBudget is called during an active invocation", async () => {
@@ -1698,7 +1740,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("preempts a persisted lower-priority invocation when a foreground nudge arrives", async () => {
+  it("queues behind a persisted active invocation when a foreground nudge arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const destroyInstance = vi.fn(async () => {});
@@ -1735,15 +1777,15 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
-      immediateDriveStarted: true,
-      inFlight: false,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
     });
 
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     await flushDetachedRunnerDrive();
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    expect(destroyInstanceNames).toEqual(["member_123"]);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(destroyInstanceNames).toEqual([]);
     expect(
       sql.exec(
         `SELECT
@@ -1756,14 +1798,14 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      active_invocation_id: null,
-      active_invocation_reason: null,
-      in_flight: 0,
-      pending_nudge: 0,
+      active_invocation_id: "workspace-invocation-1",
+      active_invocation_reason: "alarm",
+      in_flight: 1,
+      pending_nudge: 1,
     }]);
   });
 
-  it("preempts persisted deferred idle checkpoints when a foreground nudge arrives", async () => {
+  it("preserves persisted deferred idle checkpoints when a foreground nudge arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const destroyInstance = vi.fn(async () => {});
@@ -1771,7 +1813,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       nextWakeAt: null,
       status: "idle" as const,
     }));
-    const { destroyInstanceNames, runner, sql } = createRunnerCryptoContextHarness(null, {
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
       destroyInstance,
       invoke,
     });
@@ -1797,16 +1839,21 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
-      immediateDriveStarted: true,
-      inFlight: false,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
       nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
 
-    expect(destroyInstance).toHaveBeenCalledOnce();
-    await flushDetachedRunnerDrive();
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    expect(destroyInstanceNames).toEqual(["member_123"]);
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
+    await expect(runner.ownsActiveInvocationLease({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).resolves.toBe(true);
     expect(
       sql.exec(
         `SELECT
@@ -1820,11 +1867,11 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      active_invocation_id: null,
-      active_invocation_reason: null,
+      active_invocation_id: "workspace-invocation-1",
+      active_invocation_reason: "idle_shutdown_checkpoint",
       deferred_checkpoint_required: 1,
-      in_flight: 0,
-      pending_nudge: 0,
+      in_flight: 1,
+      pending_nudge: 1,
     }]);
   });
 
@@ -2117,7 +2164,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("does not begin a container invocation when the web AI usage gate denies the start", async () => {
+  it("does not call the live web AI usage gate before manual invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
     const { alarms, invoke, runner } = createRunnerCryptoContextHarness(null, {
@@ -2133,23 +2180,15 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.bindUser("member_123");
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toEqual({
-      nextWakeAt: "2026-05-01T00:00:00.000Z",
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateNotice:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
-        aiUsageGateNoticeCode: "pulse_upgrade_edge",
-        aiUsageGateReason: "ai_usage_limit_exceeded",
-        aiUsageGateRetryAfter: "2026-05-01T00:00:00.000Z",
-      },
-      status: "scheduled",
+      nextWakeAt: null,
+      status: "idle",
     });
 
-    expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toContain("2026-05-01T00:00:00.000Z");
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).not.toContain("2026-05-01T00:00:00.000Z");
     const usageGateCall = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
       .find(([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH);
-    expect(JSON.parse(String(usageGateCall?.[0].body))).toEqual({});
+    expect(usageGateCall).toBeUndefined();
   });
 
   it("skips the live web AI usage gate when a fresh signed allow decision is valid", async () => {
@@ -2186,7 +2225,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     ).toBe(false);
   });
 
-  it("falls back to the live web AI usage gate when a signed allow decision nonce is reused", async () => {
+  it("does not fall back to the live web AI usage gate when signed allow decisions are invalid or reused", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
     const decision = await createTestAiUsageAllowDecision({
@@ -2195,6 +2234,20 @@ describe("HostedUserRunner runtime crypto context", () => {
       nonce: "0123456789abcdef0123456789abcdef",
       secret: "test-ai-usage-allow-secret",
       userId: "member_123",
+    });
+    const invalidSignatureDecision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      nonce: "invalid-signature-nonce-00000001",
+      secret: "other-secret",
+      userId: "member_123",
+    });
+    const wrongUserDecision = await createTestAiUsageAllowDecision({
+      expiresAt: "2026-04-27T00:00:30.000Z",
+      issuedAt: "2026-04-27T00:00:00.000Z",
+      nonce: "wrong-user-nonce-000000000001",
+      secret: "test-ai-usage-allow-secret",
+      userId: "member_other",
     });
     const { invoke, runner } = createRunnerCryptoContextHarness(null, {
       aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
@@ -2216,58 +2269,27 @@ describe("HostedUserRunner runtime crypto context", () => {
       aiUsageAllowDecision: decision,
       reason: "manual",
     })).resolves.toMatchObject({
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateReason: "ai_usage_limit_exceeded",
-      },
-      status: "scheduled",
+      status: "idle",
     });
-
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(
-      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
-        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
-      ),
-    ).toBe(true);
-  });
-
-  it("falls back to the live web AI usage gate when a signed allow decision signature is invalid", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-    const decision = await createTestAiUsageAllowDecision({
-      expiresAt: "2026-04-27T00:00:30.000Z",
-      issuedAt: "2026-04-27T00:00:00.000Z",
-      nonce: "0123456789abcdef0123456789abcdef",
-      secret: "other-secret",
-      userId: "member_123",
-    });
-    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
-      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
-      usageGateResponse: {
-        allowed: false,
-        reason: "ai_usage_limit_exceeded",
-        retryAfter: "2026-05-01T00:00:00.000Z",
-      },
-    });
-    await runner.bindUser("member_123");
-
     await expect(runner.runUntilIdleOrBudget({
-      aiUsageAllowDecision: decision,
+      aiUsageAllowDecision: invalidSignatureDecision,
       reason: "manual",
     })).resolves.toMatchObject({
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateReason: "ai_usage_limit_exceeded",
-      },
-      status: "scheduled",
+      status: "idle",
+    });
+    await expect(runner.runUntilIdleOrBudget({
+      aiUsageAllowDecision: wrongUserDecision,
+      reason: "manual",
+    })).resolves.toMatchObject({
+      status: "idle",
     });
 
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledTimes(4);
     expect(
       mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
         ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("carries a fresh signed allow decision from nudge into the detached runner drive", async () => {
@@ -2305,83 +2327,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     ).toBe(false);
   });
 
-  it("falls back to the live web AI usage gate when a signed allow decision is stale", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:01:00.000Z"));
-    const decision = await createTestAiUsageAllowDecision({
-      expiresAt: "2026-04-27T00:00:30.000Z",
-      issuedAt: "2026-04-27T00:00:00.000Z",
-      secret: "test-ai-usage-allow-secret",
-      userId: "member_123",
-    });
-    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
-      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
-      usageGateResponse: {
-        allowed: false,
-        reason: "ai_usage_limit_exceeded",
-        retryAfter: "2026-05-01T00:00:00.000Z",
-      },
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({
-      aiUsageAllowDecision: decision,
-      reason: "manual",
-    })).resolves.toMatchObject({
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateReason: "ai_usage_limit_exceeded",
-      },
-      status: "scheduled",
-    });
-
-    expect(invoke).not.toHaveBeenCalled();
-    expect(
-      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
-        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
-      ),
-    ).toBe(true);
-  });
-
-  it("falls back to the live web AI usage gate when a signed allow decision belongs to another user", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-    const decision = await createTestAiUsageAllowDecision({
-      expiresAt: "2026-04-27T00:00:30.000Z",
-      issuedAt: "2026-04-27T00:00:00.000Z",
-      secret: "test-ai-usage-allow-secret",
-      userId: "member_other",
-    });
-    const { invoke, runner } = createRunnerCryptoContextHarness(null, {
-      aiUsageAllowSigningSecret: "test-ai-usage-allow-secret",
-      usageGateResponse: {
-        allowed: false,
-        reason: "ai_usage_limit_exceeded",
-        retryAfter: "2026-05-01T00:00:00.000Z",
-      },
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({
-      aiUsageAllowDecision: decision,
-      reason: "manual",
-    })).resolves.toMatchObject({
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateReason: "ai_usage_limit_exceeded",
-      },
-      status: "scheduled",
-    });
-
-    expect(invoke).not.toHaveBeenCalled();
-    expect(
-      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(
-        ([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH,
-      ),
-    ).toBe(true);
-  });
-
-  it("asks the web AI usage gate to notify the user when a pending nudge is denied", async () => {
+  it("does not ask the live web AI usage gate before draining a pending nudge", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
     const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
@@ -2401,107 +2347,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateNoticeCode: "pulse_upgrade_edge",
-      },
-      status: "scheduled",
+      status: "idle",
     });
 
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
     const usageGateCall = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
       .find(([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH);
-    expect(JSON.parse(String(usageGateCall?.[0].body))).toEqual({
-      deniedNoticeContext: "pending_nudge",
-    });
-  });
-
-  it("fails closed with a retry alarm when the web AI usage gate is unavailable", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
-      maxEventAttempts: 2,
-      usageGateResponse: {
-        error: "Unavailable",
-      },
-      usageGateStatus: 503,
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      nextWakeAt: "2026-04-27T00:00:30.000Z",
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateReason: "ai_usage_gate_unavailable",
-        aiUsageGateRetryAfter: "2026-04-27T00:00:30.000Z",
-      },
-      status: "scheduled",
-    });
-
-    expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toContain("2026-04-27T00:00:30.000Z");
-    expect(
-      sql.exec(
-        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      next_wake_at: "2026-04-27T00:00:30.000Z",
-      retry_failure_count: 1,
-    }]);
-
-    await vi.advanceTimersByTimeAsync(30_000);
-    await expect(runner.alarm()).resolves.toBeUndefined();
-
-    expect(invoke).not.toHaveBeenCalled();
-    expect(
-      sql.exec(
-        "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      next_wake_at: null,
-      retry_failure_count: 2,
-    }]);
-  });
-
-  it("does not begin a nudge container invocation when the web AI usage gate denies the start", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
-      usageGateResponse: {
-        allowed: false,
-        noticeCode: "pulse_upgrade_edge",
-        reason: "ai_usage_limit_exceeded",
-        retryAfter: "2026-05-01T00:00:00.000Z",
-        userNotice: "Limit reached.",
-      },
-    });
-    await runner.bindUser("member_123");
-    sql.exec(
-      "UPDATE runner_meta SET pending_nudge = 1 WHERE user_id = ?",
-      "member_123",
-    );
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
-      nextWakeAt: "2026-05-01T00:00:00.000Z",
-      redactedStatus: {
-        aiUsageGateBlocked: true,
-        aiUsageGateNotice: "Limit reached.",
-        aiUsageGateNoticeCode: "pulse_upgrade_edge",
-        aiUsageGateReason: "ai_usage_limit_exceeded",
-        aiUsageGateRetryAfter: "2026-05-01T00:00:00.000Z",
-      },
-      status: "scheduled",
-    });
-
-    expect(invoke).not.toHaveBeenCalled();
-    const usageGateCall = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
-      .find(([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH);
-    expect(usageGateCall).toBeDefined();
-    expect(JSON.parse(String(usageGateCall?.[0].body))).toEqual({
-      deniedNoticeContext: "pending_nudge",
-    });
+    expect(usageGateCall).toBeUndefined();
   });
 
   it("refreshes the cached runtime crypto context after the web TTL expires", async () => {
@@ -4004,17 +3856,17 @@ describe("HostedUserRunner runtime crypto context", () => {
 	         FROM runner_meta WHERE user_id = ?`,
 	        "member_123",
 	      ).toArray(),
-	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: null,
-	      idle_shutdown_checkpoint_workspace_version: null,
-	      next_wake_at: FIXED_NOW,
-	      pending_nudge: 0,
-	    }]);
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: null,
+      pending_nudge: 0,
+    }]);
 	  });
 
-  it("keeps browser-vault refresh pending without starting it when a nudge is already pending", async () => {
+  it("runs external browser-vault refresh as detached best-effort work without runner alarms", async () => {
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("pending-nudge-refresh"),
+      snapshotRef: createLayeredSnapshotRef("external-browser-vault-refresh"),
       version: "4",
     });
     const refreshBrowserVaultReplica = vi.fn<
@@ -4022,17 +3874,60 @@ describe("HostedUserRunner runtime crypto context", () => {
     >(async () => ({
       status: "already_fresh",
     }));
-    const waitUntil = vi.fn();
-    const { readPendingBrowserVaultRefreshStorage, runner, sql } = createRunnerCryptoContextHarness(
-      workspace,
-      {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner, runnerContainerNames } =
+      createRunnerCryptoContextHarness(workspace, {
         refreshBrowserVaultReplica,
         waitUntil,
-      },
-    );
+      });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      scheduled: true,
+    });
+
+    expect(waitUntil).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([]);
+    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
+    await Promise.all(waitUntilPromises);
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(runnerContainerNames).toEqual([
+      resolveHostedExecutionRunnerContainerName({
+        source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        userId: "member_123",
+      }),
+    ]);
+  });
+
+  it("skips detached browser-vault refresh while foreground work is pending", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("pending-work-browser-vault-refresh"),
+      version: "4",
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner, sql } =
+      createRunnerCryptoContextHarness(workspace, {
+        refreshBrowserVaultReplica,
+        waitUntil,
+      });
     await runner.bindUser("member_123");
     sql.exec(
-      "UPDATE runner_meta SET pending_nudge = 1 WHERE user_id = ?",
+      "UPDATE runner_meta SET pending_nudge = 1, pending_work = 1 WHERE user_id = ?",
       "member_123",
     );
 
@@ -4042,50 +3937,30 @@ describe("HostedUserRunner runtime crypto context", () => {
       scheduled: true,
     });
 
-    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    });
+    expect(waitUntil).toHaveBeenCalledOnce();
+    await Promise.all(waitUntilPromises);
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(waitUntil).not.toHaveBeenCalled();
+    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
+    expect(alarms).toEqual([]);
   });
 
-  it("aborts an active browser-vault refresh and starts nudge work when a nudge arrives", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
+  it("keeps background browser-vault refresh conflicts best-effort", async () => {
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-preempted-by-nudge"),
+      snapshotRef: createLayeredSnapshotRef("browser-vault-refresh-conflict"),
       version: "4",
     });
-    const activeRefresh = createDeferred<Awaited<ReturnType<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >>>();
-    let refreshInput: Parameters<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >[0] | undefined;
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async (input) => {
-      refreshInput = input;
-      return await activeRefresh.promise;
-    });
-    const abortBrowserVaultRefresh = vi.fn(async () => {
-      activeRefresh.resolve({
-        status: "already_fresh",
-      });
-    });
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      nextWakeAt: null,
-      status: "idle",
+    >(async () => ({
+      status: "publish_conflict",
     }));
+    const waitUntilPromises: Promise<unknown>[] = [];
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
       void promise.catch(() => undefined);
     });
-    const { alarms, readPendingBrowserVaultRefreshStorage, runner, runnerContainerNames } =
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner } =
       createRunnerCryptoContextHarness(workspace, {
-        destroyInstance,
-        abortBrowserVaultRefresh,
-        invoke,
         refreshBrowserVaultReplica,
         waitUntil,
       });
@@ -4096,337 +3971,26 @@ describe("HostedUserRunner runtime crypto context", () => {
     })).resolves.toMatchObject({
       scheduled: true,
     });
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
 
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: true,
-    });
-
-    expect(destroyInstance).not.toHaveBeenCalled();
-    expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
-      attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
-      userId: "member_123",
-    });
-    expect(refreshInput).toBeDefined();
-    expect(refreshInput).not.toHaveProperty("signal");
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await Promise.all(waitUntilPromises);
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
+    expect(alarms).toEqual([]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
-        component: "hosted.runner",
-        details: expect.objectContaining({
-          reason: "pending_nudge",
-        }),
-        message: "Hosted runner aborted optional browser-vault refresh.",
+        component: "runner",
+        message: "Hosted runner skipped background browser-vault refresh because publish conflicted with the latest workspace row.",
         phase: "scheduled",
         userId: "member_123",
       }),
     );
-    await flushDetachedRunnerDrive();
-    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    });
-    expect(runnerContainerNames).toContain("member_123");
-    expect(runnerContainerNames).not.toContain("member_123--browser-vault-refresh");
-    const latestAlarmMs = Date.parse(alarms.at(-1) ?? "");
-    expect(latestAlarmMs).toBeGreaterThanOrEqual(Date.parse("2026-04-27T00:00:01.000Z"));
-    expect(latestAlarmMs).toBeLessThan(Date.parse("2026-04-27T00:00:02.000Z"));
   });
 
-  it("aborts refresh for a foreground nudge without destroying the live runner container", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-abort-preserves-live-runner"),
-      version: "4",
-    });
-    const activeRefresh = createDeferred<Awaited<ReturnType<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >>>();
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => await activeRefresh.promise);
-    const abortBrowserVaultRefresh = vi.fn(async () => {
-      activeRefresh.resolve({
-        status: "already_fresh",
-      });
-    });
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      nextWakeAt: null,
-      status: "idle",
-    }));
-    const waitUntil = vi.fn((promise: Promise<unknown>) => {
-      void promise.catch(() => undefined);
-    });
-    const {
-      destroyInstanceNames,
-      runnerContainerNames,
-      runner,
-    } = createRunnerCryptoContextHarness(workspace, {
-      abortBrowserVaultRefresh,
-      destroyInstance,
-      invoke,
-      refreshBrowserVaultReplica,
-      waitUntil,
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    waitUntil.mockClear();
-    waitUntil.mockImplementation((promise: Promise<unknown>) => {
-      void promise.catch(() => undefined);
-    });
-
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: true,
-    });
-    expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
-      attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
-      userId: "member_123",
-    });
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    await flushDetachedRunnerDrive();
-    const mainRunnerContainerName = resolveHostedExecutionRunnerContainerName({
-      source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
-      userId: "member_123",
-    });
-    expect(destroyInstance).not.toHaveBeenCalled();
-    expect(destroyInstanceNames).toEqual([]);
-    expect(runnerContainerNames).toContain(mainRunnerContainerName);
-    expect(runnerContainerNames).not.toContain(`${mainRunnerContainerName}--browser-vault-refresh`);
-    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
-  });
-
-  it("aborts an active browser-vault refresh before foreground manual work starts", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-preempted-by-manual"),
-      version: "4",
-    });
-    const activeRefresh = createDeferred<Awaited<ReturnType<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >>>();
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => await activeRefresh.promise);
-    const abortBrowserVaultRefresh = vi.fn(async () => {
-      activeRefresh.resolve({
-        status: "already_fresh",
-      });
-    });
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      nextWakeAt: null,
-      status: "idle",
-    }));
-    const { readPendingBrowserVaultRefreshStorage, runner, runnerContainerNames } =
-      createRunnerCryptoContextHarness(workspace, {
-        destroyInstance,
-        abortBrowserVaultRefresh,
-        invoke,
-        refreshBrowserVaultReplica,
-      });
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "idle",
-    });
-
-    expect(destroyInstance).not.toHaveBeenCalled();
-    expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
-      attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
-      userId: "member_123",
-    });
-    expect(invoke).toHaveBeenCalledOnce();
-    await flushDetachedRunnerDrive();
-    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    });
-    expect(runnerContainerNames).toContain("member_123");
-    expect(runnerContainerNames).not.toContain("member_123--browser-vault-refresh");
-  });
-
-  it("clears pending browser-vault refresh after the container publishes the replica", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-published"),
-      version: "4",
-    });
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      byteLength: 256,
-      replicaRef: createBrowserVaultReplicaRef("live-projection-published"),
-      status: "published",
-    }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(workspace, {
-      refreshBrowserVaultReplica,
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-    await runner.alarm();
-    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
-    await flushDetachedRunnerDrive();
-
-    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.some(([input]) =>
-      input.path === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
-    )).toBe(false);
-  });
-
-  it("schedules a continuation alarm before an alarm-started browser-vault refresh", async () => {
+  it("schedules browser-vault refresh after a committed idle-shutdown checkpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-alarm-start"),
-      version: "4",
-    });
-    const activeRefresh = createDeferred<Awaited<ReturnType<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >>>();
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => await activeRefresh.promise);
-    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
-      refreshBrowserVaultReplica,
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
-
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-
-    activeRefresh.resolve({
-      status: "already_fresh",
-    });
-    await flushDetachedRunnerDrive();
-
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
-  });
-
-  it("keeps browser-vault refresh pending and schedules a retry after publish conflict", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-conflict"),
-      version: "4",
-    });
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "publish_conflict",
-    }));
-    const { alarms, readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
-      workspace,
-      {
-        refreshBrowserVaultReplica,
-      },
-    );
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "member_123",
-    }));
-
-    await flushDetachedRunnerDrive();
-
-    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    });
-    expect(alarms).toContain("2026-04-27T00:00:30.050Z");
-  });
-
-  it("keeps pending browser-vault refresh alarm-driven after an active invocation completes", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-after-invocation"),
-      version: "4",
-    });
-    const activeInvocation = createDeferred<Awaited<ReturnType<HostedExecutionContainerStubLike["invoke"]>>>();
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
-      async () => await activeInvocation.promise,
-    );
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "already_fresh",
-    }));
-    const { alarms, runner } = createRunnerCryptoContextHarness(workspace, {
-      invoke,
-      refreshBrowserVaultReplica,
-    });
-    await runner.bindUser("member_123");
-
-    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    vi.setSystemTime(new Date(FIXED_NOW));
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-
-    activeInvocation.resolve({
-      nextWakeAt: null,
-      status: "idle",
-    });
-    await expect(activeRun).resolves.toMatchObject({
-      status: "idle",
-    });
-
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
-
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "member_123",
-      }),
-    ));
-  });
-
-  it("keeps a due idle-shutdown checkpoint ahead of browser-vault refresh continuation", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const workspace = createWorkspaceState({
-      snapshotRef: createBundleRef("refresh-yields-to-due-idle-checkpoint"),
+      snapshotRef: createBundleRef("idle-checkpoint-browser-vault-refresh"),
       version: "4",
     });
     const destroyInstance = vi.fn(async () => {});
@@ -4438,10 +4002,9 @@ describe("HostedUserRunner runtime crypto context", () => {
           status: "scheduled" as const,
         };
       }
-
       return {
         idleShutdownCheckpointed: true,
-        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        nextWakeAt: null,
         status: "idle" as const,
       };
     });
@@ -4450,382 +4013,38 @@ describe("HostedUserRunner runtime crypto context", () => {
     >(async () => ({
       status: "already_fresh",
     }));
-    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { runner } = createRunnerCryptoContextHarness(workspace, {
       destroyInstance,
       invoke,
       refreshBrowserVaultReplica,
+      waitUntil,
     });
     await runner.bindUser("member_123");
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
       status: "scheduled",
     });
-    await flushDetachedRunnerDrive();
-
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
-    expect(
-      sql.exec(
-        `SELECT idle_shutdown_checkpoint_due_at,
-                idle_shutdown_checkpoint_workspace_version,
-                next_wake_at
-         FROM runner_meta WHERE user_id = ?`,
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:01.000Z",
-      idle_shutdown_checkpoint_workspace_version: "4",
-      next_wake_at: "2026-04-27T00:01:00.000Z",
-    }]);
-
-    mocks.emitHostedExecutionStructuredLog.mockClear();
     vi.setSystemTime(new Date("2026-04-27T00:00:02.000Z"));
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-
-    expect(alarms.at(-1)).toBe("2026-04-27T00:00:02.000Z");
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted runner scheduled pending browser-vault refresh continuation.",
-      }),
-    );
-
-    await runner.alarm();
+    await expect(runner.alarm()).resolves.toBeUndefined();
 
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
     expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(waitUntil).toHaveBeenCalledOnce();
+    await Promise.all(waitUntilPromises);
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
   });
 
-  it("keeps early optional browser-vault alarms behind a pending idle-shutdown checkpoint", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
+  it("skips background browser-vault refresh in hosted-local e2e isolation", async () => {
     const workspace = createWorkspaceState({
-      snapshotRef: createBundleRef("refresh-yields-to-future-idle-checkpoint"),
+      snapshotRef: createLayeredSnapshotRef("background-browser-vault-local-e2e-skip"),
       version: "4",
     });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      deferredCheckpointRequired: true,
-      nextWakeAt: "2026-04-27T00:01:00.000Z",
-      status: "scheduled" as const,
-    }));
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "already_fresh",
-    }));
-    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-      invoke,
-      refreshBrowserVaultReplica,
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "scheduled",
-    });
-    await flushDetachedRunnerDrive();
-
-    expect(
-      sql.exec(
-        `SELECT idle_shutdown_checkpoint_due_at,
-                idle_shutdown_checkpoint_workspace_version
-         FROM runner_meta WHERE user_id = ?`,
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:01.000Z",
-      idle_shutdown_checkpoint_workspace_version: "4",
-    }]);
-
-    mocks.emitHostedExecutionStructuredLog.mockClear();
-    vi.setSystemTime(new Date("2026-04-27T00:00:00.500Z"));
-
-    await runner.alarm();
-
-    expect(invoke).toHaveBeenCalledTimes(1);
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted runner yielded optional alarm work to pending idle-shutdown checkpoint.",
-      }),
-    );
-  });
-
-  it("drains a refreshed pending browser-vault slot from a later alarm", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-a"),
-      version: "4",
-    });
-    const activeRefresh = createDeferred<Awaited<ReturnType<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >>>();
-    let firstRefresh = true;
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => {
-      if (firstRefresh) {
-        firstRefresh = false;
-        return await activeRefresh.promise;
-      }
-
-      return {
-        status: "already_fresh",
-      };
-    });
-    const { runner } = createRunnerCryptoContextHarness(workspace, {
-      refreshBrowserVaultReplica,
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "member_123",
-      }),
-    ));
-    expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(1);
-
-    workspace.snapshotRef = createLayeredSnapshotRef("refresh-b");
-    workspace.version = "5";
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-
-    activeRefresh.resolve({
-      status: "already_fresh",
-    });
-
-    await flushDetachedRunnerDrive();
-    expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(1);
-
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledTimes(2));
-    expect(refreshBrowserVaultReplica).toHaveBeenLastCalledWith(expect.objectContaining({
-      userId: "member_123",
-    }));
-  });
-
-  it("schedules browser-vault refresh after a foreground invocation without running it inline", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-pending"),
-      version: "4",
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-      workspace.version = String(Number(workspace.version) + 1);
-      return {
-        nextWakeAt: null,
-        status: "idle",
-      };
-    });
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "already_fresh",
-    }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
-      workspace,
-      {
-        invoke,
-        refreshBrowserVaultReplica,
-      },
-    );
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "idle",
-    });
-
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    }));
-
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
-  });
-
-  it("skips post-foreground browser-vault refresh in hosted-local e2e isolation", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-local-e2e-skip"),
-      version: "4",
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-      workspace.version = String(Number(workspace.version) + 1);
-      return {
-        nextWakeAt: null,
-        status: "idle",
-      };
-    });
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "already_fresh",
-    }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
-      workspace,
-      {
-        invoke,
-        refreshBrowserVaultReplica,
-        runnerRuntimeEnvSource: {
-          ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-          MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
-        },
-      },
-    );
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "idle",
-    });
-
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
-  });
-
-  it("keeps foreground nudges ahead of a pending post-reply browser-vault refresh", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-nudge-wins"),
-      version: "4",
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-      workspace.version = String(Number(workspace.version) + 1);
-      return {
-        nextWakeAt: null,
-        status: "idle",
-      };
-    });
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "already_fresh",
-    }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
-      workspace,
-      {
-        invoke,
-        refreshBrowserVaultReplica,
-      },
-    );
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "idle",
-    });
-    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    }));
-
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: true,
-    });
-    await flushDetachedRunnerDrive();
-    expect(invoke).toHaveBeenCalledTimes(2);
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    });
-  });
-
-  it("preserves post-reply browser-vault refresh scheduling when a nudge is queued during foreground work", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-queued-nudge"),
-      version: "4",
-    });
-    const firstInvokeStarted = createDeferred<void>();
-    const finishFirstInvoke = createDeferred<void>();
-    const secondInvokeStarted = createDeferred<void>();
-    const finishSecondInvoke = createDeferred<void>();
-    let invokeCount = 0;
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-      invokeCount += 1;
-      if (invokeCount === 1) {
-        firstInvokeStarted.resolve();
-        await finishFirstInvoke.promise;
-      } else {
-        secondInvokeStarted.resolve();
-        await finishSecondInvoke.promise;
-      }
-      workspace.version = String(Number(workspace.version) + 1);
-      return {
-        nextWakeAt: null,
-        status: "idle",
-      };
-    });
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "already_fresh",
-    }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
-      workspace,
-      {
-        invoke,
-        refreshBrowserVaultReplica,
-      },
-    );
-    await runner.bindUser("member_123");
-
-    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
-    await firstInvokeStarted.promise;
-
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: false,
-      inFlight: true,
-    });
-
-    finishFirstInvoke.resolve();
-    await expect(activeRun).resolves.toMatchObject({
-      status: "idle",
-    });
-    await secondInvokeStarted.promise;
-    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    }));
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-
-    finishSecondInvoke.resolve();
-    await flushDetachedRunnerDrive();
-    expect(invoke).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not schedule browser-vault refresh after a failed foreground invocation", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("foreground-browser-vault-failed"),
-      version: "4",
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      nextWakeAt: null,
-      redactedStatus: {
-        reason: "test_failure",
-      },
-      status: "failed",
-    }));
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async () => ({
@@ -4837,135 +4056,25 @@ describe("HostedUserRunner runtime crypto context", () => {
     const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
       workspace,
       {
-        invoke,
         refreshBrowserVaultReplica,
+        runnerRuntimeEnvSource: {
+          ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+          MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        },
         waitUntil,
       },
     );
     await runner.bindUser("member_123");
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "failed",
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      scheduled: true,
     });
 
-    expect(invoke).toHaveBeenCalledOnce();
     expect(waitUntil).not.toHaveBeenCalled();
-    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-  });
-
-  it("preserves a completed invocation when browser-vault refresh scheduling fails", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-schedule-fails"),
-      version: "4",
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      nextWakeAt: null,
-      status: "idle",
-    }));
-    const { runner } = createRunnerCryptoContextHarness(workspace, {
-      invoke,
-      onStoragePut: ({ key }) => {
-        if (key === "runner:pending-browser-vault-refresh:v1") {
-          throw new Error("browser-vault refresh storage unavailable");
-        }
-      },
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "idle",
-    });
-    expect(invoke).toHaveBeenCalledOnce();
-  });
-
-  it("clears an alarm-driven browser-vault refresh when the current source already has a replica", async () => {
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("replica-already-current-old"),
-      version: "4",
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-      workspace.browserVaultReplicaRef = createBrowserVaultReplicaRef(
-        "replica-already-current-new-base_hash",
-      );
-      workspace.snapshotRef = createLayeredSnapshotRef("replica-already-current-new");
-      workspace.version = "5";
-      return {
-        nextWakeAt: null,
-        status: "idle",
-      };
-    });
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      status: "already_fresh",
-    }));
-    const { readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
-      workspace,
-      {
-        invoke,
-        refreshBrowserVaultReplica,
-      },
-    );
-    await runner.bindUser("member_123");
-
-    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-      status: "idle",
-    });
-
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
-      updatedAt: expect.any(String),
-    });
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    await flushDetachedRunnerDrive();
     expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
-  });
-
-  it("clears pending browser-vault refresh when the generated replica is too large", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-too-large"),
-      version: "4",
-    });
-    const browserVaultPublish = vi.fn();
-    const refreshBrowserVaultReplica = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
-    >(async () => ({
-      byteLength: 51 * 1024 * 1024,
-      maxBytes: 50 * 1024 * 1024,
-      status: "refresh_failed_too_large",
-    }));
-    const { alarms, readPendingBrowserVaultRefreshStorage, runner } = createRunnerCryptoContextHarness(
-      workspace,
-      {
-        browserVaultPublish,
-        refreshBrowserVaultReplica,
-      },
-    );
-    await runner.bindUser("member_123");
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      scheduled: true,
-    });
-
-    await runner.alarm();
-    await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined());
-    await flushDetachedRunnerDrive();
-    expect(browserVaultPublish).not.toHaveBeenCalled();
-    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
-    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:00:01.000Z")).toHaveLength(1);
   });
 
   it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {

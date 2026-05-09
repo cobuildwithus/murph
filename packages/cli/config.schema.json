@@ -9580,6 +9580,22 @@
                             "minLength": 1
                           }
                         },
+                        "analysisAnchor": {
+                          "description": "Observed analysis measurement anchor as role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:key. Repeat --analysis-anchor for multiple records.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "plannedMeasurement": {
+                          "description": "Planned analysis measurement as role=followup,kind=lab_panel,window=YYYY-MM-DD..YYYY-MM-DD,biomarkerKeys=biomarker:key. Repeat --planned-measurement for multiple records.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
                         "analysisNote": {
                           "description": "Analysis plan note. Repeat --analysis-note for multiple values.",
                           "type": "array",
@@ -9886,6 +9902,22 @@
                         },
                         "expectedDirection": {
                           "description": "Per-biomarker expected direction as biomarker:key=increase|decrease|stabilize. Repeat --expected-direction for multiple biomarkers.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "analysisAnchor": {
+                          "description": "Observed analysis measurement anchor as role=baseline,kind=lab_panel,recordId=evt_...,biomarkerKeys=biomarker:key. Repeat --analysis-anchor for multiple records.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "plannedMeasurement": {
+                          "description": "Planned analysis measurement as role=followup,kind=lab_panel,window=YYYY-MM-DD..YYYY-MM-DD,biomarkerKeys=biomarker:key. Repeat --planned-measurement for multiple records.",
                           "type": "array",
                           "items": {
                             "type": "string",

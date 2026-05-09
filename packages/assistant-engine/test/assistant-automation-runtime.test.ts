@@ -6575,6 +6575,131 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
+  it('skips replayed hosted queue-only Linq replies once reply-intent evidence exists', async () => {
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_queue_only_replay',
+      inputId: 'ain_queue_only_replay_0000000001',
+      mailboxRow: {
+        dedupeKey: 'dedupe_queue_only_replay',
+        eventId: 'evt_queue_only_replay',
+        itemId: 'mailbox_item_queue_only_replay',
+        laneSeq: '101',
+      },
+      occurredAt: '2026-04-08T00:08:00.000Z',
+      receivedAt: '2026-04-08T00:08:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_queue_only_replay',
+        threadId: 'real_thread_queue_only_replay',
+      },
+      source: 'linq',
+      text: 'queued hosted Linq replay text',
+    })
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      deliveryDispatchMode?: string
+      deliveryIdempotencyKey?: string | null
+    }) => {
+      expect(input.deliveryDispatchMode).toBe('queue-only')
+      expect(input.deliveryIdempotencyKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+      return {
+        delivery: null,
+        deliveryDeferred: true,
+        deliveryError: null,
+        deliveryIntentId: 'intent-queue-only-replay',
+        response: 'queued hosted response text',
+        session: {
+          sessionId: 'session-queue-only-replay',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const first = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_queue_only_replay',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+    const firstSend = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+
+    expect(first).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(firstSend?.deliveryIdempotencyKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [hostedInput.event.inputId],
+        outcome: 'deferred',
+      }))
+
+    replyMocks.sendAssistantMessage.mockClear()
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockResolvedValue(
+      createTerminalEvidence({
+        captureId: hostedInput.event.inputId,
+        groupCaptureIds: [hostedInput.event.inputId],
+        terminal: {
+          deliveryIntentId: 'intent-queue-only-replay',
+          kind: 'reply_intent_committed',
+          sessionId: 'session-queue-only-replay',
+        },
+      }),
+    )
+
+    const replay = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_queue_only_replay',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(replay).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
   it('keeps degraded hosted email in mixed retry groups before prompt construction', async () => {
     const promptReadyThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-ready@example.test>',

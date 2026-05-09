@@ -225,10 +225,9 @@ even if the checkpoint alarm is delivered late enough that the later retry wake
 is also due. If the ordered checkpoint alarm collides with an already-active
 workspace invocation, Cloudflare must defer the checkpoint ahead of the recovery
 wake rather than clearing it, so active-invocation recovery cannot erase the
-durability job. Optional auxiliary schedulers, including browser-vault refresh,
-must read runner state before setting continuation alarms and yield to any
-earlier or already-due runner wake/checkpoint even if Durable Object `getAlarm()`
-does not report that alarm.
+durability job. Optional auxiliary work, including browser-vault refresh, stays
+detached from runner alarms. It may run best-effort from live warm state, but
+failure or staleness cannot mutate runner checkpoint, reply, or wake state.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
@@ -380,9 +379,10 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - lease/fencing generation
 - alarm/nudge coalescing
 - container invocation
-- signed web usage-gate enforcement before container invocation
-- short-lived signed web allow-decision validation on foreground nudges; missing,
-  stale, mismatched, or invalid decisions fall back to the live web usage gate
+- optional signed web allow-decision payload compatibility on foreground
+  nudges; Cloudflare does not validate it as runner-start authority and missing,
+  stale, mismatched, or invalid decisions never trigger a live web usage-gate
+  callback before the hot reply path starts
 - encrypted bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
 - verification of signed ingress/runtime root envelopes plus Cloudflare P-256

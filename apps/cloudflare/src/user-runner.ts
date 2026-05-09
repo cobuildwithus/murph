@@ -10,11 +10,6 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  HOSTED_WORKSPACE_INVOCATION_REASONS,
-  parseHostedAiUsageAllowDecision,
-  verifyHostedAiUsageAllowDecision,
-} from "@murphai/hosted-execution/runtime-control";
-import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -79,51 +74,14 @@ import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
-import {
-  BrowserVaultRefreshCoordinator,
-  type HostedBrowserVaultRefreshScheduleResult,
-} from "./browser-vault-refresh/coordinator.ts";
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
 const ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS = 1_000;
 const DEFERRED_CHECKPOINT_DRAIN_DELAY_MS = 1_000;
-const PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
-const HOSTED_WEB_USAGE_GATE_PATH = "/api/internal/hosted-execution/usage/gate";
-const AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY =
-  "runner:ai-usage-allow-decision-nonces:v1";
-const AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA =
-  "murph.hosted-runner.ai-usage-allow-decision-nonces.v1";
-
-interface AiUsageAllowDecisionNonceRecord {
-  expiresAt: string;
-  nonce: string;
-}
-
-interface AiUsageAllowDecisionNonceStorageRecord {
-  entries: readonly AiUsageAllowDecisionNonceRecord[];
-  schema: typeof AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA;
-  updatedAt: string;
-}
-
-type HostedAiUsageGateDecision =
-  | {
-    allowed: true;
-    noticeCode: null;
-    reason: null;
-    retryAfter: null;
-    userNotice: null;
-  }
-  | {
-    allowed: false;
-    noticeCode: string | null;
-    reason: string;
-    retryAfter: string;
-    userNotice: string | null;
-  };
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -141,7 +99,11 @@ export interface HostedRunnerUserDataDeletionResult {
   userId: string;
 }
 
-export type { HostedBrowserVaultRefreshScheduleResult };
+export interface HostedBrowserVaultRefreshScheduleResult {
+  accepted: true;
+  scheduled: true;
+  userId: string;
+}
 
 interface RunnerUserStores {
   crypto: HostedUserCryptoContext;
@@ -162,13 +124,6 @@ export interface HostedRunnerStuckInvocationTestResult {
   ok: true;
 }
 
-class HostedRunnerInvocationPreemptedForNudgeError extends Error {
-  constructor() {
-    super("Hosted runner invocation preempted for a pending foreground nudge.");
-    this.name = "HostedRunnerInvocationPreemptedForNudgeError";
-  }
-}
-
 class HostedRunnerInvocationLeaseExpiredError extends Error {
   constructor() {
     super("Hosted runner invocation lease expired.");
@@ -187,16 +142,12 @@ export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
-  private readonly browserVaultRefreshCoordinator: BrowserVaultRefreshCoordinator;
   private runnerStores: RunnerUserStores | null = null;
   private runtimeCryptoContextLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
   private pendingRunnerDriveAfterInvocation: {
     aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
     reason: HostedWorkspaceInvocationReason;
-    userId: string;
-  } | null = null;
-  private pendingBrowserVaultRefreshAfterInvocation: {
     userId: string;
   } | null = null;
   private activeWorkspaceInvocationAbortController: AbortController | null = null;
@@ -217,15 +168,6 @@ export class HostedUserRunner {
     this.runnerContainerNamespace = runnerContainerNamespace;
     this.stateStore = new RunnerStateStore(state);
     this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(this.stateStore, state);
-    this.browserVaultRefreshCoordinator = new BrowserVaultRefreshCoordinator({
-      continuationDelayMs: PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS,
-      hasForegroundWork: () => this.invocationLock !== null,
-      readStateForRetryScheduling: async () => await this.tryReadStateForRetryScheduling(),
-      retryDelayMs: this.env.retryDelayMs,
-      runPendingRefresh: async (input) => await this.runPendingBrowserVaultRefresh(input),
-      state,
-      stateStore: this.stateStore,
-    });
   }
 
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
@@ -281,14 +223,14 @@ export class HostedUserRunner {
     return { userId };
   }
 
-	  async alarm(): Promise<void> {
-	    let record: RunnerStateRecord;
-	    try {
-	      record = await this.stateStore.readState();
-	    } catch (error) {
-	      emitHostedExecutionStructuredLog({
-	        component: "hosted.runner",
-	        error,
+  async alarm(): Promise<void> {
+    let record: RunnerStateRecord;
+    try {
+      record = await this.stateStore.readState();
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
         level: "warn",
         message: "Hosted wake nudge could not read runner state; scheduling a retry.",
         phase: "wake.running",
@@ -312,10 +254,10 @@ export class HostedUserRunner {
       return;
     }
 
-    if (dueAlarm.kind === "idle_shutdown_checkpoint" && !this.env.idleShutdownCheckpointsEnabled) {
+    if (dueAlarm.kind === "idle_checkpoint" && !this.env.idleShutdownCheckpointsEnabled) {
       await this.stateStore.clearIdleShutdownCheckpoint();
       await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: record.nextWakeAt,
+        preferredWakeAt: dueAlarm.checkpointNextWakeAt ?? record.nextWakeAt,
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -329,39 +271,20 @@ export class HostedUserRunner {
       return;
     }
 
-    if (
-      dueAlarm.kind === "none"
-      && !record.inFlight
-      && !record.pendingNudge
-      && record.deferredCheckpointRequired
-      && record.idleShutdownCheckpointDueAt
-    ) {
+    if (dueAlarm.kind === "none") {
+      if (record.inFlight) {
+        await this.runUntilIdleOrBudget({
+          reason: "alarm",
+        });
+        return;
+      }
       await this.runtimeAlarmScheduler.syncStoredAlarm();
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
-          idleShutdownCheckpointDueAt: record.idleShutdownCheckpointDueAt,
+          runnerAlarmPresent: record.alarm !== null,
         },
-        message: "Hosted runner yielded optional alarm work to pending idle-shutdown checkpoint.",
-        phase: "scheduled",
-        userId: record.userId,
-      });
-      return;
-    }
-
-    const browserVaultRefreshStarted = dueAlarm.kind === "none"
-      ? await this.browserVaultRefreshCoordinator.tryStart({
-        userId: record.userId,
-      })
-      : false;
-    if (
-      dueAlarm.kind === "none"
-      && browserVaultRefreshStarted
-    ) {
-      await this.runtimeAlarmScheduler.syncStoredAlarm();
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        message: "Hosted runner alarm started pending browser-vault refresh.",
+        message: "Hosted runner alarm found no due work.",
         phase: "scheduled",
         userId: record.userId,
       });
@@ -379,29 +302,29 @@ export class HostedUserRunner {
         message: "Hosted runner alarm starting workspace invocation.",
         phase: "wake.running",
         userId: record.userId,
-	      });
-	      await this.runUntilIdleOrBudget({
-        dueWake: dueAlarm.kind === "drain",
-        idleCheckpointWorkspaceVersion: dueAlarm.kind === "idle_shutdown_checkpoint"
+      });
+      await this.runUntilIdleOrBudget({
+        dueWake: dueAlarm.kind === "work",
+        idleCheckpointWorkspaceVersion: dueAlarm.kind === "idle_checkpoint"
           ? dueAlarm.idleWorkspaceVersion
           : null,
-	        reason: dueAlarm.kind === "idle_shutdown_checkpoint"
-	          ? "idle_shutdown_checkpoint"
-	          : "alarm",
-	      });
-	    } catch (error) {
-	      if (dueAlarm.kind === "idle_shutdown_checkpoint") {
-	        const latestRecord = await this.stateStore.readState();
-	        if (latestRecord.retryFailureCount === record.retryFailureCount) {
-	          const failedRecord = await this.stateStore.recordInvocationStartFailure({
-	            error,
-	            failedAt: new Date().toISOString(),
-	          });
-	          const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
-	            defaultRetryDelayMs: this.env.retryDelayMs,
-	            reason: "idle_shutdown_checkpoint",
-	            retryFailureCount: failedRecord.retryFailureCount,
-	          });
+        reason: dueAlarm.kind === "idle_checkpoint"
+          ? "idle_shutdown_checkpoint"
+          : "alarm",
+      });
+    } catch (error) {
+      if (dueAlarm.kind === "idle_checkpoint") {
+        const latestRecord = await this.stateStore.readState();
+        if (latestRecord.retryFailureCount === record.retryFailureCount) {
+          const failedRecord = await this.stateStore.recordInvocationStartFailure({
+            error,
+            failedAt: new Date().toISOString(),
+          });
+          const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
+            defaultRetryDelayMs: this.env.retryDelayMs,
+            reason: "idle_shutdown_checkpoint",
+            retryFailureCount: failedRecord.retryFailureCount,
+          });
           const retryScheduled = await this.scheduleIdleShutdownCheckpointRetry({
             retryDelayMs,
             workspaceVersion: dueAlarm.idleWorkspaceVersion,
@@ -411,22 +334,22 @@ export class HostedUserRunner {
               preferredWakeAt: latestRecord.nextWakeAt,
             });
           }
-	        }
-          await this.destroyIdleShutdownCheckpointContainerAfterFailureBestEffort({
-            userId: record.userId,
-          });
-	        emitHostedExecutionStructuredLog({
-	          component: "hosted.runner",
-	          error,
-	          level: "warn",
-	          message: "Hosted idle-shutdown checkpoint alarm failed; preserving idle checkpoint retry state.",
-	          phase: "wake.running",
-	          userId: record.userId,
-	        });
-	        return;
-	      }
+        }
+        await this.destroyIdleShutdownCheckpointContainerAfterFailureBestEffort({
+          userId: record.userId,
+        });
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          error,
+          level: "warn",
+          message: "Hosted idle-shutdown checkpoint alarm failed; preserving idle checkpoint retry state.",
+          phase: "wake.running",
+          userId: record.userId,
+        });
+        return;
+      }
 
-	      emitHostedExecutionStructuredLog({
+      emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         error,
         level: "warn",
@@ -472,7 +395,6 @@ export class HostedUserRunner {
       const runnerCleanup = await this.stopRunnerBeforeUserDataDeletion(userId);
       const r2 = await this.deleteHostedUserR2DataBestEffort(userId);
       const stateDeletion = await this.stateStore.deleteStateForUser(userId);
-      await this.state.storage.delete(AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY);
       const deleteAlarm = this.state.storage.deleteAlarm;
       const alarmCleared = typeof deleteAlarm === "function";
       if (alarmCleared) {
@@ -588,10 +510,6 @@ export class HostedUserRunner {
   async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
     let runningRecord = await this.stateStore.readState();
-    this.browserVaultRefreshCoordinator.abortForForegroundWork({
-      reason: "pending_nudge",
-      userId: runningRecord.userId,
-    });
     if (!activeInThisIsolate && runningRecord.inFlight) {
       const recovery = await this.stateStore.clearStaleInvocationIfExpired({
         nowMs: Date.now(),
@@ -603,15 +521,6 @@ export class HostedUserRunner {
         this.logStaleInvocationLeaseCleared(recovery.attemptId, runningRecord.userId);
       }
     }
-    const persistedPreemption = activeInThisIsolate
-      ? {
-          preempted: false,
-          record: runningRecord,
-        }
-      : await this.preemptPersistedWorkspaceInvocationForPendingNudge({
-          record: runningRecord,
-        });
-    runningRecord = persistedPreemption.record;
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
     const nowMs = Date.now();
     const preferredWakeAt = alreadyRunning
@@ -628,11 +537,7 @@ export class HostedUserRunner {
     const record = await this.markPendingNudgeAndApplyAlarm({
       preferredWakeAt,
     });
-    const preemptedActiveInvocation = activeInThisIsolate && runningRecord.inFlight
-      ? this.preemptActiveWorkspaceInvocationForPendingNudge({
-          userId: record.userId,
-        })
-      : false;
+    const preemptedActiveInvocation = false;
     let immediateDriveStarted = false;
     if (activeInThisIsolate) {
       immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
@@ -654,7 +559,7 @@ export class HostedUserRunner {
         alreadyRunning,
         immediateDriveStarted,
         pendingNudge: record.pendingNudge,
-        preemptedPersistedActiveInvocation: persistedPreemption.preempted,
+        preemptedPersistedActiveInvocation: false,
         preemptedActiveInvocation,
       },
       message: "Hosted runner nudge accepted.",
@@ -682,7 +587,24 @@ export class HostedUserRunner {
 
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
-    return await this.browserVaultRefreshCoordinator.schedule(input);
+    this.scheduleBrowserVaultRefreshBestEffort({
+      reason: "external_request",
+      userId: input.userId,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        scheduled: true,
+      },
+      message: "Hosted runner accepted browser-vault refresh schedule.",
+      phase: "scheduled",
+      userId: input.userId,
+    });
+    return {
+      accepted: true,
+      scheduled: true,
+      userId: input.userId,
+    };
   }
 
   async ownsActiveInvocationLease(input: {
@@ -868,71 +790,11 @@ export class HostedUserRunner {
       preflightWorkspaceRead = idlePreflight.workspaceRead;
     }
 
-    const gate = input.reason === "idle_shutdown_checkpoint"
-      ? createAllowedHostedAiUsageGateDecision()
-      : await this.resolveHostedAiUsageGateBeforeInvocation({
-          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-          notifyUserOnDenied: initialRecord.pendingNudge,
-          userId: initialRecord.userId,
-        });
-    if (!gate.allowed) {
-      if (gate.reason === "ai_usage_gate_unavailable") {
-        const error = new Error("Hosted AI usage gate was unavailable.");
-        await this.stateStore.recordInvocationStartFailure({
-          error,
-          failedAt: new Date().toISOString(),
-        });
-        await this.scheduleHostedWakeRetryAlarm({
-          respectMaxAttempts: true,
-          userId: initialRecord.userId,
-        });
-        const record = await this.stateStore.readState();
-        return {
-          nextWakeAt: record.nextWakeAt,
-          redactedStatus: {
-            aiUsageGateBlocked: true,
-            aiUsageGateReason: gate.reason,
-            aiUsageGateRetryAfter: gate.retryAfter,
-          },
-          status: "scheduled",
-        };
-      }
-
-      const record = await this.markPendingNudgeAndApplyAlarm({
-        preferredWakeAt: gate.retryAfter,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          noticeCode: gate.noticeCode,
-          reason: gate.reason,
-          retryAfter: gate.retryAfter,
-        },
-        message: "Hosted runner skipped workspace invocation because the AI usage gate denied the start.",
-        phase: "scheduled",
-        userId: initialRecord.userId,
-      });
-      return {
-        nextWakeAt: record.nextWakeAt,
-        redactedStatus: {
-          aiUsageGateBlocked: true,
-          ...(gate.noticeCode ? { aiUsageGateNoticeCode: gate.noticeCode } : {}),
-          ...(gate.userNotice ? { aiUsageGateNotice: gate.userNotice } : {}),
-          aiUsageGateReason: gate.reason,
-          aiUsageGateRetryAfter: gate.retryAfter,
-        },
-        status: "scheduled",
-      };
-    }
-
-    this.browserVaultRefreshCoordinator.abortForForegroundWork({
-      reason: "foreground_invocation",
-      userId: initialRecord.userId,
-    });
     let lease: RunnerInvocationLease;
     try {
       lease = await this.stateStore.beginInvocation({
         consumePendingNudge: input.reason === "idle_shutdown_checkpoint" ? false : undefined,
+        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
         reason: input.reason,
         userId: initialRecord.userId,
       });
@@ -1053,11 +915,6 @@ export class HostedUserRunner {
               userId: initialRecord.userId,
             });
           }
-          if (result.status !== "failed") {
-            this.pendingBrowserVaultRefreshAfterInvocation = {
-              userId: initialRecord.userId,
-            };
-          }
         }
       }
       emitHostedExecutionStructuredLog({
@@ -1073,30 +930,6 @@ export class HostedUserRunner {
       });
       return result;
     } catch (error) {
-      if (error instanceof HostedRunnerInvocationPreemptedForNudgeError) {
-        const completion = await this.stateStore.completeInvocation({
-          finishedAt: new Date().toISOString(),
-          lease,
-        });
-        const record = await this.reschedulePendingNudgeAfterInvocationLiveness(
-          completion.record,
-        ) ?? completion.record;
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            workspaceAttemptId: lease.attemptId,
-            workspaceReason: input.reason,
-          },
-          message: "Hosted runner completed preempted invocation handoff to pending nudge.",
-          phase: "scheduled",
-          userId: initialRecord.userId,
-        });
-        return {
-          nextWakeAt: record.nextWakeAt,
-          status: "scheduled",
-        };
-      }
-
       const failure = await this.stateStore.failInvocation({
         error,
         finishedAt: new Date().toISOString(),
@@ -1270,13 +1103,16 @@ export class HostedUserRunner {
       ) {
         await this.stateStore.clearIdleShutdownCheckpoint();
       } else {
-        await this.stateStore.scheduleIdleShutdownCheckpoint({
+        const record = await this.stateStore.scheduleIdleShutdownCheckpoint({
+          checkpointNextWakeAt: wakeAt,
           dueAt: resolvePreemptingIdleShutdownCheckpointDueAt({
             nextWakeAt: wakeAt,
             nowMs,
           }),
           workspaceVersion: inputRecord.idleShutdownCheckpointWorkspaceVersion,
         });
+        await this.runtimeAlarmScheduler.syncStoredAlarm();
+        return record;
       }
     }
     return await this.runtimeAlarmScheduler.syncNextWake({
@@ -1294,35 +1130,6 @@ export class HostedUserRunner {
       return await this.syncInvocationRecoveryAlarm(record);
     }
     return record;
-  }
-
-  private preemptActiveWorkspaceInvocationForPendingNudge(input: {
-    userId: string;
-  }): boolean {
-    const abortController = this.activeWorkspaceInvocationAbortController;
-    const reason = this.activeWorkspaceInvocationReason;
-    if (
-      !abortController
-      || abortController.signal.aborted
-      || !shouldPreemptActiveWorkspaceInvocationForNudge({
-        reason,
-      })
-    ) {
-      return false;
-    }
-
-    abortController.abort(new HostedRunnerInvocationPreemptedForNudgeError());
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        workspaceAttemptId: this.activeWorkspaceInvocationAttemptId,
-        workspaceReason: reason,
-      },
-      message: "Hosted runner preempted lower-priority invocation for foreground nudge.",
-      phase: "scheduled",
-      userId: input.userId,
-    });
-    return true;
   }
 
   private abortActiveInvocationAfterExpiredLease(input: {
@@ -1361,109 +1168,6 @@ export class HostedUserRunner {
       this.logStaleInvocationLeaseCleared(recovery.attemptId, recovery.record.userId);
     }
     return recovery;
-  }
-
-  private async preemptPersistedWorkspaceInvocationForPendingNudge(input: {
-    record: RunnerStateRecord;
-  }): Promise<{
-    preempted: boolean;
-    record: RunnerStateRecord;
-  }> {
-    const invocation = input.record.workspaceInvocation;
-    if (
-      !input.record.inFlight
-      || !invocation
-      || !isHostedWorkspaceInvocationReasonValue(invocation.reason)
-      || !shouldPreemptActiveWorkspaceInvocationForNudge({
-        reason: invocation.reason,
-      })
-    ) {
-      return {
-        preempted: false,
-        record: input.record,
-      };
-    }
-
-    const destroyed = await this.destroyWorkspaceInvocationContainerForPreemption({
-      reason: invocation.reason,
-      userId: input.record.userId,
-      workspaceAttemptId: invocation.attemptId,
-    });
-    if (!destroyed) {
-      return {
-        preempted: false,
-        record: input.record,
-      };
-    }
-
-    const preemption = await this.stateStore.preemptActiveInvocation({
-      attemptId: invocation.attemptId,
-      reason: invocation.reason,
-    });
-    if (preemption.preempted) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          workspaceAttemptId: invocation.attemptId,
-          workspaceReason: invocation.reason,
-        },
-        message: "Hosted runner preempted persisted lower-priority invocation for foreground nudge.",
-        phase: "scheduled",
-        userId: input.record.userId,
-      });
-    }
-
-    return preemption;
-  }
-
-  private async destroyWorkspaceInvocationContainerForPreemption(input: {
-    reason: HostedWorkspaceInvocationReason;
-    userId: string;
-    workspaceAttemptId: string;
-  }): Promise<boolean> {
-    if (!this.runnerContainerNamespace) {
-      return false;
-    }
-
-    try {
-      const destroyed = await destroyHostedExecutionContainer({
-        runnerContainerName: resolveHostedExecutionRunnerContainerName({
-          source: this.runnerRuntimeEnvSource,
-          userId: input.userId,
-        }),
-        runnerContainerNamespace: this.runnerContainerNamespace,
-        userId: input.userId,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          destroyAttempted: destroyed.attempted,
-          destroyErrorCode: destroyed.errorCode,
-          destroyOk: destroyed.ok,
-          workspaceAttemptId: input.workspaceAttemptId,
-          workspaceReason: input.reason,
-        },
-        level: destroyed.ok ? "info" : "warn",
-        message: "Hosted runner cleaned up lower-priority invocation container for foreground nudge.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return destroyed.ok;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          workspaceAttemptId: input.workspaceAttemptId,
-          workspaceReason: input.reason,
-        },
-        error,
-        level: "warn",
-        message: "Hosted runner could not clean up lower-priority invocation container for foreground nudge.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return false;
-    }
   }
 
   private logStaleInvocationLeaseCleared(
@@ -1531,185 +1235,6 @@ export class HostedUserRunner {
     }
 
     return parseHostedWorkspaceReadResponse(await response.json());
-  }
-
-  private async resolveHostedAiUsageGateBeforeInvocation(input: {
-    aiUsageAllowDecision: HostedAiUsageAllowDecision | null;
-    notifyUserOnDenied: boolean;
-    userId: string;
-  }): Promise<HostedAiUsageGateDecision> {
-    if (
-      input.aiUsageAllowDecision
-      && await this.isHostedAiUsageAllowDecisionFreshAndValid({
-        decision: input.aiUsageAllowDecision,
-        userId: input.userId,
-      })
-    ) {
-      return createAllowedHostedAiUsageGateDecision();
-    }
-
-    return await this.readHostedAiUsageGateBeforeInvocation({
-      notifyUserOnDenied: input.notifyUserOnDenied,
-      userId: input.userId,
-    });
-  }
-
-  private async isHostedAiUsageAllowDecisionFreshAndValid(input: {
-    decision: HostedAiUsageAllowDecision;
-    userId: string;
-  }): Promise<boolean> {
-    const secret = this.env.hostedAiUsageGateAllowSigningSecret;
-    if (!secret) {
-      return false;
-    }
-
-    try {
-      const decision = parseHostedAiUsageAllowDecision(input.decision);
-      if (decision.userId !== input.userId) {
-        return false;
-      }
-      if (
-        this.env.hostedAiUsageGateAllowSigningKeyId
-        && decision.signature.keyId !== this.env.hostedAiUsageGateAllowSigningKeyId
-      ) {
-        return false;
-      }
-      if (!isHostedAiUsageAllowDecisionFresh(decision)) {
-        return false;
-      }
-
-      const valid = await verifyHostedAiUsageAllowDecision({
-        decision,
-        secret,
-      });
-      if (!valid) {
-        return false;
-      }
-
-      return await this.consumeHostedAiUsageAllowDecisionNonce(decision);
-    } catch {
-      return false;
-    }
-  }
-
-  private async consumeHostedAiUsageAllowDecisionNonce(
-    decision: HostedAiUsageAllowDecision,
-  ): Promise<boolean> {
-    const nowMs = Date.now();
-    const existing = await this.readHostedAiUsageAllowDecisionNonceRecord();
-    const freshEntries = existing.entries.filter((entry) => {
-      const expiresAtMs = Date.parse(entry.expiresAt);
-      return Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
-    });
-
-    if (freshEntries.some((entry) => entry.nonce === decision.nonce)) {
-      return false;
-    }
-
-    await this.state.storage.put<AiUsageAllowDecisionNonceStorageRecord>(
-      AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY,
-      {
-        entries: [
-          ...freshEntries,
-          {
-            expiresAt: decision.expiresAt,
-            nonce: decision.nonce,
-          },
-        ],
-        schema: AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA,
-        updatedAt: new Date(nowMs).toISOString(),
-      },
-    );
-
-    return true;
-  }
-
-  private async readHostedAiUsageAllowDecisionNonceRecord(): Promise<{
-    entries: readonly AiUsageAllowDecisionNonceRecord[];
-  }> {
-    const value = await this.state.storage.get<unknown>(
-      AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY,
-    );
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return { entries: [] };
-    }
-
-    const record = value as Partial<AiUsageAllowDecisionNonceStorageRecord>;
-    if (
-      record.schema !== AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_SCHEMA
-      || !Array.isArray(record.entries)
-    ) {
-      return { entries: [] };
-    }
-
-    return {
-      entries: record.entries.flatMap((entry) => {
-        if (
-          !entry
-          || typeof entry !== "object"
-          || Array.isArray(entry)
-          || typeof entry.nonce !== "string"
-          || typeof entry.expiresAt !== "string"
-        ) {
-          return [];
-        }
-
-        return [{
-          expiresAt: entry.expiresAt,
-          nonce: entry.nonce,
-        }];
-      }),
-    };
-  }
-
-  private async readHostedAiUsageGateBeforeInvocation(input: {
-    notifyUserOnDenied: boolean;
-    userId: string;
-  },
-  ): Promise<HostedAiUsageGateDecision> {
-    try {
-      const response = await fetchHostedExecutionWebControlPlaneResponse({
-        ...(this.env.hostedWebAllowHttpHosts
-          ? { allowHttpHosts: this.env.hostedWebAllowHttpHosts }
-          : {}),
-        baseUrl: this.readHostedWebControlBaseUrl(),
-        body: JSON.stringify({
-          ...(input.notifyUserOnDenied ? { deniedNoticeContext: "pending_nudge" } : {}),
-        }),
-        boundUserId: input.userId,
-        callbackSigning: this.env.webCallbackSigning,
-        method: "POST",
-        path: HOSTED_WEB_USAGE_GATE_PATH,
-        timeoutMs: this.env.webControlTimeoutMs,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Hosted AI usage gate failed with HTTP ${response.status}.`);
-      }
-
-      return parseHostedAiUsageGateDecision(await response.json());
-    } catch (error) {
-      const retryAfter = new Date(Date.now() + this.env.retryDelayMs).toISOString();
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          reason: "ai_usage_gate_unavailable",
-          retryAfter,
-        },
-        error,
-        level: "warn",
-        message: "Hosted runner skipped workspace invocation because the AI usage gate was unavailable.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return {
-        allowed: false,
-        noticeCode: null,
-        reason: "ai_usage_gate_unavailable",
-        retryAfter,
-        userNotice: null,
-      };
-    }
   }
 
   private assertWorkspaceBelongsToRunnerUser(
@@ -1893,48 +1418,53 @@ export class HostedUserRunner {
     });
   }
 
-  private scheduleBrowserVaultRefreshAfterForegroundInvocation(input: {
+  private scheduleBrowserVaultRefreshBestEffort(input: {
+    reason: "external_request" | "idle_checkpoint_committed";
     userId: string;
   }): void {
-    if (this.shouldSkipBrowserVaultRefreshAfterForegroundInvocation()) {
+    if (this.shouldSkipBackgroundBrowserVaultRefresh()) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
-        message: "Hosted runner skipped browser-vault refresh after foreground invocation for local e2e isolation.",
+        details: {
+          reason: input.reason,
+        },
+        message: "Hosted runner skipped background browser-vault refresh for local e2e isolation.",
         phase: "scheduled",
         userId: input.userId,
       });
       return;
     }
 
-    const schedule = this.browserVaultRefreshCoordinator
-      .schedulePending({ userId: input.userId })
+    const refresh = this.runBackgroundBrowserVaultRefresh({
+      userId: input.userId,
+    })
       .catch((error) => {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           error,
           level: "warn",
-          message: "Hosted runner could not schedule browser-vault refresh after foreground invocation.",
-          phase: "scheduled",
+          message: "Hosted runner background browser-vault refresh failed.",
+          phase: "failed",
           userId: input.userId,
         });
       });
 
     try {
-      this.state.waitUntil?.(schedule);
+      this.state.waitUntil?.(refresh);
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         error,
         level: "warn",
-        message: "Hosted runner could not register post-foreground browser-vault refresh scheduling.",
+        message: "Hosted runner could not register background browser-vault refresh.",
         phase: "scheduled",
         userId: input.userId,
       });
     }
-    void schedule;
+    void refresh;
   }
 
-  private shouldSkipBrowserVaultRefreshAfterForegroundInvocation(): boolean {
+  private shouldSkipBackgroundBrowserVaultRefresh(): boolean {
     return this.readWorkerStringEnvSource().MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1";
   }
 
@@ -2128,6 +1658,7 @@ export class HostedUserRunner {
     }
 
     const scheduledCheckpoint = await this.stateStore.scheduleIdleShutdownCheckpointIfStillQuiet({
+      checkpointNextWakeAt: input.nextWakeAt,
       dueAt,
       workspaceVersion: checkpointWorkspaceVersion,
     });
@@ -2209,6 +1740,10 @@ export class HostedUserRunner {
         preferredWakeAt: null,
         userId: input.userId,
       });
+      this.scheduleBrowserVaultRefreshBestEffort({
+        reason: "idle_checkpoint_committed",
+        userId: input.userId,
+      });
       return;
     }
 
@@ -2217,6 +1752,10 @@ export class HostedUserRunner {
       await this.finishIdleShutdownCheckpointBestEffort({
         cleanupFailureMessage: "Hosted idle-shutdown checkpoint cleanup failed.",
         preferredWakeAt: input.result.nextWakeAt ?? null,
+        userId: input.userId,
+      });
+      this.scheduleBrowserVaultRefreshBestEffort({
+        reason: "idle_checkpoint_committed",
         userId: input.userId,
       });
       return;
@@ -2424,17 +1963,11 @@ export class HostedUserRunner {
     return true;
   }
 
-  private async runPendingBrowserVaultRefresh(input: {
-    signal: AbortSignal;
+  private async runBackgroundBrowserVaultRefresh(input: {
     userId: string;
   }): Promise<void> {
-    const pending = await this.stateStore.readPendingBrowserVaultRefresh();
-    if (!pending) {
-      return;
-    }
-
     let record = await this.stateStore.readState();
-    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
+    if (record.pendingNudge || record.inFlight) {
       return;
     }
 
@@ -2459,22 +1992,19 @@ export class HostedUserRunner {
     });
 
     record = await this.stateStore.readState();
-    if (record.pendingNudge || record.inFlight || input.signal.aborted) {
+    if (record.pendingNudge || record.inFlight) {
       return;
     }
 
+    const abortController = new AbortController();
     const generated = await refreshHostedExecutionContainerBrowserVaultReplica({
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
       runtime: runtimeConfig,
-      signal: input.signal,
+      signal: abortController.signal,
       timeoutMs: this.env.runnerTimeoutMs,
       userId: input.userId,
     });
-
-    if (input.signal.aborted) {
-      return;
-    }
 
     if (generated.status === "refresh_failed_too_large") {
       emitHostedExecutionStructuredLog({
@@ -2488,29 +2018,23 @@ export class HostedUserRunner {
         phase: "scheduled",
         userId: input.userId,
       });
-      await this.stateStore.clearPendingBrowserVaultRefresh({
-        slotId: pending.slotId,
-        updatedAt: pending.updatedAt,
-      });
       return;
     }
 
     if (generated.status === "publish_conflict") {
-      throw new Error("Hosted browser-vault replica publish conflicted with the latest workspace row.");
-    }
-
-    if (generated.status !== "published") {
-      await this.stateStore.clearPendingBrowserVaultRefresh({
-        slotId: pending.slotId,
-        updatedAt: pending.updatedAt,
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        level: "warn",
+        message: "Hosted runner skipped background browser-vault refresh because publish conflicted with the latest workspace row.",
+        phase: "scheduled",
+        userId: input.userId,
       });
       return;
     }
 
-    await this.stateStore.clearPendingBrowserVaultRefresh({
-      slotId: pending.slotId,
-      updatedAt: pending.updatedAt,
-    });
+    if (generated.status !== "published") {
+      return;
+    }
   }
 
   private startDetachedRunnerDrive(input: {
@@ -2685,8 +2209,6 @@ export class HostedUserRunner {
       );
     } finally {
       const pendingDrive = this.pendingRunnerDriveAfterInvocation;
-      const pendingBrowserVaultRefresh = this.pendingBrowserVaultRefreshAfterInvocation;
-      this.pendingBrowserVaultRefreshAfterInvocation = null;
 
       if (pendingDrive && this.invocationLock === null) {
         this.pendingRunnerDriveAfterInvocation = null;
@@ -2696,101 +2218,9 @@ export class HostedUserRunner {
           this.pendingRunnerDriveAfterInvocation = pendingDrive;
         }
       }
-
-      if (!this.pendingRunnerDriveAfterInvocation && this.invocationLock === null) {
-        await this.browserVaultRefreshCoordinator.drainAfterForegroundWork();
-      }
-
-      if (pendingBrowserVaultRefresh) {
-        this.scheduleBrowserVaultRefreshAfterForegroundInvocation(pendingBrowserVaultRefresh);
-      }
     }
   }
 
-}
-
-function parseHostedAiUsageGateDecision(value: unknown): HostedAiUsageGateDecision {
-  const record = requireHostedAiUsageGateObject(value);
-  if (record.allowed === true) {
-    return createAllowedHostedAiUsageGateDecision();
-  }
-
-  if (record.allowed !== false) {
-    throw new TypeError("Hosted AI usage gate response allowed must be boolean.");
-  }
-
-  return {
-    allowed: false,
-    noticeCode: parseOptionalHostedAiUsageGateString(record.noticeCode, "noticeCode"),
-    reason: requireHostedAiUsageGateString(record.reason, "reason"),
-    retryAfter: requireHostedAiUsageGateIsoDateString(record.retryAfter, "retryAfter"),
-    userNotice: parseOptionalHostedAiUsageGateString(record.userNotice, "userNotice"),
-  };
-}
-
-function createAllowedHostedAiUsageGateDecision(): HostedAiUsageGateDecision {
-  return {
-    allowed: true,
-    noticeCode: null,
-    reason: null,
-    retryAfter: null,
-    userNotice: null,
-  };
-}
-
-function isHostedAiUsageAllowDecisionFresh(
-  decision: HostedAiUsageAllowDecision,
-  nowMs = Date.now(),
-): boolean {
-  const issuedAtMs = Date.parse(decision.issuedAt);
-  const expiresAtMs = Date.parse(decision.expiresAt);
-  if (!Number.isFinite(issuedAtMs) || !Number.isFinite(expiresAtMs)) {
-    return false;
-  }
-  if (issuedAtMs > nowMs + 5_000) {
-    return false;
-  }
-  if (expiresAtMs <= nowMs) {
-    return false;
-  }
-  return expiresAtMs - issuedAtMs <= 35_000;
-}
-
-function requireHostedAiUsageGateObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted AI usage gate response must be an object.");
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function requireHostedAiUsageGateString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`Hosted AI usage gate response ${label} must be a string.`);
-  }
-
-  return value;
-}
-
-function parseOptionalHostedAiUsageGateString(
-  value: unknown,
-  label: string,
-): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  return requireHostedAiUsageGateString(value, label);
-}
-
-function requireHostedAiUsageGateIsoDateString(value: unknown, label: string): string {
-  const normalized = requireHostedAiUsageGateString(value, label);
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new TypeError(`Hosted AI usage gate response ${label} must be an ISO date string.`);
-  }
-
-  return parsed.toISOString();
 }
 
 async function deleteR2ObjectIfSupported(
@@ -2847,22 +2277,6 @@ function shouldRunHostedRunnerInvocation(input: {
     || input.reason === "manual"
     || input.record.pendingNudge
     || input.dueWake === true;
-}
-
-function shouldPreemptActiveWorkspaceInvocationForNudge(input: {
-  reason: HostedWorkspaceInvocationReason | null;
-}): boolean {
-  return input.reason === "alarm"
-    || input.reason === "retry"
-    || input.reason === "idle_shutdown_checkpoint";
-}
-
-function isHostedWorkspaceInvocationReasonValue(
-  value: string | null,
-): value is HostedWorkspaceInvocationReason {
-  return HOSTED_WORKSPACE_INVOCATION_REASONS.includes(
-    value as HostedWorkspaceInvocationReason,
-  );
 }
 
 function isCommittedIdleShutdownCheckpointResult(input: HostedWorkspaceInvocationResult): boolean {

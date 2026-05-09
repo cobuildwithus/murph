@@ -219,7 +219,7 @@ describe("RunnerStateStore schema guard", () => {
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(1);
+    ).toBe(2);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
@@ -228,71 +228,6 @@ describe("RunnerStateStore schema guard", () => {
         orphanObservedAt: null,
       },
     });
-  });
-
-  it("keeps one pending browser-vault refresh slot", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
-    const { store } = createRunnerStateStoreHarness();
-
-    await expect(store.scheduleBrowserVaultRefresh()).resolves.toEqual({
-      deduped: false,
-    });
-    const first = await store.readPendingBrowserVaultRefresh();
-    expect(first).toEqual({
-      slotId: expect.any(String),
-      updatedAt: "2026-05-08T00:00:00.000Z",
-    });
-    vi.setSystemTime(new Date("2026-05-08T00:00:01.000Z"));
-    await expect(store.scheduleBrowserVaultRefresh()).resolves.toEqual({
-      deduped: true,
-    });
-    const second = await store.readPendingBrowserVaultRefresh();
-    expect(second).toEqual({
-      slotId: expect.any(String),
-      updatedAt: "2026-05-08T00:00:01.000Z",
-    });
-    expect(second?.slotId).not.toBe(first?.slotId);
-
-    await expect(store.clearPendingBrowserVaultRefresh({
-      slotId: first?.slotId,
-      updatedAt: first?.updatedAt,
-    })).resolves.toBe(false);
-    await expect(store.clearPendingBrowserVaultRefresh({
-      slotId: second?.slotId,
-      updatedAt: second?.updatedAt,
-    })).resolves.toBe(true);
-    await expect(store.clearPendingBrowserVaultRefresh()).resolves.toBe(false);
-    await expect(store.readPendingBrowserVaultRefresh()).resolves.toBeNull();
-    vi.useRealTimers();
-  });
-
-  it("does not clear a newer pending browser-vault refresh scheduled in the same millisecond", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
-    const { store } = createRunnerStateStoreHarness();
-
-    await store.scheduleBrowserVaultRefresh();
-    const first = await store.readPendingBrowserVaultRefresh();
-    await store.scheduleBrowserVaultRefresh();
-    const second = await store.readPendingBrowserVaultRefresh();
-
-    expect(first).toEqual({
-      slotId: expect.any(String),
-      updatedAt: "2026-05-08T00:00:00.000Z",
-    });
-    expect(second).toEqual({
-      slotId: expect.any(String),
-      updatedAt: "2026-05-08T00:00:00.000Z",
-    });
-    expect(second?.slotId).not.toBe(first?.slotId);
-    await expect(store.clearPendingBrowserVaultRefresh({
-      slotId: first?.slotId,
-      updatedAt: first?.updatedAt,
-    })).resolves.toBe(false);
-    await expect(store.readPendingBrowserVaultRefresh()).resolves.toEqual(second);
-
-    vi.useRealTimers();
   });
 
   it("ignores stale invocation completion and failure metadata", async () => {
@@ -430,6 +365,69 @@ describe("RunnerStateStore schema guard", () => {
     }
   });
 
+  it("rejects expired active invocation ownership and clears the stale lease", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:10.000Z"));
+    try {
+      const { store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      const lease = await store.beginInvocation({
+        expiresAt: "2026-04-27T00:00:05.000Z",
+        reason: "nudge",
+        userId: "user-existing",
+      });
+
+      await expect(store.ownsActiveInvocationLease({
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.leaseGeneration,
+        userId: lease.userId,
+      })).resolves.toMatchObject({
+        clearedOrphanObservation: false,
+        owns: false,
+        record: {
+          active: null,
+          inFlight: false,
+          lastErrorAt: "2026-04-27T00:00:10.000Z",
+          workspaceInvocation: null,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects expired active invocation checkpoint writes and clears the stale lease", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:10.000Z"));
+    try {
+      const { store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      const lease = await store.beginInvocation({
+        expiresAt: "2026-04-27T00:00:05.000Z",
+        reason: "idle_shutdown_checkpoint",
+        userId: "user-existing",
+      });
+
+      await expect(store.recordActiveInvocationWorkspaceCheckpoint({
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.leaseGeneration,
+        userId: lease.userId,
+        workspaceVersion: "1",
+      })).resolves.toMatchObject({
+        clearedOrphanObservation: false,
+        recorded: false,
+        record: {
+          active: null,
+          inFlight: false,
+          lastErrorAt: "2026-04-27T00:00:10.000Z",
+          workspaceInvocation: null,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("records active invocation heartbeats and rejects stale heartbeat leases", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");
@@ -468,6 +466,32 @@ describe("RunnerStateStore schema guard", () => {
         workspaceInvocation: {
           lastHeartbeatAt: "2026-04-27T00:00:20.000Z",
         },
+      },
+    });
+  });
+
+  it("rejects expired active invocation heartbeats and clears the stale lease", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    const lease = await store.beginInvocation({
+      expiresAt: "2026-04-27T00:00:05.000Z",
+      reason: "nudge",
+      userId: "user-existing",
+    });
+
+    await expect(store.recordActiveInvocationHeartbeat({
+      attemptId: lease.attemptId,
+      leaseGeneration: lease.leaseGeneration,
+      nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
+      userId: lease.userId,
+    })).resolves.toMatchObject({
+      ok: false,
+      reason: "no_active_invocation",
+      record: {
+        active: null,
+        inFlight: false,
+        lastErrorAt: "2026-04-27T00:00:10.000Z",
+        workspaceInvocation: null,
       },
     });
   });

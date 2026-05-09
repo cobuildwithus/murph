@@ -6,7 +6,7 @@
 
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 1;
+const RUNNER_STATE_SCHEMA_VERSION = 2;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -23,8 +23,13 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       active_invocation_last_heartbeat_at TEXT,
       active_invocation_reason TEXT,
       active_invocation_started_at TEXT,
+      active_invocation_expires_at TEXT,
       active_invocation_orphan_observed_at TEXT,
       active_workspace_version TEXT,
+      alarm_kind TEXT,
+      alarm_due_at TEXT,
+      alarm_workspace_version TEXT,
+      alarm_checkpoint_next_wake_at TEXT,
       lease_generation INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
@@ -35,6 +40,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       idle_shutdown_checkpoint_workspace_version TEXT,
       next_wake_at TEXT,
       pending_nudge INTEGER NOT NULL DEFAULT 0,
+      pending_work INTEGER NOT NULL DEFAULT 0,
       retry_failure_count INTEGER NOT NULL DEFAULT 0
     )
   `);
@@ -43,8 +49,13 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_last_heartbeat_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_reason", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_started_at", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_expires_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_orphan_observed_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_workspace_version", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_meta", "alarm_kind", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_meta", "alarm_due_at", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_meta", "alarm_workspace_version", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_meta", "alarm_checkpoint_next_wake_at", "TEXT");
   ensureRunnerStateTableColumn(
     sql,
     "runner_meta",
@@ -55,6 +66,12 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     sql,
     "runner_meta",
     "pending_nudge",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
+    "pending_work",
     "INTEGER NOT NULL DEFAULT 0",
   );
   ensureRunnerStateTableColumn(
@@ -82,6 +99,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     "TEXT",
   );
   markRunnerStateSchemaVersion(sql);
+  migrateRunnerStateV1AlarmMirrors(sql);
   assertRunnerStateTableAbsent(sql, "runner_bundle_slots");
   assertRunnerStateTableColumns(sql, "runner_meta", {
     requiredColumns: [
@@ -91,8 +109,13 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "active_invocation_last_heartbeat_at",
       "active_invocation_reason",
       "active_invocation_started_at",
+      "active_invocation_expires_at",
       "active_invocation_orphan_observed_at",
       "active_workspace_version",
+      "alarm_kind",
+      "alarm_due_at",
+      "alarm_workspace_version",
+      "alarm_checkpoint_next_wake_at",
       "lease_generation",
       "in_flight",
       "last_error_at",
@@ -103,6 +126,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "idle_shutdown_checkpoint_workspace_version",
       "next_wake_at",
       "pending_nudge",
+      "pending_work",
       "retry_failure_count",
     ],
   });
@@ -138,6 +162,37 @@ function readRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): number 
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : 0;
+}
+
+function migrateRunnerStateV1AlarmMirrors(sql: DurableObjectSqlStorageLike): void {
+  sql.exec(`
+    UPDATE runner_meta
+    SET pending_work = CASE WHEN pending_nudge = 1 THEN 1 ELSE pending_work END
+    WHERE singleton = 1
+  `);
+  sql.exec(`
+    UPDATE runner_meta
+    SET
+      alarm_kind = 'idle_checkpoint',
+      alarm_due_at = idle_shutdown_checkpoint_due_at,
+      alarm_workspace_version = idle_shutdown_checkpoint_workspace_version,
+      alarm_checkpoint_next_wake_at = next_wake_at
+    WHERE singleton = 1
+      AND alarm_kind IS NULL
+      AND idle_shutdown_checkpoint_due_at IS NOT NULL
+  `);
+  sql.exec(`
+    UPDATE runner_meta
+    SET
+      alarm_kind = 'work',
+      alarm_due_at = next_wake_at,
+      alarm_workspace_version = NULL,
+      alarm_checkpoint_next_wake_at = NULL
+    WHERE singleton = 1
+      AND alarm_kind IS NULL
+      AND idle_shutdown_checkpoint_due_at IS NULL
+      AND next_wake_at IS NOT NULL
+  `);
 }
 
 function assertRunnerStateTableAbsent(
