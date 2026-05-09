@@ -16,8 +16,8 @@ import {
 const DEFAULT_NUDGE_LIMIT = 25;
 const MAX_NUDGE_LIMIT = 250;
 const FIRST_LAG_NUDGE_AFTER_MS = 20 * 60_000;
-const LAG_NUDGE_REPEAT_MS = 20 * 60_000;
-const LAG_NUDGE_WINDOW_MS = 2 * 60_000;
+const LAG_NUDGE_REPEAT_MS = 30 * 60_000;
+const LAG_NUDGE_WINDOW_MS = 10 * 60_000;
 const NUDGE_TIMEOUT_MS = 5_000;
 const NUDGE_CONCURRENCY = 5;
 
@@ -37,9 +37,15 @@ type HostedMailboxLagSweeperPrisma =
 type HostedMailboxLagSweeperLogger = Pick<Console, "info" | "warn">;
 
 interface HostedMailboxLaggedUser {
-  lanes: HostedMailboxLaneLag[];
+  lanes: HostedMailboxLaggedLane[];
   latestMailboxUpdatedAt: Date | null;
   workspaceCheckpointedAt: Date | null;
+}
+
+interface HostedMailboxLaggedLane {
+  lag: HostedMailboxLaneLag;
+  latestMailboxUpdatedAt: Date | null;
+  oldestUncheckpointedAt: Date | null;
 }
 
 type HostedMailboxLaggedUserEntry = [string, HostedMailboxLaggedUser];
@@ -100,9 +106,15 @@ export async function runHostedMailboxLagSweeper(input: {
       continue;
     }
 
+    const laggedLane = await buildHostedMailboxLaggedLane({
+      highWaterLatestUpdatedAt: highWater._max.updatedAt,
+      lag,
+      prisma,
+      userId: highWater.userId,
+    });
     const existing = laggedByUser.get(highWater.userId);
     if (existing) {
-      existing.lanes.push(lag);
+      existing.lanes.push(laggedLane);
       existing.latestMailboxUpdatedAt = maxNullableDate(
         existing.latestMailboxUpdatedAt,
         highWater._max.updatedAt,
@@ -111,13 +123,14 @@ export async function runHostedMailboxLagSweeper(input: {
     }
 
     laggedByUser.set(highWater.userId, {
-      lanes: [lag],
+      lanes: [laggedLane],
       latestMailboxUpdatedAt: highWater._max.updatedAt,
       workspaceCheckpointedAt: workspace?.checkpointedAt ?? null,
     });
   }
 
-  const eligibleLaggedUsers = Array.from(laggedByUser.entries()).filter(([, lagged]) =>
+  const laggedUsers = Array.from(laggedByUser.entries());
+  const eligibleLaggedUsers = laggedUsers.filter(([, lagged]) =>
     shouldNudgeHostedMailboxLaggedUser({
       lagged,
       now,
@@ -128,12 +141,26 @@ export async function runHostedMailboxLagSweeper(input: {
     now,
     nudgeLimit,
   });
+  const laggedLaneCount = countHostedMailboxLaggedLanes(laggedUsers);
+  const eligibleLaggedLaneCount = countHostedMailboxEligibleLaggedLanes({
+    laggedUsers,
+    now,
+  });
+  const freshGraceUsers = Math.max(0, laggedByUser.size - eligibleLaggedUsers.length);
+  const limitSkippedUsers = Math.max(0, eligibleLaggedUsers.length - selectedLaggedUsers.length);
+  const oldestUncheckpointedAgeMs = maxHostedMailboxUncheckpointedAgeMs({
+    laggedUsers,
+    now,
+  });
 
   logger.info("Hosted mailbox lag sweeper scanned mailbox high-water rows.", {
+    eligibleLaggedLaneCount,
     highWaterRows: highWaterRows.length,
+    laggedLaneCount,
     eligibleLaggedUsers: eligibleLaggedUsers.length,
     laggedUsers: laggedByUser.size,
     nudgeLimit,
+    oldestUncheckpointedAgeMs,
     selectedLaggedUsers: selectedLaggedUsers.length,
   });
 
@@ -148,8 +175,10 @@ export async function runHostedMailboxLagSweeper(input: {
       nudgeAttempted += 1;
       const userFingerprint = fingerprintHostedMailboxLagUser(userId);
       logger.warn("Hosted mailbox lag sweeper nudging runner for mailbox lag.", {
-        lanes: lagged.lanes,
+        lanes: lagged.lanes.map(formatHostedMailboxLaggedLaneForLog),
         latestMailboxUpdatedAt: lagged.latestMailboxUpdatedAt?.toISOString() ?? null,
+        oldestUncheckpointedAt: minHostedMailboxLaneDate(lagged.lanes)
+          ?.toISOString() ?? null,
         userFingerprint,
         workspaceCheckpointedAt: lagged.workspaceCheckpointedAt?.toISOString() ?? null,
       });
@@ -181,11 +210,14 @@ export async function runHostedMailboxLagSweeper(input: {
     },
   );
 
-  const skippedLaggedUsers = Math.max(0, laggedByUser.size - selectedLaggedUsers.length);
+  const skippedLaggedUsers = freshGraceUsers + limitSkippedUsers;
   if (skippedLaggedUsers > 0) {
-    logger.warn("Hosted mailbox lag sweeper skipped lagged users after nudge limit or fresh mailbox grace.", {
+    logger.warn("Hosted mailbox lag sweeper skipped lagged users.", {
       eligibleLaggedUsers: eligibleLaggedUsers.length,
+      freshGraceUsers,
+      limitSkippedUsers,
       nudgeLimit,
+      oldestUncheckpointedAgeMs,
       skippedLaggedUsers,
     });
   }
@@ -205,11 +237,23 @@ function shouldNudgeHostedMailboxLaggedUser(input: {
   lagged: HostedMailboxLaggedUser;
   now: Date;
 }): boolean {
-  if (!input.lagged.latestMailboxUpdatedAt) {
+  return input.lagged.lanes.some((lane) =>
+    shouldNudgeHostedMailboxLaggedLane({
+      lane,
+      now: input.now,
+    })
+  );
+}
+
+function shouldNudgeHostedMailboxLaggedLane(input: {
+  lane: HostedMailboxLaggedLane;
+  now: Date;
+}): boolean {
+  if (!input.lane.oldestUncheckpointedAt) {
     return true;
   }
 
-  const lagAgeMs = input.now.getTime() - input.lagged.latestMailboxUpdatedAt.getTime();
+  const lagAgeMs = input.now.getTime() - input.lane.oldestUncheckpointedAt.getTime();
 
   if (lagAgeMs < 0) {
     return true;
@@ -275,6 +319,122 @@ function maxNullableDate(left: Date | null, right: Date | null): Date | null {
   }
 
   return left > right ? left : right;
+}
+
+async function buildHostedMailboxLaggedLane(input: {
+  highWaterLatestUpdatedAt: Date | null;
+  lag: HostedMailboxLaneLag;
+  prisma: HostedMailboxLagSweeperPrisma;
+  userId: string;
+}): Promise<HostedMailboxLaggedLane> {
+  const oldestUncheckpointedAt = await readOldestUncheckpointedMailboxUpdatedAt({
+    importedSeq: input.lag.importedSeq,
+    lane: input.lag.lane,
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+
+  return {
+    lag: input.lag,
+    latestMailboxUpdatedAt: input.highWaterLatestUpdatedAt,
+    oldestUncheckpointedAt,
+  };
+}
+
+async function readOldestUncheckpointedMailboxUpdatedAt(input: {
+  importedSeq: string;
+  lane: HostedMailboxLaneLag["lane"];
+  prisma: HostedMailboxLagSweeperPrisma;
+  userId: string;
+}): Promise<Date | null> {
+  const oldestUncheckpointed = await input.prisma.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    select: {
+      updatedAt: true,
+    },
+    where: {
+      lane: input.lane,
+      laneSeq: {
+        gt: BigInt(input.importedSeq),
+      },
+      userId: input.userId,
+    },
+  });
+
+  return oldestUncheckpointed?.updatedAt ?? null;
+}
+
+function minHostedMailboxLaneDate(
+  lanes: HostedMailboxLaggedLane[],
+): Date | null {
+  return lanes.reduce<Date | null>(
+    (oldest, lane) => {
+      if (!lane.oldestUncheckpointedAt) {
+        return oldest;
+      }
+
+      return oldest === null || lane.oldestUncheckpointedAt < oldest
+        ? lane.oldestUncheckpointedAt
+        : oldest;
+    },
+    null,
+  );
+}
+
+function countHostedMailboxLaggedLanes(
+  laggedUsers: HostedMailboxLaggedUserEntry[],
+): number {
+  return laggedUsers.reduce((total, [, lagged]) => total + lagged.lanes.length, 0);
+}
+
+function countHostedMailboxEligibleLaggedLanes(input: {
+  laggedUsers: HostedMailboxLaggedUserEntry[];
+  now: Date;
+}): number {
+  return input.laggedUsers.reduce(
+    (total, [, lagged]) => total + lagged.lanes.filter((lane) =>
+      shouldNudgeHostedMailboxLaggedLane({
+        lane,
+        now: input.now,
+      })
+    ).length,
+    0,
+  );
+}
+
+function maxHostedMailboxUncheckpointedAgeMs(input: {
+  laggedUsers: HostedMailboxLaggedUserEntry[];
+  now: Date;
+}): number | null {
+  let maxAgeMs: number | null = null;
+
+  for (const [, lagged] of input.laggedUsers) {
+    for (const lane of lagged.lanes) {
+      if (!lane.oldestUncheckpointedAt) {
+        continue;
+      }
+
+      const ageMs = input.now.getTime() - lane.oldestUncheckpointedAt.getTime();
+      maxAgeMs = maxAgeMs === null ? ageMs : Math.max(maxAgeMs, ageMs);
+    }
+  }
+
+  return maxAgeMs;
+}
+
+function formatHostedMailboxLaggedLaneForLog(
+  lane: HostedMailboxLaggedLane,
+): HostedMailboxLaneLag & {
+  latestMailboxUpdatedAt: string | null;
+  oldestUncheckpointedAt: string | null;
+} {
+  return {
+    ...lane.lag,
+    latestMailboxUpdatedAt: lane.latestMailboxUpdatedAt?.toISOString() ?? null,
+    oldestUncheckpointedAt: lane.oldestUncheckpointedAt?.toISOString() ?? null,
+  };
 }
 
 function normalizeLimit(

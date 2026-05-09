@@ -93,6 +93,10 @@ const mocks = vi.hoisted(() => {
     })),
     readHostedLinqDailyState: vi.fn<() => Promise<HostedLinqDailyState | null>>(async () => null),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
+    readHostedMailboxItemOwnerById: vi.fn(async (input: { mailboxItemId: string }) => ({
+      id: input.mailboxItemId,
+      userId: "member_123",
+    })),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       envelope?: { eventId: string };
@@ -138,6 +142,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     ...actual,
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+    readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
 
@@ -1181,7 +1186,11 @@ https://join.example.test/join/code_first_text`);
       mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
       source: "linq",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:linq:direct",
+      timeoutMs: 5000,
+      userId: "member_123",
+    });
     expect(mocks.startHostedLinqTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -1190,6 +1199,8 @@ https://join.example.test/join/code_first_text`);
       }),
       "failed",
       expect.objectContaining({
+        directNudgeAttempted: true,
+        directNudgeConfigured: false,
         errorName: "Error",
       }),
     );

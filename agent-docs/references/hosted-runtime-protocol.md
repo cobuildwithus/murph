@@ -143,16 +143,19 @@ inputs or outputs. The pointer workflow may wake the runner and poll checkpoint
 progress; it must not decrypt mailbox payloads or perform provider-visible
 cleanup/read acknowledgement. If the pointer workflow cannot be accepted after
 the mailbox row exists, the failure is logged as a post-commit best-effort
-handoff failure and does not make provider ingress fail. This avoids duplicate
-provider retries after the durable append. The minute hosted mailbox lag sweeper
-is the current bounded recovery backstop for missed workflow starts: it compares
-mailbox high-water rows with checkpointed import status and nudges lagged
-runners by opaque user/work pointer only after a freshness grace period so
-normal workflow-driven imports can reach their quiet checkpoint. Redacted
-runtime logs remain diagnostic evidence only; they must not be merged into
-checkpointed import status for workflow progress, status projection, or sweeper
-decisions. A DB-backed pending-handoff reconciler remains future hardening for
-exact workflow-start failure journaling.
+handoff failure and does not make provider ingress fail. Web may still attempt a
+latency-only direct runner nudge on that failure path, but the handoff remains a
+workflow-start failure until the pointer workflow supervises checkpoint progress.
+This avoids duplicate provider retries after the durable append. The minute
+hosted mailbox lag sweeper is the bounded recovery backstop for missed workflow
+starts and missed direct nudges: it compares mailbox high-water rows with
+checkpointed import status, finds the oldest uncheckpointed row for each lagged
+lane, and nudges lagged runners by opaque user/work pointer only after a
+freshness grace period so normal workflow-driven imports can reach their quiet
+checkpoint. Redacted runtime logs remain diagnostic evidence only; they must not
+be merged into checkpointed import status for workflow progress, status
+projection, or sweeper decisions. A DB-backed pending-handoff reconciler remains
+future hardening for exact workflow-start failure journaling.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and runner
 nudges only coalesce pending work.

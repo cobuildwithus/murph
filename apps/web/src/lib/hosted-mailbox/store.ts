@@ -71,6 +71,13 @@ export interface HostedMailboxPayloadRow {
 export type HostedMailboxItemRecord = HostedMailboxItem;
 export type HostedMailboxPayloadRecord = HostedMailboxPayload;
 
+export interface HostedMailboxItemCheckpointRecord {
+  id: string;
+  lane: HostedMailboxLane;
+  laneSeq: string;
+  userId: string;
+}
+
 export interface AppendHostedMailboxItemResult {
   duplicate: boolean;
   dedupeConflict: boolean;
@@ -511,6 +518,38 @@ export async function readHostedMailboxItemOwnerById(input: {
       id: mailboxItemId,
     },
   });
+}
+
+export async function readHostedMailboxItemCheckpointById(input: {
+  mailboxItemId: string;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<HostedMailboxItemCheckpointRecord | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const mailboxItemId = requireNonEmptyString(
+    input.mailboxItemId,
+    "Hosted mailbox item id",
+  );
+
+  const record = await prisma.hostedMailboxItem.findUnique({
+    select: {
+      id: true,
+      lane: true,
+      laneSeq: true,
+      userId: true,
+    },
+    where: {
+      id: mailboxItemId,
+    },
+  });
+
+  return record
+    ? {
+      id: record.id,
+      lane: requireHostedMailboxLane(record.lane),
+      laneSeq: record.laneSeq.toString(),
+      userId: record.userId,
+    }
+    : null;
 }
 
 export async function readHostedMailboxItemById(input: {

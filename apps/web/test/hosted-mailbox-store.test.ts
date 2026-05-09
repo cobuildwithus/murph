@@ -10,6 +10,7 @@ import {
   fetchHostedMailboxItemsAfterLaneCursors,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
@@ -337,6 +338,46 @@ describe("appendHostedMailboxItemTx", () => {
     });
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
+  });
+
+  it("reads checkpoint ownership without hydrating mailbox payload fields", async () => {
+    const findUnique = vi.fn<HostedMailboxFindUnique>(async () =>
+      buildHostedMailboxItemRow({
+        id: "mailbox_checkpoint_1",
+        lane: "system",
+        laneSeq: 42n,
+        payloadInlineCiphertext: "cipher_should_not_be_selected",
+        payloadRef: "payload_ref_should_not_be_selected",
+        userId: "member_mailbox_1",
+      })
+    );
+    const prisma = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate({
+        findUnique,
+      }),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(readHostedMailboxItemCheckpointById({
+      mailboxItemId: "mailbox_checkpoint_1",
+      prisma,
+    })).resolves.toEqual({
+      id: "mailbox_checkpoint_1",
+      lane: "system",
+      laneSeq: "42",
+      userId: "member_mailbox_1",
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        id: true,
+        lane: true,
+        laneSeq: true,
+        userId: true,
+      },
+      where: {
+        id: "mailbox_checkpoint_1",
+      },
+    });
   });
 
   it("compares duplicate dedupe metadata derived from serialized payloads instead of caller spoof fields", async () => {
