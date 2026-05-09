@@ -322,10 +322,10 @@ describe("hosted-onboarding member-identity-service", () => {
     };
     const prisma = {
       hostedMemberIdentity: {
-        findFirst: vi.fn()
-          .mockResolvedValueOnce(identityRecord)
-          .mockResolvedValueOnce(identityRecord)
-          .mockResolvedValueOnce(identityRecord),
+        findMany: vi.fn()
+          .mockResolvedValueOnce([identityRecord])
+          .mockResolvedValueOnce([identityRecord])
+          .mockResolvedValueOnce([identityRecord]),
       },
     };
 

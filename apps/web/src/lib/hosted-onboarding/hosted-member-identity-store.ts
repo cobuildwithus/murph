@@ -14,6 +14,7 @@ import {
   createHostedWalletAddressLookupKey,
   createHostedWalletAddressLookupKeyReadCandidates,
 } from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberIdentityPrivateColumns,
   readHostedMemberIdentityPrivateState,
@@ -55,6 +56,10 @@ export interface HostedMemberIdentityLookup {
   matchedBy: HostedMemberIdentityLookupMatch;
 }
 
+type HostedMemberIdentityRecordWithMember = HostedMemberIdentity & {
+  member: HostedMember;
+};
+
 // Lookup helpers return the matched identity slice with the core row so auth
 // and onboarding flows do not need to round-trip through readHostedMemberIdentity.
 
@@ -95,7 +100,7 @@ export async function lookupHostedMemberIdentityByPrivyUserId(input: {
     return null;
   }
 
-  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
+  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
     where: {
       privyUserLookupKey: {
         in: privyUserLookupKeys,
@@ -106,9 +111,7 @@ export async function lookupHostedMemberIdentityByPrivyUserId(input: {
     },
   });
 
-  return identityRecord
-    ? await projectHostedMemberIdentityLookup(identityRecord, "privyUserId", input.prisma)
-    : null;
+  return resolveHostedMemberIdentityLookup(identityRecords, "privyUserId", input.prisma);
 }
 
 export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
@@ -139,7 +142,7 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
     return null;
   }
 
-  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
+  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
     where: {
       phoneLookupKey: {
         in: phoneLookupKeys,
@@ -150,9 +153,7 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
     },
   });
 
-  return identityRecord
-    ? await projectHostedMemberIdentityLookup(identityRecord, "phoneNumber", input.prisma)
-    : null;
+  return resolveHostedMemberIdentityLookup(identityRecords, "phoneNumber", input.prisma);
 }
 
 export async function lookupHostedMemberIdentityByWalletAddress(input: {
@@ -167,7 +168,7 @@ export async function lookupHostedMemberIdentityByWalletAddress(input: {
     return null;
   }
 
-  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
+  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
     where: {
       walletAddressLookupKey: {
         in: walletAddressLookupKeys,
@@ -178,9 +179,7 @@ export async function lookupHostedMemberIdentityByWalletAddress(input: {
     },
   });
 
-  return identityRecord
-    ? await projectHostedMemberIdentityLookup(identityRecord, "walletAddress", input.prisma)
-    : null;
+  return resolveHostedMemberIdentityLookup(identityRecords, "walletAddress", input.prisma);
 }
 
 export async function readHostedMemberIdentity(input: {
@@ -300,9 +299,7 @@ export async function projectHostedMemberIdentityState(
 }
 
 async function projectHostedMemberIdentityLookup(
-  identity: HostedMemberIdentity & {
-    member: HostedMember;
-  },
+  identity: HostedMemberIdentityRecordWithMember,
   matchedBy: HostedMemberIdentityLookupMatch,
   prisma?: HostedOnboardingReadClient,
 ): Promise<HostedMemberIdentityLookup> {
@@ -327,6 +324,46 @@ async function projectHostedMemberIdentityLookup(
     },
     matchedBy,
   };
+}
+
+async function resolveHostedMemberIdentityLookup(
+  identityRecords: HostedMemberIdentityRecordWithMember[],
+  matchedBy: HostedMemberIdentityLookupMatch,
+  prisma?: HostedOnboardingReadClient,
+): Promise<HostedMemberIdentityLookup | null> {
+  if (identityRecords.length === 0) {
+    return null;
+  }
+
+  const identityRecordByMemberId = new Map<string, HostedMemberIdentityRecordWithMember>();
+
+  for (const identityRecord of identityRecords) {
+    if (!identityRecordByMemberId.has(identityRecord.memberId)) {
+      identityRecordByMemberId.set(identityRecord.memberId, identityRecord);
+    }
+  }
+
+  if (identityRecordByMemberId.size !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: identityRecordByMemberId.size,
+        matchedBy,
+      },
+      httpStatus: 500,
+      message:
+        "Hosted member identity lookup matched multiple accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+      retryable: true,
+    });
+  }
+
+  const identityRecord = identityRecordByMemberId.values().next().value;
+
+  if (!identityRecord) {
+    return null;
+  }
+
+  return projectHostedMemberIdentityLookup(identityRecord, matchedBy, prisma);
 }
 
 async function buildHostedMemberIdentityCreateData(
