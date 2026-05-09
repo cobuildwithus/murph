@@ -292,7 +292,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       timeoutMs: 5000,
       userId: "member_telegram_123",
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_telegram:update:321",
+      source: "telegram",
+    });
     expect(response).not.toHaveProperty("wakeUserId");
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
@@ -699,7 +702,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_telegram:update:654",
+      source: "telegram",
+    });
   });
 
   it("falls back to a pointer workflow for active-member Telegram messages when direct runner nudge is not accepted", async () => {

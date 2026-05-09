@@ -10,12 +10,14 @@ import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control"
 import { getPrisma } from "../prisma";
 import {
   computeHostedMailboxLaneLag,
-  mergeLatestHostedMailboxImportRedactedStatus,
   readHostedMailboxRedactedStatusRecord,
 } from "./lag";
 
 const DEFAULT_NUDGE_LIMIT = 25;
 const MAX_NUDGE_LIMIT = 250;
+const FIRST_LAG_NUDGE_AFTER_MS = 20 * 60_000;
+const LAG_NUDGE_REPEAT_MS = 20 * 60_000;
+const LAG_NUDGE_WINDOW_MS = 2 * 60_000;
 const NUDGE_TIMEOUT_MS = 5_000;
 const NUDGE_CONCURRENCY = 5;
 
@@ -30,7 +32,7 @@ export interface HostedMailboxLagSweeperResult {
 }
 
 type HostedMailboxLagSweeperPrisma =
-  Pick<PrismaClient, "hostedMailboxItem" | "hostedRuntimeLog" | "hostedWorkspace">;
+  Pick<PrismaClient, "hostedMailboxItem" | "hostedWorkspace">;
 
 type HostedMailboxLagSweeperLogger = Pick<Console, "info" | "warn">;
 
@@ -60,46 +62,20 @@ export async function runHostedMailboxLagSweeper(input: {
     by: ["userId", "lane"],
   });
   const userIds = Array.from(new Set(highWaterRows.map((row) => row.userId)));
-  const [workspaces, latestMailboxImportLogs] = await Promise.all([
-    prisma.hostedWorkspace.findMany({
-      select: {
-        checkpointedAt: true,
-        redactedStatusJson: true,
-        userId: true,
+  const workspaces = await prisma.hostedWorkspace.findMany({
+    select: {
+      checkpointedAt: true,
+      redactedStatusJson: true,
+      userId: true,
+    },
+    where: {
+      userId: {
+        in: userIds,
       },
-      where: {
-        userId: {
-          in: userIds,
-        },
-      },
-    }),
-    userIds.length > 0
-      ? prisma.hostedRuntimeLog.findMany({
-        distinct: ["userId"],
-        orderBy: {
-          at: "desc",
-        },
-        select: {
-          redactedJson: true,
-          userId: true,
-        },
-        where: {
-          eventCode: "mailbox.imported",
-          userId: {
-            in: userIds,
-          },
-        },
-      })
-      : Promise.resolve([]),
-  ]);
+    },
+  });
   const workspaceByUserId = new Map(
     workspaces.map((workspace) => [workspace.userId, workspace]),
-  );
-  const latestMailboxImportStatusByUserId = new Map(
-    latestMailboxImportLogs.map((log) => [
-      log.userId,
-      readHostedMailboxRedactedStatusRecord(log.redactedJson),
-    ]),
   );
   const laggedByUser = new Map<string, HostedMailboxLaggedUser>();
 
@@ -109,9 +85,8 @@ export async function runHostedMailboxLagSweeper(input: {
     }
 
     const workspace = workspaceByUserId.get(highWater.userId) ?? null;
-    const redactedStatusJson = mergeLatestHostedMailboxImportRedactedStatus(
-      readHostedMailboxRedactedStatusRecord(workspace?.redactedStatusJson ?? null),
-      latestMailboxImportStatusByUserId.get(highWater.userId) ?? null,
+    const redactedStatusJson = readHostedMailboxRedactedStatusRecord(
+      workspace?.redactedStatusJson ?? null,
     );
     const lag = computeHostedMailboxLaneLag({
       highWater: {
@@ -142,14 +117,21 @@ export async function runHostedMailboxLagSweeper(input: {
     });
   }
 
+  const eligibleLaggedUsers = Array.from(laggedByUser.entries()).filter(([, lagged]) =>
+    shouldNudgeHostedMailboxLaggedUser({
+      lagged,
+      now,
+    })
+  );
   const selectedLaggedUsers = selectRotatingNudgeWindow({
-    laggedUsers: Array.from(laggedByUser.entries()),
+    laggedUsers: eligibleLaggedUsers,
     now,
     nudgeLimit,
   });
 
   logger.info("Hosted mailbox lag sweeper scanned mailbox high-water rows.", {
     highWaterRows: highWaterRows.length,
+    eligibleLaggedUsers: eligibleLaggedUsers.length,
     laggedUsers: laggedByUser.size,
     nudgeLimit,
     selectedLaggedUsers: selectedLaggedUsers.length,
@@ -201,7 +183,8 @@ export async function runHostedMailboxLagSweeper(input: {
 
   const skippedLaggedUsers = Math.max(0, laggedByUser.size - selectedLaggedUsers.length);
   if (skippedLaggedUsers > 0) {
-    logger.warn("Hosted mailbox lag sweeper skipped lagged users after nudge limit.", {
+    logger.warn("Hosted mailbox lag sweeper skipped lagged users after nudge limit or fresh mailbox grace.", {
+      eligibleLaggedUsers: eligibleLaggedUsers.length,
       nudgeLimit,
       skippedLaggedUsers,
     });
@@ -216,6 +199,28 @@ export async function runHostedMailboxLagSweeper(input: {
     nudgeNotAccepted,
     skippedLaggedUsers,
   };
+}
+
+function shouldNudgeHostedMailboxLaggedUser(input: {
+  lagged: HostedMailboxLaggedUser;
+  now: Date;
+}): boolean {
+  if (!input.lagged.latestMailboxUpdatedAt) {
+    return true;
+  }
+
+  const lagAgeMs = input.now.getTime() - input.lagged.latestMailboxUpdatedAt.getTime();
+
+  if (lagAgeMs < 0) {
+    return true;
+  }
+
+  if (lagAgeMs < FIRST_LAG_NUDGE_AFTER_MS) {
+    return false;
+  }
+
+  return ((lagAgeMs - FIRST_LAG_NUDGE_AFTER_MS) % LAG_NUDGE_REPEAT_MS)
+    < LAG_NUDGE_WINDOW_MS;
 }
 
 function selectRotatingNudgeWindow(input: {

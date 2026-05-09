@@ -1,7 +1,9 @@
 export const HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER = "5s";
-// The workflow owns runner nudge handoff after mailbox append, so keep retrying
-// long enough to cover deploys, transient Cloudflare issues, and brief web/runner outages.
+export const HOSTED_WEBHOOK_CHECKPOINT_WORKFLOW_RETRY_AFTER = "30s";
+// The workflow first wakes the runner, then waits for checkpointed mailbox
+// progress without repeatedly nudging and extending the runner quiet period.
 export const HOSTED_WEBHOOK_NUDGE_WORKFLOW_STEP_MAX_RETRIES = 120;
+export const HOSTED_WEBHOOK_CHECKPOINT_WORKFLOW_STEP_MAX_RETRIES = 720;
 
 export type HostedWebhookNudgeWorkflowSource =
   | "device-sync"

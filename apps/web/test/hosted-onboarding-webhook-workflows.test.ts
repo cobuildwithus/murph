@@ -11,20 +11,10 @@ import {
 } from "workflow";
 
 const mocks = vi.hoisted(() => ({
-  decodeHostedMailboxStoredPayload: vi.fn(),
-  deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
-  finishHostedOnboardingTiming: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
-  readHostedMailboxItemOwnerById: vi.fn(),
-  readHostedMailboxPayload: vi.fn(),
-  sendHostedLinqReadReceipt: vi.fn(),
+  readHostedWorkspace: vi.fn(),
   start: vi.fn(),
-  startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
-    baseDetails,
-    startedAtMs: 0,
-    step,
-  })),
 }));
 
 vi.mock("workflow/api", () => ({
@@ -38,10 +28,18 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
 
   return {
     ...actual,
-    decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
     readHostedMailboxItemById: mocks.readHostedMailboxItemById,
-    readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
-    readHostedMailboxPayload: mocks.readHostedMailboxPayload,
+  };
+});
+
+vi.mock("@/src/lib/hosted-workspace/store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-workspace/store")>(
+    "@/src/lib/hosted-workspace/store",
+  );
+
+  return {
+    ...actual,
+    readHostedWorkspace: mocks.readHostedWorkspace,
   };
 });
 
@@ -49,27 +47,10 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
-    "@/src/lib/hosted-onboarding/linq",
-  );
-
-  return {
-    ...actual,
-    sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
-  };
-});
-
-vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
-  deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
-  finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
-  startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
-}));
-
 import { startHostedWebhookNudgeWorkflow } from "@/src/lib/hosted-onboarding/webhook-workflow-start";
 import {
   nudgeHostedWebhookMailboxItemStep,
-  sendHostedWebhookLinqReadReceiptStep,
+  waitHostedWebhookMailboxItemCheckpointStep,
 } from "@/src/lib/hosted-onboarding/webhook-workflow-steps";
 import { hostedWebhookNudgeWorkflow } from "@/src/lib/hosted-onboarding/webhook-workflows";
 
@@ -79,19 +60,11 @@ describe("hosted onboarding webhook workflows", () => {
     mocks.start.mockResolvedValue({
       runId: "run_123",
     });
-    mocks.readHostedMailboxItemOwnerById.mockResolvedValue({
-      id: "mailbox_123",
-      userId: "member_123",
-    });
     mocks.readHostedMailboxItemById.mockResolvedValue(buildHostedMailboxItem());
-    mocks.readHostedMailboxPayload.mockResolvedValue({
-      payloadCiphertext: "payload_ciphertext_123",
-    });
-    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildHostedLinqWake());
-    mocks.sendHostedLinqReadReceipt.mockResolvedValue({
-      ok: true,
-      status: 204,
-    });
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "1",
+      hostedMailboxSystemImportedSeq: "0",
+    }));
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -131,13 +104,15 @@ describe("hosted onboarding webhook workflows", () => {
     });
   });
 
-  it("looks up the mailbox owner and nudges the hosted runner", async () => {
+  it("nudges the hosted runner when the mailbox item is not checkpointed", async () => {
+    mockMailboxProgressBehind();
+
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",
       source: "telegram",
     })).resolves.toBeUndefined();
 
-    expect(mocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
+    expect(mocks.readHostedMailboxItemById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
@@ -145,9 +120,12 @@ describe("hosted onboarding webhook workflows", () => {
       timeoutMs: 5_000,
       userId: "member_123",
     });
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(1);
   });
 
-  it("runs the runner nudge and Linq read receipt in the same pointer workflow", async () => {
+  it("nudges once, then waits for checkpoint progress in the pointer workflow", async () => {
+    mockMailboxProgressBehindThenCaughtUp();
+
     await expect(hostedWebhookNudgeWorkflow({
       mailboxItemId: "mailbox_123",
       source: "linq",
@@ -161,90 +139,24 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.readHostedMailboxItemById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
-    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
-      chatId: "chat_123",
-      timeoutMs: 5_000,
-    });
-    expect(
-      mocks.nudgeHostedRunnerUserBestEffortResult.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.sendHostedLinqReadReceipt.mock.invocationCallOrder[0]);
-    expect(mocks.readHostedMailboxPayload).toHaveBeenCalledWith({
-      dedupeKey: "evt_123",
-      mailboxItemId: "mailbox_123",
-      payloadRef: "payload_ref_123",
-      userId: "member_123",
-    });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith(expect.objectContaining({
-      dedupeKey: "evt_123",
-      kind: "conversation.message",
-      lane: "conversation",
-      mailboxItemId: "mailbox_123",
-      payloadCiphertext: "payload_ciphertext_123",
-      payloadInlineCiphertext: null,
-      payloadSchema: "murph.hosted-mailbox-item.v1",
-      userId: "member_123",
-    }));
-  });
-
-  it("skips the read receipt step for non-Linq workflow sources", async () => {
-    await expect(sendHostedWebhookLinqReadReceiptStep({
-      mailboxItemId: "mailbox_123",
-      source: "telegram",
-    })).resolves.toBeUndefined();
-
-    expect(mocks.readHostedMailboxItemById).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-  });
-
-  it("keeps Linq workflow read receipts best-effort", async () => {
-    mocks.sendHostedLinqReadReceipt.mockRejectedValueOnce(new Error("read receipt failed"));
-
-    await expect(sendHostedWebhookLinqReadReceiptStep({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    })).resolves.toBeUndefined();
-
-    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
-      expect.objectContaining({
-        step: "hosted-onboarding.workflow.linq.ingress-read-receipt",
-      }),
-      "failed",
-      expect.objectContaining({
-        errorName: "Error",
-      }),
-    );
-  });
-
-  it("resolves Linq read receipts from inline mailbox payloads", async () => {
-    mocks.readHostedMailboxItemById.mockResolvedValue({
-      ...buildHostedMailboxItem(),
-      payloadInlineCiphertext: "inline_ciphertext_123",
-      payloadRef: null,
-    });
-
-    await expect(sendHostedWebhookLinqReadReceiptStep({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    })).resolves.toBeUndefined();
-
-    expect(mocks.readHostedMailboxPayload).not.toHaveBeenCalled();
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith(expect.objectContaining({
-      payloadCiphertext: null,
-      payloadInlineCiphertext: "inline_ciphertext_123",
-    }));
-    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
-      chatId: "chat_123",
-      timeoutMs: 5_000,
-    });
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the durable nudge retry window long enough for short outages", () => {
     expect(
       Object.getOwnPropertyDescriptor(nudgeHostedWebhookMailboxItemStep, "maxRetries")?.value,
     ).toBe(120);
+    expect(
+      Object.getOwnPropertyDescriptor(
+        waitHostedWebhookMailboxItemCheckpointStep,
+        "maxRetries",
+      )?.value,
+    ).toBe(720);
   });
 
   it("uses the device-sync wake context for device-sync workflow nudges", async () => {
+    mockMailboxProgressBehind();
+
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",
       source: "device-sync",
@@ -258,6 +170,8 @@ describe("hosted onboarding webhook workflows", () => {
   });
 
   it("uses the email source label for email ingress wake retry workflows", async () => {
+    mockMailboxProgressBehind();
+
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",
       source: "email",
@@ -271,7 +185,7 @@ describe("hosted onboarding webhook workflows", () => {
   });
 
   it("marks missing mailbox pointers fatal inside Workflow", async () => {
-    mocks.readHostedMailboxItemOwnerById.mockResolvedValue(null);
+    mocks.readHostedMailboxItemById.mockResolvedValue(null);
 
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_missing",
@@ -282,6 +196,10 @@ describe("hosted onboarding webhook workflows", () => {
   });
 
   it("marks unaccepted nudge handoffs retryable inside Workflow", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "0",
+      hostedMailboxSystemImportedSeq: "0",
+    }));
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: false,
       alarmScheduled: null,
@@ -298,17 +216,88 @@ describe("hosted onboarding webhook workflows", () => {
       source: "linq",
     })).rejects.toBeInstanceOf(RetryableError);
   });
+
+  it("skips runner nudge when the mailbox item is already checkpointed", async () => {
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("waits for checkpoint progress without nudging again", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "0",
+      hostedMailboxSystemImportedSeq: "0",
+    }));
+
+    await expect(waitHostedWebhookMailboxItemCheckpointStep({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    })).rejects.toBeInstanceOf(RetryableError);
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the mailbox item's lane when checking checkpoint progress", async () => {
+    mocks.readHostedMailboxItemById.mockResolvedValue(buildHostedMailboxItem({
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    }));
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "99",
+      hostedMailboxSystemImportedSeq: "1",
+    }));
+
+    await expect(waitHostedWebhookMailboxItemCheckpointStep({
+      mailboxItemId: "mailbox_123",
+      source: "device-sync",
+    })).rejects.toBeInstanceOf(RetryableError);
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    mocks.readHostedMailboxItemById.mockResolvedValue(buildHostedMailboxItem({
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    }));
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "99",
+      hostedMailboxSystemImportedSeq: "2",
+    }));
+
+    await expect(waitHostedWebhookMailboxItemCheckpointStep({
+      mailboxItemId: "mailbox_123",
+      source: "device-sync",
+    })).resolves.toBeUndefined();
+  });
 });
 
-function buildHostedMailboxItem() {
+function buildHostedMailboxItem(input: {
+  kind?:
+    | "assistant.notification.requested"
+    | "conversation.message"
+    | "device-sync.wake"
+    | "member.activated"
+    | "member.channels.updated";
+  lane?: "conversation" | "system";
+  laneSeq?: string;
+} = {}) {
   return {
     createdAt: "2026-05-03T00:00:00.000Z",
     dedupeKey: "evt_123",
     expiresAt: null,
     id: "mailbox_123",
-    kind: "conversation.message" as const,
-    lane: "conversation" as const,
-    laneSeq: "1",
+    kind: input.kind ?? "conversation.message",
+    lane: input.lane ?? "conversation",
+    laneSeq: input.laneSeq ?? "1",
     occurredAt: "2026-05-03T00:00:00.000Z",
     payloadBytes: 256,
     payloadInlineCiphertext: null,
@@ -319,22 +308,36 @@ function buildHostedMailboxItem() {
   };
 }
 
-function buildHostedLinqWake() {
+function buildHostedWorkspace(redactedStatusJson: Record<string, unknown> | null) {
   return {
-    eventId: "evt_123",
-    kind: "conversation.message",
-    message: {
-      channel: "linq",
-      linqMessage: {
-        chatId: "chat_123",
-        from: "sender",
-        isFromMe: false,
-        messageId: "msg_123",
-        parts: [],
-      },
-      phoneLookupKey: "lookup_123",
-    },
-    occurredAt: "2026-05-03T00:00:00.000Z",
+    browserVaultReplicaRef: null,
+    checkpointedAt: "2026-05-03T00:00:00.000Z",
+    createdAt: "2026-05-03T00:00:00.000Z",
+    nextWakeAt: null,
+    nextWakeReason: null,
+    redactedStatusJson,
+    snapshotRef: null,
+    updatedAt: "2026-05-03T00:00:00.000Z",
     userId: "member_123",
+    version: "1",
   };
+}
+
+function mockMailboxProgressBehind() {
+  mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+    hostedMailboxConversationImportedSeq: "0",
+    hostedMailboxSystemImportedSeq: "0",
+  }));
+}
+
+function mockMailboxProgressBehindThenCaughtUp() {
+  mocks.readHostedWorkspace
+    .mockResolvedValueOnce(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "0",
+      hostedMailboxSystemImportedSeq: "0",
+    }))
+    .mockResolvedValueOnce(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "1",
+      hostedMailboxSystemImportedSeq: "0",
+    }));
 }

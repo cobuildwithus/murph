@@ -736,25 +736,6 @@ export async function listHostedRuntimeLogs(input: {
   return rows.map((row) => projectHostedRuntimeLog(row));
 }
 
-export async function readLatestHostedMailboxImportRuntimeLog(input: {
-  prisma?: HostedWorkspaceStoreClient;
-  userId: string;
-}): Promise<HostedRuntimeLogRecord | null> {
-  const prisma = input.prisma ?? getPrisma();
-  const userId = requireNonEmptyString(input.userId, "Hosted runtime log userId");
-  const row = await prisma.hostedRuntimeLog.findFirst({
-    orderBy: {
-      at: "desc",
-    },
-    where: {
-      eventCode: "mailbox.imported",
-      userId,
-    },
-  });
-
-  return row ? projectHostedRuntimeLog(row) : null;
-}
-
 export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorkspaceRecord {
   return {
     browserVaultReplicaRef: record.browserVaultReplicaRef,
