@@ -47,13 +47,6 @@ interface ResolveInterventionExperimentLinkInput {
 export async function resolveInterventionExperimentLink(
   input: ResolveInterventionExperimentLinkInput,
 ): Promise<InterventionExperimentLinkResult | null> {
-  if (input.allowOutOfWindow === true && input.experiment === undefined) {
-    throw new VaultCliError(
-      'invalid_option',
-      '--allow-out-of-window only applies with --experiment <slug>.',
-    )
-  }
-
   if (input.noExperiment === true) {
     if (input.experiment !== undefined) {
       throw new VaultCliError(
@@ -70,6 +63,13 @@ export async function resolveInterventionExperimentLink(
     }
 
     return null
+  }
+
+  if (input.allowOutOfWindow === true && input.experiment === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--allow-out-of-window only applies with --experiment <slug>.',
+    )
   }
 
   const query = await loadQueryRuntime()
