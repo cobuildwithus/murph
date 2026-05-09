@@ -2,6 +2,8 @@ import { afterEach, vi } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
 
+vi.mock("server-only", () => ({}));
+
 const globalForHostedWebTests = globalThis as typeof globalThis & {
   __murphHostedOnboardingEnv?: unknown;
   __murphHostedOnboardingStripe?: unknown;

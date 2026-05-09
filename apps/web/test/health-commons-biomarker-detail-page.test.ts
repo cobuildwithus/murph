@@ -89,7 +89,6 @@ describe("BiomarkerPage", () => {
     expect(source).not.toContain("./catalog");
 
     expect(generateStaticParams()).toEqual([
-      { biomarkerId: "apolipoprotein-b" },
       { biomarkerId: "blood-glucose" },
       { biomarkerId: "blood-oxygen-spo2" },
       { biomarkerId: "deep-sleep-minutes" },
@@ -470,6 +469,15 @@ describe("BiomarkerPage", () => {
       throw new Error("Expected the resting-heart-rate biomarker fixture.");
     }
 
+    if (!biomarker.biomarker) {
+      throw new Error("Expected the resting-heart-rate biomarker spec.");
+    }
+
+    biomarker.biomarker = {
+      ...biomarker.biomarker,
+      privateMetricBindings: [],
+    };
+
     catalog.entities.push({
       ...biomarker,
       key: "biomarker:incomplete-rhr-fixture",
@@ -492,7 +500,6 @@ describe("BiomarkerPage", () => {
 
     const routeIds = listHealthCommonsBiomarkerRoutes(reader);
     expect(routeIds).toEqual(expect.arrayContaining([
-      "apolipoprotein-b",
       "blood-glucose",
       "blood-oxygen-spo2",
       "deep-sleep-minutes",
@@ -502,8 +509,10 @@ describe("BiomarkerPage", () => {
       "resting-heart-rate",
     ]));
     expect(routeIds).not.toContain("incomplete-rhr-fixture");
+    expect(routeIds).not.toContain("apolipoprotein-b");
     expect(routeIds).not.toContain("sleep-quality");
-    expect(resolveHealthCommonsBiomarkerDetail("apolipoprotein-b", reader)?.privateMetricBindings).toEqual([]);
+    expect(resolveHealthCommonsBiomarkerDetail("resting-heart-rate", reader)?.privateMetricBindings).toEqual([]);
+    expect(resolveHealthCommonsBiomarkerDetail("apolipoprotein-b", reader)).toBeNull();
     expect(resolveHealthCommonsBiomarkerDetail("sleep-quality", reader)).toBeNull();
     expect(resolveHealthCommonsBiomarkerDetail("incomplete-rhr-fixture", reader)).toBeNull();
   });
