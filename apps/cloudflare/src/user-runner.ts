@@ -682,7 +682,14 @@ export class HostedUserRunner {
             attemptId: recovery.attemptId,
             userId: runningRecord.userId,
           });
-          return this.withInvocationLock(async () => this.runUntilIdleOrBudgetInternal(input));
+          return this.withInvocationLock(async () =>
+            this.runUntilIdleOrBudgetInternal({
+              ...input,
+              // The expired invocation already consumed the pending nudge/work bit.
+              // Recovery must force one replacement drain instead of observing idle.
+              dueWake: true,
+            })
+          );
         }
       }
       const record = await this.syncInvocationRecoveryAlarm(runningRecord, {

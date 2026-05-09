@@ -1412,6 +1412,67 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("re-drives once when recovery clears an expired invocation that consumed pending work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return activeInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      runnerTimeoutMs: 1_000,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(
+      sql.exec(
+        `SELECT in_flight, pending_nudge, pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 1,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("alarm");
+    expect(invoke.mock.calls[1]?.[0].job.request.leaseGeneration).toBe("2");
+    expect(
+      sql.exec(
+        `SELECT active_invocation_id, in_flight, pending_nudge, pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      active_invocation_id: null,
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]);
+  });
+
   it("replays from a durable alarm after cold restore clears an expired active invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
