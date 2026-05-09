@@ -38,9 +38,11 @@ Done:
 - Patched optional browser-vault refresh scheduling/alarm handling so stale or early optional alarms yield to pending deferred idle-shutdown checkpoints, with a regression for pending refresh plus future idle checkpoint.
 - After the deploy, confirmed the idle-shutdown checkpoint now starts but does not commit: live logs show snapshot-size and Codex-home diagnostics without `checkpoint.snapshot_finished`, while the snapshot contains roughly 13k external artifacts.
 - Patched idle-shutdown checkpointing to write a working delta against the existing base snapshot instead of full-compacting the whole artifact corpus on every drain, and added bridge regressions for base, working, and layered snapshot refs.
+- After the next live retry, confirmed the fixed runner took the new `working_delta` path but still timed out after snapshot-size logging because the first delta migration had to persist a large external artifact batch.
+- Patched full and working-delta checkpoint bundle writes to dedupe artifact puts by hash and persist them with bounded concurrency, with a regression covering many raw artifacts.
 
 Now:
-- Run broad verification, commit/push/deploy the working-delta checkpoint fix, then recheck the live mailbox high-watermark and iMessage reply path.
+- Run broad verification, commit/push/deploy the bounded artifact persistence fix, then recheck the live mailbox high-watermark and iMessage reply path.
 
 Next:
 - Watch the lagged hosted mailbox recover, then verify cold/warm iMessage reply scenarios after provider capacity is available.
