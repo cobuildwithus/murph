@@ -184,15 +184,18 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).toHaveBeenCalled();
   });
 
-  it("writes idle shutdown full snapshots without the browser-vault replica port", async () => {
+  it("writes idle shutdown working deltas without the browser-vault replica port", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
-    const putArtifact = vi.fn(async () => {});
     const artifactBundles = new Map<string, Uint8Array>();
     const baseSnapshotRef = await createStoredBaseSnapshotRef({
       artifactBundles,
       vaultRoot,
+    });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace changed\n", "utf8");
+    const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
+      artifactBundles.set(sha256, bytes);
     });
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
@@ -222,13 +225,20 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const snapshotRef = requireWorkingSnapshotRef(result.snapshotRef);
 
-    expect(snapshotRef.hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(snapshotRef.base).toEqual(baseSnapshotRef);
+    expect(snapshotRef.delta.key).toMatch(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u);
     expect(result).not.toHaveProperty("browserVaultReplicaRef");
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.hash,
+      sha256: snapshotRef.delta.hash,
     }));
+    expect(readHostedBundleTextFile({
+      bytes: artifactBundles.get(snapshotRef.delta.hash) ?? null,
+      expectedKind: "vault",
+      path: "note.md",
+      root: "vault",
+    })).toBe("workspace changed\n");
   });
 
   it("writes full seed checkpoints when there is no base snapshot", async () => {
@@ -496,7 +506,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
-  it("compacts legacy working refs during idle shutdown without writing a new working delta", async () => {
+  it("refreshes legacy working refs during idle shutdown with a new working delta", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(baseVaultRoot, vaultRoot);
@@ -540,21 +550,21 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const fullRef = requireBundleRef(result.snapshotRef);
-    expect(fullRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(fullRef.key).not.toContain("workspace-deltas");
+    const workingRef = requireWorkingSnapshotRef(result.snapshotRef);
+    expect(workingRef.base).toEqual(legacyWorkingRef.base);
+    expect(workingRef.delta.key).toMatch(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u);
     expect(readHostedBundleTextFile({
-      bytes: artifactBundles.get(fullRef.hash) ?? null,
+      bytes: artifactBundles.get(workingRef.delta.hash) ?? null,
       expectedKind: "vault",
       path: "note.md",
       root: "vault",
     })).toBe("latest working state\n");
     expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: fullRef.hash,
+      sha256: workingRef.delta.hash,
     }));
   });
 
-  it("compacts legacy layered refs during idle shutdown with hot preserved inline files", async () => {
+  it("writes working deltas for legacy layered refs with hot preserved inline files", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const hotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-hot-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
@@ -610,17 +620,18 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const fullRef = requireBundleRef(result.snapshotRef);
-    expect(fullRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    const fullBundle = artifactBundles.get(fullRef.hash) ?? null;
+    const workingRef = requireWorkingSnapshotRef(result.snapshotRef);
+    expect(workingRef.base).toEqual(legacyLayeredRef.base);
+    expect(workingRef.delta.key).toMatch(/^cloudflare-workspace-deltas\/[a-f0-9]{64}\.bundle$/u);
+    const deltaBundle = artifactBundles.get(workingRef.delta.hash) ?? null;
     expect(readHostedBundleTextFile({
-      bytes: fullBundle,
+      bytes: deltaBundle,
       expectedKind: "vault",
       path: preservedPath,
       root: "vault",
     })).toBeNull();
     expect(listHostedBundleArtifacts({
-      bytes: fullBundle,
+      bytes: deltaBundle,
       expectedKind: "vault",
     })).toContainEqual({
       path: preservedPath,
@@ -657,6 +668,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       materializedArtifactPaths: new Set([`vault:${preservedPath}`]),
       vaultRoot,
     });
+    await writeFile(path.join(vaultRoot, "note.md"), "materialized latest\n", "utf8");
 
     const artifactBundles = new Map<string, Uint8Array>();
     const legacyLayeredRef = await createLegacyLayeredSnapshotFixture({
@@ -694,16 +706,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const fullRef = requireBundleRef(result.snapshotRef);
-    const fullBundle = artifactBundles.get(fullRef.hash) ?? null;
+    const workingRef = requireWorkingSnapshotRef(result.snapshotRef);
+    const deltaBundle = artifactBundles.get(workingRef.delta.hash) ?? null;
     expect(readHostedBundleTextFile({
-      bytes: fullBundle,
+      bytes: deltaBundle,
       expectedKind: "vault",
       path: preservedPath,
       root: "vault",
     })).toBeNull();
     expect(listHostedBundleArtifacts({
-      bytes: fullBundle,
+      bytes: deltaBundle,
       expectedKind: "vault",
     })).not.toContainEqual({
       path: preservedPath,
@@ -1710,5 +1722,22 @@ function requireBundleRef(value: unknown) {
     key: record.key,
     size: record.size,
     updatedAt: record.updatedAt,
+  };
+}
+
+function requireWorkingSnapshotRef(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Expected a hosted execution working snapshot ref.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.schema !== HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA) {
+    throw new TypeError("Expected a hosted execution working snapshot ref.");
+  }
+
+  return {
+    base: requireBundleRef(record.base),
+    delta: requireBundleRef(record.delta),
+    schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
   };
 }

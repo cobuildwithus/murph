@@ -36,9 +36,11 @@ Done:
 - Patched foreground-nudge preemption and lease ownership so deferred idle-shutdown checkpoints can finish and then drain the queued nudge, with regressions for active same-isolate and persisted active checkpoint cases.
 - After the deploy, confirmed mailbox import reached seq 546 in-memory but the durable imported watermark still stayed at 444 because optional browser-vault refresh alarms could fire before a pending deferred idle checkpoint and consume the alarm slot.
 - Patched optional browser-vault refresh scheduling/alarm handling so stale or early optional alarms yield to pending deferred idle-shutdown checkpoints, with a regression for pending refresh plus future idle checkpoint.
+- After the deploy, confirmed the idle-shutdown checkpoint now starts but does not commit: live logs show snapshot-size and Codex-home diagnostics without `checkpoint.snapshot_finished`, while the snapshot contains roughly 13k external artifacts.
+- Patched idle-shutdown checkpointing to write a working delta against the existing base snapshot instead of full-compacting the whole artifact corpus on every drain, and added bridge regressions for base, working, and layered snapshot refs.
 
 Now:
-- Commit/push/deploy the optional-refresh/deferred-checkpoint ordering fix, then recheck the live mailbox high-watermark and iMessage reply path.
+- Run broad verification, commit/push/deploy the working-delta checkpoint fix, then recheck the live mailbox high-watermark and iMessage reply path.
 
 Next:
 - Watch the lagged hosted mailbox recover, then verify cold/warm iMessage reply scenarios after provider capacity is available.
@@ -54,5 +56,6 @@ Working set (files/ids/commands):
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `pnpm cf:deploy:immediate`
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts`
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runtime-bridge-workspace.test.ts`
 - `pnpm -C apps/cloudflare typecheck`
 - `pnpm typecheck`
