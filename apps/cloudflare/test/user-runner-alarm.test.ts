@@ -4536,6 +4536,67 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(destroyInstance).toHaveBeenCalledOnce();
   });
 
+  it("keeps early optional browser-vault alarms behind a pending idle-shutdown checkpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createBundleRef("refresh-yields-to-future-idle-checkpoint"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      deferredCheckpointRequired: true,
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      status: "scheduled" as const,
+    }));
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      refreshBrowserVaultReplica,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      scheduled: true,
+    });
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "scheduled",
+    });
+    await flushDetachedRunnerDrive();
+
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:01.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+    }]);
+
+    mocks.emitHostedExecutionStructuredLog.mockClear();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.500Z"));
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runner yielded optional alarm work to pending idle-shutdown checkpoint.",
+      }),
+    );
+  });
+
   it("drains a refreshed pending browser-vault slot from a later alarm", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
