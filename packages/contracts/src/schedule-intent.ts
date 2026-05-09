@@ -151,6 +151,14 @@ export const experimentRunScheduleIntentSchema = z.discriminatedUnion("kind", [
   experimentRunScheduleIntentCronSchema,
 ]);
 
+function isMissingOrEmptyScheduleField(issue: z.ZodIssue): boolean {
+  if (issue.code === "invalid_type") {
+    return true;
+  }
+
+  return issue.code === "too_small" && issue.minimum === 1;
+}
+
 function formatScheduleIntentIssue(issue: z.ZodIssue): string {
   if (issue.path.length === 0 && issue.code === "invalid_type") {
     return "schedule must be an object.";
@@ -162,11 +170,11 @@ function formatScheduleIntentIssue(issue: z.ZodIssue): string {
     case "kind":
       return "schedule.kind must match a supported scheduled-log schedule.";
     case "at":
-      return issue.code === "invalid_type" ? "schedule.at is required." : issue.message;
+      return isMissingOrEmptyScheduleField(issue) ? "schedule.at is required." : issue.message;
     case "everyMs":
       return "schedule.everyMs must be a positive integer.";
     case "expression":
-      return issue.code === "invalid_type" ? "schedule.expression is required." : issue.message;
+      return isMissingOrEmptyScheduleField(issue) ? "schedule.expression is required." : issue.message;
     case "localTime":
       return "schedule.localTime must use HH:MM format.";
     default:
