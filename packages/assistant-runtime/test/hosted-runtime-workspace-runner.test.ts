@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  sha256HostedBundleHex,
+  snapshotHostedBundleRoots,
+} from "@murphai/runtime-state/node";
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
   createAssistantOutboxIntent,
@@ -58,6 +62,9 @@ import {
   createEmptyHostedMailboxImportState,
   readHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import {
+  restoreHostedWorkspaceRuntimeJobWorkspace,
+} from "../src/hosted-runtime/workspace-restore.ts";
 import {
   HostedMailboxUserMismatchError,
   type HostedMailboxPostCheckpointEffectResult,
@@ -322,6 +329,110 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
     } finally {
       await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("marks deferred foreground mailbox imports as live for same-snapshot restore", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-live-"));
+
+    try {
+      const vaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceVaultRoot = path.join(workspaceRoot, "source-vault");
+      await mkdir(sourceVaultRoot, { recursive: true });
+      await writeFile(path.join(sourceVaultRoot, "note.md"), "snapshot note\n", "utf8");
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{
+          root: sourceVaultRoot,
+          rootKey: "vault",
+        }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const snapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `cloudflare-workspace-base/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+      const artifactGetCalls: string[] = [];
+      const artifactBytesByHash = new Map<string, Uint8Array>([
+        [baseHash, baseBundle],
+      ]);
+      const { mailboxPort } = createMailboxPort({
+        items: [
+          createMailboxItem({
+            id: "mailbox_item_runner_live_state",
+            laneSeq: "1",
+          }),
+        ],
+      });
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createPlatform({
+          artifactBytesByHash,
+          artifactGetCalls,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        vaultRoot,
+        workspace: createWorkspaceState({ snapshotRef }),
+      });
+      assert.deepEqual(artifactGetCalls, [baseHash]);
+
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_live_state",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          await writeFile(path.join(vaultRoot, "live-mailbox-state.txt"), "seq=1\n", "utf8");
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          artifactBytesByHash,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_live_state",
+        async runAssistantPhase() {
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ snapshotRef }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(await readFile(path.join(vaultRoot, "live-mailbox-state.txt"), "utf8"), "seq=1\n");
+      artifactGetCalls.length = 0;
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createPlatform({
+          artifactBytesByHash,
+          artifactGetCalls,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        vaultRoot,
+        workspace: createWorkspaceState({ snapshotRef }),
+      });
+
+      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(await readFile(path.join(vaultRoot, "live-mailbox-state.txt"), "utf8"), "seq=1\n");
+    } finally {
+      await rm(workspaceRoot, {
         force: true,
         recursive: true,
       });
@@ -3030,6 +3141,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 });
 
 function createPlatform(input: {
+  artifactBytesByHash?: ReadonlyMap<string, Uint8Array>;
+  artifactGetCalls?: string[];
   effectsPort?: Partial<HostedRuntimeEffectsPort>;
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort;
@@ -3038,8 +3151,9 @@ function createPlatform(input: {
 }) {
   return {
     artifactStore: {
-      async get() {
-        return null;
+      async get(sha256: string) {
+        input.artifactGetCalls?.push(sha256);
+        return input.artifactBytesByHash?.get(sha256) ?? null;
       },
       async put() {
         return undefined;

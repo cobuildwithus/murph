@@ -27,6 +27,7 @@ import type {
 import { describe, test } from "vitest";
 
 import {
+  markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
@@ -796,6 +797,151 @@ describe("hosted workspace restore Codex continuity", () => {
         await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
         JSON.stringify({ session: "cache-missing" }) + "\n",
       );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("keeps live foreground state for an unchanged restored snapshot", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-live-state-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const sourceBaseVaultRoot = path.join(workspaceRoot, "base-vault");
+      await mkdir(sourceBaseVaultRoot, { recursive: true });
+      await writeFile(path.join(sourceBaseVaultRoot, "note.md"), "base note\n", "utf8");
+      const lazyRelativePath = "raw/inbox/live/lazy.txt";
+      const lazyBytes = Buffer.from("lazy inbox artifact\n", "utf8");
+      const lazyArtifactHash = sha256HostedBundleHex(lazyBytes);
+      await mkdir(path.dirname(path.join(sourceBaseVaultRoot, lazyRelativePath)), { recursive: true });
+      await writeFile(path.join(sourceBaseVaultRoot, lazyRelativePath), lazyBytes);
+      const baseBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (file) => {
+          if (file.path !== lazyRelativePath) {
+            return null;
+          }
+
+          return {
+            byteSize: lazyBytes.byteLength,
+            sha256: lazyArtifactHash,
+          };
+        },
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const snapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `cloudflare-workspace-base/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+      const artifactGetCalls: string[] = [];
+      const artifactBytesByHash = new Map<string, Uint8Array>([
+        [baseHash, baseBundle],
+        [lazyArtifactHash, lazyBytes],
+      ]);
+      const platform = createRestorePlatform({
+        artifactBytesByHash,
+        artifactGetCalls,
+      });
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
+        }),
+      });
+      assert.deepEqual(artifactGetCalls, [baseHash]);
+      await assert.rejects(readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), {
+        code: "ENOENT",
+      });
+
+      await writeFile(path.join(restoredVaultRoot, "live-mailbox-state.txt"), "seq=467\n", "utf8");
+      await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
+        snapshotRef,
+        vaultRoot: restoredVaultRoot,
+      });
+      artifactGetCalls.length = 0;
+      const samePayloadSnapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `cloudflare-workspace-base/alternate-${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+
+      const liveRestored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: samePayloadSnapshotRef,
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(await readFile(path.join(restoredVaultRoot, "live-mailbox-state.txt"), "utf8"), "seq=467\n");
+      const lazyMaterialized = await liveRestored.materializeWorkspaceArtifacts([lazyRelativePath]);
+      assert.deepEqual([...lazyMaterialized.materializedArtifactPaths], [`vault:${lazyRelativePath}`]);
+      assert.deepEqual([...lazyMaterialized.missingArtifactPaths], []);
+      assert.equal(await readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), "lazy inbox artifact\n");
+
+      const nextSourceVaultRoot = path.join(workspaceRoot, "next-base-vault");
+      await mkdir(path.dirname(path.join(nextSourceVaultRoot, lazyRelativePath)), { recursive: true });
+      const nextLazyBytes = Buffer.from("next lazy inbox artifact\n", "utf8");
+      const nextLazyArtifactHash = sha256HostedBundleHex(nextLazyBytes);
+      await writeFile(path.join(nextSourceVaultRoot, "note.md"), "next base note\n", "utf8");
+      await writeFile(path.join(nextSourceVaultRoot, lazyRelativePath), nextLazyBytes);
+      const nextBaseBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (file) => {
+          if (file.path !== lazyRelativePath) {
+            return null;
+          }
+
+          return {
+            byteSize: nextLazyBytes.byteLength,
+            sha256: nextLazyArtifactHash,
+          };
+        },
+        kind: "vault",
+        roots: [
+          {
+            root: nextSourceVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      assert.ok(nextBaseBundle);
+      const nextBaseHash = sha256HostedBundleHex(nextBaseBundle);
+      artifactBytesByHash.set(nextBaseHash, nextBaseBundle);
+      artifactBytesByHash.set(nextLazyArtifactHash, nextLazyBytes);
+      const nextSnapshotRef = createBundleRef({
+        hash: nextBaseHash,
+        key: `cloudflare-workspace-base/${nextBaseHash}.bundle`,
+        size: nextBaseBundle.byteLength,
+      });
+      artifactGetCalls.length = 0;
+
+      const nextRestored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform,
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: nextSnapshotRef,
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, [nextBaseHash]);
+      await assert.rejects(readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), {
+        code: "ENOENT",
+      });
+      const nextLazyMaterialized = await nextRestored.materializeWorkspaceArtifacts([lazyRelativePath]);
+      assert.deepEqual([...nextLazyMaterialized.materializedArtifactPaths], [`vault:${lazyRelativePath}`]);
+      assert.deepEqual([...nextLazyMaterialized.missingArtifactPaths], []);
+      assert.equal(await readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), "next lazy inbox artifact\n");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

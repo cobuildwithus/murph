@@ -67,6 +67,8 @@ const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-hot-re
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
 const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-working-restore-cache.v1";
 const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
+const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA = "murph.hosted-workspace-live-runtime-state.v1";
+const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
 
 export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 
@@ -114,6 +116,12 @@ interface HostedWorkspaceWorkingRestoreCache {
   vaultRootName: string;
 }
 
+interface HostedWorkspaceLiveRuntimeState {
+  schema: typeof HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA;
+  snapshotRefKey: string;
+  vaultRootName: string;
+}
+
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   logContext?: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
@@ -122,13 +130,49 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
   const restored = await createHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
   const snapshotRef = input.workspace?.snapshotRef ?? null;
+  const liveState = await readHostedWorkspaceLiveRuntimeState(restored.vaultRoot);
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
+  const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
+
+  if (liveState) {
+    if (isHostedWorkspaceLiveRuntimeStateHit({
+      cache: liveState,
+      snapshotRef,
+      vaultRoot: restored.vaultRoot,
+    })) {
+      addHostedWorkspaceRuntimeBundleReaders({
+        baseSnapshotRef,
+        deltaSnapshotRef,
+        hotSnapshotRef,
+        platform: input.platform,
+        readBundles: materializerBundles,
+      });
+      const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
+        vaultRoot: restored.vaultRoot,
+      });
+      return {
+        ...restored,
+        materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+          materializedArtifactPaths,
+          platform: input.platform,
+          restored,
+          readBundles: materializerBundles,
+        }),
+        materializedArtifactPaths,
+        mode: snapshotRef ? "snapshot" : "null-bootstrap",
+        restoreWasCold: false,
+      };
+    }
+
+    await clearHostedWorkspaceRuntimeLocalRoots(restored);
+    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+  }
+
   const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
     vaultRoot: restored.vaultRoot,
   });
-  const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
 
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     return {
@@ -447,6 +491,23 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,
   });
+}
+
+function addHostedWorkspaceRuntimeBundleReaders(input: {
+  baseSnapshotRef: HostedExecutionBundleRef | null;
+  deltaSnapshotRef: HostedExecutionBundleRef | null;
+  hotSnapshotRef: HostedExecutionBundleRef | null;
+  platform: HostedRuntimePlatform;
+  readBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>>;
+}): void {
+  for (const ref of [input.baseSnapshotRef, input.hotSnapshotRef, input.deltaSnapshotRef]) {
+    if (ref) {
+      input.readBundles.push(() => readHostedWorkspaceRuntimeBundle({
+        platform: input.platform,
+        ref,
+      }));
+    }
+  }
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
@@ -775,6 +836,48 @@ export async function writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffor
   }
 }
 
+export async function markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort(input: {
+  snapshotRef: HostedWorkspaceState["snapshotRef"];
+  vaultRoot: string;
+}): Promise<void> {
+  try {
+    await writeFile(
+      resolveHostedWorkspaceLiveRuntimeStatePath(input.vaultRoot),
+      JSON.stringify({
+        schema: HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA,
+        snapshotRefKey: snapshotRefKey(input.snapshotRef),
+        vaultRootName: readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot),
+      } satisfies HostedWorkspaceLiveRuntimeState) + "\n",
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+  } catch {
+    // Restore remains correct without this marker; the next warm run may reapply the same snapshot.
+  }
+}
+
+async function readHostedWorkspaceLiveRuntimeState(
+  vaultRoot: string,
+): Promise<HostedWorkspaceLiveRuntimeState | null> {
+  try {
+    const contents = await readFile(resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot), "utf8");
+    const parsed: unknown = JSON.parse(contents);
+    return parseHostedWorkspaceLiveRuntimeState(parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot: string): Promise<void> {
+  try {
+    await rm(resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot), { force: true });
+  } catch {
+    // A stale or missing marker only affects warm-restore performance.
+  }
+}
+
 async function readHostedWorkspaceHotRestoreCache(
   vaultRoot: string,
 ): Promise<HostedWorkspaceHotRestoreCache | null> {
@@ -883,6 +986,17 @@ function isHostedWorkspaceWorkingRestoreCacheHit(input: {
   );
 }
 
+function isHostedWorkspaceLiveRuntimeStateHit(input: {
+  cache: HostedWorkspaceLiveRuntimeState;
+  snapshotRef: HostedWorkspaceState["snapshotRef"];
+  vaultRoot: string;
+}): boolean {
+  return (
+    input.cache.snapshotRefKey === snapshotRefKey(input.snapshotRef)
+    && input.cache.vaultRootName === readHostedWorkspaceRestoreCacheVaultRootName(input.vaultRoot)
+  );
+}
+
 function parseHostedWorkspaceBaseRestoreCache(
   value: unknown,
 ): HostedWorkspaceBaseRestoreCache | null {
@@ -984,6 +1098,50 @@ function parseHostedWorkspaceWorkingRestoreCache(
   };
 }
 
+function parseHostedWorkspaceLiveRuntimeState(
+  value: unknown,
+): HostedWorkspaceLiveRuntimeState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (value.schema !== HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA) {
+    return null;
+  }
+  if (typeof value.snapshotRefKey !== "string") {
+    return null;
+  }
+  if (typeof value.vaultRootName !== "string") {
+    return null;
+  }
+
+  return {
+    schema: HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_SCHEMA,
+    snapshotRefKey: value.snapshotRefKey,
+    vaultRootName: value.vaultRootName,
+  };
+}
+
+function snapshotRefKey(snapshotRef: HostedWorkspaceState["snapshotRef"]): string {
+  const base = readHostedExecutionSnapshotBaseRef(snapshotRef);
+  const hot = readHostedExecutionSnapshotHotRef(snapshotRef);
+  const delta = readHostedExecutionSnapshotDeltaRef(snapshotRef);
+
+  return JSON.stringify({
+    base: bundlePayloadKey(base),
+    delta: bundlePayloadKey(delta),
+    hot: bundlePayloadKey(hot),
+  });
+}
+
+function bundlePayloadKey(ref: HostedExecutionBundleRef | null): { hash: string; size: number } | null {
+  return ref
+    ? {
+        hash: ref.hash,
+        size: ref.size,
+      }
+    : null;
+}
+
 function readHostedWorkspaceRestoreCacheVaultRootName(vaultRoot: string): string {
   return path.basename(path.resolve(vaultRoot));
 }
@@ -1006,6 +1164,13 @@ function resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot: string): strin
   return path.join(
     path.dirname(path.resolve(vaultRoot)),
     HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME,
+  );
+}
+
+function resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot: string): string {
+  return path.join(
+    path.dirname(path.resolve(vaultRoot)),
+    HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME,
   );
 }
 
@@ -1194,6 +1359,7 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
   restored: HostedRestoredExecutionContext,
 ): Promise<void> {
   await Promise.all([
+    clearHostedWorkspaceLiveRuntimeStateBestEffort(restored.vaultRoot),
     rm(restored.operatorHomeRoot, {
       force: true,
       recursive: true,
@@ -1207,5 +1373,14 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
     createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
     createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
     createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
+  ]);
+}
+
+async function clearHostedWorkspaceRestoreCachesBestEffort(vaultRoot: string): Promise<void> {
+  await Promise.all([
+    clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot),
+    clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot),
+    clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot),
+    clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot),
   ]);
 }

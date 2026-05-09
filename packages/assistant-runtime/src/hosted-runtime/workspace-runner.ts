@@ -46,6 +46,9 @@ import {
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
+import {
+  markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
+} from "./workspace-restore.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -499,6 +502,12 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
     result,
     runnerInput: input.input,
   });
+  if (result.checkpointDeferred && result.stateChanged) {
+    await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
+      snapshotRef: input.input.workspace?.snapshotRef ?? null,
+      vaultRoot: input.input.vaultRoot,
+    });
+  }
 
   return result;
 }
