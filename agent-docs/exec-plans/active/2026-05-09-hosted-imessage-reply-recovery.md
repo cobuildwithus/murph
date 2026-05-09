@@ -40,12 +40,14 @@ Done:
 - Patched idle-shutdown checkpointing to write a working delta against the existing base snapshot instead of full-compacting the whole artifact corpus on every drain, and added bridge regressions for base, working, and layered snapshot refs.
 - After the next live retry, confirmed the fixed runner took the new `working_delta` path but still timed out after snapshot-size logging because the first delta migration had to persist a large external artifact batch.
 - Patched full and working-delta checkpoint bundle writes to dedupe artifact puts by hash and persist them with bounded concurrency, with a regression covering many raw artifacts.
+- After the deploy, confirmed the latest Worker was live and mailbox imports reached the current conversation high-water in runtime logs, but the raw checkpointed workspace watermark still lagged because old pointer workflows could each issue their one runner nudge and keep colliding with the pending idle checkpoint.
+- Patched webhook pointer workflows so only the latest mailbox item in a lane can issue a runner nudge; older pointer workflows still wait for checkpointed progress but no longer amplify a backlog into repeated foreground nudges.
 
 Now:
-- Run broad verification, commit/push/deploy the bounded artifact persistence fix, then recheck the live mailbox high-watermark and iMessage reply path.
+- Commit/push the pointer-workflow nudge suppression fix, let Vercel deploy it, then recheck checkpoint progress and the iMessage reply path.
 
 Next:
-- Watch the lagged hosted mailbox recover, then verify cold/warm iMessage reply scenarios after provider capacity is available.
+- Watch the lagged hosted mailbox recover after the web deploy, then verify cold/warm iMessage reply scenarios after provider capacity is available.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: live post-deploy iMessage reply latency until the fixed Worker is deployed, the lagged runner drains, and the assistant provider stops returning capacity/quota failure.
@@ -55,8 +57,12 @@ Working set (files/ids/commands):
 - `packages/assistant-runtime/src/hosted-runtime/**`
 - `packages/hosted-execution/src/**`
 - `packages/operator-config/src/linq-runtime.ts`
+- `apps/web/src/lib/hosted-onboarding/webhook-workflow-steps.ts`
+- `apps/web/test/hosted-onboarding-webhook-workflows.test.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `pnpm cf:deploy:immediate`
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-webhook-workflows.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts apps/web/test/hosted-execution-handoff.test.ts`
+- `pnpm --dir apps/web typecheck`
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts`
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runtime-bridge-workspace.test.ts`
 - `pnpm -C apps/cloudflare typecheck`

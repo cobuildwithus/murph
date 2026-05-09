@@ -13,6 +13,7 @@ import {
 const mocks = vi.hoisted(() => ({
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   readHostedMailboxItemCheckpointById: vi.fn(),
+  readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedWorkspace: vi.fn(),
   start: vi.fn(),
 }));
@@ -29,6 +30,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   return {
     ...actual,
     readHostedMailboxItemCheckpointById: mocks.readHostedMailboxItemCheckpointById,
+    readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   };
 });
 
@@ -63,6 +65,10 @@ describe("hosted onboarding webhook workflows", () => {
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(
       buildHostedMailboxItemCheckpoint(),
     );
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([{
+      lane: "conversation",
+      maxSeq: "1",
+    }]);
     mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
       hostedMailboxConversationImportedSeq: "1",
       hostedMailboxSystemImportedSeq: "0",
@@ -217,6 +223,33 @@ describe("hosted onboarding webhook workflows", () => {
       mailboxItemId: "mailbox_123",
       source: "linq",
     })).rejects.toBeInstanceOf(RetryableError);
+  });
+
+  it("skips runner nudge for older mailbox pointers in the same lane", async () => {
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(
+      buildHostedMailboxItemCheckpoint({
+        laneSeq: "4",
+      }),
+    );
+    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
+      hostedMailboxConversationImportedSeq: "0",
+      hostedMailboxSystemImportedSeq: "0",
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([{
+      lane: "conversation",
+      maxSeq: "5",
+    }]);
+
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.readHostedMailboxMaxSeqByLane).toHaveBeenCalledWith({
+      lanes: ["conversation"],
+      userId: "member_123",
+    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("skips runner nudge when the mailbox item is already checkpointed", async () => {
