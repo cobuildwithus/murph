@@ -105,7 +105,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Journal day frontmatter:
   `schemaVersion`, `docType`, `dayKey`, `eventIds`, `sampleStreams`
 - Experiment frontmatter:
-  `schemaVersion`, `docType`, `experimentId`, `slug`, `status`, `title`, `startedOn`, `commonsProtocolRef`, optional private `protocolRef`, optional `effectiveProtocolSnapshot`, and optional `runPlan.baseline` with `mode: prospective | retrospective | omitted`. Protocol-backed experiments require the public `commonsProtocolRef` plus the effective snapshot; private `protocolRef` is present only when the run uses a saved private adaptation.
+  `schemaVersion`, `docType`, `experimentId`, `slug`, `status`, `title`, `startedOn`, `commonsProtocolRef`, optional private `protocolRef`, optional `effectiveProtocolSnapshot`, optional `runPlan.baseline` with `mode: prospective | retrospective | omitted`, and optional analysis evidence in `analysisPlan.measurementAnchors[]` plus future timing in `analysisPlan.plannedMeasurements[]`. `runPlan.baseline` is the run baseline or pre-intervention window; lab panels and other observed measurement evidence belong in `analysisPlan.measurementAnchors[]`. Protocol-backed experiments require the public `commonsProtocolRef` plus the effective snapshot; private `protocolRef` is present only when the run uses a saved private adaptation.
 - Provider frontmatter:
   `schemaVersion`, `docType`, `providerId`, `slug`, `title`, `status`, `specialty`, `organization`
 - Food frontmatter:

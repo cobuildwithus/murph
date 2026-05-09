@@ -1469,12 +1469,70 @@ export const experimentExpectedDirectionSchema = z
 
 export const experimentExpectedDirectionsSchema = z.array(experimentExpectedDirectionSchema).max(50);
 
+export const experimentMeasurementRoleSchema = z.enum(["baseline", "followup"]);
+
+export const experimentMeasurementKindSchema = z.enum([
+  "lab_panel",
+  "wearable_summary",
+  "manual_measurement",
+  "document",
+]);
+
+export const experimentMeasurementAnchorRecordIdSchema = patternedString(
+  "^(?:(?:evt|sample|batch|metric_sample)_[A-Za-z0-9][A-Za-z0-9_-]*|sample-summary:[0-9]{4}-[0-9]{2}-[0-9]{2}:[A-Za-z0-9_-]+:[A-Za-z0-9_.%/-]+)$",
+);
+
+export const experimentMeasurementAnchorSchema = z
+  .object({
+    role: experimentMeasurementRoleSchema,
+    kind: experimentMeasurementKindSchema,
+    recordId: experimentMeasurementAnchorRecordIdSchema,
+    biomarkerKeys: uniqueArray(healthCommonsKeySchema, {
+      minItems: 1,
+      uniqueItems: true,
+    }),
+    observedOn: isoDateString().optional(),
+  })
+  .strict();
+
+export const experimentMeasurementAnchorsSchema = z.array(experimentMeasurementAnchorSchema).max(50);
+
+export const experimentPlannedMeasurementSchema = z
+  .object({
+    role: experimentMeasurementRoleSchema,
+    kind: experimentMeasurementKindSchema,
+    biomarkerKeys: uniqueArray(healthCommonsKeySchema, {
+      minItems: 1,
+      uniqueItems: true,
+    }),
+    targetWindow: z
+      .object({
+        start: isoDateString(),
+        end: isoDateString(),
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((measurement, context) => {
+    if (measurement.targetWindow.start > measurement.targetWindow.end) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Planned measurement targetWindow.start must be before or equal to targetWindow.end.",
+        path: ["targetWindow", "end"],
+      });
+    }
+  });
+
+export const experimentPlannedMeasurementsSchema = z.array(experimentPlannedMeasurementSchema).max(50);
+
 export const experimentAnalysisPlanSchema = z
   .object({
     primaryBiomarkerKey: healthCommonsKeySchema.optional(),
     secondaryBiomarkerKeys: uniqueArray(healthCommonsKeySchema, { uniqueItems: true }).optional(),
     desiredDirection: z.enum(EXPERIMENT_SIGNAL_DIRECTIONS).optional(),
     expectedDirections: experimentExpectedDirectionsSchema.optional(),
+    measurementAnchors: experimentMeasurementAnchorsSchema.optional(),
+    plannedMeasurements: experimentPlannedMeasurementsSchema.optional(),
     notes: z.array(boundedString(1, 4000)).optional(),
   })
   .strict()
@@ -1489,6 +1547,38 @@ export const experimentAnalysisPlanSchema = z
         });
       }
       seen.add(entry.biomarkerKey);
+    }
+
+    const seenAnchors = new Set<string>();
+    for (const [index, anchor] of (analysisPlan.measurementAnchors ?? []).entries()) {
+      const key = `${anchor.role}\u0000${anchor.kind}\u0000${anchor.recordId}`;
+      if (seenAnchors.has(key)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Duplicate measurement anchor.",
+          path: ["measurementAnchors", index, "recordId"],
+        });
+      }
+      seenAnchors.add(key);
+    }
+
+    const seenPlannedMeasurements = new Set<string>();
+    for (const [index, planned] of (analysisPlan.plannedMeasurements ?? []).entries()) {
+      const key = [
+        planned.role,
+        planned.kind,
+        planned.targetWindow.start,
+        planned.targetWindow.end,
+        [...planned.biomarkerKeys].sort().join("|"),
+      ].join("\u0000");
+      if (seenPlannedMeasurements.has(key)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Duplicate planned measurement.",
+          path: ["plannedMeasurements", index, "targetWindow"],
+        });
+      }
+      seenPlannedMeasurements.add(key);
     }
   });
 
@@ -2225,6 +2315,10 @@ export type ExperimentAdherenceEvidenceRule = z.infer<typeof experimentAdherence
 export type ExperimentAdherenceTarget = z.infer<typeof experimentAdherenceTargetSchema>;
 export type ExperimentRunLogging = z.infer<typeof experimentRunLoggingSchema>;
 export type ExperimentRunPlan = z.infer<typeof experimentRunPlanSchema>;
+export type ExperimentMeasurementRole = z.infer<typeof experimentMeasurementRoleSchema>;
+export type ExperimentMeasurementKind = z.infer<typeof experimentMeasurementKindSchema>;
+export type ExperimentMeasurementAnchor = z.infer<typeof experimentMeasurementAnchorSchema>;
+export type ExperimentPlannedMeasurement = z.infer<typeof experimentPlannedMeasurementSchema>;
 export type ExperimentAnalysisPlan = z.infer<typeof experimentAnalysisPlanSchema>;
 export type ExperimentOnboardingSafety = z.infer<typeof experimentOnboardingSafetySchema>;
 export type ExperimentOnboardingCapture = z.infer<typeof experimentOnboardingCaptureSchema>;

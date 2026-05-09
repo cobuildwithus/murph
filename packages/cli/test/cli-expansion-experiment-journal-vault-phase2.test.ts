@@ -675,6 +675,12 @@ test.sequential(
         'biomarker:resting-heart-rate=decrease',
         '--expected-direction',
         'biomarker:sleep-efficiency=increase',
+        '--analysis-anchor',
+        'role=baseline,kind=lab_panel,recordId=evt_lipid_baseline,biomarkerKeys=biomarker:ldl-c',
+        '--analysis-anchor',
+        'role=baseline,kind=lab_panel,recordId=evt_lipid_baseline,biomarkerKeys=biomarker:apob',
+        '--planned-measurement',
+        'role=followup,kind=lab_panel,window=2026-06-01..2026-06-07,biomarkerKeys=biomarker:ldl-c',
         '--analysis-note',
         'Compare the seven-day baseline to the intervention window.',
         '--onboarding-completed-at',
@@ -800,6 +806,25 @@ test.sequential(
       assert.deepEqual(analysisPlan.expectedDirections, [
         { biomarkerKey: 'biomarker:resting-heart-rate', direction: 'decrease' },
         { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
+      ])
+      assert.deepEqual(analysisPlan.measurementAnchors, [
+        {
+          role: 'baseline',
+          kind: 'lab_panel',
+          recordId: 'evt_lipid_baseline',
+          biomarkerKeys: ['biomarker:ldl-c', 'biomarker:apob'],
+        },
+      ])
+      assert.deepEqual(analysisPlan.plannedMeasurements, [
+        {
+          role: 'followup',
+          kind: 'lab_panel',
+          biomarkerKeys: ['biomarker:ldl-c'],
+          targetWindow: {
+            start: '2026-06-01',
+            end: '2026-06-07',
+          },
+        },
       ])
       assert.deepEqual(analysisPlan.notes, [
         'Compare the seven-day baseline to the intervention window.',
@@ -2043,7 +2068,7 @@ test.sequential(
       assert.deepEqual(requireData(outcome).outcome.conclusion, {
         caveats: [
           'This is an N-of-1 readout, not medical advice.',
-          'Sparse wearable coverage or missing sessions can make this directional rather than decisive.',
+          'Sparse biomarker coverage or missing sessions can make this directional rather than decisive.',
         ],
         headline: 'The experiment finished, but the primary biomarker readout is incomplete.',
         plainLanguage:

@@ -22,6 +22,11 @@ import {
   readExperimentProtocolProjectionFields,
   type ExperimentProtocolProjectionFields,
 } from "./protocols.ts";
+import {
+  extractMetricPointsFromCanonicalEntities,
+  selectMetricValue,
+  type MetricPoint,
+} from "./metrics/index.ts";
 import { summarizeWearableDay, type WearableDaySummary, type WearableResolvedMetric } from "./wearables.ts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
@@ -216,6 +221,7 @@ interface ExperimentSummaryContext {
   experiment: CanonicalEntity;
   frontmatter: QueryExperimentFrontmatter;
   interventionDates: string[];
+  metricPoints: MetricPoint[];
   progressPhase: ExperimentProgressPhase;
   summariesByDate: Map<string, WearableDaySummary | null>;
 }
@@ -231,6 +237,11 @@ interface MetricWindowPoint {
   value: number;
 }
 
+interface MetricWindowSelection {
+  points: MetricWindowPoint[];
+  totalDays: number;
+}
+
 export function summarizeExperimentProgress(
   vault: VaultReadModel,
   slug: string,
@@ -242,14 +253,17 @@ export function summarizeExperimentProgress(
     .filter(isCompletedSessionEvent)
     .map((event) => event.entityId);
   const primarySignal = signals[0] ?? null;
-  const baselineDaysAvailable = countDatesWithWearableData(
-    context.baselineDates,
-    context.summariesByDate,
-  );
-  const interventionDaysAvailable = countDatesWithWearableData(
-    context.interventionDates,
-    context.summariesByDate,
-  );
+  const primaryBiomarkerKey = context.frontmatter.analysisPlan?.primaryBiomarkerKey ?? null;
+  const baselineDaysAvailable =
+    primaryBiomarkerKey !== null &&
+    hasMeasurementAnchorForRole(context.frontmatter.analysisPlan, primaryBiomarkerKey, "baseline")
+      ? primarySignal?.baselineDayCount ?? 0
+      : countDatesWithWearableData(context.baselineDates, context.summariesByDate);
+  const interventionDaysAvailable =
+    primaryBiomarkerKey !== null &&
+    hasMeasurementAnchorForRole(context.frontmatter.analysisPlan, primaryBiomarkerKey, "followup")
+      ? primarySignal?.interventionDayCount ?? 0
+      : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
   const adherence = {
     ...buildAdherenceSummary(context),
     sessionEventIds: completedSessionEventIds,
@@ -424,6 +438,7 @@ function buildExperimentSummaryContext(
       frontmatter.runPlan?.interventionStart,
       minIsoDate(frontmatter.runPlan?.interventionEnd, asOf),
     ),
+    metricPoints: extractMetricPointsFromCanonicalEntities(vault.entities),
     progressPhase,
     summariesByDate,
   };
@@ -445,16 +460,20 @@ function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetric
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
   return biomarkerKeys.map((biomarkerKey) => {
-    const baseline = collectMetricWindow(
+    const baselineWindow = collectMetricWindow(
+      context,
       biomarkerKey,
+      "baseline",
       context.baselineDates,
-      context.summariesByDate,
     );
-    const intervention = collectMetricWindow(
+    const interventionWindow = collectMetricWindow(
+      context,
       biomarkerKey,
+      "followup",
       context.interventionDates,
-      context.summariesByDate,
     );
+    const baseline = baselineWindow.points;
+    const intervention = interventionWindow.points;
     const baselineMean = mean(baseline.map((entry) => entry.value));
     const interventionMean = mean(intervention.map((entry) => entry.value));
     const deltaAbs =
@@ -472,13 +491,13 @@ function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetric
     const baselineSummary = {
       daysWithData: baseline.length,
       mean: baselineMean,
-      totalDays: context.baselineDates.length,
+      totalDays: baselineWindow.totalDays,
       unit,
     };
     const interventionSummary = {
       daysWithData: intervention.length,
       mean: interventionMean,
-      totalDays: context.interventionDates.length,
+      totalDays: interventionWindow.totalDays,
       unit,
     };
 
@@ -640,11 +659,7 @@ function buildCoverageSummary(input: {
     (input.primarySignal?.interventionDayCount ?? 0);
   let status: ExperimentCoverageStatus = "insufficient";
 
-  const hasCompleteMetricWindow =
-    input.frontmatter.runPlan?.baselineStart !== undefined &&
-    input.frontmatter.runPlan?.baselineEnd !== undefined &&
-    input.frontmatter.runPlan?.interventionStart !== undefined &&
-    input.frontmatter.runPlan?.interventionEnd !== undefined;
+  const hasCompleteMetricWindow = hasAnalysisMetricWindow(input.frontmatter);
 
   if (
     input.primarySignal !== null &&
@@ -721,10 +736,7 @@ function buildAnalysisReadiness(
     blockingReasons.push("missing_primary_biomarker");
   }
   if (
-    !frontmatter.runPlan?.baselineStart ||
-    !frontmatter.runPlan.baselineEnd ||
-    !frontmatter.runPlan.interventionStart ||
-    !frontmatter.runPlan.interventionEnd
+    !hasAnalysisMetricWindow(frontmatter)
   ) {
     blockingReasons.push("missing_metric_window");
   }
@@ -833,7 +845,7 @@ function buildOutcomeConclusion(
     return {
       caveats: [
         "This is an N-of-1 readout, not medical advice.",
-        "Sparse wearable coverage or missing sessions can make this directional rather than decisive.",
+        "Sparse biomarker coverage or missing sessions can make this directional rather than decisive.",
       ],
       headline: "The experiment finished, but the primary biomarker readout is incomplete.",
       plainLanguage:
@@ -1146,17 +1158,84 @@ function hasSafetyFollowUp(events: readonly CanonicalEntity[]): boolean {
   });
 }
 
-function collectMetricWindow(
+function hasAnalysisMetricWindow(frontmatter: ExperimentFrontmatter): boolean {
+  const primaryBiomarkerKey = frontmatter.analysisPlan?.primaryBiomarkerKey;
+  if (!primaryBiomarkerKey) {
+    return false;
+  }
+
+  if (hasMeasurementPlanForBiomarker(frontmatter.analysisPlan, primaryBiomarkerKey)) {
+    return (
+      hasMeasurementAnchorForRole(frontmatter.analysisPlan, primaryBiomarkerKey, "baseline") &&
+      (hasMeasurementAnchorForRole(frontmatter.analysisPlan, primaryBiomarkerKey, "followup") ||
+        hasPlannedMeasurementForRole(frontmatter.analysisPlan, primaryBiomarkerKey, "followup"))
+    );
+  }
+
+  if (
+    frontmatter.runPlan?.baselineStart !== undefined &&
+    frontmatter.runPlan?.baselineEnd !== undefined &&
+    frontmatter.runPlan?.interventionStart !== undefined &&
+    frontmatter.runPlan?.interventionEnd !== undefined
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function hasMeasurementPlanForBiomarker(
+  analysisPlan: QueryExperimentFrontmatter["analysisPlan"] | undefined,
   biomarkerKey: string,
+): boolean {
+  return (
+    (analysisPlan?.measurementAnchors ?? []).some((anchor) =>
+      anchor.biomarkerKeys.includes(biomarkerKey)
+    ) ||
+    (analysisPlan?.plannedMeasurements ?? []).some((measurement) =>
+      measurement.biomarkerKeys.includes(biomarkerKey)
+    )
+  );
+}
+
+function hasMeasurementAnchorForRole(
+  analysisPlan: QueryExperimentFrontmatter["analysisPlan"] | undefined,
+  biomarkerKey: string,
+  role: "baseline" | "followup",
+): boolean {
+  return (analysisPlan?.measurementAnchors ?? []).some(
+    (anchor) => anchor.role === role && anchor.biomarkerKeys.includes(biomarkerKey),
+  );
+}
+
+function hasPlannedMeasurementForRole(
+  analysisPlan: QueryExperimentFrontmatter["analysisPlan"] | undefined,
+  biomarkerKey: string,
+  role: "baseline" | "followup",
+): boolean {
+  return (analysisPlan?.plannedMeasurements ?? []).some(
+    (measurement) =>
+      measurement.role === role && measurement.biomarkerKeys.includes(biomarkerKey),
+  );
+}
+
+function collectMetricWindow(
+  context: ExperimentSummaryContext,
+  biomarkerKey: string,
+  role: "baseline" | "followup",
   dates: readonly string[],
-  summariesByDate: ReadonlyMap<string, WearableDaySummary | null>,
-): MetricWindowPoint[] {
+): MetricWindowSelection {
+  const anchored = collectAnchoredMetricWindow(context, biomarkerKey, role);
+  if (anchored !== null) {
+    return anchored;
+  }
+
   const points: MetricWindowPoint[] = [];
 
   for (const date of dates) {
     const resolved = resolveBiomarkerMetric(
       biomarkerKey,
-      summariesByDate.get(date) ?? null,
+      context.summariesByDate.get(date) ?? null,
     );
     const value = resolved?.selection.value ?? null;
     if (value === null) {
@@ -1170,7 +1249,42 @@ function collectMetricWindow(
     });
   }
 
-  return points;
+  return { points, totalDays: dates.length };
+}
+
+function collectAnchoredMetricWindow(
+  context: ExperimentSummaryContext,
+  biomarkerKey: string,
+  role: "baseline" | "followup",
+): MetricWindowSelection | null {
+  const anchors = (context.frontmatter.analysisPlan?.measurementAnchors ?? []).filter(
+    (anchor) => anchor.role === role && anchor.biomarkerKeys.includes(biomarkerKey),
+  );
+  if (anchors.length === 0) {
+    return null;
+  }
+
+  const points: MetricWindowPoint[] = [];
+  for (const anchor of anchors) {
+    const selection = selectMetricValue({
+      biomarkerKey,
+      now: context.asOf,
+      points: context.metricPoints.filter(
+        (point) => point.source.recordId === anchor.recordId,
+      ),
+    });
+    if (typeof selection.value !== "number" || !Number.isFinite(selection.value)) {
+      continue;
+    }
+
+    points.push({
+      date: selection.effectiveDate ?? anchor.observedOn ?? context.asOf,
+      unit: selection.unit ?? null,
+      value: selection.value,
+    });
+  }
+
+  return { points, totalDays: anchors.length };
 }
 
 function resolveBiomarkerMetric(
