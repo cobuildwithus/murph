@@ -511,6 +511,52 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
+  it('requires vault-first evidence reads before setup questions', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      onboardingGuidance: false,
+    }))
+
+    expect(prompt).toContain(
+      'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
+    )
+    expect(prompt).toContain(
+      'This is a prerequisite, not an optional courtesy.',
+    )
+    expect(prompt).toContain(
+      'Read the protocol page, active experiments, saved memory/preferences, relevant journal notes, regimens/supplements/medications, labs, documents, wearable summaries',
+    )
+    expect(prompt).toContain(
+      'the protocol onboarding block `contextReview.vaultChecks[].readHints`',
+    )
+    expect(prompt).toContain(
+      'Treat `ask_if_unknown` setup slots as unknown only after that vault-first pass.',
+    )
+    expect(prompt).toContain(
+      'Do not ask the user to restate labs, wearable signals, notes, active experiments, regimen details, goals, conditions, allergies, preferences, or other saved context',
+    )
+    expect(prompt).toContain(
+      'For lab-backed protocols, inspect structured lab surfaces such as `vault-cli blood-test list --format json`',
+    )
+    expect(prompt).toContain(
+      'If a usable panel exists, propose it and ask only for confirmation when selection or freshness is ambiguous.',
+    )
+    expect(prompt).toContain(
+      'keep "baseline lab/panel evidence" separate from the experiment\'s run baseline or pre-intervention window.',
+    )
+    expect(prompt).toContain(
+      'label both plainly, for example "baseline lipid panel: <date>" and "pre-intervention run-in: <date range>"',
+    )
+    expect(prompt).toContain(
+      'For wearable-backed protocols, inspect normalized wearable reads before asking about baseline coverage, recent values, or device availability.',
+    )
+    expect(prompt).toContain(
+      'If a required evidence read is unavailable, stale, sparse, or inconclusive, say the specific gap briefly and ask one targeted question for that gap.',
+    )
+    expect(prompt).toContain(
+      'ask the safety screen even when the vault is silent.',
+    )
+  })
+
   it('points richer experiment setup at the typed edit command', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
@@ -534,6 +580,14 @@ describe('assistant experiment onboarding guidance', () => {
 
     expect(prompt).toContain('vault-cli experiment start <slug>')
     expect(prompt).toContain('--from-protocol <key-or-route>')
+    expect(prompt).toContain(
+      'supports a custom run baseline window with `--baseline-start`, `--baseline-end`, and `--baseline-days`',
+    )
+    expect(prompt).toContain(
+      'It does not have a dedicated typed flag for baseline lab id/date',
+    )
+    expect(prompt).toContain('--setup-answer baseline_lipid_panel_date=<YYYY-MM-DD>')
+    expect(prompt).toContain('--setup-answer baseline_lipid_panel_id=<evt_id>')
     expect(prompt).toContain('vault-cli experiment start <slug> --custom')
     expect(prompt).not.toContain('vault-cli experiment start <slug> --protocol-key')
     expect(prompt).toContain('vault-cli experiment edit <id>')
