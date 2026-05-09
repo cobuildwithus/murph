@@ -549,7 +549,7 @@ export class HostedUserRunner {
         })
       : false;
     let immediateDriveStarted = false;
-    if (activeInThisIsolate && runningRecord.inFlight) {
+    if (activeInThisIsolate) {
       immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: "nudge",

@@ -2976,7 +2976,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    }]);
 	  });
 
-	  it("preserves a fresh nudge when idle alarm application reenters during setAlarm", async () => {
+	  it("starts a fresh nudge drive when idle alarm application reenters during setAlarm", async () => {
 	    vi.useFakeTimers();
 	    vi.setSystemTime(new Date(FIXED_NOW));
 	    const workspace = createWorkspaceState({
@@ -3006,12 +3006,12 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
 	      status: "idle",
 	    });
+	    await flushDetachedRunnerDrive();
 
 	    expect(nudgedDuringIdleAlarmApplication).toBe(true);
-	    expect(invoke).toHaveBeenCalledOnce();
+	    expect(invoke).toHaveBeenCalledTimes(2);
 	    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
-	    expect(alarms.filter((alarm) => alarm === "2026-04-27T00:05:00.000Z")).toHaveLength(1);
-	    expect(alarms.at(-1)).toBe(FIXED_NOW);
+	    expect(alarms).toContain(FIXED_NOW);
 	    expect(
 	      sql.exec(
 	        `SELECT idle_shutdown_checkpoint_due_at,
@@ -3025,7 +3025,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	      idle_shutdown_checkpoint_due_at: null,
 	      idle_shutdown_checkpoint_workspace_version: null,
 	      next_wake_at: FIXED_NOW,
-	      pending_nudge: 1,
+	      pending_nudge: 0,
 	    }]);
 	  });
 
