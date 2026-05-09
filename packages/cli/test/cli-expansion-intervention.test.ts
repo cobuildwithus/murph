@@ -5,9 +5,12 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
+import { registerEventCommands } from '../src/commands/event.js'
+import { registerExperimentCommands } from '../src/commands/experiment.js'
 import { registerInterventionCommands } from '../src/commands/intervention.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 interface SchemaEnvelope {
@@ -28,6 +31,9 @@ interface InterventionAddEnvelope {
   interventionType: string
   durationMinutes: number | null
   regimenId: string | null
+  experimentId: string | null
+  experimentSlug: string | null
+  experimentLinkMode: 'auto' | 'explicit' | null
   note: string
 }
 
@@ -69,9 +75,26 @@ function createSliceCli() {
   const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
+  registerEventCommands(cli, services)
+  registerExperimentCommands(cli, services)
   registerInterventionCommands(cli, services)
 
   return cli
+}
+
+async function runSliceCli<TData>(args: string[]): Promise<CliEnvelope<TData>> {
+  const cli = createSliceCli()
+  const output: string[] = []
+
+  await cli.serve([...args, '--full-output', '--format', 'json'], {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
 async function runSliceCliRaw(args: string[]) {
@@ -89,6 +112,49 @@ async function runSliceCliRaw(args: string[]) {
   return output.join('').trim()
 }
 
+async function createActiveSaunaExperiment(vaultRoot: string, slug: string) {
+  const result = await runSliceCli<{
+    experimentId: string
+    slug: string
+  }>([
+    'experiment',
+    'start',
+    slug,
+    '--custom',
+    '--title',
+    slug,
+    '--started-on',
+    '2026-04-01',
+    '--status',
+    'active',
+    '--intervention-start',
+    '2026-04-01',
+    '--intervention-end',
+    '2026-04-14',
+    '--modality',
+    'sauna',
+    '--primary-biomarker-key',
+    'biomarker:resting-heart-rate',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(result.ok, true, result.ok ? undefined : result.error.message)
+  return requireData(result)
+}
+
+function assertEntityExperimentLink(
+  entity: ShowEnvelope['entity'],
+  expectedExperimentId: string | null,
+  expectedExperimentSlug?: string,
+) {
+  assert.equal(entity.data.experimentId, expectedExperimentId ?? undefined)
+  assert.equal(entity.data.experimentSlug, expectedExperimentSlug)
+  assert.equal(
+    entity.links.some((link) => link.id === expectedExperimentId),
+    expectedExperimentId !== null,
+  )
+}
+
 test('intervention add schema exposes the freeform intervention capture surface', async () => {
   const schema = JSON.parse(
     await runSliceCliRaw(['intervention', 'add', '--schema']),
@@ -97,6 +163,9 @@ test('intervention add schema exposes the freeform intervention capture surface'
   assert.equal('duration' in schema.options.properties, true)
   assert.equal('type' in schema.options.properties, true)
   assert.equal('regimenId' in schema.options.properties, true)
+  assert.equal('experiment' in schema.options.properties, true)
+  assert.equal('skipExperimentLink' in schema.options.properties, true)
+  assert.equal('allowOutOfWindow' in schema.options.properties, true)
   assert.equal('occurredAt' in schema.options.properties, true)
   assert.equal('source' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
@@ -274,6 +343,343 @@ test.sequential(
         ambiguousDuration.error.message ?? '',
         /Pass --duration <minutes> to record it explicitly/u,
       )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'intervention add auto-links exactly one active matching experiment',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-cli-intervention-experiment-'),
+    )
+
+    try {
+      const initResult = await runSliceCli<{ created: boolean }>([
+        'init',
+        '--timezone',
+        'UTC',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const experiment = await createActiveSaunaExperiment(vaultRoot, 'sauna-rhr')
+
+      const sauna = await runSliceCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--occurred-at',
+        '2026-04-03T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(sauna.ok, true, sauna.ok ? undefined : sauna.error.message)
+      assert.equal(requireData(sauna).experimentId, experiment.experimentId)
+      assert.equal(requireData(sauna).experimentSlug, 'sauna-rhr')
+      assert.equal(requireData(sauna).experimentLinkMode, 'auto')
+
+      const shown = await runSliceCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(sauna).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shown.ok, true)
+      assert.equal(
+        requireData(shown).entity.data.experimentId,
+        experiment.experimentId,
+      )
+      assert.equal(requireData(shown).entity.data.experimentSlug, 'sauna-rhr')
+      assertEntityExperimentLink(
+        requireData(shown).entity,
+        experiment.experimentId,
+        'sauna-rhr',
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'intervention add fails before write on ambiguous automatic experiment matches',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-cli-intervention-ambiguous-'),
+    )
+
+    try {
+      await runSliceCli<unknown>(['init', '--timezone', 'UTC', '--vault', vaultRoot])
+      for (const slug of ['sauna-a', 'sauna-b']) {
+        await createActiveSaunaExperiment(vaultRoot, slug)
+      }
+
+      const ambiguous = await runSliceCli<unknown>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--occurred-at',
+        '2026-04-03T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(ambiguous.ok, false)
+      assert.equal(ambiguous.error.code, 'invalid_option')
+      assert.match(ambiguous.error.message ?? '', /Multiple active experiments match/u)
+
+      const list = await runSliceCli<{ count: number }>([
+        'event',
+        'list',
+        '--kind',
+        'intervention_session',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(list.ok, true)
+      assert.equal(requireData(list).count, 0)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'intervention add supports explicit experiment links and opt-out',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-cli-intervention-explicit-'),
+    )
+
+    try {
+      await runSliceCli<unknown>(['init', '--timezone', 'UTC', '--vault', vaultRoot])
+      const experiment = await createActiveSaunaExperiment(
+        vaultRoot,
+        'explicit-sauna',
+      )
+      await createActiveSaunaExperiment(vaultRoot, 'alternate-sauna')
+
+      const explicit = await runSliceCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--experiment',
+        'explicit-sauna',
+        '--occurred-at',
+        '2026-04-03T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(explicit.ok, true)
+      assert.equal(requireData(explicit).experimentId, experiment.experimentId)
+      assert.equal(requireData(explicit).experimentSlug, 'explicit-sauna')
+      assert.equal(requireData(explicit).experimentLinkMode, 'explicit')
+
+      const optedOut = await runSliceCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--skip-experiment-link',
+        '--occurred-at',
+        '2026-04-04T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(optedOut.ok, true)
+      assert.equal(requireData(optedOut).experimentId, null)
+      assert.equal(requireData(optedOut).experimentSlug, null)
+      assert.equal(requireData(optedOut).experimentLinkMode, null)
+
+      const shownOptOut = await runSliceCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(optedOut).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shownOptOut.ok, true)
+      assertEntityExperimentLink(requireData(shownOptOut).entity, null)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'intervention add requires an override for explicit out-of-window links',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-cli-intervention-window-'),
+    )
+
+    try {
+      await runSliceCli<unknown>(['init', '--timezone', 'UTC', '--vault', vaultRoot])
+      const experiment = await createActiveSaunaExperiment(vaultRoot, 'sauna-window')
+
+      const blocked = await runSliceCli<unknown>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--experiment',
+        'sauna-window',
+        '--occurred-at',
+        '2026-04-20T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(blocked.ok, false)
+      assert.match(blocked.error.message ?? '', /outside the intervention window/u)
+
+      const linked = await runSliceCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--experiment',
+        'sauna-window',
+        '--allow-out-of-window',
+        '--occurred-at',
+        '2026-04-20T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(linked.ok, true)
+      assert.equal(requireData(linked).experimentId, experiment.experimentId)
+      assert.equal(requireData(linked).experimentSlug, 'sauna-window')
+      assert.equal(requireData(linked).experimentLinkMode, 'explicit')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'experiment session attach, replace, detach preserve non-experiment intervention links',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'murph-cli-intervention-attach-'),
+    )
+
+    try {
+      await runSliceCli<unknown>(['init', '--timezone', 'UTC', '--vault', vaultRoot])
+      const experiments: Record<string, string> = {}
+      for (const slug of ['sauna-one', 'sauna-two']) {
+        const created = await createActiveSaunaExperiment(vaultRoot, slug)
+        experiments[slug] = created.experimentId
+      }
+
+      const created = await runSliceCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--skip-experiment-link',
+        '--regimen-id',
+        'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+        '--occurred-at',
+        '2026-04-03T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(created.ok, true)
+
+      const attached = await runSliceCli<{
+        eventId: string
+        experimentId: string
+        experimentSlug: string
+        linked: boolean
+      }>([
+        'experiment',
+        'session',
+        'attach',
+        'sauna-one',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(attached.ok, true, attached.ok ? undefined : attached.error.message)
+      assert.equal(requireData(attached).experimentId, experiments['sauna-one'])
+      assert.equal(requireData(attached).experimentSlug, 'sauna-one')
+      assert.equal(requireData(attached).linked, true)
+
+      const relinkBlocked = await runSliceCli<unknown>([
+        'experiment',
+        'session',
+        'attach',
+        'sauna-two',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(relinkBlocked.ok, false)
+      assert.match(relinkBlocked.error.message ?? '', /already linked/u)
+
+      const replaced = await runSliceCli<{
+        experimentId: string
+        experimentSlug: string
+      }>([
+        'experiment',
+        'session',
+        'attach',
+        'sauna-two',
+        requireData(created).eventId,
+        '--replace',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(replaced.ok, true)
+      assert.equal(requireData(replaced).experimentId, experiments['sauna-two'])
+      assert.equal(requireData(replaced).experimentSlug, 'sauna-two')
+
+      const editedRegimen = await runSliceCli<ShowEnvelope>([
+        'intervention',
+        'edit',
+        requireData(created).eventId,
+        '--regimen-id',
+        'reg_01JNV422Y2M5ZBV64ZP4N1DRB2',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(editedRegimen.ok, true)
+      assert.equal(
+        requireData(editedRegimen).entity.data.experimentId,
+        experiments['sauna-two'],
+      )
+      assert.deepEqual(
+        new Set(requireData(editedRegimen).entity.links.map((link) => link.id)),
+        new Set([
+          experiments['sauna-two'],
+          'reg_01JNV422Y2M5ZBV64ZP4N1DRB2',
+        ]),
+      )
+
+      const detached = await runSliceCli<{ linked: boolean }>([
+        'experiment',
+        'session',
+        'detach',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(detached.ok, true)
+      assert.equal(requireData(detached).linked, false)
+
+      const shown = await runSliceCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shown.ok, true)
+      assert.equal(requireData(shown).entity.data.experimentId, undefined)
+      assert.equal(requireData(shown).entity.data.experimentSlug, undefined)
+      assert.deepEqual(requireData(shown).entity.links.map((link) => link.id), [
+        'reg_01JNV422Y2M5ZBV64ZP4N1DRB2',
+      ])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

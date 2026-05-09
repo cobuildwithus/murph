@@ -833,7 +833,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['intervention', 'add'],
         description:
-          'Record one intervention session from a freeform note with lightweight structured inference.',
+          'Record one intervention session from a freeform note, with automatic single-match experiment linking.',
       },
       {
         path: ['intervention', 'edit'],
@@ -1184,6 +1184,14 @@ export const vaultCliCommandDescriptors = [
         description: 'Log one structured intervention session for an experiment using typed fields.',
       },
       {
+        path: ['experiment', 'session', 'attach'],
+        description: 'Attach an existing intervention_session event to one experiment.',
+      },
+      {
+        path: ['experiment', 'session', 'detach'],
+        description: 'Detach an existing intervention_session event from its experiment.',
+      },
+      {
         path: ['experiment', 'context', 'log'],
         description: 'Log one experiment-linked context, note, or supplement-intake record using typed fields.',
       },
@@ -1210,6 +1218,8 @@ export const vaultCliCommandDescriptors = [
         'checkpointExperiment',
         'stopExperiment',
         'logExperimentSession',
+        'attachExperimentSession',
+        'detachExperimentSession',
         'logExperimentContext',
         'writeExperimentOutcome',
       ],

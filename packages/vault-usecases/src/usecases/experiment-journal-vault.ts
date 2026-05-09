@@ -57,6 +57,10 @@ import {
   uniqueStrings,
 } from './vault-usecase-helpers.js'
 import { upsertEventRecord } from './provider-event.js'
+import {
+  attachInterventionSessionToExperiment,
+  detachInterventionSessionFromExperiment,
+} from './intervention-experiment-link.js'
 import type { JsonObject } from '../health-cli-method-types.js'
 
 type EntityFamily = 'experiment' | 'journal'
@@ -1130,6 +1134,29 @@ export async function logExperimentContextRecordFromInput(input: {
     lookup: input.lookup,
     payload,
   })
+}
+
+export async function attachExperimentSessionRecord(input: {
+  vault: string
+  lookup: string
+  eventId: string
+  replace?: boolean
+  allowOutOfWindow?: boolean
+}) {
+  return attachInterventionSessionToExperiment({
+    vault: input.vault,
+    experiment: input.lookup,
+    eventId: input.eventId,
+    replace: input.replace,
+    allowOutOfWindow: input.allowOutOfWindow,
+  })
+}
+
+export async function detachExperimentSessionRecord(input: {
+  vault: string
+  eventId: string
+}) {
+  return detachInterventionSessionFromExperiment(input)
 }
 
 export async function logExperimentContextRecord(input: {

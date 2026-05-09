@@ -89,6 +89,9 @@ const experimentLookupArgSchema = z.object({
 const experimentJournalLookupArgSchema = z.object({
   lookup: z.string().min(1).describe('Experiment id or slug to resolve.'),
 })
+const interventionSessionEventIdSchema = z
+  .string()
+  .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical intervention event id in evt_* form.')
 const experimentSessionStatusSchema = z.enum([
   'completed',
   'partial',
@@ -948,6 +951,14 @@ const experimentSessionLogResultSchema = z.object({
   ledgerFile: pathSchema,
   created: z.boolean(),
   kind: z.literal('intervention_session'),
+})
+
+const experimentSessionAttachResultSchema = showResultSchema.extend({
+  eventId: interventionSessionEventIdSchema,
+  lookupId: interventionSessionEventIdSchema,
+  experimentId: z.string().min(1).nullable(),
+  experimentSlug: slugSchema.nullable(),
+  linked: z.boolean(),
 })
 
 const experimentContextLogResultSchema = z.object({
@@ -1884,6 +1895,51 @@ export function registerExperimentCommands(
         afterExercise: options.afterExercise,
         symptoms: normalizeRepeatableFlagOption(options.symptoms, 'symptoms'),
         confounders,
+      })
+    },
+  })
+
+  session.command('attach', {
+    description: 'Attach an existing intervention session event to one experiment.',
+    args: z.object({
+      lookup: z.string().min(1).describe('Experiment id or slug to resolve.'),
+      eventId: interventionSessionEventIdSchema.describe('Intervention session event id.'),
+    }),
+    options: withBaseOptions({
+      replace: z
+        .boolean()
+        .optional()
+        .describe('Replace an existing different experiment link on the session.'),
+      allowOutOfWindow: z
+        .boolean()
+        .optional()
+        .describe('Allow linking a session outside the experiment intervention window.'),
+    }),
+    output: experimentSessionAttachResultSchema,
+    async run({ args, options }) {
+      return services.core.attachExperimentSession({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        lookup: args.lookup,
+        eventId: args.eventId,
+        replace: options.replace === true,
+        allowOutOfWindow: options.allowOutOfWindow === true,
+      })
+    },
+  })
+
+  session.command('detach', {
+    description: 'Remove any experiment link from an intervention session event.',
+    args: z.object({
+      eventId: interventionSessionEventIdSchema.describe('Intervention session event id.'),
+    }),
+    options: withBaseOptions(),
+    output: experimentSessionAttachResultSchema,
+    async run({ args, options }) {
+      return services.core.detachExperimentSession({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        eventId: args.eventId,
       })
     },
   })

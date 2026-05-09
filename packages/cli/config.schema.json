@@ -5297,6 +5297,19 @@
                           "type": "string",
                           "pattern": "^reg_[0-9A-Za-z]+$"
                         },
+                        "experiment": {
+                          "description": "Optional experiment slug to link explicitly. Omit for automatic single-match linking.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "skipExperimentLink": {
+                          "description": "Disable automatic experiment linking for this capture.",
+                          "type": "boolean"
+                        },
+                        "allowOutOfWindow": {
+                          "description": "Allow an explicit --experiment link outside the intervention window.",
+                          "type": "boolean"
+                        },
                         "occurredAt": {
                           "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
                           "anyOf": [
@@ -10228,6 +10241,60 @@
                                     "type": "string",
                                     "minLength": 1
                                   }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "attach": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "replace": {
+                                  "description": "Replace an existing different experiment link on the session.",
+                                  "type": "boolean"
+                                },
+                                "allowOutOfWindow": {
+                                  "description": "Allow linking a session outside the experiment intervention window.",
+                                  "type": "boolean"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "detach": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
                                 }
                               }
                             }

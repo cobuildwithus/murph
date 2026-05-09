@@ -46,6 +46,8 @@ const coreServiceMethodNames = [
   "stopExperiment",
   "logExperimentSession",
   "logExperimentSessionJson",
+  "attachExperimentSession",
+  "detachExperimentSession",
   "logExperimentContext",
   "logExperimentContextJson",
   "writeExperimentOutcome",

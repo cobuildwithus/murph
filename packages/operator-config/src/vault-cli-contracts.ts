@@ -344,6 +344,9 @@ export const interventionAddResultSchema = z.object({
   interventionType: z.string().min(1),
   durationMinutes: z.number().int().positive().nullable(),
   regimenId: z.string().min(1).nullable(),
+  experimentId: z.string().min(1).nullable(),
+  experimentSlug: slugSchema.nullable(),
+  experimentLinkMode: z.enum(['auto', 'explicit']).nullable(),
   note: z.string().min(1),
 })
 
