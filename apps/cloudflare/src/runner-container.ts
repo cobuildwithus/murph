@@ -237,7 +237,7 @@ export class RunnerContainer extends Container {
 
   async destroyInstance(): Promise<void> {
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
-    this.browserVaultRefreshAbortController?.abort(new Error("browser-vault refresh container destroyed"));
+    this.browserVaultRefreshAbortController?.abort(new Error("browser-vault refresh runner destroyed"));
     await this.stopWarmContainer();
   }
 
@@ -1694,13 +1694,6 @@ export function resolveHostedExecutionRunnerContainerName(input: {
   return workerVersionSegment
     ? `${input.userId}--v-${workerVersionSegment}`
     : input.userId;
-}
-
-export function resolveHostedExecutionBrowserVaultRefreshRunnerContainerName(input: {
-  source: RunnerContainerNameSource;
-  userId: string;
-}): string {
-  return `${resolveHostedExecutionRunnerContainerName(input)}--browser-vault-refresh`;
 }
 
 function readRunnerContainerWorkerVersionSegment(source: RunnerContainerNameSource): string | null {

@@ -24,7 +24,6 @@ import type {
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
 import {
-  resolveHostedExecutionBrowserVaultRefreshRunnerContainerName,
   resolveHostedExecutionRunnerContainerName,
 } from "../src/runner-container.ts";
 import { hostedEmailRawMessageUserPrefix } from "../src/hosted-email.ts";
@@ -3121,7 +3120,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       immediateDriveStarted: true,
     });
 
-    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalled());
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
       attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
       userId: "member_123",
@@ -3144,31 +3143,30 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
       updatedAt: expect.any(String),
     });
-    expect(runnerContainerNames).toContain("member_123--browser-vault-refresh");
     expect(runnerContainerNames).toContain("member_123");
+    expect(runnerContainerNames).not.toContain("member_123--browser-vault-refresh");
     const latestAlarmMs = Date.parse(alarms.at(-1) ?? "");
     expect(latestAlarmMs).toBeGreaterThanOrEqual(Date.parse("2026-04-27T00:00:01.000Z"));
     expect(latestAlarmMs).toBeLessThan(Date.parse("2026-04-27T00:00:02.000Z"));
   });
 
-  it("cleans up only the browser-vault refresh container without blocking a foreground nudge", async () => {
+  it("aborts refresh for a foreground nudge without destroying the live runner container", async () => {
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("refresh-cleanup-fire-and-forget"),
+      snapshotRef: createLayeredSnapshotRef("refresh-abort-preserves-live-runner"),
       version: "4",
     });
     const activeRefresh = createDeferred<Awaited<ReturnType<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >>>();
-    const destroyStarted = createDeferred<void>();
-    const releaseDestroy = createDeferred<void>();
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
     >(async () => await activeRefresh.promise);
-    const abortBrowserVaultRefresh = vi.fn(async () => {});
-    const destroyInstance = vi.fn(async () => {
-      destroyStarted.resolve();
-      await releaseDestroy.promise;
+    const abortBrowserVaultRefresh = vi.fn(async () => {
+      activeRefresh.resolve({
+        status: "already_fresh",
+      });
     });
+    const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
       nextWakeAt: null,
       status: "idle",
@@ -3178,6 +3176,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     const {
       destroyInstanceNames,
+      runnerContainerNames,
       runner,
     } = createRunnerCryptoContextHarness(workspace, {
       abortBrowserVaultRefresh,
@@ -3196,48 +3195,29 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
     await vi.waitFor(() => expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce());
     waitUntil.mockClear();
-    const waitUntilSettled: boolean[] = [];
     waitUntil.mockImplementation((promise: Promise<unknown>) => {
-      const index = waitUntilSettled.length;
-      waitUntilSettled.push(false);
-      void promise.finally(() => {
-        waitUntilSettled[index] = true;
-      }).catch(() => undefined);
+      void promise.catch(() => undefined);
     });
 
-    let nudgeSettled = false;
-    const nudge = runner.nudgeHostedRunner().finally(() => {
-      nudgeSettled = true;
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
     });
-    await destroyStarted.promise;
-
-    try {
-      await vi.waitFor(() => expect(nudgeSettled).toBe(true));
-      await expect(nudge).resolves.toMatchObject({
-        accepted: true,
-        immediateDriveStarted: true,
-      });
-      expect(waitUntil.mock.calls.length).toBeGreaterThanOrEqual(2);
-      expect(waitUntil).toHaveBeenNthCalledWith(1, expect.any(Promise));
-      expect(waitUntilSettled[0]).toBe(false);
-    } finally {
-      releaseDestroy.resolve();
-      activeRefresh.resolve({
-        status: "already_fresh",
-      });
-    }
-    await flushDetachedRunnerDrive();
-    const refreshContainerName = resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
-      source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+    expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
+      attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
       userId: "member_123",
     });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await flushDetachedRunnerDrive();
     const mainRunnerContainerName = resolveHostedExecutionRunnerContainerName({
       source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
       userId: "member_123",
     });
-    expect(destroyInstanceNames.length).toBeGreaterThan(0);
-    expect(destroyInstanceNames.every((name) => name === refreshContainerName)).toBe(true);
-    expect(destroyInstanceNames).not.toContain(mainRunnerContainerName);
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstanceNames).toEqual([]);
+    expect(runnerContainerNames).toContain(mainRunnerContainerName);
+    expect(runnerContainerNames).not.toContain(`${mainRunnerContainerName}--browser-vault-refresh`);
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
   });
 
   it("aborts an active browser-vault refresh before foreground manual work starts", async () => {
@@ -3282,7 +3262,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    await vi.waitFor(() => expect(destroyInstance).toHaveBeenCalled());
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(abortBrowserVaultRefresh).toHaveBeenCalledWith({
       attemptId: expect.stringMatching(/^browser-vault-refresh:/u),
       userId: "member_123",
@@ -3292,8 +3272,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
       updatedAt: expect.any(String),
     });
-    expect(runnerContainerNames).toContain("member_123--browser-vault-refresh");
     expect(runnerContainerNames).toContain("member_123");
+    expect(runnerContainerNames).not.toContain("member_123--browser-vault-refresh");
   });
 
   it("clears pending browser-vault refresh after the container publishes the replica", async () => {
@@ -4086,7 +4066,6 @@ function createRunnerContainerNamespace(
     getByName(name: string) {
       expect([
         "member_123",
-        "member_123--browser-vault-refresh",
       ]).toContain(name);
       return {
         destroyInstance,
@@ -4272,10 +4251,6 @@ function createRunnerCryptoContextHarness(
         runnerContainerNames.push(name);
         expect([
           resolveHostedExecutionRunnerContainerName({
-            source: runnerRuntimeEnvSource,
-            userId: "member_123",
-          }),
-          resolveHostedExecutionBrowserVaultRefreshRunnerContainerName({
             source: runnerRuntimeEnvSource,
             userId: "member_123",
           }),
