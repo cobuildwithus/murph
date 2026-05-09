@@ -2704,7 +2704,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("carries non-idle deferred progress into the next idle-shutdown checkpoint", async () => {
+  it("checkpoints budget-exhausted deferred progress before the retry wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -2722,13 +2722,14 @@ describe("HostedUserRunner runtime crypto context", () => {
       }
       if (invoke.mock.calls.length === 2) {
         return {
-          nextWakeAt: null,
+          idleShutdownCheckpointed: true,
+          nextWakeAt: "2026-04-27T00:01:00.000Z",
           status: "idle" as const,
         };
       }
 
       return {
-        idleShutdownCheckpointed: true,
+        nextWakeAt: null,
         status: "idle" as const,
       };
     });
@@ -2752,6 +2753,30 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       deferred_checkpoint_required: 1,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:01.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: "2026-04-27T00:01:00.000Z",
+    }]);
+
+    vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe("2026-04-27T00:01:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 0,
       idle_shutdown_checkpoint_due_at: null,
       idle_shutdown_checkpoint_workspace_version: null,
       next_wake_at: "2026-04-27T00:01:00.000Z",
@@ -2760,33 +2785,14 @@ describe("HostedUserRunner runtime crypto context", () => {
     vi.setSystemTime(new Date("2026-04-27T00:01:00.000Z"));
     await runner.alarm();
 
-    expect(invoke).toHaveBeenCalledTimes(2);
-    expect(alarms).toContain("2026-04-27T00:06:00.000Z");
-    expect(
-      sql.exec(
-        `SELECT deferred_checkpoint_required,
-                idle_shutdown_checkpoint_due_at,
-                idle_shutdown_checkpoint_workspace_version
-         FROM runner_meta WHERE user_id = ?`,
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:06:00.000Z",
-      idle_shutdown_checkpoint_workspace_version: "4",
-    }]);
-
-    vi.setSystemTime(new Date("2026-04-27T00:06:00.000Z"));
-    await runner.alarm();
-
     expect(invoke).toHaveBeenCalledTimes(3);
-    expect(invoke.mock.calls[2]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[2]?.[0].job.request.reason).toBe("alarm");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
                 idle_shutdown_checkpoint_due_at,
-                idle_shutdown_checkpoint_workspace_version
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
          FROM runner_meta WHERE user_id = ?`,
         "member_123",
       ).toArray(),
@@ -2794,6 +2800,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       deferred_checkpoint_required: 0,
       idle_shutdown_checkpoint_due_at: null,
       idle_shutdown_checkpoint_workspace_version: null,
+      next_wake_at: null,
     }]);
   });
 
