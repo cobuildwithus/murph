@@ -160,8 +160,9 @@ export function createHostedAssistantInputSource(input: {
     ...foregroundReplayBaseSource,
     async listInputCandidates(query) {
       const base = await foregroundReplayBaseSource.listInputCandidates(query);
+      const replayLimit = normalizePreferredAssistantInputLimit(query.limit);
       const replay = await listPreferredAssistantInputCandidates({
-        preferredInputIds: foregroundReplayInputIds,
+        preferredInputIds: foregroundReplayInputIds.slice(-replayLimit),
         query,
         vaultRoot: input.vaultRoot,
       });
@@ -192,25 +193,31 @@ function buildForegroundReplayCandidateBatch(input: {
     input.replay.map((candidate) => candidate.event.cursor),
     input.query.afterCursor ?? null,
   );
-  const candidatesByInputId = new Map<string, AssistantInputCandidate>();
-
-  for (const candidate of [...input.base.inputs, ...input.replay]) {
-    if (
-      latestReplayCursor
-      && compareAssistantInputCursors(candidate.event.cursor, latestReplayCursor) > 0
-    ) {
-      continue;
-    }
-    if (!candidatesByInputId.has(candidate.event.inputId)) {
-      candidatesByInputId.set(candidate.event.inputId, candidate);
-    }
-  }
-
-  const selected = [...candidatesByInputId.values()]
+  const replayCandidates = uniqueAssistantInputCandidates(input.replay)
     .sort((left, right) =>
       compareAssistantInputCursors(left.event.cursor, right.event.cursor)
     )
-    .slice(0, limit);
+    .slice(-limit);
+  const remainingBaseLimit = Math.max(0, limit - replayCandidates.length);
+  const baseCandidates = remainingBaseLimit === 0
+    ? []
+    : uniqueAssistantInputCandidates(
+      input.base.inputs.filter((candidate) => {
+        if (replayInputIds.has(candidate.event.inputId)) {
+          return false;
+        }
+        return !latestReplayCursor
+          || compareAssistantInputCursors(candidate.event.cursor, latestReplayCursor) <= 0;
+      }),
+    )
+      .sort((left, right) =>
+        compareAssistantInputCursors(left.event.cursor, right.event.cursor)
+      )
+      .slice(-remainingBaseLimit);
+  const selected = [...baseCandidates, ...replayCandidates]
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.event.cursor, right.event.cursor)
+    );
 
   return {
     inputs: selected.map((candidate) =>
@@ -224,6 +231,18 @@ function buildForegroundReplayCandidateBatch(input: {
       input.query.afterCursor ?? null,
     ),
   };
+}
+
+function uniqueAssistantInputCandidates(
+  candidates: readonly AssistantInputCandidate[],
+): AssistantInputCandidate[] {
+  const candidatesByInputId = new Map<string, AssistantInputCandidate>();
+  for (const candidate of candidates) {
+    if (!candidatesByInputId.has(candidate.event.inputId)) {
+      candidatesByInputId.set(candidate.event.inputId, candidate);
+    }
+  }
+  return [...candidatesByInputId.values()];
 }
 
 function maskForegroundReplayCandidatePromptContent(

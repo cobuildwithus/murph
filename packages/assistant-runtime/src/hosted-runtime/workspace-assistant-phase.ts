@@ -298,11 +298,12 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance.initialProviderCleanupCheckpoint;
 
     const skipDeviceSync = shouldSkipDeviceSyncForAssistantPhase(input);
-    const preferredInputIds =
-      input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const foregroundReplayInputIds = resolveHostedForegroundReplayInputIds(input);
     const foregroundReplayPromptInputIds =
       resolveHostedForegroundReplayPromptInputIds(foregroundReplayInputIds);
+    const preferredInputIds = hasFreshConversationInput
+      ? foregroundReplayInputIds
+      : input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
       deferReceiptRecovery: shouldDeferReceiptRecoveryForAssistantPhase(input),
       executionContext,
@@ -598,7 +599,7 @@ function resolveHostedForegroundReplayInputIds(
   if (assistantInputIds.length === 0 || !hasFreshHostedConversationInput(input)) {
     return [];
   }
-  return assistantInputIds;
+  return assistantInputIds.slice(-HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT);
 }
 
 function resolveHostedForegroundReplayPromptInputIds(
