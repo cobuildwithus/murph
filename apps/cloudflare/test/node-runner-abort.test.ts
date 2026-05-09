@@ -50,6 +50,7 @@ describe("runHostedWorkspaceInvocation abort forwarding", () => {
           channelCapabilities: {
             emailSendReady: false,
             telegramBotConfigured: false,
+            whatsappCloudApiConfigured: false,
           },
           deviceSync: null,
           managedAutoReplyChannels: [],
