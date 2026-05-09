@@ -1702,6 +1702,65 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it("preserves liveness heartbeat JSON bodies through the local worker bridge", async () => {
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint: ({ workspaceVersion }) => {
+          currentLease = {
+            ...currentLease,
+            workspaceVersion,
+          };
+        },
+      },
+    });
+
+    await expect(platform.runtimeLivenessPort?.touch({
+      requestId: "hosted-workspace-invocation:attempt_1",
+    })).resolves.toEqual({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const heartbeatRequest = requireFetchRequest(fetchMock.mock.calls[0], "heartbeat");
+    expect(heartbeatRequest.url).toBe(
+      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/runner-control.worker/internal/active-invocation/heartbeat",
+    );
+    expect(heartbeatRequest.method).toBe("POST");
+    expect(heartbeatRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    await expect(heartbeatRequest.json()).resolves.toEqual({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      requestId: "hosted-workspace-invocation:attempt_1",
+    });
+  });
+
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       checkpointed: true,

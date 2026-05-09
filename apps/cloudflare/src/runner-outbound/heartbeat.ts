@@ -1,3 +1,5 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
+
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
   requireRunnerOutboundUserStubMethod,
@@ -11,8 +13,19 @@ import {
 export const HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH =
   "/internal/active-invocation/heartbeat";
 
+interface HeartbeatLeaseProof {
+  attemptId: string;
+  leaseGeneration: string;
+}
+
+interface RunnerHeartbeatProxyContext {
+  proxyAttemptId?: string | null;
+  proxyLeaseGeneration?: string | null;
+}
+
 export async function handleRunnerHeartbeatRequest(input: {
   env: RunnerOutboundEnvironmentSource;
+  proxyContext?: RunnerHeartbeatProxyContext;
   request: Request;
   url: URL;
   userId: string;
@@ -25,25 +38,41 @@ export async function handleRunnerHeartbeatRequest(input: {
     return methodNotAllowed();
   }
 
-  const payload = await readHeartbeatPayload(input.request);
-  if (!payload.ok) {
-    return json(payload);
+  const payloadLease = await readHeartbeatBodyLease(input.request);
+  const headerLease = readHeartbeatHeaderLease(input.request);
+  const proxyLease = readHeartbeatProxyLease(input.proxyContext ?? {});
+  const mismatchReason =
+    readHeartbeatLeaseMismatch(payloadLease, headerLease)
+    ?? readHeartbeatLeaseMismatch(payloadLease, proxyLease)
+    ?? readHeartbeatLeaseMismatch(headerLease, proxyLease);
+  if (mismatchReason) {
+    return json({
+      ok: false,
+      reason: mismatchReason,
+    });
   }
 
-  const headers = readRunnerActiveInvocationLeaseHeaders(input.request);
-  if (headers) {
-    if (headers.attemptId !== payload.attemptId) {
-      return json({
-        ok: false,
-        reason: "stale_attempt",
-      });
-    }
-    if (headers.leaseGeneration !== payload.leaseGeneration) {
-      return json({
-        ok: false,
-        reason: "stale_generation",
-      });
-    }
+  const lease = payloadLease ?? headerLease ?? proxyLease;
+  if (!lease) {
+    emitHostedExecutionStructuredLog({
+      component: "runner-outbound",
+      details: {
+        contentLengthPresent: input.request.headers.has("content-length") ? "true" : "false",
+        contentTypePresent: input.request.headers.has("content-type") ? "true" : "false",
+        hasBody: input.request.body ? "true" : "false",
+        path: input.url.pathname,
+        proxyLeasePresent: proxyLease ? "true" : "false",
+        reason: "malformed_request",
+      },
+      level: "warn",
+      message: "Hosted runner heartbeat rejected a malformed payload.",
+      phase: "failed",
+      userId: input.userId,
+    });
+    return json({
+      ok: false,
+      reason: "malformed_request",
+    });
   }
 
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
@@ -52,39 +81,72 @@ export async function handleRunnerHeartbeatRequest(input: {
     "recordActiveInvocationHeartbeat",
   );
   return json(await recordActiveInvocationHeartbeat({
-    attemptId: payload.attemptId,
-    leaseGeneration: payload.leaseGeneration,
+    attemptId: lease.attemptId,
+    leaseGeneration: lease.leaseGeneration,
     userId: input.userId,
   }));
 }
 
-async function readHeartbeatPayload(request: Request): Promise<
-  | {
-    attemptId: string;
-    leaseGeneration: string;
-    ok: true;
+async function readHeartbeatBodyLease(request: Request): Promise<HeartbeatLeaseProof | null> {
+  if (!request.body) {
+    return null;
   }
-  | {
-    ok: false;
-    reason: "malformed_request";
-  }
-> {
+
   try {
     const body = await readJsonObject(request);
     const attemptId = readRequiredString(body, "attemptId");
     const leaseGeneration = readRequiredString(body, "leaseGeneration");
-    readRequiredString(body, "requestId");
     return {
       attemptId,
       leaseGeneration,
-      ok: true,
     };
   } catch {
-    return {
-      ok: false,
-      reason: "malformed_request",
-    };
+    return null;
   }
+}
+
+function readHeartbeatHeaderLease(request: Request): HeartbeatLeaseProof | null {
+  const headers = readRunnerActiveInvocationLeaseHeaders(request);
+  if (!headers) {
+    return null;
+  }
+
+  return {
+    attemptId: headers.attemptId,
+    leaseGeneration: headers.leaseGeneration,
+  };
+}
+
+function readHeartbeatProxyLease(
+  context: RunnerHeartbeatProxyContext,
+): HeartbeatLeaseProof | null {
+  if (!context.proxyAttemptId || !context.proxyLeaseGeneration) {
+    return null;
+  }
+
+  return {
+    attemptId: context.proxyAttemptId,
+    leaseGeneration: context.proxyLeaseGeneration,
+  };
+}
+
+function readHeartbeatLeaseMismatch(
+  left: HeartbeatLeaseProof | null,
+  right: HeartbeatLeaseProof | null,
+): "stale_attempt" | "stale_generation" | null {
+  if (!left || !right) {
+    return null;
+  }
+
+  if (left.attemptId !== right.attemptId) {
+    return "stale_attempt";
+  }
+
+  if (left.leaseGeneration !== right.leaseGeneration) {
+    return "stale_generation";
+  }
+
+  return null;
 }
 
 function readRequiredString(

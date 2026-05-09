@@ -399,7 +399,6 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           attemptId: "workspace-invocation-1",
           leaseGeneration: "1",
-          requestId: "hosted-workspace-invocation:workspace-invocation-1",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -420,6 +419,140 @@ describe("handleRunnerOutboundRequest", () => {
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+  });
+
+  it("records header-only active invocation heartbeats when the bridge drops the body", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true as const,
+      pendingNudge: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        headers: createRunnerProxyHeaders({
+          "x-hosted-runtime-attempt-id": "workspace-invocation-1",
+          "x-hosted-runtime-lease-generation": "1",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+  });
+
+  it("rejects active invocation heartbeats when body and headers disagree", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn();
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        body: JSON.stringify({
+          attemptId: "workspace-invocation-stale",
+          leaseGeneration: "1",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "workspace-invocation-1",
+          "x-hosted-runtime-lease-generation": "1",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      reason: "stale_attempt",
+    });
+    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it("records proxy-context active invocation heartbeats when the request has no body or lease headers", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true as const,
+      pendingNudge: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "workspace-invocation-1",
+        proxyLeaseGeneration: "1",
+      },
     );
 
     expect(response.status).toBe(200);
@@ -474,13 +607,11 @@ describe("handleRunnerOutboundRequest", () => {
       "{",
       JSON.stringify({
         attemptId: "workspace-invocation-1",
-        leaseGeneration: "1",
         workspaceVersion: "0",
       }),
       JSON.stringify({
         attemptId: "workspace-invocation-1",
-        leaseGeneration: "1",
-        requestId: null,
+        requestId: "hosted-workspace-invocation:workspace-invocation-1",
       }),
     ]) {
       const response = await handleRunnerOutboundRequest(

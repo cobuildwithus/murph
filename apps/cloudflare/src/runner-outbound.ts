@@ -96,6 +96,7 @@ export async function handleRunnerOutboundRequest(
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
       return handleRunnerHeartbeatRequest({
         env,
+        proxyContext,
         request,
         url,
         userId,
