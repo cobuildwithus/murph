@@ -177,6 +177,7 @@ describe("hosted deploy automation helpers", () => {
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+      CF_RUNNER_DESTROY_TIMEOUT_MS: "30000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
@@ -321,6 +322,7 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS).toBe("30000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS).toBe("65000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("600000");
     expect(config.vars.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS).toBe("30000");
@@ -493,6 +495,7 @@ describe("hosted deploy automation helpers", () => {
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
       "CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}",
+      "CF_RUNNER_DESTROY_TIMEOUT_MS: ${{ vars.CF_RUNNER_DESTROY_TIMEOUT_MS }}",
       "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: ${{ vars.HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
@@ -523,7 +526,7 @@ describe("hosted deploy automation helpers", () => {
       "if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
       "if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
       "if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' && github.ref == 'refs/heads/main' && github.ref_protected }}",
-      "if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker) || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}",
+      "if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker && needs.codex-auth-deploy-guard.result == 'success') || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-auth-deploy-guard.result == 'success' && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}",
       "name: Linq delivery E2E gate",
       "name: Linq scheduled reminder E2E gate",
       "name: Cloudflare verify and runner smoke gate",
@@ -696,7 +699,7 @@ describe("hosted deploy automation helpers", () => {
     expect([
       ...workflow.matchAll(/runs-on: blacksmith-4vcpu-ubuntu-2404/gmu),
     ]).toHaveLength(5);
-    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(1);
+    expect([...workflow.matchAll(/^    runs-on: ubuntu-24\.04$/gmu)]).toHaveLength(2);
     expect(workflow).not.toMatch(/inputs\.deploy_worker.{0,160}blacksmith-4vcpu-ubuntu-2404/u);
     expect([
       ...workflow.matchAll(/docker run \\/gmu),

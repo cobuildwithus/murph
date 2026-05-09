@@ -30,6 +30,7 @@ export function buildHostedWranglerDeployConfig(
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: environment.runnerCommitTimeoutMs,
+    HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS: environment.runnerDestroyTimeoutMs,
     HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: environment.runnerReadyTimeoutMs,
     HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: environment.runnerTimeoutMs,
     HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: environment.webControlTimeoutMs,
