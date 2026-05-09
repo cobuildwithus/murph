@@ -15,6 +15,28 @@ export type BrowserVaultRefreshCoordinatorStateStore = Pick<
   "readPendingBrowserVaultRefresh" | "readState" | "scheduleBrowserVaultRefresh"
 >;
 
+function parseFiniteDateMs(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readEarliestRunnerAlarmAtMs(record: RunnerStateRecord): number | null {
+  const alarmTimes = [
+    parseFiniteDateMs(record.idleShutdownCheckpointDueAt),
+    parseFiniteDateMs(record.nextWakeAt),
+  ].filter((value): value is number => value !== null);
+
+  if (alarmTimes.length === 0) {
+    return null;
+  }
+
+  return Math.min(...alarmTimes);
+}
+
 export interface HostedBrowserVaultRefreshScheduleResult {
   accepted: true;
   scheduled: true;
@@ -109,6 +131,18 @@ export class BrowserVaultRefreshCoordinator {
     const continuationAtMs = nowMs
       + (input.delayMs ?? this.deps.continuationDelayMs);
     const existingAlarmAtMs = await this.deps.state.storage.getAlarm();
+    const runnerAlarmAtMs = readEarliestRunnerAlarmAtMs(record);
+    if (runnerAlarmAtMs !== null && runnerAlarmAtMs <= continuationAtMs) {
+      const runnerAlarmFireAtMs = Math.max(nowMs, runnerAlarmAtMs);
+      if (
+        typeof existingAlarmAtMs !== "number"
+        || !Number.isFinite(existingAlarmAtMs)
+        || existingAlarmAtMs > runnerAlarmFireAtMs
+      ) {
+        await this.deps.state.storage.setAlarm(new Date(runnerAlarmFireAtMs));
+      }
+      return false;
+    }
     if (
       typeof existingAlarmAtMs === "number"
       && Number.isFinite(existingAlarmAtMs)

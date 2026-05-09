@@ -26,9 +26,11 @@ Done:
 - Found a third live alarm race: when the due checkpoint alarm collided with an already-active invocation, recovery scheduling cleared the checkpoint and browser-vault refresh could keep preempting the durable mailbox watermark.
 - Patched active-invocation recovery to preserve and defer the idle-shutdown checkpoint ahead of recovery wakes, and added a regression covering the collision plus stale-lease recovery.
 - Confirmed the live reply engine is currently reaching the assistant provider but failing with `ASSISTANT_CODEX_USAGE_LIMIT`; this is separate from the mailbox/read durability fix and points at the configured OpenAI provider quota/billing boundary.
+- Found a fourth live alarm risk: optional browser-vault refresh continuation could replace an earlier runner-owned checkpoint alarm when Durable Object `getAlarm()` reported no current alarm.
+- Patched browser-vault refresh scheduling to read runner state and yield to earlier or due runner alarms, with a focused regression covering a due idle-shutdown checkpoint plus empty `getAlarm()`.
 
 Now:
-- Run focused verification, commit/push the active-invocation checkpoint preservation fix, deploy immediately, and watch the lagged hosted mailbox recover.
+- Run required verification, commit/push the browser-vault alarm ordering fix, deploy immediately, and watch the lagged hosted mailbox recover.
 
 Next:
 - Verify cold/warm reply scenarios after provider capacity is available and run required final checks/audits.
