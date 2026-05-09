@@ -16,7 +16,9 @@ Key decisions:
 - Deterministic delivery identity is the acceptable duplicate-send mitigation for foreground no-checkpoint behavior, subject to provider support.
 
 State:
-- Production includes the warm-restore, mailbox-lag, runner preemption, foreground nudge handoff, and active-turn refresh fixes. Fresh live iMessage probes still replayed the same uncheckpointed foreground window: each turn imported/reconsidered 22 conversation items from the same durable workspace version, while the provider turn itself was only a few seconds. The current local fix keeps foreground persistence deferred but bounds fresh foreground replay to the latest prompt window and reserves scan slots for those replay candidates, so old deferred backlog cannot crowd out the new message.
+- Production includes the warm-restore, mailbox-lag, runner preemption, foreground nudge handoff, active-turn refresh, replay-window, live-restore, and refresh-container churn fixes through commit `e6881ee5e`.
+- Post-deploy DB/Cloudflare metadata is promising but not final acceptance: automatic target-user turns after rollout imported zero mailbox rows from the current conversation watermark, had `checkpointDeferred=false`, completed in roughly 1.0-1.6s, and Cloudflare showed no `control token` churn or browser-vault refresh failure logs in the checked post-deploy window.
+- Live iMessage cold/hot/multi-message acceptance is still open pending explicit confirmation to send new probe iMessages through the local Messages UI.
 
 Done:
 - Created the task goal.
@@ -57,17 +59,17 @@ Done:
 - Preferred diff verification passed: `pnpm test:diff packages/assistant-runtime/src/hosted-runtime/maintenance.ts packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts packages/assistant-runtime/test/hosted-runtime-turn-input.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`.
 
 Now:
-- Commit and deploy the replay-window fix while preserving unrelated dirty hosted-local, Cloudflare, and WhatsApp edits.
+- Waiting on confirmation to send the next short iMessage probe sequence. Do not close the plan until cold, hot, and multi-message iMessage timing is verified.
 
 Next:
-- Commit and deploy a build that includes the replay-window fix before final iMessage latency measurements.
-- Re-test cold container start, warm container reuse, and warm multi-message state-mutating paths through local iMessage.
-- Run completion audits and create a scoped commit/finish-task handoff if live verification is acceptable and the dirty worktree allows it safely.
+- After confirmation, send short cold, hot, and multi-message probes through local iMessage and correlate with DB/Cloudflare timing.
+- If live timing still exceeds the sub-3s assistant-start target, continue root-cause debugging instead of closing this plan.
+- Run completion audits and create a scoped finish-task handoff only if live verification is acceptable and the dirty worktree allows it safely.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: whether provider-side iMessage delivery supports true deterministic idempotency, or only local warm-container sent markers.
-- UNCONFIRMED: live production latency after deploying the replay-window fix.
-- UNCONFIRMED: safest deployment path from this dirty/ahead checkout, because direct local Cloudflare preflight lacks required environment and GitHub workflow deployment from remote main would not include the unpushed local patch.
+- UNCONFIRMED: live production latency after deploying the refresh-container churn fix.
+- UNCONFIRMED: whether local Messages probe sending is approved for the next acceptance sequence.
 
 Working set (files/ids/commands):
 - `hosted-runner-minimal-architecture-migration-guide.md`
@@ -87,3 +89,5 @@ Working set (files/ids/commands):
 - `apps/web/app/api/internal/hosted-runtime/status/route.ts`
 - `apps/web/src/lib/browser-vault/**`
 - Focused hosted-runtime, hosted-local, Cloudflare runner, and web ingress tests as identified during investigation.
+- Latest scoped verification: `pnpm --dir apps/cloudflare typecheck`; `pnpm --dir . exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/runner-container.test.ts`; `pnpm test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/runner-container.test.ts`.
+- Latest deploy: GitHub Actions run `25591346257`, head SHA `e6881ee5eea41f226ce004f701a8d69b70c7ffca`, status `success`.
