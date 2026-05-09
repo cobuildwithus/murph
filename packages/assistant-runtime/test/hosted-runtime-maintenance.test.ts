@@ -1389,6 +1389,46 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
+  it("bounds foreground replay scans to the replay window", async () => {
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: true,
+    });
+
+    await runHostedAssistantRuntimeTimerLane({
+      wake: {
+        eventId: "evt_foreground_replay_window",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      foregroundReplayInputIds: [
+        "ain_00000000000000000000000000000001",
+        "ain_00000000000000000000000000000002",
+        "ain_00000000000000000000000000000003",
+        "ain_00000000000000000000000000000004",
+        "ain_00000000000000000000000000000005",
+      ],
+      requestId: "req_foreground_replay_window",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxPerScan: 5,
+      }),
+    );
+  });
+
   it("returns an immediate follow-up wake when assistant work is still runnable now", async () => {
     vi.useFakeTimers();
 

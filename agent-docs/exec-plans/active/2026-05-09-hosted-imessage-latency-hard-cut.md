@@ -16,7 +16,7 @@ Key decisions:
 - Deterministic delivery identity is the acceptable duplicate-send mitigation for foreground no-checkpoint behavior, subject to provider support.
 
 State:
-- Production has the warm-restore, mailbox-lag, and lower-priority runner preemption fixes deployed. A follow-up live iMessage probe showed append-to-nudge was fast and lower-priority work no longer owned the first blocker, but late foreground messages could still wait behind an active assistant/provider turn. The remaining root cause is that fresh foreground imports disabled active-turn mailbox refresh for the whole provider turn instead of only skipping the first already-imported admission. A local minimal fix re-enables the live active-turn mailbox refresh after the first admission; deploy plus cold/hot/multi-message iMessage timing verification are still pending.
+- Production includes the warm-restore, mailbox-lag, runner preemption, foreground nudge handoff, and active-turn refresh fixes. Fresh live iMessage probes still replayed the same uncheckpointed foreground window: each turn imported/reconsidered 22 conversation items from the same durable workspace version, while the provider turn itself was only a few seconds. The current local fix keeps foreground persistence deferred but bounds fresh foreground replay to the latest prompt window and reserves scan slots for those replay candidates, so old deferred backlog cannot crowd out the new message.
 
 Done:
 - Created the task goal.
@@ -47,18 +47,26 @@ Done:
 - Identified the remaining root cause: `runHostedWorkspaceAssistantPhase` disabled active-turn mailbox refresh whenever the initial foreground import was fresh. That preserved the first-admission duplicate-import guard, but it also disabled the 1s live active-turn mailbox poll, causing follow-up messages to wait behind the provider turn.
 - Implemented the minimal runtime fix: keep `skipInitialMailboxRefresh` for fresh foreground imports, but pass `skipActiveTurnMailboxRefresh: false` so active provider turns can import late conversation input without building/checkpointing foreground workspace snapshots.
 - Focused assistant-runtime verification passed for `pnpm --filter @murphai/assistant-runtime test -- hosted-runtime-turn-input.test.ts hosted-runtime-workspace-assistant-phase.test.ts --runInBand`.
+- Confirmed after the latest deployed fixes that repeated foreground turns still imported/reconsidered the same 22 deferred conversation items from workspace version 1786; assistant pass elapsed around 17s while the Codex provider turn was roughly 3-6s.
+- Implemented the minimal replay-window fix: fresh foreground imports pass only the latest bounded replay ids as preferred/foreground replay ids, and the turn input source reserves scan slots for replay candidates before filling remaining capacity with older base context.
+- Focused assistant-runtime verification passed for `pnpm --filter @murphai/assistant-runtime test -- hosted-runtime-turn-input.test.ts hosted-runtime-workspace-assistant-phase.test.ts --runInBand` and `pnpm --filter @murphai/assistant-runtime typecheck`.
+- Final completion review found the assistant pass could still request an unbounded foreground replay scan. Fixed by bounding `maxPerScan` to the replay-window size and adding a maintenance-level regression for the hosted assistant pass call.
+- Updated focused assistant-runtime verification passed for `pnpm --filter @murphai/assistant-runtime test -- hosted-runtime-maintenance.test.ts hosted-runtime-turn-input.test.ts hosted-runtime-workspace-assistant-phase.test.ts hosted-runtime-workspace-entrypoint.test.ts --runInBand` and `pnpm --filter @murphai/assistant-runtime typecheck`.
+- Required `pnpm typecheck` passed after the maintenance-level fix. Required `pnpm test` is still blocked before this package by the pre-existing contracts scheduled-log assertion mismatch.
+- Required completion audits passed after the maintenance-level fix: security/privacy found no findings, coverage-write made no changes, and final review confirmed the previous unbounded replay-scan finding is closed.
+- Preferred diff verification passed: `pnpm test:diff packages/assistant-runtime/src/hosted-runtime/maintenance.ts packages/assistant-runtime/src/hosted-runtime/turn-input.ts packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts packages/assistant-runtime/test/hosted-runtime-turn-input.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts`.
 
 Now:
-- Run broader focused verification for the active-turn refresh fix while preserving unrelated dirty hosted-local, Cloudflare, and WhatsApp edits.
+- Commit and deploy the replay-window fix while preserving unrelated dirty hosted-local, Cloudflare, and WhatsApp edits.
 
 Next:
-- Commit and deploy a build that includes the active-turn refresh fix before final iMessage latency measurements.
+- Commit and deploy a build that includes the replay-window fix before final iMessage latency measurements.
 - Re-test cold container start, warm container reuse, and warm multi-message state-mutating paths through local iMessage.
 - Run completion audits and create a scoped commit/finish-task handoff if live verification is acceptable and the dirty worktree allows it safely.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: whether provider-side iMessage delivery supports true deterministic idempotency, or only local warm-container sent markers.
-- UNCONFIRMED: live production latency after deploying the active-turn refresh fix.
+- UNCONFIRMED: live production latency after deploying the replay-window fix.
 - UNCONFIRMED: safest deployment path from this dirty/ahead checkout, because direct local Cloudflare preflight lacks required environment and GitHub workflow deployment from remote main would not include the unpushed local patch.
 
 Working set (files/ids/commands):

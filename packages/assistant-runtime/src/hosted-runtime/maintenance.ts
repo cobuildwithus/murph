@@ -475,8 +475,7 @@ export async function runHostedAssistantAutomation(
 }
 
 function normalizeHostedForegroundReplayScanLimit(count: number): number {
-  void count;
-  return Number.MAX_SAFE_INTEGER;
+  return Math.max(1, count);
 }
 
 function buildHostedAssistantAutomationEventCountLogDetails(

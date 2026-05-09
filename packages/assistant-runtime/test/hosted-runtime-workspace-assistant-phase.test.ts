@@ -1511,7 +1511,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("keeps restored foreground replay accountable while limiting prompt-visible inputs", async () => {
+  it("limits restored foreground replay to the latest prompt window", async () => {
     const assistantInputIds = [
       "ain_00000000000000000000000000000001",
       "ain_00000000000000000000000000000002",
@@ -1526,11 +1526,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: assistantInputIds.length,
     }));
 
+    const foregroundReplayInputIds = assistantInputIds.slice(-5);
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
-        foregroundReplayInputIds: assistantInputIds,
-        foregroundReplayPromptInputIds: assistantInputIds.slice(-5),
-        preferredInputIds: assistantInputIds,
+        foregroundReplayInputIds,
+        foregroundReplayPromptInputIds: foregroundReplayInputIds,
+        preferredInputIds: foregroundReplayInputIds,
         skipActiveTurnMailboxRefresh: false,
         skipInitialMailboxRefresh: true,
       }),
