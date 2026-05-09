@@ -376,6 +376,109 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("publishes restored mailbox watermarks during idle-shutdown checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-source-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const restoredState = createEmptyHostedMailboxImportState();
+    restoredState.watermarks.conversation = "546";
+    restoredState.watermarks.system = "7";
+    await writeMailboxImportStateFile(sourceVaultRoot, restoredState);
+    const sourceBundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [
+        {
+          root: sourceVaultRoot,
+          rootKey: "vault",
+        },
+      ],
+    });
+    assert.ok(sourceBundle);
+    const bundleHash = sha256HostedBundleHex(sourceBundle);
+    const artifactBytesByHash = new Map([
+      [bundleHash, sourceBundle],
+    ]);
+    const redactedStatus = {
+      hostedMailboxConversationImportedSeq: "444",
+      hostedMailboxFetchedCount: 50,
+      hostedMailboxSystemImportedSeq: "0",
+      preservedStatus: true,
+    };
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+      events,
+      workspace: createWorkspaceState({
+        redactedStatus,
+        snapshotRef: createBundleRef({
+          hash: bundleHash,
+          key: "users/bundles/member-synthetic/idle-shutdown-source.bundle.json",
+          size: sourceBundle.byteLength,
+        }),
+        version: "4",
+      }),
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_mailbox_status",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            assert.deepEqual(snapshotInput.redactedStatus, {
+              ...redactedStatus,
+              hostedMailboxConversationImportedSeq: "546",
+              hostedMailboxSystemImportedSeq: "7",
+            });
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/idle-shutdown.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            mailboxPort: null,
+            workspacePort,
+          }),
+          vaultRoot,
+        });
+
+      assert.equal(checkpointRequests.length, 1);
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        ...redactedStatus,
+        hostedMailboxConversationImportedSeq: "546",
+        hostedMailboxSystemImportedSeq: "7",
+      });
+      assert.deepEqual(result, {
+        idleShutdownCheckpointed: true,
+        redactedStatus: {
+          ...redactedStatus,
+          hostedMailboxConversationImportedSeq: "546",
+          hostedMailboxSystemImportedSeq: "7",
+        },
+        status: "idle",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(sourceVaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("checkpoints null-bootstrap idle-shutdown work when no workspace row exists", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
     const events: string[] = [];
