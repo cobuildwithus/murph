@@ -1189,7 +1189,7 @@ describe('assistant automation shared helpers', () => {
     ).toBe('2026-04-08T00:00:03.000Z')
     expect(shared.normalizeScanLimit(undefined)).toBe(50)
     expect(shared.normalizeScanLimit(0.4)).toBe(1)
-    expect(shared.normalizeScanLimit(250.8)).toBe(200)
+    expect(shared.normalizeScanLimit(250.8)).toBe(250)
     expect(shared.createEmptyInboxScanResult()).toEqual({
       considered: 0,
       failed: 0,

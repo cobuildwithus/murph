@@ -207,6 +207,7 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
   "localPathPreview",
 ]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
+const HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT = 5;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
@@ -297,10 +298,17 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance.initialProviderCleanupCheckpoint;
 
     const skipDeviceSync = shouldSkipDeviceSyncForAssistantPhase(input);
+    const preferredInputIds =
+      input.initialMailboxImport.importResult.assistantInputIds ?? [];
+    const foregroundReplayInputIds = resolveHostedForegroundReplayInputIds(input);
+    const foregroundReplayPromptInputIds =
+      resolveHostedForegroundReplayPromptInputIds(foregroundReplayInputIds);
     const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
       deferReceiptRecovery: shouldDeferReceiptRecoveryForAssistantPhase(input),
       executionContext,
-      preferredInputIds: input.initialMailboxImport.importResult.assistantInputIds ?? [],
+      foregroundReplayInputIds,
+      foregroundReplayPromptInputIds,
+      preferredInputIds,
       requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
       runtime: {
         commitTimeoutMs: input.runtime.commitTimeoutMs,
@@ -580,6 +588,23 @@ function hasFreshHostedConversationInput(
 ): boolean {
   return (input.initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
     || (input.initialMailboxImport.importResult.conversationImportedCount ?? 0) > 0;
+}
+
+function resolveHostedForegroundReplayInputIds(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): readonly string[] {
+  const assistantInputIds =
+    input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  if (assistantInputIds.length === 0 || !hasFreshHostedConversationInput(input)) {
+    return [];
+  }
+  return assistantInputIds;
+}
+
+function resolveHostedForegroundReplayPromptInputIds(
+  assistantInputIds: readonly string[],
+): readonly string[] {
+  return assistantInputIds.slice(-HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT);
 }
 
 function isHostedForegroundAssistantDeliveryPass(input: {
