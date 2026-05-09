@@ -133,13 +133,15 @@ describe("nudgeHostedRunnerBestEffort", () => {
       userId: "user-123",
     })).resolves.toMatchObject({
       reason: "workflow-started",
-      runnerNudgeAccepted: true,
+      runnerNudgeAccepted: false,
       started: true,
       workflowStarted: true,
     });
 
-    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000);
-    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
+    await vi.waitFor(() =>
+      expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000),
+    );
+    await vi.waitFor(() => expect(nudgeUserRunner).toHaveBeenCalledWith("user-123"));
     expect(mailboxStoreMocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
@@ -194,9 +196,66 @@ describe("nudgeHostedRunnerBestEffort", () => {
     });
     await expect(handoff).resolves.toMatchObject({
       reason: "workflow-started",
-      runnerNudgeAccepted: true,
+      runnerNudgeAccepted: false,
       started: true,
       workflowStarted: true,
+    });
+  });
+
+  it("does not wait for the success-path direct nudge before returning workflow handoff", async () => {
+    let resolveDirectNudge!: (value: {
+      accepted: boolean;
+      alarmScheduled: boolean;
+      alreadyRunning: boolean;
+      inFlight: boolean;
+      leaseGeneration: string;
+    }) => void;
+    const directNudge = new Promise<{
+      accepted: boolean;
+      alarmScheduled: boolean;
+      alreadyRunning: boolean;
+      inFlight: boolean;
+      leaseGeneration: string;
+    }>((resolve) => {
+      resolveDirectNudge = resolve;
+    });
+    const nudgeUserRunner = vi.fn().mockReturnValue(directNudge);
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+      deleteUserData: vi.fn(),
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner,
+      scheduleBrowserVaultRefresh: vi.fn(),
+    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_direct_nudge_pending",
+      mailboxItemId: "mailbox_123",
+      response: {
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      source: "linq",
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      reason: "workflow-started",
+      runnerNudgeAccepted: false,
+      started: true,
+      workflowStarted: true,
+    });
+
+    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+      source: "linq",
+    });
+    await vi.waitFor(() => expect(nudgeUserRunner).toHaveBeenCalledWith("user-123"));
+
+    resolveDirectNudge({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "1",
     });
   });
 

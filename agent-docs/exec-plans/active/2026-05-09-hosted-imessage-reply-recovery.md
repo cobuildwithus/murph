@@ -74,12 +74,15 @@ Done:
 - Completion audits found and the patch fixed three deploy blockers/tightening points: direct runner nudges now start before pointer-workflow bookkeeping, Linq auto-reply self-heal is narrowed away from consent-gated WhatsApp import, and initial mailbox import now runs inside the hosted process environment instead of ambient `HOME`.
 - Added regressions for direct nudge not waiting on workflow start, hosted-process env during initial mailbox import, Linq auto-reply self-heal before staging, WhatsApp non-self-heal, latest-lane workflow re-nudge lookup, and nudge-reason follow-up drives.
 - Focused verification passed for the runner alarm regression, hosted webhook workflow, hosted handoff, hosted conversation mailbox import, hosted workspace entrypoint, assistant-runtime typecheck/test, Cloudflare verify, hosted-web verify, and final diff-aware verification.
+- Follow-up audit found two latency blockers before deploy: idle-checkpoint pending nudges could still fall back to alarm-only continuation, and hosted-web webhook success could still wait on the optional direct runner nudge.
+- Patched pending-nudge checkpoint handoff to queue the same continuation drive in the current isolate and changed hosted-web webhook success to return after durable workflow handoff while observing direct runner nudge asynchronously.
+- Focused Cloudflare/web regressions, full Cloudflare verify, full hosted-web verify, assistant-runtime typecheck/test, diff hygiene, and privacy scans passed for the audit-blocker follow-up.
 
 Now:
-- Commit/push the verified pending-work/admission recovery patch to main, then retry Pro review in the open ChatGPT thread.
+- Commit/push the verified audit-blocker follow-up to main, then retry Pro review in the open ChatGPT thread.
 
 Next:
-- Deploy immediately, then recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
+- Deploy immediately after Pro review, then recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: live post-deploy iMessage reply latency until the pending-work/admission recovery patch is deployed and the runner drains fresh inbound messages.

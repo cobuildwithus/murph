@@ -1,6 +1,7 @@
 import {
   startHostedWebhookNudgeWorkflow,
 } from "./webhook-workflow-start";
+import { after } from "next/server";
 import {
   nudgeHostedRunnerUserBestEffortResult,
 } from "../hosted-runner/control";
@@ -77,9 +78,15 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   }
   const mailboxItemId = input.mailboxItemId;
 
-  const directNudgePromise = tryNudgeHostedWebhookRunnerDirectForMailboxItem({
-    aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+  const directNudgePromise = observeHostedWebhookDirectNudge({
+    eventId: input.eventId,
     mailboxItemId,
+    nudge: tryNudgeHostedWebhookRunnerDirectForMailboxItem({
+      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+      mailboxItemId,
+      source: input.source,
+      userId: input.userId,
+    }),
     source: input.source,
     userId: input.userId,
   });
@@ -107,20 +114,68 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     };
   }
 
-  const directNudge = await directNudgePromise;
+  scheduleAfterResponseOrFireAndForget(async () => {
+    await directNudgePromise;
+  });
   finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
-    directNudgeAttempted: directNudge.attempted,
-    directNudgeConfigured: directNudge.configured,
-    directNudgeErrorCode: directNudge.errorCode,
+    directNudgeDeferred: true,
     workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
   });
   return {
     reason: "workflow-started",
     runId: workflow.runId,
-    runnerNudgeAccepted: directNudge.accepted,
+    runnerNudgeAccepted: false,
     started: true,
     workflowStarted: true,
   };
+}
+
+function observeHostedWebhookDirectNudge(input: {
+  eventId: string;
+  mailboxItemId: string;
+  nudge: Promise<HostedWebhookDirectNudgeSummary>;
+  source: "linq" | "telegram" | "whatsapp";
+  userId?: string;
+}): Promise<HostedWebhookDirectNudgeSummary> {
+  const timing = startHostedOnboardingTiming(
+    `hosted-onboarding.webhook.${input.source}.direct-runner-nudge`,
+    {
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      mailboxItemIdSuffix: toHostedOnboardingLogIdSuffix(input.mailboxItemId),
+      userIdPresent: Boolean(input.userId),
+      userIdSuffix: input.userId ? toHostedOnboardingLogIdSuffix(input.userId) : null,
+    },
+  );
+
+  return input.nudge.then((summary) => {
+    finishHostedOnboardingTiming(timing, summary.accepted ? "accepted" : "completed", {
+      directNudgeAttempted: summary.attempted,
+      directNudgeConfigured: summary.configured,
+      directNudgeErrorCode: summary.errorCode,
+    });
+    return summary;
+  }, (error: unknown) => {
+    const errorName = deriveHostedOnboardingTimingErrorName(error);
+    finishHostedOnboardingTiming(timing, "failed", {
+      directNudgeAttempted: false,
+      directNudgeConfigured: null,
+      directNudgeErrorCode: errorName,
+    });
+    return {
+      accepted: false,
+      attempted: false,
+      configured: null,
+      errorCode: errorName,
+    };
+  });
+}
+
+function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
 }
 
 async function tryNudgeHostedWebhookRunnerDirectForMailboxItem(input: {
