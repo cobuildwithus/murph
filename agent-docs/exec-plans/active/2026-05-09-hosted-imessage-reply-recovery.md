@@ -30,9 +30,11 @@ Done:
 - Patched browser-vault refresh scheduling to read runner state and yield to earlier or due runner alarms, with a focused regression covering a due idle-shutdown checkpoint plus empty `getAlarm()`.
 - After the deploy, confirmed the lagged runner still replayed from the old checkpoint and found a fifth alarm-ordering bug: a deferred idle checkpoint that was already due could lose to an already-due retry wake, and that non-idle wake cleared the checkpoint before it could commit.
 - Found the Linq reply delivery failure was also being made terminal: idempotent Linq POST sends were marked non-retryable on transient 5xx/transport failures, so one provider/effect 502 could permanently fail the outbox reply.
+- After the next deploy, confirmed the new Worker was live but the lagged runner still replayed 444->494/494->544 because a newly scheduled deferred checkpoint used a one-second delay while the workspace retry wake was already due; that retry wake then cleared the checkpoint before it could run.
+- Patched deferred checkpoint scheduling to keep the normal fast drain, but move the checkpoint to at-or-before the retry wake when that wake is earlier/already due, and added a regression for the scheduling-time collision.
 
 Now:
-- Patch and verify the due-deferred-checkpoint priority and idempotent Linq send retryability, then commit/push and deploy immediately.
+- Commit/push/deploy the scheduling-time deferred-checkpoint priority fix, then recheck the live mailbox high-watermark and iMessage reply path.
 
 Next:
 - Watch the lagged hosted mailbox recover, then verify cold/warm iMessage reply scenarios after provider capacity is available.
