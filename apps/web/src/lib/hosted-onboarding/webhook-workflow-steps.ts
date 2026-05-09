@@ -5,6 +5,7 @@ import {
 
 import {
   readHostedMailboxItemCheckpointById,
+  readHostedMailboxMaxSeqByLane,
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
@@ -38,6 +39,10 @@ export async function nudgeHostedWebhookMailboxItemStep(
   }
 
   if (await isHostedWebhookMailboxItemCheckpointed(mailboxItem)) {
+    return;
+  }
+
+  if (!(await isHostedWebhookMailboxItemLatestInLane(mailboxItem))) {
     return;
   }
 
@@ -111,4 +116,17 @@ async function isHostedWebhookMailboxItemCheckpointed(
     laneSeq: mailboxItem.laneSeq,
     redactedStatusJson: workspace?.redactedStatusJson ?? null,
   });
+}
+
+async function isHostedWebhookMailboxItemLatestInLane(
+  mailboxItem: HostedMailboxItemCheckpointRecord,
+): Promise<boolean> {
+  const [highWater] = await readHostedMailboxMaxSeqByLane({
+    lanes: [mailboxItem.lane],
+    userId: mailboxItem.userId,
+  });
+  const currentMaxSeq = BigInt(highWater?.maxSeq ?? "0");
+  const mailboxSeq = BigInt(mailboxItem.laneSeq);
+
+  return currentMaxSeq <= mailboxSeq;
 }
