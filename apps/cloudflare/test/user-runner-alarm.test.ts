@@ -1123,6 +1123,95 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("preserves a due idle-shutdown checkpoint while another invocation is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("active-preserves-idle-checkpoint"),
+      version: "4",
+    });
+    const activeInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return await activeInvocation.promise;
+      }
+
+      return {
+        idleShutdownCheckpointed: true,
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      runnerTimeoutMs: 1_000,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?,
+           next_wake_at = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "2026-04-27T00:01:00.000Z",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    const deferredRows = sql.exec<{
+      idle_shutdown_checkpoint_due_at: string | null;
+      idle_shutdown_checkpoint_workspace_version: string | null;
+      next_wake_at: string | null;
+    }>(
+      `SELECT idle_shutdown_checkpoint_due_at,
+              idle_shutdown_checkpoint_workspace_version,
+              next_wake_at
+       FROM runner_meta WHERE user_id = ?`,
+      "member_123",
+    ).toArray();
+    expect(deferredRows).toHaveLength(1);
+    const deferredRow = deferredRows[0];
+    expect(deferredRow?.idle_shutdown_checkpoint_due_at).not.toBeNull();
+    expect(deferredRow?.idle_shutdown_checkpoint_workspace_version).toBe("4");
+    expect(deferredRow?.next_wake_at).not.toBeNull();
+    expect(
+      Date.parse(deferredRow?.next_wake_at ?? "")
+        - Date.parse(deferredRow?.idle_shutdown_checkpoint_due_at ?? ""),
+    ).toBe(1);
+    expect(alarms.at(-1)).toBe(deferredRow?.idle_shutdown_checkpoint_due_at);
+
+    vi.setSystemTime(new Date("2026-04-27T00:00:02.000Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      next_wake_at: null,
+    }]);
+    await expect(activeRun).rejects.toThrow("Hosted runner invocation lease expired.");
+  });
+
   it("syncs a recovery alarm instead of waiting behind a long active invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

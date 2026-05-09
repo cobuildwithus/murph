@@ -222,7 +222,10 @@ deferred idle-shutdown checkpoint ahead of that wake; otherwise a cold container
 can lose the staged watermark or terminal reply evidence and loop over the same
 mailbox prefix. The Durable Object alarm consumer must preserve that ordering
 even if the checkpoint alarm is delivered late enough that the later retry wake
-is also due.
+is also due. If the ordered checkpoint alarm collides with an already-active
+workspace invocation, Cloudflare must defer the checkpoint ahead of the recovery
+wake rather than clearing it, so active-invocation recovery cannot erase the
+durability job.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
