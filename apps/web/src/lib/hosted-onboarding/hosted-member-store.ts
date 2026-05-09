@@ -26,6 +26,7 @@ import {
 import {
   type HostedMemberRoutingStateSnapshot,
   projectHostedMemberRoutingState,
+  upsertHostedMemberReplyAliasLookupKeyTx,
 } from "./hosted-member-routing-store";
 import {
   lockHostedMemberRow,
@@ -133,6 +134,7 @@ export interface HostedMemberVerifiedEmailSyncInput {
   address: string;
   memberId: string;
   prisma?: Prisma.TransactionClient | HostedOnboardingReadClient;
+  replyAliasLookupKey?: string | null;
   verifiedAt: Date;
 }
 
@@ -359,24 +361,50 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
   const prismaClient = input.prisma;
 
   if (prismaClient && "$transaction" in prismaClient && typeof prismaClient.$transaction === "function") {
-    return prismaClient.$transaction((tx: Prisma.TransactionClient) => upsertHostedMemberEmailAuthorization({
-      memberId: input.memberId,
-      prisma: tx,
-      verifiedEmail: {
-        address: input.address,
-        verifiedAt: input.verifiedAt,
-      },
-    }));
+    return prismaClient.$transaction((tx: Prisma.TransactionClient) =>
+      upsertHostedMemberVerifiedEmailAuthorizationTx({
+        ...input,
+        prisma: tx,
+      })
+    );
   }
 
-  return upsertHostedMemberEmailAuthorization({
+  return upsertHostedMemberVerifiedEmailAuthorizationTx({
     memberId: input.memberId,
     prisma: input.prisma as Prisma.TransactionClient,
+    replyAliasLookupKey: input.replyAliasLookupKey,
+    address: input.address,
+    verifiedAt: input.verifiedAt,
+  });
+}
+
+async function upsertHostedMemberVerifiedEmailAuthorizationTx(
+  input: HostedMemberVerifiedEmailSyncInput & {
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<HostedMemberEmailAuthorizationState> {
+  const authorization = await upsertHostedMemberEmailAuthorization({
+    directPublicSender: {
+      address: input.address,
+      authorizedAt: input.verifiedAt,
+    },
+    memberId: input.memberId,
+    prisma: input.prisma,
     verifiedEmail: {
       address: input.address,
       verifiedAt: input.verifiedAt,
     },
   });
+
+  if (input.replyAliasLookupKey) {
+    await upsertHostedMemberReplyAliasLookupKeyTx({
+      memberId: input.memberId,
+      prisma: input.prisma,
+      replyAliasLookupKey: input.replyAliasLookupKey,
+    });
+  }
+
+  return authorization;
 }
 
 export async function readHostedMemberSnapshot(input: {

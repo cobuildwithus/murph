@@ -33,6 +33,7 @@ export function HostedAccountSettingsCards({
   const telegramUserId = account.telegram.telegramUserId;
   const emailAddress = account.email.address;
   const emailVerified = Boolean(account.email.verifiedAt);
+  const murphEmailAddress = account.email.murphEmailAddress;
   const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
 
   return (
@@ -67,6 +68,14 @@ export function HostedAccountSettingsCards({
           label="Email"
           value={emailAddress ?? "Not connected"}
           empty={!emailAddress}
+          meta={emailAddress && murphEmailAddress ? (
+            <SettingsContactLink
+              href={`mailto:${murphEmailAddress}`}
+              label={`Email Murph at ${murphEmailAddress}`}
+            >
+              Email {murphEmailAddress}
+            </SettingsContactLink>
+          ) : null}
           action={
             <Button type="button" size="default" variant={emailAddress ? "ghost" : "default"} onClick={() => setLinkMode("email")}>
               {emailAddress ? (emailVerified ? "Change" : "Verify") : "Link email"}
@@ -97,15 +106,15 @@ function SettingsRow(props: {
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
-      <div className="min-w-0">
+    <div className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
+      <div className="min-w-0 flex-1">
         <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
           {props.label}
         </span>
         <p className={`font-serif text-base tracking-tight ${props.empty ? "text-muted-foreground" : "text-foreground"}`}>
           {props.value}
         </p>
-        {props.meta ? <div className="mt-1">{props.meta}</div> : null}
+        {props.meta ? <div className="mt-1 [overflow-wrap:anywhere]">{props.meta}</div> : null}
       </div>
       {props.action ? <div className="shrink-0">{props.action}</div> : null}
     </div>

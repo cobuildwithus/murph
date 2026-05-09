@@ -8,6 +8,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  createHostedEmailUserReplyAliasRoute,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
@@ -25,13 +26,10 @@ import {
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import type { HostedEmailConfig } from "./config.ts";
 import {
-  formatHostedEmailAddress,
   isHostedEmailPublicSenderAddress,
   parseHostedEmailRouteCandidate,
 } from "./route-addressing.ts";
 import {
-  createHostedEmailRouteToken,
-  deriveStableHostedEmailKey,
   parseHostedEmailRouteToken,
 } from "./route-crypto.ts";
 
@@ -89,17 +87,19 @@ export async function createHostedEmailUserAddress(input: {
     throw new Error("Hosted email route registration callback is not configured.");
   }
 
-  const aliasKey = await deriveStableHostedEmailKey(
-    input.config.signingSecret,
-    `user:${input.userId}`,
-  );
+  const replyAlias = await createHostedEmailUserReplyAliasRoute({
+    domain: input.config.domain,
+    localPart: input.config.localPart,
+    signingSecret: input.config.signingSecret,
+    userId: input.userId,
+  });
   let response: Response;
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(input.webControlAllowHttpHosts ? { allowHttpHosts: input.webControlAllowHttpHosts } : {}),
       baseUrl: input.webControlBaseUrl,
       body: JSON.stringify({
-        aliasKey,
+        aliasKey: replyAlias.aliasKey,
       }),
       boundUserId: input.userId,
       callbackSigning: input.webCallbackSigning,
@@ -160,13 +160,7 @@ export async function createHostedEmailUserAddress(input: {
     throw error;
   }
 
-  return formatHostedEmailAddress(
-    input.config,
-    await createHostedEmailRouteToken({
-      aliasKey,
-      secret: input.config.signingSecret,
-    }),
-  );
+  return replyAlias.address;
 }
 
 export async function resolveHostedEmailInboundRoute(

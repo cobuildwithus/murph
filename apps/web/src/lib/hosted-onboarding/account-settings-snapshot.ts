@@ -1,11 +1,13 @@
 import "server-only";
 
 import { getPrisma } from "../prisma";
+import { createHostedMemberReplyAliasRouteFromLookupKey } from "./hosted-email-reply-alias";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 
 export interface HostedAccountSettingsSnapshot {
   email: {
     address: string | null;
+    murphEmailAddress?: string | null;
     verifiedAt: string | null;
   };
   phone: {
@@ -24,13 +26,20 @@ export async function readHostedAccountSettingsSnapshot(input: {
     memberId: input.memberId,
     prisma: getPrisma(),
   });
+  const verifiedEmail = snapshot?.emailAuthorization?.verifiedEmail ?? null;
+  const murphEmailRoute = verifiedEmail
+    ? await createHostedMemberReplyAliasRouteFromLookupKey({
+        replyAliasLookupKey: snapshot?.routing?.replyAliasLookupKey,
+      })
+    : null;
 
   return {
     email: {
-      address: snapshot?.emailAuthorization?.verifiedEmail?.address
+      address: verifiedEmail?.address
         ?? snapshot?.emailAuthorization?.stripeCheckoutEmail?.address
         ?? null,
-      verifiedAt: snapshot?.emailAuthorization?.verifiedEmail?.verifiedAt.toISOString() ?? null,
+      murphEmailAddress: murphEmailRoute?.address ?? null,
+      verifiedAt: verifiedEmail?.verifiedAt.toISOString() ?? null,
     },
     phone: {
       number: snapshot?.identity?.phoneNumber ?? null,

@@ -55,7 +55,7 @@ export function SettingsContactLink(props: {
   external?: boolean;
 }) {
   return (
-    <p className="text-xs leading-relaxed text-muted-foreground">
+    <p className="text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
       <a
         href={props.href}
         aria-label={props.label}

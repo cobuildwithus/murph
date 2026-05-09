@@ -19,14 +19,13 @@ import { Alert, AlertDescription } from "@/src/components/ui/alert";
 
 import { ConnectedAccountCard, SettingsContactLink } from "./connected-account-card";
 
-const MURPH_CONTACT_EMAIL = "murph@mail.withmurph.ai";
-
 export function HostedEmailSettingsContent(props: {
   changeFlow?: boolean;
   currentEmail: HostedPrivyEmailAccount | null;
   currentVerifiedEmail: (HostedPrivyEmailAccount & { verifiedAt: number }) | null;
   emailAddress: string;
   emailInputRef: RefObject<HTMLInputElement | null>;
+  murphEmailAddress?: string | null;
   canSendEmailUpdateCode: boolean;
   isBusy: boolean;
   isSendingCode: boolean;
@@ -43,6 +42,7 @@ export function HostedEmailSettingsContent(props: {
     currentVerifiedEmail,
     emailAddress,
     emailInputRef,
+    murphEmailAddress,
     canSendEmailUpdateCode,
     isBusy,
     isSendingCode,
@@ -101,12 +101,12 @@ export function HostedEmailSettingsContent(props: {
         />
       )}
 
-      {currentEmail && !props.changeFlow ? (
+      {currentEmail && murphEmailAddress && !props.changeFlow ? (
         <SettingsContactLink
-          href={`mailto:${MURPH_CONTACT_EMAIL}`}
-          label={`Email Murph at ${MURPH_CONTACT_EMAIL}`}
+          href={`mailto:${murphEmailAddress}`}
+          label={`Email Murph at ${murphEmailAddress}`}
         >
-          Email {MURPH_CONTACT_EMAIL}
+          Email {murphEmailAddress}
         </SettingsContactLink>
       ) : null}
 

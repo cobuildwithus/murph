@@ -24,6 +24,7 @@ export const hostedMemberRoutingStateSelect =
     pendingLinqParticipantContactLookupKey: true,
     pendingLinqParticipantContactObservedAt: true,
     pendingLinqRecipientPhoneEncrypted: true,
+    replyAliasLookupKey: true,
     telegramUserLookupKey: true,
     telegramUserIdEncrypted: true,
   });
@@ -54,6 +55,7 @@ export const hostedMemberRoutingLookupSelect =
     pendingLinqParticipantContactLookupKey: true,
     pendingLinqParticipantContactObservedAt: true,
     pendingLinqRecipientPhoneEncrypted: true,
+    replyAliasLookupKey: true,
     telegramUserLookupKey: true,
     telegramUserIdEncrypted: true,
     member: {
@@ -78,6 +80,7 @@ export interface HostedMemberRoutingStateSnapshot {
   pendingLinqChatId: string | null;
   pendingLinqParticipantContact: HostedLinqParticipantContactClaim | null;
   pendingLinqRecipientPhone: string | null;
+  replyAliasLookupKey?: string | null;
   telegramThreadId: string | null;
   telegramUserId: string | null;
   telegramUserLookupKey: string | null;
@@ -131,6 +134,7 @@ export async function projectHostedMemberRoutingState(
       value: privateState.pendingLinqParticipantContact,
     }),
     pendingLinqRecipientPhone: privateState.pendingLinqRecipientPhone,
+    replyAliasLookupKey: routing.replyAliasLookupKey ?? null,
     telegramThreadId: privateState.telegramThreadId,
     telegramUserId: privateState.telegramUserId,
     telegramUserLookupKey: routing.telegramUserLookupKey ?? null,

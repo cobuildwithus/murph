@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHostedEmailUserReplyAliasRoute } from "@murphai/hosted-execution/hosted-email";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
@@ -24,12 +25,25 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
 import { readHostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
+const originalHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+const originalHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+const originalHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
 describe("hosted account settings snapshot", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "murph";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-email-signing-secret";
     mocks.getPrisma.mockReturnValue({
       readonly: true,
     });
+  });
+
+  afterEach(() => {
+    restoreEnv("HOSTED_EMAIL_DOMAIN", originalHostedEmailDomain);
+    restoreEnv("HOSTED_EMAIL_LOCAL_PART", originalHostedEmailLocalPart);
+    restoreEnv("HOSTED_EMAIL_SIGNING_SECRET", originalHostedEmailSigningSecret);
   });
 
   it("prefills settings from the unverified Stripe checkout email when no verified email exists", async () => {
@@ -52,12 +66,19 @@ describe("hosted account settings snapshot", () => {
     })).resolves.toMatchObject({
       email: {
         address: "payer@example.com",
+        murphEmailAddress: null,
         verifiedAt: null,
       },
     });
   });
 
   it("prefers the verified email over the Stripe checkout email", async () => {
+    const replyAlias = await createHostedEmailUserReplyAliasRoute({
+      domain: "mail.example.test",
+      localPart: "murph",
+      signingSecret: "test-email-signing-secret",
+      userId: "member_123",
+    });
     mocks.readHostedMemberSnapshot.mockResolvedValue({
       emailAuthorization: {
         directPublicSender: null,
@@ -73,7 +94,9 @@ describe("hosted account settings snapshot", () => {
         },
       },
       identity: null,
-      routing: null,
+      routing: {
+        replyAliasLookupKey: replyAlias.aliasKey,
+      },
     });
 
     await expect(readHostedAccountSettingsSnapshot({
@@ -81,8 +104,18 @@ describe("hosted account settings snapshot", () => {
     })).resolves.toMatchObject({
       email: {
         address: "verified@example.com",
+        murphEmailAddress: replyAlias.address,
         verifiedAt: "2026-05-02T00:00:00.000Z",
       },
     });
   });
 });
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
