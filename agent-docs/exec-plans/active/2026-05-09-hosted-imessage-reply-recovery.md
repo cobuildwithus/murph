@@ -61,15 +61,18 @@ Done:
 - Patched runner-control heartbeat handling to resolve lease proof from body, headers, or proxy context, keep stale-proof mismatch checks, and log only safe metadata when no proof exists.
 - Added regressions for header-only heartbeats, proxy-context heartbeats, body/header mismatch rejection, local internal proxy no-body heartbeat liveness, and local runtime heartbeat body preservation.
 - Focused heartbeat/local-proxy verification and Cloudflare typecheck passed; full Cloudflare verification still reproduces an unrelated `container-entrypoint.test.ts` timeout flake.
+- Deployed the heartbeat fix, then live warm probing exposed the next blocker: the workspace invocation was prepared, the RunnerContainer lifecycle reported a clean stop a few seconds later, and the UserRunner remained active without liveness, outbound, completion, or failure logs.
+- Patched workspace invocation fetches so container lifecycle stop aborts active work and the Durable Object invocation races the request against the abort signal instead of waiting forever on a dead shell.
+- Added a RunnerContainer regression where a never-resolving workspace request is stopped by `onStop()` and must fail/clean up rather than leaving the invocation active.
 
 Now:
-- Run final verification around the heartbeat fix, commit/push to main, run another Pro review in the open ChatGPT thread, then deploy Cloudflare immediately.
+- Run verification around the container-stop active-work fix, commit/push to main, retry Pro in the open ChatGPT thread if the page becomes usable, then deploy Cloudflare immediately.
 
 Next:
 - Recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: live post-deploy iMessage reply latency until the active-invocation recovery fix is deployed and the runner drains a fresh inbound message.
+- UNCONFIRMED: live post-deploy iMessage reply latency until the container-stop active-work fix is deployed and the runner drains a fresh inbound message.
 
 Working set (files/ids/commands):
 - `apps/cloudflare/src/**`

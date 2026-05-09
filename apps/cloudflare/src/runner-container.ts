@@ -335,22 +335,49 @@ export class RunnerContainer extends Container {
 
   override onStop(params: StopParams): void {
     const context = this.currentLogContext;
+    const abortedOperations = this.abortActiveOperationsForContainerStop(params);
+    const stoppedDuringActiveWork =
+      abortedOperations.browserVaultRefresh || abortedOperations.workspaceInvocation;
     const cleanExit = params.exitCode === 0;
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
+        activeBrowserVaultRefreshAborted: abortedOperations.browserVaultRefresh,
+        activeWorkspaceInvocationAborted: abortedOperations.workspaceInvocation,
         exitCode: params.exitCode,
         lifecycleStage: "onStop",
         runnerPort: RUNNER_PORT,
         stopReason: params.reason,
       },
-      level: cleanExit ? "info" : "warn",
-      message: cleanExit
+      level: cleanExit && !stoppedDuringActiveWork ? "info" : "warn",
+      message: stoppedDuringActiveWork
+        ? "Hosted execution container stopped during active work."
+        : cleanExit
         ? "Hosted execution container lifecycle hook reported stop."
         : "Hosted execution container lifecycle hook reported non-zero stop.",
-      phase: cleanExit ? "container.ready" : "failed",
+      phase: cleanExit && !stoppedDuringActiveWork ? "container.ready" : "failed",
       userId: context?.userId,
     });
+  }
+
+  private abortActiveOperationsForContainerStop(params: StopParams): {
+    browserVaultRefresh: boolean;
+    workspaceInvocation: boolean;
+  } {
+    return {
+      browserVaultRefresh: abortRunnerContainerOperation(
+        this.browserVaultRefreshAbortController,
+        new Error(
+          `browser-vault refresh container stopped during active work (${params.reason}, exit ${params.exitCode})`,
+        ),
+      ),
+      workspaceInvocation: abortRunnerContainerOperation(
+        this.workspaceInvocationAbortController,
+        new Error(
+          `workspace invocation container stopped during active work (${params.reason}, exit ${params.exitCode})`,
+        ),
+      ),
+    };
   }
 
   override onError(error: unknown): never {
@@ -443,7 +470,11 @@ export class RunnerContainer extends Container {
         phase: "container.ready",
         userId: routeUserId,
       });
-      const response = await this.containerFetch(
+      const requestSignal = combineRunnerContainerAbortSignals(
+        operationAbortController.signal,
+        AbortSignal.timeout(remainingTimeoutMs),
+      );
+      const runnerRequest = this.containerFetch(
         RUNNER_EXECUTE_URL,
         {
           body: JSON.stringify({
@@ -459,13 +490,11 @@ export class RunnerContainer extends Container {
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
-          signal: combineRunnerContainerAbortSignals(
-            operationAbortController.signal,
-            AbortSignal.timeout(remainingTimeoutMs),
-          ),
+          signal: requestSignal,
         },
         RUNNER_PORT,
       );
+      const response = await raceRunnerContainerOperationAbort(runnerRequest, requestSignal);
       this.noteRunnerActivity("runner-response-received");
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1229,6 +1258,18 @@ function throwIfRunnerContainerOperationAborted(signal: AbortSignal): void {
       ? signal.reason
       : new DOMException("The operation was aborted.", "AbortError");
   }
+}
+
+function abortRunnerContainerOperation(
+  controller: AbortController | null,
+  reason: Error,
+): boolean {
+  if (!controller || controller.signal.aborted) {
+    return false;
+  }
+
+  controller.abort(reason);
+  return true;
 }
 
 function combineRunnerContainerAbortSignals(
