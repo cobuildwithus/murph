@@ -1226,21 +1226,41 @@ export class HostedUserRunner {
       minimumDelayMs?: number;
     } = {},
   ): Promise<RunnerStateRecord> {
-    const record = inputRecord.idleShutdownCheckpointDueAt
-      ? await this.stateStore.clearIdleShutdownCheckpoint()
-      : inputRecord;
     const nowMs = Date.now();
+    const minimumDelayMs = inputRecord.idleShutdownCheckpointDueAt
+      ? Math.max(
+          input.minimumDelayMs ?? 0,
+          ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
+        )
+      : input.minimumDelayMs ?? 0;
     const preferredWakeAt = resolvePendingNudgeWakeAt({
       nowMs,
-      record,
+      record: inputRecord,
       runnerTimeoutMs: this.env.runnerTimeoutMs,
     });
+    const wakeAt = applyMinimumFutureWakeAt({
+      minimumDelayMs,
+      nowMs,
+      wakeAt: preferredWakeAt,
+    });
+    if (inputRecord.idleShutdownCheckpointDueAt) {
+      if (
+        inputRecord.pendingNudge
+        || !inputRecord.idleShutdownCheckpointWorkspaceVersion
+      ) {
+        await this.stateStore.clearIdleShutdownCheckpoint();
+      } else {
+        await this.stateStore.scheduleIdleShutdownCheckpoint({
+          dueAt: resolvePreemptingIdleShutdownCheckpointDueAt({
+            nextWakeAt: wakeAt,
+            nowMs,
+          }),
+          workspaceVersion: inputRecord.idleShutdownCheckpointWorkspaceVersion,
+        });
+      }
+    }
     return await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: applyMinimumFutureWakeAt({
-        minimumDelayMs: input.minimumDelayMs ?? 0,
-        nowMs,
-        wakeAt: preferredWakeAt,
-      }),
+      preferredWakeAt: wakeAt,
     });
   }
 
@@ -1930,8 +1950,15 @@ export class HostedUserRunner {
     const workspaceRead = await this.readHostedWorkspaceFromWeb(input.record.userId);
     this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.record.userId);
     const latestRecord = await this.stateStore.readState();
-    if (latestRecord.pendingNudge || latestRecord.inFlight) {
+    if (latestRecord.pendingNudge) {
       await this.stateStore.clearIdleShutdownCheckpoint();
+      const record = await this.syncPendingWorkAlarm(latestRecord);
+      return {
+        nextWakeAt: record.nextWakeAt,
+        run: false,
+      };
+    }
+    if (latestRecord.inFlight) {
       const record = await this.syncPendingWorkAlarm(latestRecord);
       return {
         nextWakeAt: record.nextWakeAt,
@@ -2074,8 +2101,15 @@ export class HostedUserRunner {
 
     await this.runtimeAlarmScheduler.syncStoredAlarm();
     const latestRecord = await this.stateStore.readState();
-    if (latestRecord.pendingNudge || latestRecord.inFlight) {
+    if (latestRecord.pendingNudge) {
       await this.stateStore.clearIdleShutdownCheckpoint();
+      const record = await this.syncPendingWorkAlarm(latestRecord);
+      return {
+        kind: "deferred",
+        record,
+      };
+    }
+    if (latestRecord.inFlight) {
       const record = await this.syncPendingWorkAlarm(latestRecord);
       return {
         kind: "deferred",
@@ -2892,6 +2926,18 @@ function applyMinimumFutureWakeAt(input: {
   }
 
   return new Date(minimumWakeAtMs).toISOString();
+}
+
+function resolvePreemptingIdleShutdownCheckpointDueAt(input: {
+  nextWakeAt: string;
+  nowMs: number;
+}): string {
+  const nextWakeAtMs = Date.parse(input.nextWakeAt);
+  if (!Number.isFinite(nextWakeAtMs)) {
+    return new Date(input.nowMs).toISOString();
+  }
+
+  return new Date(Math.max(input.nowMs, nextWakeAtMs - 1)).toISOString();
 }
 
 function resolveHostedRunnerFailureRetryDelayMs(input: {

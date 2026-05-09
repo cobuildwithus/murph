@@ -23,10 +23,12 @@ Done:
 - Patched Cloudflare runner alarm scheduling to drain the deferred idle-shutdown checkpoint before short non-idle retry/receipt wakes, and added a targeted runner alarm regression test.
 - Confirmed the first patched Worker deployed successfully and the runner began scheduling the checkpoint drain, then found a second alarm-ordering issue: if Cloudflare delivered the checkpoint alarm after the retry wake was also due, the normal drain consumed the alarm first and postponed the checkpoint again.
 - Patched the Durable Object alarm consumer so an earlier due idle-shutdown checkpoint still runs before a later retry wake even when both are overdue, and tightened the regression to simulate late alarm delivery.
+- Found a third live alarm race: when the due checkpoint alarm collided with an already-active invocation, recovery scheduling cleared the checkpoint and browser-vault refresh could keep preempting the durable mailbox watermark.
+- Patched active-invocation recovery to preserve and defer the idle-shutdown checkpoint ahead of recovery wakes, and added a regression covering the collision plus stale-lease recovery.
 - Confirmed the live reply engine is currently reaching the assistant provider but failing with `ASSISTANT_CODEX_USAGE_LIMIT`; this is separate from the mailbox/read durability fix and points at the configured OpenAI provider quota/billing boundary.
 
 Now:
-- Run focused verification, commit/push the alarm-ordering fix, deploy immediately, and watch the lagged hosted mailbox recover.
+- Run focused verification, commit/push the active-invocation checkpoint preservation fix, deploy immediately, and watch the lagged hosted mailbox recover.
 
 Next:
 - Verify cold/warm reply scenarios after provider capacity is available and run required final checks/audits.
