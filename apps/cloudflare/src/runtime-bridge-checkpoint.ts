@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionBundleRef,
+  HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedWorkspaceCheckpointRequest,
@@ -51,7 +51,7 @@ export interface HostedRuntimeBridgeCheckpointInput {
   userId: string;
   writeBundle(
     context: HostedRuntimeBridgeBundleWriteContext,
-  ): Promise<HostedExecutionBundleRef> | HostedExecutionBundleRef;
+  ): Promise<HostedExecutionSnapshotRef> | HostedExecutionSnapshotRef;
 }
 
 export interface HostedRuntimeBridgeSnapshotInput {
@@ -66,7 +66,7 @@ export interface HostedRuntimeBridgeSnapshotInput {
   userId: string;
   writeBundle(
     context: HostedRuntimeBridgeBundleWriteContext,
-  ): Promise<HostedExecutionBundleRef> | HostedExecutionBundleRef;
+  ): Promise<HostedExecutionSnapshotRef> | HostedExecutionSnapshotRef;
 }
 
 export interface HostedRuntimeBridgeWebCheckpointInput {
@@ -110,7 +110,7 @@ export async function checkpointHostedRuntimeBridgeWorkspace(
 
 export async function snapshotHostedRuntimeBridgeWorkspaceBundle(
   input: HostedRuntimeBridgeSnapshotInput,
-): Promise<HostedExecutionBundleRef> {
+): Promise<HostedExecutionSnapshotRef> {
   const initialLease = requireCheckpointLeaseMatchesRequest({
     lease: await input.readCurrentLease(),
     request: input.request,
