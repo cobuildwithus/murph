@@ -87,6 +87,7 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
 const ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS = 1_000;
+const DEFERRED_CHECKPOINT_DRAIN_DELAY_MS = 1_000;
 const PENDING_BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
@@ -1811,6 +1812,7 @@ export class HostedUserRunner {
     ) {
       const idleSchedule = await this.scheduleIdleShutdownCheckpointIfCurrent({
         deferredCheckpointRequired: record.deferredCheckpointRequired,
+        drainBeforeNextWake: input.resultStatus === "budget_exhausted",
         nextWakeAt: input.fallbackNextWakeAt,
         userId: input.userId,
         workspaceVersion: input.workspaceVersion,
@@ -1981,6 +1983,7 @@ export class HostedUserRunner {
 
   private async scheduleIdleShutdownCheckpointIfCurrent(input: {
     deferredCheckpointRequired: boolean;
+    drainBeforeNextWake?: boolean;
     nextWakeAt: string | null;
     userId: string;
     workspaceVersion: string;
@@ -2009,12 +2012,15 @@ export class HostedUserRunner {
       };
     }
 
-    const dueAt = new Date(Date.now() + resolveIdleShutdownCheckpointDelayMs({
-      idleTtlMs: this.env.runnerIdleTtlMs,
-      safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
-    })).toISOString();
+    const dueAt = new Date(Date.now() + (input.drainBeforeNextWake
+      ? DEFERRED_CHECKPOINT_DRAIN_DELAY_MS
+      : resolveIdleShutdownCheckpointDelayMs({
+          idleTtlMs: this.env.runnerIdleTtlMs,
+          safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
+        }))).toISOString();
     const workspaceWakePreemptsIdleCheckpoint =
-      input.nextWakeAt
+      !input.drainBeforeNextWake
+      && input.nextWakeAt
         ? Date.parse(input.nextWakeAt) <= Date.parse(dueAt)
         : false;
     const nullWorkspaceCheckpointAllowed =

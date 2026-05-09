@@ -17,23 +17,24 @@ State:
 
 Done:
 - Loaded repo workflow, security, reliability, verification, hosted runtime, and Cloudflare deploy docs.
+- Committed and pushed the pre-existing worktree checkpoint, then started an immediate Cloudflare deploy.
+- Confirmed production mailbox high-water had advanced while the checkpointed imported sequence stayed behind for one active hosted user.
+- Identified the root cause: budget-exhausted mailbox import with deferred progress scheduled a fast retry before an idle-shutdown checkpoint, so cold containers could reread the same mailbox prefix.
+- Patched Cloudflare runner alarm scheduling to drain the deferred idle-shutdown checkpoint before the budget retry wake, and added a targeted runner alarm regression test.
 
 Now:
-- Trace current iMessage/Linq ingress, mailbox import, assistant admission, and outbound reply paths against runtime evidence.
+- Run focused verification, commit/push the fix, deploy immediately, and watch the lagged hosted mailbox recover.
 
 Next:
-- Patch the root cause, add targeted regressions, deploy, and verify cold/warm reply scenarios.
+- Verify cold/warm reply scenarios and run required final checks/audits.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: exact failing production stage, pending log/data inspection.
-- UNCONFIRMED: whether current dirty hosted-runner edits are intended to fix part of this issue or are unrelated in-progress work.
+- UNCONFIRMED: live post-deploy iMessage reply latency until the fixed worker is deployed and the lagged runner drains.
 
 Working set (files/ids/commands):
-- `apps/web/src/lib/hosted-onboarding/**`
 - `apps/cloudflare/src/**`
 - `packages/assistant-runtime/src/hosted-runtime/**`
-- `packages/assistant-engine/src/assistant/**`
 - `packages/hosted-execution/src/**`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `pnpm cf:deploy:immediate`
-- `pnpm dev`
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts`
