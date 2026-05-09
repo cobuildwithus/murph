@@ -311,7 +311,7 @@ describe("hosted deploy automation helpers", () => {
       head_sampling_rate: 1,
       logs: {
         enabled: true,
-        invocation_logs: true,
+        invocation_logs: false,
         persist: true,
         head_sampling_rate: 1,
       },
