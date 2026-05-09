@@ -21,15 +21,18 @@ Done:
 - Confirmed production mailbox high-water had advanced while the checkpointed imported sequence stayed behind for one active hosted user.
 - Identified the root cause: budget-exhausted mailbox import with deferred progress scheduled a fast retry before an idle-shutdown checkpoint, so cold containers could reread the same mailbox prefix.
 - Patched Cloudflare runner alarm scheduling to drain the deferred idle-shutdown checkpoint before short non-idle retry/receipt wakes, and added a targeted runner alarm regression test.
+- Confirmed the first patched Worker deployed successfully and the runner began scheduling the checkpoint drain, then found a second alarm-ordering issue: if Cloudflare delivered the checkpoint alarm after the retry wake was also due, the normal drain consumed the alarm first and postponed the checkpoint again.
+- Patched the Durable Object alarm consumer so an earlier due idle-shutdown checkpoint still runs before a later retry wake even when both are overdue, and tightened the regression to simulate late alarm delivery.
+- Confirmed the live reply engine is currently reaching the assistant provider but failing with `ASSISTANT_CODEX_USAGE_LIMIT`; this is separate from the mailbox/read durability fix and points at the configured OpenAI provider quota/billing boundary.
 
 Now:
-- Run focused verification, commit/push the fix, deploy immediately, and watch the lagged hosted mailbox recover.
+- Run focused verification, commit/push the alarm-ordering fix, deploy immediately, and watch the lagged hosted mailbox recover.
 
 Next:
-- Verify cold/warm reply scenarios and run required final checks/audits.
+- Verify cold/warm reply scenarios after provider capacity is available and run required final checks/audits.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: live post-deploy iMessage reply latency until the fixed worker is deployed and the lagged runner drains.
+- UNCONFIRMED: live post-deploy iMessage reply latency until the fixed Worker is deployed, the lagged runner drains, and the assistant provider stops returning capacity/quota failure.
 
 Working set (files/ids/commands):
 - `apps/cloudflare/src/**`

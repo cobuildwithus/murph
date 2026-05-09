@@ -220,7 +220,9 @@ When a non-idle retry or receipt wake would preempt the normal idle-shutdown
 window after deferred foreground progress, Cloudflare must first schedule the
 deferred idle-shutdown checkpoint ahead of that wake; otherwise a cold container
 can lose the staged watermark or terminal reply evidence and loop over the same
-mailbox prefix.
+mailbox prefix. The Durable Object alarm consumer must preserve that ordering
+even if the checkpoint alarm is delivered late enough that the later retry wake
+is also due.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
