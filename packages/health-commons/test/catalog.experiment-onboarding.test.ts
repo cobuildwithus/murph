@@ -186,6 +186,7 @@ describe("buildHealthCommonsCatalogFromContent", () => {
       (entity) => entity.key === "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol",
     );
 
+    expect(protocol).toBeDefined();
     expect(protocol?.testPlans).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

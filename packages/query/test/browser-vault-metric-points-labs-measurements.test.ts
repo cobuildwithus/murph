@@ -184,7 +184,7 @@ test("browser-vault metric points project manual measurements, metric samples, a
       .map((point) => point.value)
       .filter((value): value is number => typeof value === "number")
       .sort((left, right) => left - right),
-    [82],
+    [82, 88, 99.1001],
   );
 
   const crp = client.metricSelections.get("hs-crp");
@@ -199,6 +199,55 @@ test("browser-vault metric points project manual measurements, metric samples, a
 
   assert.equal(client.metrics.series({ metricKey: "body-weight" }).length, 1);
   assert.equal(client.metrics.latestRow({ metricKey: "apob" })?.sourceKind, "test-result");
+});
+
+test("browser-vault metric rows preserve same-day lab record ids for anchored experiment lookups", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-24T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEvent("evt_anchor_ldl", "test", {
+          occurredAt: "2026-04-23T08:00:00.000Z",
+          attributes: {
+            collectedAt: "2026-04-23T08:00:00.000Z",
+            results: [
+              {
+                analyte: "LDL-C",
+                biomarkerSlug: "ldl-c",
+                unit: "mg/dL",
+                value: 140,
+              },
+            ],
+          },
+        }),
+        createEvent("evt_same_day_ldl", "test", {
+          occurredAt: "2026-04-23T09:00:00.000Z",
+          attributes: {
+            collectedAt: "2026-04-23T09:00:00.000Z",
+            results: [
+              {
+                analyte: "LDL-C",
+                biomarkerSlug: "ldl-c",
+                unit: "mg/dL",
+                value: 150,
+              },
+            ],
+          },
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const rows = client.metrics.series({ metricKey: "ldl-c" });
+
+  assert.deepEqual(rows.map((row) => [row.value, row.recordIds]), [
+    [140, ["evt_anchor_ldl"]],
+    [150, ["evt_same_day_ldl"]],
+  ]);
 });
 
 test("browser-vault metric goal targets honor startAt when selecting rolling-window progress", async () => {

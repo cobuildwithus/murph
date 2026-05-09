@@ -933,6 +933,10 @@ test.sequential(
         'sauna-daily',
         '--baseline-days',
         '0',
+        '--baseline-start',
+        '2026-05-01',
+        '--baseline-end',
+        '2026-05-07',
         '--vault',
         vaultRoot,
       ])

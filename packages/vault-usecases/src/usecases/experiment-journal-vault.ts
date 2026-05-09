@@ -2498,7 +2498,10 @@ function buildRunPlanDatePatch(input: ApplyExperimentOnboardingRecordInput) {
       throw new VaultCliError('invalid_option', '--baseline-days must be zero or greater.')
     }
 
-    if (input.baselineDays > 0) {
+    if (input.baselineDays === 0) {
+      baselineStart = undefined
+      baselineEnd = undefined
+    } else {
       if (baselineStart) {
         baselineEnd = mergeComputedDate(
           baselineEnd,

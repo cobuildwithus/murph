@@ -1295,6 +1295,70 @@ test("treats measurement anchors as browser analysis windows when run windows ar
   assert.equal(result.biomarkers[0]?.deltaAbs, -20);
 });
 
+test("treats completed lab anchor comparisons as enough browser outcome data", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-08-02T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_completed_lab",
+          slug: "completed-lab-ldl",
+          status: "completed",
+          runPlan: {
+            interventionStart: "2026-05-09",
+            interventionEnd: "2026-08-01",
+          },
+          analysisPlan: {
+            primaryBiomarkerKey: "biomarker:ldl-c",
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                role: "baseline",
+                kind: "lab_panel",
+                recordId: "evt_completed_lab_baseline",
+                biomarkerKeys: ["biomarker:ldl-c"],
+              },
+              {
+                role: "followup",
+                kind: "lab_panel",
+                recordId: "evt_completed_lab_followup",
+                biomarkerKeys: ["biomarker:ldl-c"],
+              },
+            ],
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:ldl-c",
+          date: "2026-04-23",
+          metricKey: "ldl-c",
+          recordIds: ["evt_completed_lab_baseline"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 140,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:ldl-c",
+          date: "2026-08-02",
+          metricKey: "ldl-c",
+          recordIds: ["evt_completed_lab_followup"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 120,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "completed-lab-ldl");
+
+  assert.ok(result);
+  assert.equal(result.progress?.dataCoverage.status, "ready_for_review");
+  assert.equal(result.biomarkers[0]?.completeness, "good");
+  assert.equal(result.outcome?.status, "enough_data");
+});
+
 test("treats lab measurement plans as setup-ready without a run baseline window", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -1363,6 +1427,60 @@ test("treats lab measurement plans as setup-ready without a run baseline window"
   });
   assert.equal(result.progress?.windows.baselineStart, null);
   assert.equal(result.progress?.windows.baselineEnd, null);
+});
+
+test("incomplete browser point plans keep using complete run windows", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-25T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_incomplete_point",
+          slug: "browser-incomplete-point",
+          status: "completed",
+          analysisPlan: {
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                role: "baseline",
+                kind: "lab_panel",
+                recordId: "evt_browser_rhr_lab_baseline",
+                biomarkerKeys: ["biomarker:resting-heart-rate"],
+              },
+            ],
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:resting-heart-rate",
+          date: "2026-03-25",
+          metricKey: "resting-heart-rate",
+          recordIds: ["evt_browser_rhr_lab_baseline"],
+          unit: "bpm",
+          value: 70,
+        }),
+        ...restingHeartRateRows([
+          ["2026-04-01", 62],
+          ["2026-04-02", 61],
+          ["2026-04-03", 60],
+          ["2026-04-08", 59],
+          ["2026-04-09", 58],
+          ["2026-04-10", 59],
+        ]),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-incomplete-point");
+
+  assert.ok(result);
+  assert.equal(result.progress?.dataCoverage.status, "ready_for_review");
+  assert.equal(result.biomarkers[0]?.baseline.daysWithData, 3);
+  assert.equal(result.biomarkers[0]?.baseline.mean, 61);
+  assert.equal(result.biomarkers[0]?.intervention.daysWithData, 3);
+  assert.equal(result.biomarkers[0]?.intervention.mean, 58.666666666666664);
 });
 
 test("requires complete lab measurement windows before skipping browser run baselines", () => {

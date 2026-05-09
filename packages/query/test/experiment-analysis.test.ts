@@ -559,7 +559,7 @@ test("experiment analysis uses lab measurement anchors separately from run basel
       unit: "mg/dL",
     },
     biomarkerKey: "biomarker:ldl-c",
-    completeness: "partial",
+    completeness: "good",
     deltaAbs: -20,
     deltaPct: -14.29,
     expectedDirection: "decrease",
@@ -582,6 +582,99 @@ test("experiment analysis uses lab measurement anchors separately from run basel
   assert.equal(outcome.metricResults[0]?.baselineMean, 140);
   assert.equal(outcome.metricResults[0]?.interventionMean, 120);
   assert.equal(outcome.metricResults[0]?.deltaAbs, -20);
+});
+
+test("incomplete point measurement plans do not mix lab anchors with run windows", () => {
+  const experiment = makeExperiment("completed", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",
+    slug: "rhr-baseline-anchor-only",
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      desiredDirection: "decrease",
+      measurementAnchors: [
+        {
+          role: "baseline",
+          kind: "lab_panel",
+          recordId: "evt_rhr_lab_baseline",
+          biomarkerKeys: ["biomarker:resting-heart-rate"],
+          observedOn: "2026-03-25",
+        },
+      ],
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-no-mixed-windows",
+    metadata: null,
+    entities: [
+      experiment,
+      makeLabResult({
+        biomarkerSlug: "resting-heart-rate",
+        collectedAt: "2026-03-25T08:00:00.000Z",
+        entityId: "evt_rhr_lab_baseline",
+        unit: "bpm",
+        value: 70,
+      }),
+      makeObservation({
+        entityId: "evt_rhr_daily_baseline_1",
+        dayKey: "2026-04-01",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-01T06:00:00.000Z",
+        unit: "bpm",
+        value: 62,
+      }),
+      makeObservation({
+        entityId: "evt_rhr_daily_baseline_2",
+        dayKey: "2026-04-02",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-02T06:00:00.000Z",
+        unit: "bpm",
+        value: 61,
+      }),
+      makeObservation({
+        entityId: "evt_rhr_daily_baseline_3",
+        dayKey: "2026-04-03",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-03T06:00:00.000Z",
+        unit: "bpm",
+        value: 60,
+      }),
+      makeObservation({
+        entityId: "evt_rhr_daily_intervention_1",
+        dayKey: "2026-04-08",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-08T06:00:00.000Z",
+        unit: "bpm",
+        value: 59,
+      }),
+      makeObservation({
+        entityId: "evt_rhr_daily_intervention_2",
+        dayKey: "2026-04-09",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-09T06:00:00.000Z",
+        unit: "bpm",
+        value: 58,
+      }),
+      makeObservation({
+        entityId: "evt_rhr_daily_intervention_3",
+        dayKey: "2026-04-10",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-10T06:00:00.000Z",
+        unit: "bpm",
+        value: 59,
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "rhr-baseline-anchor-only", {
+    asOf: "2026-04-25",
+  });
+
+  assert.equal(progress.analysisReadiness.status, "ready");
+  assert.equal(progress.dataCoverage.status, "ready_for_review");
+  assert.equal(progress.signals[0]?.baselineDayCount, 3);
+  assert.equal(progress.signals[0]?.baselineMean, 61);
+  assert.equal(progress.signals[0]?.interventionDayCount, 3);
+  assert.equal(progress.signals[0]?.interventionMean, 58.67);
 });
 
 test("lab-backed experiments do not require a run baseline window", () => {
