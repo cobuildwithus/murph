@@ -1764,7 +1764,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(timeoutSpy).toHaveBeenCalledWith(7_500);
+    expect(timeoutSpy).toHaveBeenCalledWith(15_000);
     timeoutSpy.mockRestore();
   });
 

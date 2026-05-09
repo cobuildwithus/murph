@@ -42,12 +42,15 @@ Done:
 - Patched full and working-delta checkpoint bundle writes to dedupe artifact puts by hash and persist them with bounded concurrency, with a regression covering many raw artifacts.
 - After the deploy, confirmed the latest Worker was live and mailbox imports reached the current conversation high-water in runtime logs, but the raw checkpointed workspace watermark still lagged because old pointer workflows could each issue their one runner nudge and keep colliding with the pending idle checkpoint.
 - Patched webhook pointer workflows so only the latest mailbox item in a lane can issue a runner nudge; older pointer workflows still wait for checkpointed progress but no longer amplify a backlog into repeated foreground nudges.
+- After the web deploy, confirmed idle-shutdown checkpoints now commit but the web-visible mailbox watermark still stayed stale because idle-shutdown checkpoint requests reused the previous workspace redacted status instead of the restored local mailbox state.
+- Patched idle-shutdown checkpoints to overlay restored local mailbox watermarks onto the checkpoint redacted status, and pinned the behavior with an entrypoint regression.
+- Repaired the stale Cloudflare Linq outbound test expectation for the current 15s foreground send timeout introduced earlier in this incident.
 
 Now:
-- Commit/push the pointer-workflow nudge suppression fix, let Vercel deploy it, then recheck checkpoint progress and the iMessage reply path.
+- Re-run focused assistant-runtime and Cloudflare verification, then commit/push the idle-checkpoint watermark publishing fix and redeploy Cloudflare.
 
 Next:
-- Watch the lagged hosted mailbox recover after the web deploy, then verify cold/warm iMessage reply scenarios after provider capacity is available.
+- Recheck the lagged hosted mailbox after Cloudflare deploy; then verify cold/warm iMessage reply scenarios after provider capacity is available.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: live post-deploy iMessage reply latency until the fixed Worker is deployed, the lagged runner drains, and the assistant provider stops returning capacity/quota failure.
@@ -59,6 +62,9 @@ Working set (files/ids/commands):
 - `packages/operator-config/src/linq-runtime.ts`
 - `apps/web/src/lib/hosted-onboarding/webhook-workflow-steps.ts`
 - `apps/web/test/hosted-onboarding-webhook-workflows.test.ts`
+- `packages/assistant-runtime/src/hosted-runtime.ts`
+- `packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`
+- `apps/cloudflare/test/runner-outbound.test.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `pnpm cf:deploy:immediate`
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-webhook-workflows.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts apps/web/test/hosted-execution-handoff.test.ts`

@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -34,6 +35,9 @@ import type {
 } from "./hosted-runtime/mailbox-import.ts";
 import {
   createEmptyHostedMailboxImportState,
+  readHostedMailboxImportState,
+  resolveHostedMailboxImportStatePath,
+  type HostedMailboxImportState,
 } from "./hosted-runtime/mailbox-state.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
@@ -477,7 +481,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               status: "scheduled",
             }
           : null,
-        redactedStatus: workspaceRead.workspace?.redactedStatus ?? null,
+        redactedStatus: await buildHostedIdleShutdownCheckpointRedactedStatus({
+          baseStatus: workspaceRead.workspace?.redactedStatus ?? null,
+          vaultRoot: restored.vaultRoot,
+        }),
         workspacePort: idleShutdownCheckpointWorkspacePort,
       });
     }
@@ -714,6 +721,60 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
       : {}),
     status: "idle",
   };
+}
+
+async function buildHostedIdleShutdownCheckpointRedactedStatus(input: {
+  baseStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
+  vaultRoot: string;
+}): Promise<HostedWorkspaceCheckpointRequest["redactedStatus"] | null> {
+  if (!await hostedMailboxImportStateFileExists(input.vaultRoot)) {
+    return cloneHostedRuntimeRedactedStatus(input.baseStatus);
+  }
+
+  const state = await readHostedMailboxImportState({
+    vaultRoot: input.vaultRoot,
+  });
+  return mergeHostedMailboxImportStateRedactedStatus({
+    baseStatus: input.baseStatus,
+    state,
+  });
+}
+
+async function hostedMailboxImportStateFileExists(vaultRoot: string): Promise<boolean> {
+  try {
+    await access(resolveHostedMailboxImportStatePath(vaultRoot));
+    return true;
+  } catch (error) {
+    if (isNodeFileNotFoundError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function mergeHostedMailboxImportStateRedactedStatus(input: {
+  baseStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
+  state: HostedMailboxImportState;
+}): HostedWorkspaceCheckpointRequest["redactedStatus"] {
+  return {
+    ...(input.baseStatus ?? {}),
+    hostedMailboxConversationImportedSeq: input.state.watermarks.conversation,
+    hostedMailboxSystemImportedSeq: input.state.watermarks.system,
+  };
+}
+
+function cloneHostedRuntimeRedactedStatus(
+  value: HostedWorkspaceCheckpointRequest["redactedStatus"] | null,
+): HostedWorkspaceCheckpointRequest["redactedStatus"] | null {
+  return value ? { ...value } : null;
+}
+
+function isNodeFileNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof Error
+    && "code" in error
+    && error.code === "ENOENT"
+  );
 }
 
 function observeIdleShutdownCheckpointAfterPreemption(input: {
