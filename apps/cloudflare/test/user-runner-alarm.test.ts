@@ -2804,6 +2804,64 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("checkpoints deferred progress before a short non-idle workspace wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createBundleRef("base-only-short-non-idle-wake"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return {
+          deferredCheckpointRequired: true,
+          nextWakeAt: "2026-04-27T00:01:00.000Z",
+          status: "scheduled" as const,
+        };
+      }
+
+      return {
+        idleShutdownCheckpointed: true,
+        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "scheduled",
+    });
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 1,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:01.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: "2026-04-27T00:01:00.000Z",
+    }]);
+
+    vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe("2026-04-27T00:01:00.000Z");
+    expect(destroyInstance).toHaveBeenCalledOnce();
+  });
+
   it("schedules a deferred checkpoint before a later non-idle workspace wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
