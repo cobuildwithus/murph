@@ -233,18 +233,13 @@ export class RunnerStateStore {
       ? Date.parse(meta.idle_shutdown_checkpoint_due_at)
       : Number.NaN;
 
-    if (Number.isFinite(nextWakeAtMs) && nextWakeAtMs <= nowMs) {
-      meta.next_wake_at = null;
-      this.writeMetaRowSync(meta);
-      return {
-        kind: "drain",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
     if (
       Number.isFinite(idleCheckpointDueAtMs)
       && idleCheckpointDueAtMs <= nowMs
+      && (
+        !Number.isFinite(nextWakeAtMs)
+        || idleCheckpointDueAtMs < nextWakeAtMs
+      )
     ) {
       if (!meta.idle_shutdown_checkpoint_workspace_version) {
         this.clearIdleShutdownCheckpointMetaSync(meta);
@@ -259,6 +254,15 @@ export class RunnerStateStore {
       return {
         idleWorkspaceVersion,
         kind: "idle_shutdown_checkpoint",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    if (Number.isFinite(nextWakeAtMs) && nextWakeAtMs <= nowMs) {
+      meta.next_wake_at = null;
+      this.writeMetaRowSync(meta);
+      return {
+        kind: "drain",
         record: this.readStateFromMetaSync(meta),
       };
     }

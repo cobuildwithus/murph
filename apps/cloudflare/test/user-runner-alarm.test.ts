@@ -2758,7 +2758,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       next_wake_at: "2026-04-27T00:01:00.000Z",
     }]);
 
-    vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:01:05.000Z"));
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -2779,10 +2779,9 @@ describe("HostedUserRunner runtime crypto context", () => {
       deferred_checkpoint_required: 0,
       idle_shutdown_checkpoint_due_at: null,
       idle_shutdown_checkpoint_workspace_version: null,
-      next_wake_at: "2026-04-27T00:01:00.000Z",
+      next_wake_at: "2026-04-27T00:01:05.000Z",
     }]);
 
-    vi.setSystemTime(new Date("2026-04-27T00:01:00.000Z"));
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(3);
