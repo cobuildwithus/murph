@@ -96,6 +96,10 @@ export function sanitizeObjectKey(value: unknown, fallback = "field"): string {
   return sanitizeSegment(value, fallback).replace(/-/g, "_");
 }
 
+const MAX_SANITIZED_FILE_NAME_LENGTH = 180;
+const MAX_SANITIZED_FILE_EXTENSION_LENGTH = 32;
+const SANITIZED_FILE_NAME_HASH_LENGTH = 12;
+
 export function sanitizeSegment(value: unknown, fallback = "item"): string {
   const candidate = String(value ?? "")
     .trim()
@@ -109,8 +113,26 @@ export function sanitizeSegment(value: unknown, fallback = "item"): string {
 export function sanitizeFileName(fileName: unknown, fallback = "artifact"): string {
   const parsed = path.posix.parse(path.posix.basename(String(fileName ?? "")));
   const stem = sanitizeSegment(parsed.name, fallback);
-  const ext = parsed.ext.toLowerCase().replace(/[^.a-z0-9]+/g, "");
-  return `${stem}${ext}`;
+  const ext = sanitizeFileNameExtension(parsed.ext);
+  const candidate = `${stem}${ext}`;
+
+  if (candidate.length <= MAX_SANITIZED_FILE_NAME_LENGTH) {
+    return candidate;
+  }
+
+  const suffix = `-${sha256Hex(candidate).slice(0, SANITIZED_FILE_NAME_HASH_LENGTH)}`;
+  const stemLimit = Math.max(1, MAX_SANITIZED_FILE_NAME_LENGTH - ext.length - suffix.length);
+  const boundedStem = stem.slice(0, stemLimit).replace(/-+$/g, "") || stem.slice(0, 1) || "artifact";
+
+  return `${boundedStem}${suffix}${ext}`;
+}
+
+function sanitizeFileNameExtension(value: string): string {
+  const ext = value.toLowerCase().replace(/[^.a-z0-9]+/g, "");
+  if (!/^\.[a-z0-9]+$/u.test(ext)) {
+    return "";
+  }
+  return ext.length <= MAX_SANITIZED_FILE_EXTENSION_LENGTH ? ext : "";
 }
 
 export function normalizeRelativePath(relativePath: string): string {
@@ -176,6 +198,10 @@ export function buildSnippet(...sources: Array<string | null | undefined>): stri
 
 export async function ensureParentDirectory(filePath: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 export async function sha256File(filePath: string): Promise<string> {

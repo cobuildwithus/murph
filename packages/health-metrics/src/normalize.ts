@@ -90,7 +90,10 @@ export function normalizeUnit(value: string | null): string | null {
     u_l: "U/L",
     "u/l": "U/L",
   };
-  return aliases[lower] ?? normalized;
+  const alias = Object.prototype.hasOwnProperty.call(aliases, lower)
+    ? aliases[lower]
+    : undefined;
+  return alias ?? normalized;
 }
 
 export function unitsEquivalent(left: string | null, right: string | null): boolean {

@@ -133,13 +133,13 @@ function normalizeWearableRawIngestJsonPayload(value: unknown): WearableRawInges
     return value.map(normalizeWearableRawIngestJsonPayload);
   }
   if (isPlainJsonObject(value)) {
-    const normalized: { [key: string]: WearableRawIngestJsonValue } = {};
+    const normalized: Array<[string, WearableRawIngestJsonValue]> = [];
     for (const [key, entry] of Object.entries(value)) {
       if (entry !== undefined) {
-        normalized[key] = normalizeWearableRawIngestJsonPayload(entry);
+        normalized.push([key, normalizeWearableRawIngestJsonPayload(entry)]);
       }
     }
-    return normalized;
+    return Object.fromEntries(normalized) as { [key: string]: WearableRawIngestJsonValue };
   }
 
   throw new TypeError("Wearable raw ingest payload must be JSON-serializable.");
