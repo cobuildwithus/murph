@@ -122,11 +122,11 @@ export class HostedDeviceSyncControlPlane {
     return this.connections.disconnectConnection(userId, connectionId);
   }
 
-  async pairAgent(label: string | null): Promise<{
+  async pairAgent(user: AuthenticatedHostedUser, label: string | null): Promise<{
     agent: { id: string; label: string | null; createdAt: string; expiresAt: string };
     token: string;
   }> {
-    return this.agentSessions.createAgentSession(await this.requireAuthenticatedUser(), label);
+    return this.agentSessions.createAgentSession(user, label);
   }
 
   async requireAgentSession() {
