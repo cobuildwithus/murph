@@ -513,6 +513,10 @@ export class HostedUserRunner {
     }
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
     const nowMs = Date.now();
+    const resetRetryFailureCount = runningRecord.retryFailureCount >= this.env.maxEventAttempts;
+    const retryFailureCount = resetRetryFailureCount
+      ? 0
+      : runningRecord.retryFailureCount;
     const preferredWakeAt = alreadyRunning
       ? resolvePendingNudgeDrainContinuationWakeAt({
           nowMs,
@@ -522,10 +526,11 @@ export class HostedUserRunner {
       : new Date(nowMs + resolveHostedRunnerFailureRetryDelayMs({
           defaultRetryDelayMs: this.env.retryDelayMs,
           reason: "nudge",
-          retryFailureCount: runningRecord.retryFailureCount,
+          retryFailureCount,
         })).toISOString();
     const record = await this.markPendingNudgeAndApplyAlarm({
       preferredWakeAt,
+      resetRetryFailureCount,
     });
     const preemptedActiveInvocation = false;
     let immediateDriveStarted = false;
@@ -551,6 +556,7 @@ export class HostedUserRunner {
         pendingNudge: record.pendingNudge,
         preemptedPersistedActiveInvocation: false,
         preemptedActiveInvocation,
+        retryFailureCountReset: resetRetryFailureCount,
       },
       message: "Hosted runner nudge accepted.",
       phase: "scheduled",
@@ -1022,9 +1028,11 @@ export class HostedUserRunner {
 
   private async markPendingNudgeAndApplyAlarm(input: {
     preferredWakeAt?: string | null;
+    resetRetryFailureCount?: boolean;
   } = {}): Promise<RunnerStateRecord> {
     const record = await this.stateStore.markPendingInvocationNudge({
       preferredWakeAt: input.preferredWakeAt,
+      resetRetryFailureCount: input.resetRetryFailureCount,
     });
     if (record.nextWakeAt) {
       await this.state.storage.setAlarm(new Date(record.nextWakeAt));
