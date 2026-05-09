@@ -763,7 +763,10 @@ function buildBiomarkerResult(
   return {
     baseline,
     biomarkerKey,
-    completeness: classifyMetricCompleteness(baseline.daysWithData, intervention.daysWithData),
+    completeness: classifyMetricCompleteness(
+      baseline.daysWithData,
+      intervention.daysWithData,
+    ),
     deltaAbs,
     deltaPct,
     expectedEffect,
@@ -794,7 +797,12 @@ function buildAnchoredBiomarkerResult(input: {
   label: string;
   sourceMetric: BrowserVaultExperimentMetricSource;
 }): BrowserVaultExperimentBiomarkerResult | null {
-  if (!hasMeasurementPlanForBiomarker(input.context.entity.attributes, input.biomarkerKey)) {
+  if (
+    !hasCompletePointMeasurementPlanForBiomarker(
+      input.context.entity.attributes,
+      input.biomarkerKey,
+    )
+  ) {
     return null;
   }
 
@@ -882,7 +890,11 @@ function buildAnchoredBiomarkerResult(input: {
   return {
     baseline,
     biomarkerKey: input.biomarkerKey,
-    completeness: classifyMetricCompleteness(baseline.daysWithData, intervention.daysWithData),
+    completeness: classifyMetricCompleteness(
+      baseline.daysWithData,
+      intervention.daysWithData,
+      { pointMeasurement: true },
+    ),
     deltaAbs,
     deltaPct,
     expectedEffect: input.expectedEffect,
@@ -1489,15 +1501,10 @@ function hasCompleteBrowserPrimaryPointMeasurementWindow(
   );
   return Boolean(
     primaryBiomarkerKey &&
-      readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "baseline")
-        .length > 0 &&
-      (readMeasurementAnchors(context.entity.attributes, primaryBiomarkerKey, "followup")
-        .length > 0 ||
-        readPlannedMeasurementWindow(
-          context.entity.attributes,
-          primaryBiomarkerKey,
-          "followup",
-        ).totalDays > 0),
+      hasCompletePointMeasurementPlanForBiomarker(
+        context.entity.attributes,
+        primaryBiomarkerKey,
+      ),
   );
 }
 
@@ -1555,12 +1562,14 @@ function collectBiomarkerKeys(attributes: JsonRecord): string[] {
   return uniqueStrings(keys);
 }
 
-function hasMeasurementPlanForBiomarker(attributes: JsonRecord, biomarkerKey: string): boolean {
+function hasCompletePointMeasurementPlanForBiomarker(
+  attributes: JsonRecord,
+  biomarkerKey: string,
+): boolean {
   return (
-    readMeasurementAnchors(attributes, biomarkerKey, "baseline").length > 0 ||
-    readMeasurementAnchors(attributes, biomarkerKey, "followup").length > 0 ||
-    readPlannedMeasurementWindow(attributes, biomarkerKey, "baseline").totalDays > 0 ||
-    readPlannedMeasurementWindow(attributes, biomarkerKey, "followup").totalDays > 0
+    readMeasurementAnchors(attributes, biomarkerKey, "baseline").length > 0 &&
+    (readMeasurementAnchors(attributes, biomarkerKey, "followup").length > 0 ||
+      readPlannedMeasurementWindow(attributes, biomarkerKey, "followup").totalDays > 0)
   );
 }
 
@@ -1842,7 +1851,12 @@ function buildBiomarkerStatusReason(
 function classifyMetricCompleteness(
   baselineDays: number,
   interventionDays: number,
+  options: { pointMeasurement?: boolean } = {},
 ): BrowserVaultExperimentBiomarkerResult["completeness"] {
+  if (options.pointMeasurement && baselineDays >= 1 && interventionDays >= 1) {
+    return "good";
+  }
+
   if (baselineDays >= 3 && interventionDays >= 3) {
     return "good";
   }
@@ -1903,7 +1917,12 @@ function classifyCoverageStatus(
     interventionDays >= 1;
 
   if (totalDays === 0) {
-    return hasCompleteWindows && primary !== null ? "no_data" : "insufficient";
+    return (
+      hasCompleteWindows ||
+      hasCompleteBrowserPrimaryPointMeasurementWindow(context)
+    ) && primary !== null
+      ? "no_data"
+      : "insufficient";
   }
 
   if (

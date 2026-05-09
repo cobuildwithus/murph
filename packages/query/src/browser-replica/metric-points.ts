@@ -28,15 +28,15 @@ export function toBrowserVaultMetricRows(input: {
   to?: string;
 }): BrowserVaultMetricRow[] {
   const metricKeys = [...new Set(input.points.map((point) => point.metricKey))].sort();
-  return metricKeys.flatMap((metricKey) =>
+  return dedupeEquivalentMetricRows(metricKeys.flatMap((metricKey) =>
     selectMetricSeries({
-      duplicatePolicy: "selection-policy",
+      duplicatePolicy: "keep-all",
       from: input.from,
       metricKey,
       points: input.points,
       to: input.to,
     }).rows.flatMap(toBrowserVaultMetricRow)
-  );
+  ));
 }
 
 export function createBrowserVaultMetricSelectionRows(input: {
@@ -93,6 +93,34 @@ function toBrowserVaultMetricRow(point: MetricSeriesPoint): BrowserVaultMetricRo
     value,
     valueLabel: point.valueLabel ?? null,
   }];
+}
+
+function dedupeEquivalentMetricRows(
+  rows: readonly BrowserVaultMetricRow[],
+): BrowserVaultMetricRow[] {
+  const byEquivalentValue = new Map<string, BrowserVaultMetricRow>();
+
+  for (const row of rows) {
+    const key = [
+      row.metricKey,
+      row.date,
+      row.unit,
+      String(row.value),
+      [...row.recordIds].sort().join(","),
+    ].join("\u0000");
+    const existing = byEquivalentValue.get(key);
+    if (!existing) {
+      byEquivalentValue.set(key, row);
+      continue;
+    }
+
+    byEquivalentValue.set(key, {
+      ...existing,
+      pointIds: [...new Set([...existing.pointIds, ...row.pointIds])].sort(),
+    });
+  }
+
+  return [...byEquivalentValue.values()];
 }
 
 export function browserMetricRowToSeriesPoint(row: BrowserVaultMetricRow): MetricSeriesPoint {

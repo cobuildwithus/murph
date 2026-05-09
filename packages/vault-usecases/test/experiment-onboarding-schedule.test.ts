@@ -156,6 +156,8 @@ test("applyExperimentOnboardingRecord clears run baseline windows with zero base
     vault: "test-vault",
     lookup: "psyllium-ldl",
     baselineDays: 0,
+    baselineStart: "2026-05-01",
+    baselineEnd: "2026-05-07",
   });
 
   const updateInput = updateExperiment.mock.calls[0]?.[0];
