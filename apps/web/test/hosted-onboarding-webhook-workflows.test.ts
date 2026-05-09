@@ -12,7 +12,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
-  readHostedMailboxItemById: vi.fn(),
+  readHostedMailboxItemCheckpointById: vi.fn(),
   readHostedWorkspace: vi.fn(),
   start: vi.fn(),
 }));
@@ -28,7 +28,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
 
   return {
     ...actual,
-    readHostedMailboxItemById: mocks.readHostedMailboxItemById,
+    readHostedMailboxItemCheckpointById: mocks.readHostedMailboxItemCheckpointById,
   };
 });
 
@@ -60,7 +60,9 @@ describe("hosted onboarding webhook workflows", () => {
     mocks.start.mockResolvedValue({
       runId: "run_123",
     });
-    mocks.readHostedMailboxItemById.mockResolvedValue(buildHostedMailboxItem());
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(
+      buildHostedMailboxItemCheckpoint(),
+    );
     mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
       hostedMailboxConversationImportedSeq: "1",
       hostedMailboxSystemImportedSeq: "0",
@@ -112,7 +114,7 @@ describe("hosted onboarding webhook workflows", () => {
       source: "telegram",
     })).resolves.toBeUndefined();
 
-    expect(mocks.readHostedMailboxItemById).toHaveBeenCalledWith({
+    expect(mocks.readHostedMailboxItemCheckpointById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
@@ -136,7 +138,7 @@ describe("hosted onboarding webhook workflows", () => {
       timeoutMs: 5_000,
       userId: "member_123",
     });
-    expect(mocks.readHostedMailboxItemById).toHaveBeenCalledWith({
+    expect(mocks.readHostedMailboxItemCheckpointById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(2);
@@ -185,7 +187,7 @@ describe("hosted onboarding webhook workflows", () => {
   });
 
   it("marks missing mailbox pointers fatal inside Workflow", async () => {
-    mocks.readHostedMailboxItemById.mockResolvedValue(null);
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(null);
 
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_missing",
@@ -245,8 +247,7 @@ describe("hosted onboarding webhook workflows", () => {
   });
 
   it("uses the mailbox item's lane when checking checkpoint progress", async () => {
-    mocks.readHostedMailboxItemById.mockResolvedValue(buildHostedMailboxItem({
-      kind: "device-sync.wake",
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(buildHostedMailboxItemCheckpoint({
       lane: "system",
       laneSeq: "2",
     }));
@@ -263,8 +264,7 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
-    mocks.readHostedMailboxItemById.mockResolvedValue(buildHostedMailboxItem({
-      kind: "device-sync.wake",
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(buildHostedMailboxItemCheckpoint({
       lane: "system",
       laneSeq: "2",
     }));
@@ -280,30 +280,14 @@ describe("hosted onboarding webhook workflows", () => {
   });
 });
 
-function buildHostedMailboxItem(input: {
-  kind?:
-    | "assistant.notification.requested"
-    | "conversation.message"
-    | "device-sync.wake"
-    | "member.activated"
-    | "member.channels.updated";
+function buildHostedMailboxItemCheckpoint(input: {
   lane?: "conversation" | "system";
   laneSeq?: string;
 } = {}) {
   return {
-    createdAt: "2026-05-03T00:00:00.000Z",
-    dedupeKey: "evt_123",
-    expiresAt: null,
     id: "mailbox_123",
-    kind: input.kind ?? "conversation.message",
     lane: input.lane ?? "conversation",
     laneSeq: input.laneSeq ?? "1",
-    occurredAt: "2026-05-03T00:00:00.000Z",
-    payloadBytes: 256,
-    payloadInlineCiphertext: null,
-    payloadRef: "payload_ref_123",
-    payloadSchema: "murph.hosted-mailbox-item.v1",
-    updatedAt: "2026-05-03T00:00:00.000Z",
     userId: "member_123",
   };
 }

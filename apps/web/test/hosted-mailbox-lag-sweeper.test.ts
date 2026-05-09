@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   groupBy: vi.fn(),
   hostedWorkspaceFindMany: vi.fn(),
   getPrisma: vi.fn(),
+  mailboxFindFirst: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
 }));
 
@@ -28,11 +29,15 @@ describe("hosted mailbox lag sweeper", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({
       hostedMailboxItem: {
+        findFirst: mocks.mailboxFindFirst,
         groupBy: mocks.groupBy,
       },
       hostedWorkspace: {
         findMany: mocks.hostedWorkspaceFindMany,
       },
+    });
+    mocks.mailboxFindFirst.mockResolvedValue({
+      updatedAt: new Date("2026-05-02T00:01:00.000Z"),
     });
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
@@ -197,13 +202,149 @@ describe("hosted mailbox lag sweeper", () => {
     );
     expect(result.skippedLaggedUsers).toBe(2);
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted mailbox lag sweeper skipped lagged users after nudge limit or fresh mailbox grace.",
-      {
+      "Hosted mailbox lag sweeper skipped lagged users.",
+      expect.objectContaining({
         eligibleLaggedUsers: 3,
+        freshGraceUsers: 0,
+        limitSkippedUsers: 2,
         nudgeLimit: 1,
         skippedLaggedUsers: 2,
-      },
+      }),
     );
+  });
+
+  it("uses the oldest uncheckpointed item instead of the latest mailbox row", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
+        lane: "conversation",
+        maxSeq: 4n,
+        updatedAt: new Date("2026-05-02T00:19:00.000Z"),
+        userId: "member_steady_inbound",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
+        redactedStatusJson: {
+          hostedMailboxConversationImportedSeq: "1",
+        },
+        userId: "member_steady_inbound",
+      }),
+    ]);
+    mocks.mailboxFindFirst.mockResolvedValue({
+      updatedAt: new Date("2026-05-02T00:01:00.000Z"),
+    });
+
+    const result = await lagSweeper.runHostedMailboxLagSweeper({
+      logger: buildLogger(),
+      now: new Date("2026-05-02T00:25:00.000Z"),
+      nudgeLimit: 5,
+    });
+
+    expect(mocks.mailboxFindFirst).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "asc",
+      },
+      select: {
+        updatedAt: true,
+      },
+      where: {
+        lane: "conversation",
+        laneSeq: {
+          gt: 1n,
+        },
+        userId: "member_steady_inbound",
+      },
+    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(result.skippedLaggedUsers).toBe(0);
+  });
+
+  it("keeps lag nudges on a bounded retry cadence after the first wide window", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
+        lane: "conversation",
+        maxSeq: 4n,
+        updatedAt: new Date("2026-05-02T00:35:00.000Z"),
+        userId: "member_stuck_lag",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
+        redactedStatusJson: {
+          hostedMailboxConversationImportedSeq: "1",
+        },
+        userId: "member_stuck_lag",
+      }),
+    ]);
+    mocks.mailboxFindFirst.mockResolvedValue({
+      updatedAt: new Date("2026-05-02T00:00:00.000Z"),
+    });
+    const logger = buildLogger();
+
+    const skipped = await lagSweeper.runHostedMailboxLagSweeper({
+      logger,
+      now: new Date("2026-05-02T00:35:00.000Z"),
+      nudgeLimit: 5,
+    });
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(skipped.skippedLaggedUsers).toBe(1);
+
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockClear();
+    logger.warn.mockClear();
+
+    const eligible = await lagSweeper.runHostedMailboxLagSweeper({
+      logger,
+      now: new Date("2026-05-02T00:50:00.000Z"),
+      nudgeLimit: 5,
+    });
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(eligible.skippedLaggedUsers).toBe(0);
+  });
+
+  it("does not let fresh activity on one lane suppress stale lag on another lane", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
+        lane: "conversation",
+        maxSeq: 5n,
+        updatedAt: new Date("2026-05-02T00:24:00.000Z"),
+        userId: "member_mixed_lanes",
+      }),
+      buildHighWater({
+        lane: "system",
+        maxSeq: 2n,
+        updatedAt: new Date("2026-05-02T00:01:00.000Z"),
+        userId: "member_mixed_lanes",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
+        redactedStatusJson: {
+          hostedMailboxConversationImportedSeq: "4",
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        userId: "member_mixed_lanes",
+      }),
+    ]);
+    mocks.mailboxFindFirst.mockImplementation(async (query) => ({
+      updatedAt: query.where.lane === "system"
+        ? new Date("2026-05-02T00:01:00.000Z")
+        : new Date("2026-05-02T00:24:00.000Z"),
+    }));
+
+    const result = await lagSweeper.runHostedMailboxLagSweeper({
+      logger: buildLogger(),
+      now: new Date("2026-05-02T00:25:00.000Z"),
+      nudgeLimit: 5,
+    });
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      laggedUsers: 1,
+      nudgeAttempted: 1,
+      skippedLaggedUsers: 0,
+    });
   });
 
   it("lets fresh mailbox lag reach the normal checkpoint path before nudging", async () => {
@@ -224,8 +365,10 @@ describe("hosted mailbox lag sweeper", () => {
       }),
     ]);
 
+    const logger = buildLogger();
+
     const result = await lagSweeper.runHostedMailboxLagSweeper({
-      logger: buildLogger(),
+      logger,
       now: new Date("2026-05-02T00:05:00.000Z"),
       nudgeLimit: 5,
     });
@@ -240,6 +383,16 @@ describe("hosted mailbox lag sweeper", () => {
       nudgeNotAccepted: 0,
       skippedLaggedUsers: 1,
     });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Hosted mailbox lag sweeper skipped lagged users.",
+      expect.objectContaining({
+        eligibleLaggedUsers: 0,
+        freshGraceUsers: 1,
+        limitSkippedUsers: 0,
+        nudgeLimit: 5,
+        skippedLaggedUsers: 1,
+      }),
+    );
   });
 
   it("logs a warning when a lag nudge is not accepted", async () => {

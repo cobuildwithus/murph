@@ -4,8 +4,8 @@ import {
 } from "workflow";
 
 import {
-  readHostedMailboxItemById,
-  type HostedMailboxItemRecord,
+  readHostedMailboxItemCheckpointById,
+  type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
   isHostedMailboxLaneCheckpointed,
@@ -29,7 +29,7 @@ export async function nudgeHostedWebhookMailboxItemStep(
 ): Promise<void> {
   "use step";
 
-  const mailboxItem = await readHostedMailboxItemById({
+  const mailboxItem = await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
   });
 
@@ -67,7 +67,7 @@ export async function waitHostedWebhookMailboxItemCheckpointStep(
 ): Promise<void> {
   "use step";
 
-  const mailboxItem = await readHostedMailboxItemById({
+  const mailboxItem = await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
   });
 
@@ -100,7 +100,7 @@ function resolveHostedNudgeWorkflowContext(
 }
 
 async function isHostedWebhookMailboxItemCheckpointed(
-  mailboxItem: HostedMailboxItemRecord,
+  mailboxItem: HostedMailboxItemCheckpointRecord,
 ): Promise<boolean> {
   const workspace = await readHostedWorkspace({
     userId: mailboxItem.userId,

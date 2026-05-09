@@ -50,7 +50,6 @@ export function readHostedMailboxImportedSeqForLane(
   const candidates = [
     `hostedMailbox${capitalizedLane}ImportedSeq`,
     `${lane}ImportedSeq`,
-    `${lane}SeqEnd`,
     `imported${capitalizedLane}Seq`,
     `mailbox${capitalizedLane}ImportedSeq`,
   ];
