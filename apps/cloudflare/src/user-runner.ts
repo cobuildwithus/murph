@@ -124,13 +124,6 @@ export interface HostedRunnerStuckInvocationTestResult {
   ok: true;
 }
 
-class HostedRunnerInvocationLeaseExpiredError extends Error {
-  constructor() {
-    super("Hosted runner invocation lease expired.");
-    this.name = "HostedRunnerInvocationLeaseExpiredError";
-  }
-}
-
 class HostedRunnerUserDataDeletionRunnerStillActiveError extends Error {
   constructor() {
     super("Hosted runner container cleanup failed before user data deletion.");
@@ -150,9 +143,6 @@ export class HostedUserRunner {
     reason: HostedWorkspaceInvocationReason;
     userId: string;
   } | null = null;
-  private activeWorkspaceInvocationAbortController: AbortController | null = null;
-  private activeWorkspaceInvocationAttemptId: string | null = null;
-  private activeWorkspaceInvocationReason: HostedWorkspaceInvocationReason | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -673,25 +663,7 @@ export class HostedUserRunner {
 
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
-      let runningRecord = await this.stateStore.readState();
-      if (runningRecord.inFlight && runningRecord.workspaceInvocation) {
-        const recovery = await this.clearExpiredActiveInvocationForRecovery();
-        runningRecord = recovery.record;
-        if (recovery.cleared) {
-          this.abortActiveInvocationAfterExpiredLease({
-            attemptId: recovery.attemptId,
-            userId: runningRecord.userId,
-          });
-          return this.withInvocationLock(async () =>
-            this.runUntilIdleOrBudgetInternal({
-              ...input,
-              // The expired invocation already consumed the pending nudge/work bit.
-              // Recovery must force one replacement drain instead of observing idle.
-              dueWake: true,
-            })
-          );
-        }
-      }
+      const runningRecord = await this.stateStore.readState();
       const record = await this.syncInvocationRecoveryAlarm(runningRecord, {
         minimumDelayMs: ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
       });
@@ -1139,28 +1111,6 @@ export class HostedUserRunner {
     return record;
   }
 
-  private abortActiveInvocationAfterExpiredLease(input: {
-    attemptId: string | null;
-    userId: string;
-  }): void {
-    const abortController = this.activeWorkspaceInvocationAbortController;
-    if (abortController && !abortController.signal.aborted) {
-      abortController.abort(new HostedRunnerInvocationLeaseExpiredError());
-    }
-    this.invocationLock = null;
-    this.pendingRunnerDriveAfterInvocation = null;
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        workspaceAttemptId: input.attemptId,
-      },
-      level: "warn",
-      message: "Hosted runner dropped stale active invocation lock after lease expiry.",
-      phase: "wake.running",
-      userId: input.userId,
-    });
-  }
-
   private async clearExpiredActiveInvocationForRecovery(): Promise<{
     attemptId: string | null;
     cleared: boolean;
@@ -1323,26 +1273,14 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
-    const abortController = new AbortController();
-    this.activeWorkspaceInvocationAbortController = abortController;
-    this.activeWorkspaceInvocationAttemptId = input.lease.attemptId;
-    this.activeWorkspaceInvocationReason = input.reason;
-    try {
-      return await invokeHostedExecutionContainerRunner({
-        job,
-        runnerContainerName,
-        runnerContainerNamespace: this.runnerContainerNamespace,
-        signal: abortController.signal,
-        timeoutMs: this.env.runnerTimeoutMs,
-        userId: input.userId,
-      });
-    } finally {
-      if (this.activeWorkspaceInvocationAbortController === abortController) {
-        this.activeWorkspaceInvocationAbortController = null;
-        this.activeWorkspaceInvocationAttemptId = null;
-        this.activeWorkspaceInvocationReason = null;
-      }
-    }
+    return await invokeHostedExecutionContainerRunner({
+      job,
+      runnerContainerName,
+      runnerContainerNamespace: this.runnerContainerNamespace,
+      signal: AbortSignal.timeout(this.env.runnerTimeoutMs),
+      timeoutMs: this.env.runnerTimeoutMs,
+      userId: input.userId,
+    });
   }
 
   private async scheduleNextWorkspaceAlarm(input: {
@@ -2058,19 +1996,6 @@ export class HostedUserRunner {
       reason: input.reason,
     })
       .then(() => undefined, async (error) => {
-        if (error instanceof HostedRunnerInvocationLeaseExpiredError) {
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            details: {
-              reason: input.reason,
-            },
-            message: "Hosted runner stale invocation handoff completed without scheduling an extra retry.",
-            phase: "scheduled",
-            userId: input.userId,
-          });
-          return;
-        }
-
         const record = await this.tryReadStateForRetryScheduling();
         const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
           defaultRetryDelayMs: this.env.retryDelayMs,
