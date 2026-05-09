@@ -30,6 +30,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       last_error_at TEXT,
       last_error_code TEXT,
       last_invocation_at TEXT,
+      deferred_checkpoint_required INTEGER NOT NULL DEFAULT 0,
       idle_shutdown_checkpoint_due_at TEXT,
       idle_shutdown_checkpoint_workspace_version TEXT,
       next_wake_at TEXT,
@@ -65,6 +66,12 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   ensureRunnerStateTableColumn(
     sql,
     "runner_meta",
+    "deferred_checkpoint_required",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
     "idle_shutdown_checkpoint_due_at",
     "TEXT",
   );
@@ -91,6 +98,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "last_error_at",
       "last_error_code",
       "last_invocation_at",
+      "deferred_checkpoint_required",
       "idle_shutdown_checkpoint_due_at",
       "idle_shutdown_checkpoint_workspace_version",
       "next_wake_at",

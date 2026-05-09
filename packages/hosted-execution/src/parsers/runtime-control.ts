@@ -894,6 +894,14 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
             "Hosted workspace invocation request budget",
           ),
         }),
+    ...(record.checkpointNextWakeAt === undefined
+      ? {}
+      : {
+          checkpointNextWakeAt: readNullableString(
+            record.checkpointNextWakeAt,
+            "Hosted workspace invocation request checkpointNextWakeAt",
+          ),
+        }),
     leaseGeneration: requireNonNegativeBigIntString(
       record.leaseGeneration,
       "Hosted workspace invocation request leaseGeneration",
@@ -909,6 +917,12 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
 
 export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWorkspaceInvocationResult {
   const record = requireObject(value, "Hosted workspace invocation result");
+  const deferredCheckpointRequired = record.deferredCheckpointRequired === undefined
+    ? undefined
+    : requireBoolean(
+        record.deferredCheckpointRequired,
+        "Hosted workspace invocation result deferredCheckpointRequired",
+      );
   const idleShutdownCheckpointed = record.idleShutdownCheckpointed === undefined
     ? undefined
     : requireBoolean(
@@ -929,6 +943,7 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
     );
   }
   return {
+    ...(deferredCheckpointRequired === undefined ? {} : { deferredCheckpointRequired }),
     ...(idleShutdownCheckpointed === undefined ? {} : { idleShutdownCheckpointed }),
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
     ...(record.redactedStatus === undefined

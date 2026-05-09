@@ -296,7 +296,9 @@ export class RunnerStateStore {
     if (input.consumePendingNudge !== false) {
       meta.pending_nudge = 0;
     }
-    this.clearIdleShutdownCheckpointMetaSync(meta);
+    if (input.reason !== "idle_shutdown_checkpoint") {
+      this.clearIdleShutdownCheckpointMetaSync(meta);
+    }
     this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
 
@@ -496,6 +498,22 @@ export class RunnerStateStore {
   async clearIdleShutdownCheckpoint(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     this.clearIdleShutdownCheckpointMetaSync(meta);
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async markDeferredCheckpointRequired(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    meta.deferred_checkpoint_required = 1;
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async clearDeferredCheckpointRequired(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    meta.deferred_checkpoint_required = 0;
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -766,6 +784,7 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at,
+        deferred_checkpoint_required,
         idle_shutdown_checkpoint_due_at,
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
@@ -798,12 +817,13 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at,
+        deferred_checkpoint_required,
         idle_shutdown_checkpoint_due_at,
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
@@ -817,6 +837,7 @@ export class RunnerStateStore {
       meta.last_error_at,
       meta.last_error_code,
       meta.last_invocation_at,
+      meta.deferred_checkpoint_required,
       meta.idle_shutdown_checkpoint_due_at,
       meta.idle_shutdown_checkpoint_workspace_version,
       meta.next_wake_at,

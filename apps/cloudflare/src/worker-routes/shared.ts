@@ -70,7 +70,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   startStuckInvocationForTest?(input: { userId: string }): Promise<HostedRunnerStuckInvocationTestResult>;
-  runnerStatus(): Promise<HostedRunnerStatusResponse>;
+  runnerStatus(input?: { logLimit?: number }): Promise<HostedRunnerStatusResponse>;
 }
 
 export interface WorkerEnvironmentSource

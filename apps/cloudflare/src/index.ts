@@ -350,8 +350,8 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.deleteHostedUserData(userId);
   }
 
-  async runnerStatus(): Promise<HostedRunnerStatusResponse> {
-    return this.runner.runnerStatus();
+  async runnerStatus(input?: { logLimit?: number }): Promise<HostedRunnerStatusResponse> {
+    return this.runner.runnerStatus(input);
   }
 
   async nudgeHostedRunner(input?: HostedRunnerNudgeRequest): Promise<HostedRunnerNudgeResult> {
@@ -603,7 +603,17 @@ async function handleStatusRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(await stub.runnerStatus());
+  return json(await stub.runnerStatus(readHostedStatusRouteOptions(context.url)));
+}
+
+function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefined {
+  const rawLogLimit = url.searchParams.get("logLimit");
+  if (!rawLogLimit) {
+    return undefined;
+  }
+
+  const logLimit = Number.parseInt(rawLogLimit, 10);
+  return Number.isSafeInteger(logLimit) && logLimit > 0 ? { logLimit } : undefined;
 }
 
 async function handleDeployContainerSmokeRoute(

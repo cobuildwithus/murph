@@ -214,6 +214,7 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(result, {
+        deferredCheckpointRequired: true,
         nextWakeAt: null,
         redactedStatus: {
           hostedMailboxBlockedCount: 0,
@@ -333,6 +334,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_idle_shutdown_future_wake",
+            checkpointNextWakeAt: "2026-04-20T08:10:00.000Z",
             leaseGeneration: "9",
             reason: "idle_shutdown_checkpoint",
             userId: TEST_USER_ID,
@@ -3427,6 +3429,7 @@ describe("hosted workspace runtime entrypoint", () => {
         console.info("hosted pre-import local profile", stageSummary);
       }
       assert.deepEqual(result, {
+        deferredCheckpointRequired: true,
         nextWakeAt: null,
         redactedStatus: {
           hostedMailboxBlockedCount: 0,
@@ -3646,6 +3649,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const mailboxRetryWakeAt = result.nextWakeAt;
       assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
       assert.deepEqual(result, {
+        deferredCheckpointRequired: true,
         nextWakeAt: mailboxRetryWakeAt,
         redactedStatus: {
           hostedMailboxBlockedCount: 1,
@@ -3902,6 +3906,7 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
       assert.deepEqual(result, {
+        deferredCheckpointRequired: true,
         nextWakeAt: null,
         redactedStatus: {
           hostedAssistantNextWakeAt: null,

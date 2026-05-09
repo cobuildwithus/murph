@@ -290,6 +290,7 @@ function createRunnerStateRecord(
 ): RunnerStateRecord {
   return {
     bundleRef: null,
+    deferredCheckpointRequired: false,
     idleShutdownCheckpointDueAt: null,
     idleShutdownCheckpointWorkspaceVersion: null,
     inFlight: false,

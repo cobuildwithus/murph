@@ -27,6 +27,7 @@ export interface RunnerMetaRow {
   last_error_at: string | null;
   last_error_code: string | null;
   last_invocation_at: string | null;
+  deferred_checkpoint_required: number;
   idle_shutdown_checkpoint_due_at: string | null;
   idle_shutdown_checkpoint_workspace_version: string | null;
   next_wake_at: string | null;
@@ -52,6 +53,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     last_error_at: null,
     last_error_code: null,
     last_invocation_at: null,
+    deferred_checkpoint_required: 0,
     idle_shutdown_checkpoint_due_at: null,
     idle_shutdown_checkpoint_workspace_version: null,
     next_wake_at: null,
@@ -77,6 +79,7 @@ export function projectRunnerStateRecord(input: {
       lastErrorAt: input.meta.last_error_at,
       lastErrorCode: input.meta.last_error_code,
       lastInvocationAt: input.meta.last_invocation_at,
+      deferredCheckpointRequired: input.meta.deferred_checkpoint_required === 1,
       idleShutdownCheckpointDueAt: input.meta.idle_shutdown_checkpoint_due_at,
       idleShutdownCheckpointWorkspaceVersion:
         input.meta.idle_shutdown_checkpoint_workspace_version,

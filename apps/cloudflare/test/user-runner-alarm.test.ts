@@ -2378,6 +2378,266 @@ describe("HostedUserRunner runtime crypto context", () => {
       }]);
   });
 
+  it("runs an idle-shutdown checkpoint after deferred mailbox progress on a base-only workspace", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "444",
+        hostedMailboxFetchedCount: 0,
+        hostedMailboxImportedCount: 0,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      },
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      snapshotRef: createBundleRef("base-only-deferred-mailbox"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return {
+          deferredCheckpointRequired: true,
+          nextWakeAt: null,
+          redactedStatus: {
+            hostedMailboxBlockedCount: 0,
+            hostedMailboxConversationImportedSeq: "445",
+            hostedMailboxFetchedCount: 1,
+            hostedMailboxImportedCount: 1,
+            hostedMailboxRetryableBlockedCount: 0,
+            hostedMailboxSystemImportedSeq: "0",
+          },
+          status: "idle" as const,
+        };
+      }
+
+      return {
+        idleShutdownCheckpointed: true,
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("manual");
+    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: null,
+    }]);
+
+    vi.setSystemTime(new Date("2026-04-27T00:05:00.000Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBeNull();
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                next_wake_at,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      next_wake_at: null,
+      pending_nudge: 0,
+    }]);
+  });
+
+  it("carries non-idle deferred progress into the next idle-shutdown checkpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createBundleRef("base-only-sticky-deferred"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return {
+          deferredCheckpointRequired: true,
+          nextWakeAt: "2026-04-27T00:01:00.000Z",
+          status: "budget_exhausted" as const,
+        };
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+
+      return {
+        idleShutdownCheckpointed: true,
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "budget_exhausted",
+    });
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 1,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      next_wake_at: "2026-04-27T00:01:00.000Z",
+    }]);
+
+    vi.setSystemTime(new Date("2026-04-27T00:01:00.000Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(alarms).toContain("2026-04-27T00:06:00.000Z");
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 1,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:06:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+    }]);
+
+    vi.setSystemTime(new Date("2026-04-27T00:06:00.000Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke.mock.calls[2]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+    }]);
+  });
+
+  it("schedules a deferred checkpoint before a later non-idle workspace wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createBundleRef("base-only-non-idle-later-wake"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return {
+          deferredCheckpointRequired: true,
+          nextWakeAt: "2026-04-27T00:10:00.000Z",
+          status: "scheduled" as const,
+        };
+      }
+
+      return {
+        idleShutdownCheckpointed: true,
+        nextWakeAt: "2026-04-27T00:10:00.000Z",
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "scheduled",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 1,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: "2026-04-27T00:10:00.000Z",
+    }]);
+
+    vi.setSystemTime(new Date("2026-04-27T00:05:00.000Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe("2026-04-27T00:10:00.000Z");
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      next_wake_at: "2026-04-27T00:10:00.000Z",
+    }]);
+  });
+
   it("keeps an existing workspace wake instead of scheduling an idle-shutdown checkpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2386,7 +2646,12 @@ describe("HostedUserRunner runtime crypto context", () => {
       snapshotRef: createLayeredSnapshotRef("idle-existing-wake"),
       version: "4",
     });
-    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace);
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+        nextWakeAt: "2026-04-27T00:01:30.000Z",
+        status: "idle",
+      })),
+    });
     await runner.bindUser("member_123");
 
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({

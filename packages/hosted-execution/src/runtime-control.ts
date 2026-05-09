@@ -820,6 +820,7 @@ export interface HostedWorkspaceInvocationBudget {
 export interface HostedWorkspaceInvocationRequest {
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
+  checkpointNextWakeAt?: string | null;
   leaseGeneration: string;
   reason: HostedWorkspaceInvocationReason;
   userId: string;
@@ -827,6 +828,7 @@ export interface HostedWorkspaceInvocationRequest {
 }
 
 export interface HostedWorkspaceInvocationResult {
+  deferredCheckpointRequired?: boolean;
   idleShutdownCheckpointed?: boolean;
   nextWakeAt?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;

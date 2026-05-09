@@ -434,14 +434,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     hotRestoreCacheVaultRoot = restored.vaultRoot;
     assertRuntimeLiveness();
     if (isIdleShutdownCheckpoint) {
+      const checkpointNextWakeAt = Object.hasOwn(input.request, "checkpointNextWakeAt")
+        ? input.request.checkpointNextWakeAt ?? null
+        : workspaceRead.workspace?.nextWakeAt ?? null;
       const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
         createSnapshot: createLivenessGuardedCheckpointSnapshot,
         metadata: {
           attemptId: input.request.attemptId,
           expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
           leaseGeneration: input.request.leaseGeneration,
-          nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
-          nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
+          nextWakeAt: checkpointNextWakeAt,
+          nextWakeReason: workspaceRead.workspace?.nextWakeAt === checkpointNextWakeAt
+            ? workspaceRead.workspace?.nextWakeReason ?? null
+            : null,
         },
       });
       const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
@@ -614,8 +619,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ? result.assistantPhaseResult.redactedStatus ?? {}
         : {}),
     };
+    const deferredCheckpointRequired = foregroundRunRequiresDeferredCheckpoint(result);
 
     return {
+      ...(deferredCheckpointRequired ? { deferredCheckpointRequired: true } : {}),
       ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
       redactedStatus,
       status: resolveHostedWorkspaceInvocationStatus({
@@ -1015,6 +1022,18 @@ function resolveHostedWorkspaceInvocationStatus(input: {
   }
 
   return "idle";
+}
+
+function foregroundRunRequiresDeferredCheckpoint(
+  result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>,
+): boolean {
+  return (
+    (
+      result.initialMailboxImport.checkpointDeferred
+      && result.initialMailboxImport.stateChanged
+    )
+    || result.assistantPhaseResult?.progressed === true
+  );
 }
 
 function resolveHostedWorkspaceRunNextWakeAt(input: {
