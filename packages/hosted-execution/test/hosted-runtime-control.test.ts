@@ -194,6 +194,7 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
+      checkpointNextWakeAt: null,
       leaseGeneration: "7",
       reason: "nudge",
       userId: "member_123",
@@ -204,8 +205,24 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
+      checkpointNextWakeAt: null,
       leaseGeneration: "7",
       reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(parseHostedWorkspaceInvocationRequest({
+      attemptId: "attempt_2",
+      checkpointNextWakeAt: "2026-04-27T00:10:00.000Z",
+      leaseGeneration: "8",
+      reason: "idle_shutdown_checkpoint",
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).toEqual({
+      attemptId: "attempt_2",
+      checkpointNextWakeAt: "2026-04-27T00:10:00.000Z",
+      leaseGeneration: "8",
+      reason: "idle_shutdown_checkpoint",
       userId: "member_123",
       workspaceVersion: "4",
     });
@@ -235,6 +252,7 @@ describe("hosted runtime control contracts", () => {
       })).toThrow(`Hosted workspace invocation request.${field} is no longer supported.`);
     }
     expect(parseHostedWorkspaceInvocationResult({
+      deferredCheckpointRequired: true,
       idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
@@ -242,6 +260,7 @@ describe("hosted runtime control contracts", () => {
       },
       status: "idle",
     })).toEqual({
+      deferredCheckpointRequired: true,
       idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
@@ -255,6 +274,13 @@ describe("hosted runtime control contracts", () => {
       status: "scheduled",
     });
     expect(parseHostedWorkspaceInvocationResult({
+      deferredCheckpointRequired: false,
+      status: "idle",
+    })).toEqual({
+      deferredCheckpointRequired: false,
+      status: "idle",
+    });
+    expect(parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       status: "idle",
@@ -263,6 +289,10 @@ describe("hosted runtime control contracts", () => {
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       status: "idle",
     });
+    expect(() => parseHostedWorkspaceInvocationResult({
+      deferredCheckpointRequired: "true",
+      status: "idle",
+    })).toThrow("Hosted workspace invocation result deferredCheckpointRequired must be a boolean.");
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       status: "scheduled",

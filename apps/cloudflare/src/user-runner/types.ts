@@ -42,6 +42,7 @@ export interface RunnerStateRecord {
   lastErrorAt: string | null;
   lastErrorCode: string | null;
   lastInvocationAt: string | null;
+  deferredCheckpointRequired: boolean;
   idleShutdownCheckpointDueAt: string | null;
   idleShutdownCheckpointWorkspaceVersion: string | null;
   leaseGeneration: number;

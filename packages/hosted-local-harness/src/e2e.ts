@@ -16,6 +16,7 @@ export type HostedLocalE2eScenarioName =
   | "codex-gateway-prefix"
   | "container-continuity"
   | "device-connect"
+  | "idle-checkpoint-deferred-progress"
   | "mailbox-platform-env"
   | "linq-first-contact"
   | "linq-delivery"
@@ -63,6 +64,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
     name: "device-connect",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
+    name: "idle-checkpoint-deferred-progress",
   },
   {
     file: "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
