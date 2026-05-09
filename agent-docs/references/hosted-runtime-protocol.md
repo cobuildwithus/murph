@@ -241,6 +241,11 @@ supported by the hosted mailbox-backed active-turn input refresh: at provider
 request boundaries and at the final commit barrier, the runtime refreshes
 mailbox rows, stages any new input, checkpoints accepted input state, and
 continues the same logical assistant turn before outbox intent creation.
+Hosted Linq reply sends are idempotent when an outbox idempotency key is
+present. The Linq HTTP layer may retry those POST sends on transient transport,
+408, or 5xx failures, and the hosted outbox must keep such failures retryable
+instead of terminal. Non-idempotent POST sends still fail closed unless the
+provider confirms a safe retry contract.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after mailbox import checkpointing

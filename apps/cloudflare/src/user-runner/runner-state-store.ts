@@ -233,12 +233,19 @@ export class RunnerStateStore {
       ? Date.parse(meta.idle_shutdown_checkpoint_due_at)
       : Number.NaN;
 
+    const idleCheckpointDue =
+      Number.isFinite(idleCheckpointDueAtMs) && idleCheckpointDueAtMs <= nowMs;
+    const deferredIdleCheckpointShouldDrainFirst =
+      meta.deferred_checkpoint_required === 1
+      && meta.pending_nudge !== 1
+      && meta.in_flight !== 1;
+
     if (
-      Number.isFinite(idleCheckpointDueAtMs)
-      && idleCheckpointDueAtMs <= nowMs
+      idleCheckpointDue
       && (
         !Number.isFinite(nextWakeAtMs)
         || idleCheckpointDueAtMs < nextWakeAtMs
+        || deferredIdleCheckpointShouldDrainFirst
       )
     ) {
       if (!meta.idle_shutdown_checkpoint_workspace_version) {
