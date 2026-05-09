@@ -20,7 +20,7 @@ Done:
 - Committed and pushed the pre-existing worktree checkpoint, then started an immediate Cloudflare deploy.
 - Confirmed production mailbox high-water had advanced while the checkpointed imported sequence stayed behind for one active hosted user.
 - Identified the root cause: budget-exhausted mailbox import with deferred progress scheduled a fast retry before an idle-shutdown checkpoint, so cold containers could reread the same mailbox prefix.
-- Patched Cloudflare runner alarm scheduling to drain the deferred idle-shutdown checkpoint before the budget retry wake, and added a targeted runner alarm regression test.
+- Patched Cloudflare runner alarm scheduling to drain the deferred idle-shutdown checkpoint before short non-idle retry/receipt wakes, and added a targeted runner alarm regression test.
 
 Now:
 - Run focused verification, commit/push the fix, deploy immediately, and watch the lagged hosted mailbox recover.

@@ -216,10 +216,11 @@ unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
 watermarks, and the runtime/checkpoint result carries the next fast mailbox
 retry wake so Cloudflare can promptly reinvoke the workspace.
-When retryable import is caused by the per-invocation mailbox item budget after
-staging progress, Cloudflare must first schedule the deferred idle-shutdown
-checkpoint ahead of the retry wake; otherwise a cold container can lose the
-staged watermark and loop over the same mailbox prefix.
+When a non-idle retry or receipt wake would preempt the normal idle-shutdown
+window after deferred foreground progress, Cloudflare must first schedule the
+deferred idle-shutdown checkpoint ahead of that wake; otherwise a cold container
+can lose the staged watermark or terminal reply evidence and loop over the same
+mailbox prefix.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence

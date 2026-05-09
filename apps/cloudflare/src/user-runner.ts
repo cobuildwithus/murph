@@ -1812,7 +1812,7 @@ export class HostedUserRunner {
     ) {
       const idleSchedule = await this.scheduleIdleShutdownCheckpointIfCurrent({
         deferredCheckpointRequired: record.deferredCheckpointRequired,
-        drainBeforeNextWake: input.resultStatus === "budget_exhausted",
+        drainBeforeNextWake: input.resultStatus !== "idle",
         nextWakeAt: input.fallbackNextWakeAt,
         userId: input.userId,
         workspaceVersion: input.workspaceVersion,
@@ -2012,17 +2012,22 @@ export class HostedUserRunner {
       };
     }
 
-    const dueAt = new Date(Date.now() + (input.drainBeforeNextWake
-      ? DEFERRED_CHECKPOINT_DRAIN_DELAY_MS
-      : resolveIdleShutdownCheckpointDelayMs({
-          idleTtlMs: this.env.runnerIdleTtlMs,
-          safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
-        }))).toISOString();
-    const workspaceWakePreemptsIdleCheckpoint =
-      !input.drainBeforeNextWake
-      && input.nextWakeAt
-        ? Date.parse(input.nextWakeAt) <= Date.parse(dueAt)
+    const idleCheckpointDelayMs = resolveIdleShutdownCheckpointDelayMs({
+      idleTtlMs: this.env.runnerIdleTtlMs,
+      safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
+    });
+    const idleCheckpointDueAt = new Date(Date.now() + idleCheckpointDelayMs).toISOString();
+    const workspaceWakePreemptsIdleWindow =
+      input.nextWakeAt
+        ? Date.parse(input.nextWakeAt) <= Date.parse(idleCheckpointDueAt)
         : false;
+    const shouldDrainBeforeNextWake =
+      input.drainBeforeNextWake === true && workspaceWakePreemptsIdleWindow;
+    const dueAt = shouldDrainBeforeNextWake
+      ? new Date(Date.now() + DEFERRED_CHECKPOINT_DRAIN_DELAY_MS).toISOString()
+      : idleCheckpointDueAt;
+    const workspaceWakePreemptsIdleCheckpoint =
+      workspaceWakePreemptsIdleWindow && !shouldDrainBeforeNextWake;
     const nullWorkspaceCheckpointAllowed =
       input.deferredCheckpointRequired
       && input.workspaceVersion === "0";
