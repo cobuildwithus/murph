@@ -14,6 +14,12 @@ const mocks = vi.hoisted(() => ({
       id: `mailbox_${input.envelope?.eventId ?? "unknown"}`,
     },
   })),
+  readHostedMailboxItemOwnerById: vi.fn(async (input: {
+    mailboxItemId: string;
+  }) => ({
+    id: input.mailboxItemId,
+    userId: "member_whatsapp_123",
+  })),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(async () => ({
     accepted: true,
     alarmScheduled: false,
@@ -37,6 +43,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   return {
     ...actual,
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+    readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
 
@@ -59,6 +66,12 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("WHATSAPP_APP_SECRET", "whatsapp-app-secret");
+    mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => ({
+      id: input.mailboxItemId,
+      userId: "member_whatsapp_123",
+    }));
   });
 
   it("verifies signed WhatsApp webhook payloads and reports no-op updates", async () => {

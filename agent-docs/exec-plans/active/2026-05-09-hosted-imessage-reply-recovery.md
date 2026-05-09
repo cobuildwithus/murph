@@ -67,15 +67,22 @@ Done:
 - Deployed the same-isolate lifecycle-stop fix; the live warm probe still missed the latency target and logs showed terminal container status without enough same-isolate lifecycle locality to wake the request reliably.
 - Extended the fix with a workspace-request status watcher so stopped or missing child shells abort the active invocation even when the lifecycle hook cannot see the in-memory request controller.
 - Added stopped-status and missing-container regressions for hanging workspace requests; full Cloudflare verification passed with 944 tests.
+- After deploying the status watcher, live iMessage probing still missed the latency target: a fresh inbound was read quickly but replied minutes later, with logs showing pending work preserved through idle-checkpoint/recovery paths.
+- Patched idle-checkpoint pending-work handoff so observed pending nudges queue the same follow-up drive used by normal invocation completion instead of relying only on a durable alarm.
+- Patched hosted webhook pointer workflows so a latest uncheckpointed mailbox pointer re-nudges during checkpoint waiting, preserving the exact mailbox item as active work until durable import progress catches up.
+- Patched hosted conversation mailbox import to self-heal the managed auto-reply channel before returning staged assistant input ids, so cold Linq/iMessage inputs cannot be staged before the scanner has channel admission state.
+- Completion audits found and the patch fixed three deploy blockers/tightening points: direct runner nudges now start before pointer-workflow bookkeeping, Linq auto-reply self-heal is narrowed away from consent-gated WhatsApp import, and initial mailbox import now runs inside the hosted process environment instead of ambient `HOME`.
+- Added regressions for direct nudge not waiting on workflow start, hosted-process env during initial mailbox import, Linq auto-reply self-heal before staging, WhatsApp non-self-heal, latest-lane workflow re-nudge lookup, and nudge-reason follow-up drives.
+- Focused verification passed for the runner alarm regression, hosted webhook workflow, hosted handoff, hosted conversation mailbox import, hosted workspace entrypoint, assistant-runtime typecheck/test, Cloudflare verify, hosted-web verify, and final diff-aware verification.
 
 Now:
-- Commit/push the status-watcher hardening, retry Pro in the open ChatGPT thread if the page becomes usable, then deploy Cloudflare immediately.
+- Commit/push the verified pending-work/admission recovery patch to main, then retry Pro review in the open ChatGPT thread.
 
 Next:
-- Recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
+- Deploy immediately, then recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: live post-deploy iMessage reply latency until the container-stop active-work fix is deployed and the runner drains a fresh inbound message.
+- UNCONFIRMED: live post-deploy iMessage reply latency until the pending-work/admission recovery patch is deployed and the runner drains fresh inbound messages.
 
 Working set (files/ids/commands):
 - `apps/cloudflare/src/**`

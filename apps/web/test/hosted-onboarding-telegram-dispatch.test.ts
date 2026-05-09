@@ -33,6 +33,12 @@ const mocks = vi.hoisted(() => {
       runId: "workflow-run-123",
     })),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
+    readHostedMailboxItemOwnerById: vi.fn(async (input: {
+      mailboxItemId: string;
+    }) => ({
+      id: input.mailboxItemId,
+      userId: "member_telegram_123",
+    })),
     runtimeEnv: {
       contactPrivacyKeyring: {
         currentVersion: "v1",
@@ -93,6 +99,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     ...actual,
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+    readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
 });
 
@@ -184,6 +191,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       inFlight: false,
       nextAlarmAtPresent: false,
     });
+    mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => ({
+      id: input.mailboxItemId,
+      userId: "member_telegram_123",
+    }));
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 
@@ -552,6 +565,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         pendingLinqParticipantContactLookupKey: true,
         pendingLinqParticipantContactObservedAt: true,
         pendingLinqRecipientPhoneEncrypted: true,
+        replyAliasLookupKey: true,
         telegramUserIdEncrypted: true,
         telegramUserLookupKey: true,
       },

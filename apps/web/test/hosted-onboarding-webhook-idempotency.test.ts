@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
+  readHostedMailboxItemOwnerById: vi.fn(),
   readHostedMemberHomeLinqRoute: vi.fn(),
   readHostedLinqDailyState: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+  readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -131,6 +133,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       item: {
         id: "mailbox_evt_123",
       },
+    });
+    mocks.readHostedMailboxItemOwnerById.mockResolvedValue({
+      id: "mailbox_evt_123",
+      userId: "member_123",
     });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({

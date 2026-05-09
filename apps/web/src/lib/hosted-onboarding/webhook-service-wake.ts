@@ -77,6 +77,12 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   }
   const mailboxItemId = input.mailboxItemId;
 
+  const directNudgePromise = tryNudgeHostedWebhookRunnerDirectForMailboxItem({
+    aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+    mailboxItemId,
+    source: input.source,
+    userId: input.userId,
+  });
   let workflow: Awaited<ReturnType<typeof startHostedWebhookNudgeWorkflow>>;
   try {
     workflow = await startHostedWebhookNudgeWorkflow({
@@ -85,12 +91,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     });
   } catch (error) {
     const errorName = deriveHostedOnboardingTimingErrorName(error);
-    const directNudge = await tryNudgeHostedWebhookRunnerDirectForMailboxItem({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      mailboxItemId,
-      source: input.source,
-      userId: input.userId,
-    });
+    const directNudge = await directNudgePromise;
     finishHostedOnboardingTiming(handoffTiming, "failed", {
       directNudgeAttempted: directNudge.attempted,
       directNudgeConfigured: directNudge.configured,
@@ -106,12 +107,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     };
   }
 
-  const directNudge = await tryNudgeHostedWebhookRunnerDirectForMailboxItem({
-    aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-    mailboxItemId,
-    source: input.source,
-    userId: input.userId,
-  });
+  const directNudge = await directNudgePromise;
   finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
     directNudgeAttempted: directNudge.attempted,
     directNudgeConfigured: directNudge.configured,

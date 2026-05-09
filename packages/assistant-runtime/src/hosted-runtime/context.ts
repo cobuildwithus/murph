@@ -120,6 +120,26 @@ export async function prepareHostedWakeContext(
     : null;
 }
 
+export async function prepareHostedAssistantAutoReplyForWake(
+  vaultRoot: string,
+  wake: HostedExecutionWake,
+  runtimeEnv: Readonly<Record<string, string>>,
+  resolvedConfig: {
+    channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
+    managedAutoReplyChannels?: readonly HostedAssistantRuntimeManagedAutoReplyChannel[];
+  },
+): Promise<void> {
+  await bootstrapHostedAssistantRuntimeState(
+    vaultRoot,
+    wake,
+    runtimeEnv,
+    resolvedConfig,
+    {
+      enableAssistantChannelReconciliation: false,
+    },
+  );
+}
+
 export async function bootstrapHostedMemberContext(
   vaultRoot: string,
   wake: HostedExecutionWake,

@@ -82,6 +82,23 @@ export async function waitHostedWebhookMailboxItemCheckpointStep(
 
   const checkpointed = await isHostedWebhookMailboxItemCheckpointed(mailboxItem);
   if (!checkpointed) {
+    if (await isHostedWebhookMailboxItemLatestInLane(mailboxItem)) {
+      const result = await nudgeHostedRunnerUserBestEffortResult({
+        context: resolveHostedNudgeWorkflowContext(input.source),
+        timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+        userId: mailboxItem.userId,
+      });
+
+      if (!result.accepted) {
+        throw new RetryableError(
+          "Hosted webhook runner nudge is temporarily unavailable.",
+          {
+            retryAfter: HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER,
+          },
+        );
+      }
+    }
+
     throw new RetryableError(
       "Hosted webhook mailbox item import is not checkpointed yet.",
       {

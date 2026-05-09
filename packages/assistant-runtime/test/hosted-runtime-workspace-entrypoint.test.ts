@@ -149,6 +149,7 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     const mailboxPort = createMailboxPort({ events, items });
     const imported: Array<{ id: string; route: string }> = [];
+    const ambientHome = process.env.HOME;
 
     try {
       const ensureHostedInboxSidecarReadyImpl =
@@ -191,6 +192,8 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           async importItem(item) {
+            assert.equal(process.env.VAULT, path.resolve(vaultRoot));
+            assert.notEqual(process.env.HOME, ambientHome);
             imported.push({
               id: item.item.id,
               route: item.route.action,
@@ -231,7 +234,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -307,7 +310,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -376,7 +379,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -478,8 +481,8 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceVaultRoot);
     }
   });
 
@@ -539,7 +542,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -615,19 +618,19 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-	      assert.deepEqual(result, {
+      assert.deepEqual(result, {
         nextWakeAt: "2026-04-27T00:00:45.000Z",
-	        status: "scheduled",
-	      });
-	      assert.equal(checkpointRequests.length, 0);
-	      assert.equal(touchCalls, 2);
-	      assert.deepEqual(events, [
-	        "heartbeat:1",
-	        "workspace.read",
-	        "heartbeat:2",
-	      ]);
+        status: "scheduled",
+      });
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(touchCalls, 2);
+      assert.deepEqual(events, [
+        "heartbeat:1",
+        "workspace.read",
+        "heartbeat:2",
+      ]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -745,7 +748,7 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       releaseSnapshot();
       await Promise.all(snapshotAttempts.map((attempt) => attempt.catch(() => undefined)));
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -848,7 +851,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(events.includes("heartbeat:pending"));
       assert.equal(events.includes("workspace.checkpoint.finish"), false);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -954,7 +957,7 @@ describe("hosted workspace runtime entrypoint", () => {
       releaseCheckpoint();
       await vi.waitFor(() => expect(events).toContain("workspace.checkpoint.finish"));
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1053,7 +1056,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await vi.waitFor(() => expect(events).toContain("workspace.checkpoint.reject"));
       assert.ok(events.includes("heartbeat:pending"));
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1165,7 +1168,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "utf8",
       ));
     } finally {
-      await rm(parentRoot, { force: true, recursive: true });
+      await removeTempRoot(parentRoot);
     }
   });
 
@@ -1223,7 +1226,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "Hosted mailbox import checkpoint returned an unexpected user.",
       );
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1281,7 +1284,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(events.slice(0, 2), ["heartbeat", "workspace.read"]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1332,7 +1335,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await expect(run).rejects.toBeInstanceOf(HostedWorkspaceRuntimeLivenessRejectedError);
       assert.deepEqual(events, ["heartbeat"]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1421,7 +1424,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(events.indexOf("import.start") < events.indexOf("heartbeat:2"));
       assert.ok(events.indexOf("heartbeat:2") < events.indexOf("import.abort"));
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1490,7 +1493,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1568,7 +1571,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1651,7 +1654,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       await assert.rejects(readdir(receiptRoot));
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1704,7 +1707,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "import",
       ]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1910,7 +1913,7 @@ describe("hosted workspace runtime entrypoint", () => {
           new Promise((resolve) => setTimeout(resolve, 10)),
         ]);
       }
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1979,7 +1982,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(checkpointRequests, []);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -2060,10 +2063,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       ]);
     } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -2157,7 +2157,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests, []);
       expect(createCheckpointSnapshot).not.toHaveBeenCalled();
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -2368,8 +2368,8 @@ describe("hosted workspace runtime entrypoint", () => {
         "sidecar.ready",
       ]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceVaultRoot);
     }
   });
 
@@ -2535,9 +2535,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests, []);
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
-      await rm(sourceCurrentVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceBaseVaultRoot);
+      await removeTempRoot(sourceCurrentVaultRoot);
     }
   });
 
@@ -2619,7 +2619,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch",
       ]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -2715,7 +2715,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch",
       ]);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -2804,7 +2804,7 @@ describe("hosted workspace runtime entrypoint", () => {
           "mailbox.fetch",
         ]);
       } finally {
-        await rm(vaultRoot, { force: true, recursive: true });
+        await removeTempRoot(vaultRoot);
       }
     }
   });
@@ -2993,9 +2993,9 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.deepEqual(checkpointRequests, []);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
-      await rm(sourceHotVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceBaseVaultRoot);
+      await removeTempRoot(sourceHotVaultRoot);
     }
   });
 
@@ -3153,9 +3153,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(artifactGetCalls, []);
       assert.equal(checkpointRequests.length, 0);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
-      await rm(sourceHotVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceBaseVaultRoot);
+      await removeTempRoot(sourceHotVaultRoot);
     }
   });
 
@@ -3270,9 +3270,9 @@ describe("hosted workspace runtime entrypoint", () => {
         "1",
       );
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
-      await rm(sourceHotVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceBaseVaultRoot);
+      await removeTempRoot(sourceHotVaultRoot);
     }
   });
 
@@ -3429,9 +3429,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(requireEventIndex(events, "workspace.read") < requireEventIndex(events, "mailbox.fetch"));
       assert.ok(requireEventIndex(events, "mailbox.fetch") < requireEventIndex(events, "assistant"));
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
-      await rm(sourceHotVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceBaseVaultRoot);
+      await removeTempRoot(sourceHotVaultRoot);
     }
   });
 
@@ -3574,8 +3574,8 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(artifactGetCalls, [bundleHash, eagerArtifactHash]);
       assert.equal(checkpointRequests.length, 0);
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceVaultRoot);
     }
   });
 
@@ -3835,8 +3835,8 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-      await rm(sourceVaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceVaultRoot);
     }
   });
 
@@ -3903,7 +3903,7 @@ describe("hosted workspace runtime entrypoint", () => {
         path.join(path.dirname(path.resolve(vaultRoot)), `${path.basename(vaultRoot)}-operator-home`),
       );
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -4056,7 +4056,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "budget_exhausted",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -4139,7 +4139,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "scheduled",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -4200,7 +4200,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, previousWakeAt);
       assert.equal(result.status, "scheduled");
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -4246,7 +4246,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "scheduled",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -4318,7 +4318,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "idle",
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -4706,6 +4706,15 @@ function createBundleRef(input: {
     size: input.size,
     updatedAt: TEST_NOW,
   };
+}
+
+async function removeTempRoot(root: string): Promise<void> {
+  await rm(root, {
+    force: true,
+    maxRetries: 3,
+    recursive: true,
+    retryDelay: 50,
+  });
 }
 
 function createDeferred<T>() {
