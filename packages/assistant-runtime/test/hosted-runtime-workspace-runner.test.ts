@@ -48,7 +48,6 @@ import {
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedMailboxImportCheckpointResult,
   type HostedRuntimeEffectsPort,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -77,15 +76,6 @@ import type {
   HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
-
-function requireMailboxSnapshotInput(
-  input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
-) {
-  if (!("state" in input) || !("previousState" in input)) {
-    throw new Error("Expected mailbox checkpoint snapshot input.");
-  }
-  return input;
-}
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_runner";
@@ -1311,7 +1301,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("creates checkpoint snapshot refs after mailbox import mutates local state", async () => {
+  test("defers mailbox import snapshots after foreground import mutates local state", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -1321,36 +1311,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     ];
     const { mailboxPort } = createMailboxPort({ items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const snapshotWatermarks: string[] = [];
+    const createSnapshot = vi.fn(async () => ({
+      snapshotRef: createBundleRef({
+        hash: "a".repeat(64),
+        key: "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json",
+        size: 512,
+      }),
+    }));
 
     try {
-      await runHostedWorkspaceUntilIdleOrBudget({
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-          async createSnapshot(snapshotInput) {
-            const sourceBundleHash = "a".repeat(64);
-            const state = await readHostedMailboxImportState({ vaultRoot });
-            snapshotWatermarks.push(state.watermarks.conversation);
-            assert.equal(requireMailboxSnapshotInput(snapshotInput).state.watermarks.conversation, "1");
-            assert.deepEqual(snapshotInput.redactedStatus, {
-              hostedMailboxBlockedCount: 0,
-              hostedMailboxConversationImportedSeq: "1",
-              hostedMailboxFetchedCount: 1,
-              hostedMailboxImportedCount: 1,
-              hostedMailboxRetryableBlockedCount: 0,
-              hostedMailboxSystemImportedSeq: "0",
-            });
-            return {
-              browserVaultReplicaRef: {
-                ...TEST_BROWSER_VAULT_REPLICA_REF,
-                sourceBundleHash,
-              },
-              snapshotRef: createBundleRef({
-                hash: sourceBundleHash,
-                key: "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json",
-                size: 512,
-              }),
-            };
-          },
+          createSnapshot,
           metadata: {
             attemptId: "attempt_synthetic_runner_snapshot",
             expectedWorkspaceVersion: "0",
@@ -1373,12 +1345,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         workspace: createWorkspaceState({ version: "0" }),
       });
 
-      assert.deepEqual(snapshotWatermarks, ["1"]);
-      assert.equal(checkpointRequests.length, 1);
-      const checkpointSnapshotRef = requireBundleRef(checkpointRequests[0]?.snapshotRef);
-      assert.equal(checkpointSnapshotRef.key, "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json");
-      assert.equal(checkpointRequests[0]?.browserVaultReplicaRef?.sourceBundleHash, "a".repeat(64));
-      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
+      assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "1");
+      assert.equal(result.deferredCheckpointRequired, true);
+      assert.equal(result.latestWorkspace?.version, "0");
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(createSnapshot.mock.calls.length, 0);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -2054,7 +2025,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("checkpoints mailbox post-checkpoint effects without an assistant phase", async () => {
+  test("runs mailbox post-checkpoint effects without foreground checkpointing when no assistant phase runs", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({
@@ -2104,17 +2075,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint",
       ]);
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.latestWorkspace?.version, "1");
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.reason, "import");
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "1",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "0",
-      });
+      assert.equal(result.deferredCheckpointRequired, true);
+      assert.equal(result.latestWorkspace, null);
+      assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -2214,10 +2177,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint:done",
       ]);
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.latestWorkspace?.version, "1");
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-      ]);
+      assert.equal(result.deferredCheckpointRequired, true);
+      assert.equal(result.latestWorkspace, null);
+      assert.deepEqual(checkpointRequests, []);
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
       assert.ok(effectLog);
@@ -2246,7 +2208,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("logs mailbox post-checkpoint effect failures without blocking checkpointing", async () => {
+  test("logs mailbox post-checkpoint effect failures without foreground checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({
       items: [
@@ -2298,10 +2260,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.latestWorkspace?.version, "1");
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "import",
-      ]);
+      assert.equal(result.deferredCheckpointRequired, true);
+      assert.equal(result.latestWorkspace, null);
+      assert.deepEqual(checkpointRequests, []);
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
       assert.ok(effectLog);
@@ -2693,10 +2654,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         workspace: createWorkspaceState({ version: "0" }),
       });
 
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "activation_bootstrap",
-      ]);
-      assert.equal(result.latestWorkspace?.version, "1");
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(result.latestWorkspace?.version, "0");
       assert.equal(result.latestWorkspace?.nextWakeAt, null);
       assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.assistantPhaseResult?.nextWakeAt, null);
@@ -2705,6 +2664,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           .filter((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred")
           .map((entry) => entry.redactedJson),
         [
+          {
+            checkpointPhase: "assistant",
+            checkpointReason: "activation_bootstrap",
+          },
           {
             checkpointPhase: "post_assistant",
             checkpointReason: "system_mailbox_receipt",
@@ -3646,27 +3609,4 @@ async function withTestTimeout<T>(promise: Promise<T>, timeoutMs = 250): Promise
       clearTimeout(timeout);
     }
   }
-}
-
-function requireBundleRef(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || !("hash" in value)) {
-    throw new TypeError("Expected a hosted execution bundle ref.");
-  }
-
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.hash !== "string"
-    || typeof record.key !== "string"
-    || typeof record.size !== "number"
-    || typeof record.updatedAt !== "string"
-  ) {
-    throw new TypeError("Hosted execution bundle ref is malformed.");
-  }
-
-  return {
-    hash: record.hash,
-    key: record.key,
-    size: record.size,
-    updatedAt: record.updatedAt,
-  };
 }

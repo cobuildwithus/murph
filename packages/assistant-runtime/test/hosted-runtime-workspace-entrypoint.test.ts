@@ -10,6 +10,10 @@ import {
   runCanonicalWrite,
 } from "@murphai/core";
 import {
+  readAssistantInputEvent,
+  upsertAssistantInputEvent,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
@@ -632,6 +636,11 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     let touchCalls = 0;
+    let releaseSnapshot: () => void = () => undefined;
+    const snapshotReleased = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const snapshotAttempts: Promise<void>[] = [];
     const runtimeLivenessPort: RuntimeLivenessPort = {
       async touch() {
         touchCalls += 1;
@@ -663,8 +672,13 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot() {
             events.push("snapshot.start");
-            await vi.waitFor(() => expect(touchCalls).toBeGreaterThanOrEqual(3));
-            events.push("snapshot.finish");
+            const snapshotAttempt = (async () => {
+              await vi.waitFor(() => expect(touchCalls).toBeGreaterThanOrEqual(3));
+              await snapshotReleased;
+              events.push("snapshot.finish");
+            })();
+            snapshotAttempts.push(snapshotAttempt);
+            await snapshotAttempt;
             return {
               snapshotRef: buildHostedExecutionLayeredSnapshotRef({
                 base: createBundleRef({
@@ -725,7 +739,12 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(events.includes("heartbeat:3"));
       assert.equal(events.includes("workspace.checkpoint"), false);
       assert.equal(events.includes("snapshot.finish"), false);
+      releaseSnapshot();
+      await Promise.all(snapshotAttempts.map((attempt) => attempt.catch(() => undefined)));
+      assert.equal(events.includes("workspace.checkpoint"), false);
     } finally {
+      releaseSnapshot();
+      await Promise.all(snapshotAttempts.map((attempt) => attempt.catch(() => undefined)));
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
@@ -1909,6 +1928,10 @@ describe("hosted workspace runtime entrypoint", () => {
       redactedStatus: null,
       snapshotRef: null,
     };
+    const activationBootstrapCheckpointRequest: HostedWorkspaceCheckpointRequest = {
+      ...checkpointRequest,
+      reason: "activation_bootstrap",
+    };
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -1938,6 +1961,14 @@ describe("hosted workspace runtime entrypoint", () => {
               () => input.runtime.platform.workspacePort!.checkpoint(checkpointRequest),
               /Foreground hosted runner must not checkpoint workspace/u,
             );
+            await assert.rejects(
+              () => input.platform.workspacePort!.checkpoint(activationBootstrapCheckpointRequest),
+              /Foreground hosted runner must not checkpoint workspace/u,
+            );
+            await assert.rejects(
+              () => input.runtime.platform.workspacePort!.checkpoint(activationBootstrapCheckpointRequest),
+              /Foreground hosted runner must not checkpoint workspace/u,
+            );
             return {};
           },
           vaultRoot,
@@ -1952,7 +1983,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("foreground member activation writes the bootstrap checkpoint before later turns", async () => {
+  test("foreground member activation defers bootstrap checkpointing to idle shutdown", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2012,28 +2043,22 @@ describe("hosted workspace runtime entrypoint", () => {
       });
 
       assert.equal(result.status, "idle");
-      assert.equal(result.deferredCheckpointRequired, undefined);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "activation_bootstrap",
-      ]);
-      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
-        hostedAssistantProgressed: true,
-        hostedMailboxBlockedCount: 0,
-        hostedMailboxConversationImportedSeq: "0",
-        hostedMailboxFetchedCount: 1,
-        hostedMailboxImportedCount: 1,
-        hostedMailboxRetryableBlockedCount: 0,
-        hostedMailboxSystemImportedSeq: "1",
-      });
-      expect(createCheckpointSnapshot).toHaveBeenCalledOnce();
-      expect(events).toContain("workspace.checkpoint");
-      expect(events).toContain("snapshot:activation_bootstrap");
+      assert.equal(result.deferredCheckpointRequired, true);
+      assert.deepEqual(checkpointRequests, []);
+      expect(createCheckpointSnapshot).not.toHaveBeenCalled();
+      expect(events).not.toContain("workspace.checkpoint");
+      expect(events).not.toContain("snapshot:activation_bootstrap");
       const assistantDeferredLogs = logRequests.flatMap((request) => request.entries)
         .filter((entry) =>
           entry.eventCode === "checkpoint.runtime_residue_deferred"
           && entry.redactedJson?.checkpointPhase === "assistant"
         );
-      assert.deepEqual(assistantDeferredLogs, []);
+      assert.deepEqual(assistantDeferredLogs.map((entry) => entry.redactedJson), [
+        {
+          checkpointPhase: "assistant",
+          checkpointReason: "activation_bootstrap",
+        },
+      ]);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -3244,6 +3269,165 @@ describe("hosted workspace runtime entrypoint", () => {
         secondFetch.lanes.find((lane) => lane.lane === "conversation")?.importedSeq,
         "1",
       );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(sourceBaseVaultRoot, { force: true, recursive: true });
+      await rm(sourceHotVaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("runs assistant phase from restored staged input when mailbox watermark is already current", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
+    const sourceHotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-hot-"));
+    const events: string[] = [];
+    const artifactGetCalls: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const importedSeqs: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceBaseVaultRoot });
+      await writeFile(path.join(sourceBaseVaultRoot, "base-note.md"), "base\n", "utf8");
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: sourceBaseVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const baseRef = createBundleRef({
+        hash: baseHash,
+        key: "users/bundles/member-synthetic/cold-restore-base.bundle.json",
+        size: baseBundle.byteLength,
+      });
+      artifactBytesByHash.set(baseHash, baseBundle);
+
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceHotVaultRoot });
+      const stagedInput = await upsertAssistantInputEvent({
+        vault: sourceHotVaultRoot,
+        event: {
+          content: {
+            text: "staged hosted Linq input",
+            userMessageContent: [
+              {
+                text: "staged hosted Linq input",
+                type: "text",
+              },
+            ],
+          },
+          conversation: {
+            accountId: "acct_staged_linq",
+            actorId: "actor_staged_linq",
+            actorIsSelf: false,
+            source: "linq",
+            threadId: "thread_staged_linq",
+            threadIsDirect: true,
+          },
+          occurredAt: TEST_NOW,
+          receivedAt: TEST_NOW,
+          replyTarget: {
+            channel: "linq",
+            messageId: "msg_staged_linq",
+            threadId: "thread_staged_linq",
+          },
+          sourceRef: {
+            dedupeKey: "dedupe_staged_linq",
+            eventId: "evt_staged_linq",
+            itemId: "mailbox_item_cold_restore_001",
+            kind: "hosted-mailbox",
+            lane: "conversation",
+            laneSeq: "1",
+            payloadSchema: "payload.v1",
+            payloadSource: "inline",
+            source: "hosted-mailbox",
+            wakeSchema: "wake.v1",
+          },
+        },
+      });
+      const restoredState = createEmptyHostedMailboxImportState();
+      restoredState.watermarks.conversation = "1";
+      await writeMailboxImportStateFile(sourceHotVaultRoot, restoredState);
+      const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+        vaultRoot: sourceHotVaultRoot,
+      });
+      const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+      const hotRef = createBundleRef({
+        hash: hotHash,
+        key: "users/bundles/member-synthetic/cold-restore-hot.bundle.json",
+        size: hotSnapshot.bundle.byteLength,
+      });
+      artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+
+      const workspace = createWorkspaceState({
+        snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+          base: baseRef,
+          hot: hotRef,
+        }),
+        version: "9",
+      });
+      const platform = createPlatform({
+        artifactBytesByHash,
+        artifactGetCalls,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          fetchRequests,
+          items: [
+            createMailboxItem({
+              id: "mailbox_item_cold_restore_001",
+              laneSeq: "1",
+            }),
+          ],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace,
+        }),
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_cold_restore_staged_input",
+            workspaceVersion: workspace.version,
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Cold-restore foreground replay should not checkpoint.");
+          },
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            return { status: "imported" };
+          },
+          platform,
+          async runAssistantPhase() {
+            events.push("assistant");
+            const restoredInput = await readAssistantInputEvent({
+              inputId: stagedInput.inputId,
+              vault: vaultRoot,
+            });
+            assert.equal(restoredInput?.inputId, stagedInput.inputId);
+            assert.equal(restoredInput?.sourceRef.kind, "hosted-mailbox");
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(importedSeqs, []);
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(artifactGetCalls, [baseHash, hotHash]);
+      assert.equal(readConversationImportedSeq(fetchRequests[0]), "1");
+      assert.ok(requireEventIndex(events, "workspace.read") < requireEventIndex(events, "mailbox.fetch"));
+      assert.ok(requireEventIndex(events, "mailbox.fetch") < requireEventIndex(events, "assistant"));
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
       await rm(sourceBaseVaultRoot, { force: true, recursive: true });

@@ -45,12 +45,15 @@ Done:
 - After the web deploy, confirmed idle-shutdown checkpoints now commit but the web-visible mailbox watermark still stayed stale because idle-shutdown checkpoint requests reused the previous workspace redacted status instead of the restored local mailbox state.
 - Patched idle-shutdown checkpoints to overlay restored local mailbox watermarks onto the checkpoint redacted status, and pinned the behavior with an entrypoint regression.
 - Repaired the stale Cloudflare Linq outbound test expectation for the current 15s foreground send timeout introduced earlier in this incident.
+- Checked dbhub after the user-reported cold-start/stale-reply symptom. The active high-volume hosted mailbox row is now caught up to its conversation high-water, but recent runtime logs show the previous stale-prefix replay pattern followed by a pass that considered multiple queued conversation inputs and replied to one older pending input.
+- Found a regression in the latest runner priority change: foreground nudges could preempt active or persisted deferred checkpoint invocations even when `deferred_checkpoint_required` was set, reopening the same durability hole that lets a cold container restore an older mailbox/import watermark.
+- Restored the deferred-checkpoint preemption guard and regression coverage so foreground nudges queue behind required checkpoint work instead of destroying it.
 
 Now:
-- Re-run focused assistant-runtime and Cloudflare verification, then commit/push the idle-checkpoint watermark publishing fix and redeploy Cloudflare.
+- Re-run focused Cloudflare verification and completion audits for the deferred-checkpoint preemption regression.
 
 Next:
-- Recheck the lagged hosted mailbox after Cloudflare deploy; then verify cold/warm iMessage reply scenarios after provider capacity is available.
+- Commit through the active-plan path, deploy Cloudflare, then recheck cold/warm iMessage reply scenarios after provider capacity is available.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: live post-deploy iMessage reply latency until the fixed Worker is deployed, the lagged runner drains, and the assistant provider stops returning capacity/quota failure.

@@ -11,7 +11,6 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   readHostedExecutionSnapshotBaseRef,
-  buildHostedExecutionWorkingSnapshotRef,
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
   parseHostedExecutionWake,
@@ -41,7 +40,6 @@ import {
   readHostedWorkspaceSkippedInlineFiles,
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
-  snapshotHostedPortableWorkspaceDelta,
   type HostedBundleArtifactRef,
   type HostedBundleArtifactRestoreInput,
   type HostedBundleArtifactSnapshotInput,
@@ -95,9 +93,7 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
   ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 >;
-type HostedWorkspaceFullCheckpointRequest =
-  HostedWorkspaceCheckpointRequest & { reason: "activation_bootstrap" | "idle_shutdown" };
-type HostedWorkspaceIdleShutdownCheckpointRequest =
+type HostedWorkspaceIdleCheckpointRequest =
   HostedWorkspaceCheckpointRequest & { reason: "idle_shutdown" };
 
 export type HostedWorkspaceMailboxPayloadDecodeInput = HostedMailboxPayloadDecodeInput;
@@ -262,87 +258,38 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
 }): Promise<{
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
-  const request = requireHostedWorkspaceBridgeFullCheckpointRequest(input.request);
+  const request = requireHostedWorkspaceBridgeIdleCheckpointRequest(input.request);
 
-  try {
-    const currentRefs = input.platform.workspacePort?.read
-      ? await readHostedWorkspaceCurrentCheckpointState(input)
-      : {
-          baseSnapshotRef: null,
-          baseManifest: null,
-          snapshotRef: null,
-        };
-    const preservedState = currentRefs.snapshotRef
-      ? await readHostedWorkspaceEffectivePreservedState({
-          platform: input.platform,
-          snapshotRef: currentRefs.snapshotRef,
-        })
-      : null;
-    if (
-      request.reason === "idle_shutdown"
-      && currentRefs.baseSnapshotRef
-      && currentRefs.baseManifest
-      && currentRefs.snapshotRef
-      && preservedState
-    ) {
-      return await createWorkingDeltaSnapshot({
+  const currentRefs = input.platform.workspacePort?.read
+    ? await readHostedWorkspaceCurrentCheckpointRefs(input)
+    : {
+        baseSnapshotRef: null,
+        snapshotRef: null,
+      };
+  const preservedState = currentRefs.snapshotRef
+    ? await readHostedWorkspaceEffectivePreservedState({
+        platform: input.platform,
+        snapshotRef: currentRefs.snapshotRef,
+      })
+    : null;
+  return currentRefs.baseSnapshotRef
+    ? await createFullCompactionSnapshot({
         ...input,
-        baseManifest: currentRefs.baseManifest,
-        baseSnapshotRef: currentRefs.baseSnapshotRef,
-        currentSnapshotRef: currentRefs.snapshotRef,
+        preservedState,
+        request,
+      })
+    : await createFullSeedSnapshot({
+        ...input,
         preservedState,
         request,
       });
-    }
-    return currentRefs.baseSnapshotRef
-      ? await createFullCompactionSnapshot({
-          ...input,
-          preservedState,
-          request,
-        })
-      : await createFullSeedSnapshot({
-          ...input,
-          preservedState,
-          request,
-        });
-  } catch (error) {
-    if (request.reason !== "idle_shutdown") {
-      throw error;
-    }
-    const idleShutdownRequest: HostedWorkspaceIdleShutdownCheckpointRequest = {
-      ...request,
-      reason: "idle_shutdown",
-    };
-    if (error instanceof HostedWorkspaceCommittedStateUnavailableError) {
-      return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
-        ...input,
-        error: new HostedWorkspaceIdleCompactionPreservedStateUnavailableError(),
-        request: idleShutdownRequest,
-      });
-    }
-    if (isHostedWorkspaceIdleShutdownCheckpointSkippableError(error)) {
-      return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
-        ...input,
-        error,
-        request: idleShutdownRequest,
-      });
-    }
-    throw error;
-  }
 }
 
-function requireHostedWorkspaceBridgeFullCheckpointRequest(
+function requireHostedWorkspaceBridgeIdleCheckpointRequest(
   request: HostedWorkspaceCheckpointRequest,
-): HostedWorkspaceFullCheckpointRequest {
-  if (request.reason !== "activation_bootstrap" && request.reason !== "idle_shutdown") {
-    throw new Error("Hosted workspace checkpoint snapshots are activation-bootstrap or idle-shutdown only.");
-  }
-
-  if (request.reason === "activation_bootstrap") {
-    return {
-      ...request,
-      reason: "activation_bootstrap",
-    };
+): HostedWorkspaceIdleCheckpointRequest {
+  if (request.reason !== "idle_shutdown") {
+    throw new Error("Hosted workspace snapshot construction is idle-shutdown only.");
   }
 
   return {
@@ -358,35 +305,12 @@ class HostedWorkspaceCommittedStateUnavailableError extends Error {
   }
 }
 
-class HostedWorkspaceIdleCompactionPreservedStateUnavailableError extends Error {
-  constructor() {
-    super("Hosted idle compaction skipped because current committed workspace state could not be read.");
-    this.name = "HostedWorkspaceIdleCompactionPreservedStateUnavailableError";
-  }
-}
-
-type HostedWorkspaceIdleShutdownCheckpointSkipError =
-  | HostedWorkspaceIdleCompactionPreservedStateUnavailableError
-  | HostedWorkspaceSnapshotContinuityIncompleteError;
-
-function isHostedWorkspaceIdleShutdownCheckpointSkippableError(
-  error: unknown,
-): error is HostedWorkspaceIdleShutdownCheckpointSkipError {
-  return (
-    error instanceof HostedWorkspaceSnapshotContinuityIncompleteError
-    || error instanceof HostedWorkspaceIdleCompactionPreservedStateUnavailableError
-  );
-}
-
 type HostedWorkspaceFullCheckpointCommitKind =
   | "full_compaction"
   | "full_seed";
-type HostedWorkspaceCheckpointCommitKind =
-  | HostedWorkspaceFullCheckpointCommitKind
-  | "working_delta"
-  | "working_unchanged";
-type HostedWorkspaceCheckpointSnapshotMode = "delta" | "full";
-type HostedWorkspaceCheckpointPolicy = "full" | "working_delta";
+type HostedWorkspaceCheckpointCommitKind = HostedWorkspaceFullCheckpointCommitKind;
+type HostedWorkspaceCheckpointSnapshotMode = "full";
+type HostedWorkspaceCheckpointPolicy = "full";
 const HOSTED_WORKSPACE_ARTIFACT_PUT_CONCURRENCY = 32;
 
 async function createFullSeedSnapshot(
@@ -416,17 +340,9 @@ interface HostedWorkspaceBridgeFullSnapshotInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   preservedState?: HostedWorkspaceEffectivePreservedState | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceFullCheckpointRequest;
+  request: HostedWorkspaceIdleCheckpointRequest;
   userId: string;
   vaultRoot: string;
-}
-
-interface HostedWorkspaceBridgeWorkingDeltaSnapshotInput
-  extends HostedWorkspaceBridgeFullSnapshotInput {
-  baseManifest: HostedPortableWorkspaceManifest;
-  baseSnapshotRef: HostedExecutionBundleRef;
-  currentSnapshotRef: NonNullable<HostedExecutionSnapshotRef>;
-  preservedState: HostedWorkspaceEffectivePreservedState;
 }
 
 async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput & {
@@ -545,141 +461,6 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
     snapshotMode: "full",
-    workspaceSnapshotSizeDiagnostics,
-  });
-
-  return {
-    snapshotRef,
-  };
-}
-
-async function createWorkingDeltaSnapshot(
-  input: HostedWorkspaceBridgeWorkingDeltaSnapshotInput,
-): Promise<{
-  snapshotRef: HostedExecutionSnapshotRef;
-}> {
-  const startedAt = Date.now();
-  let externalArtifactPutBytes = 0;
-  let externalArtifactPutCount = 0;
-  let bundlePutBytes = 0;
-  let bundlePutCount = 0;
-  let leaseCheckCount = 0;
-  let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
-  const pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[] = [];
-  let deltaSnapshot: Awaited<ReturnType<typeof snapshotHostedPortableWorkspaceDelta>> | null = null;
-  const skippedInlineFiles = await readHostedWorkspaceSkippedInlineFilesBestEffort({
-    vaultRoot: input.vaultRoot,
-  });
-  const preservedArtifacts = [
-    ...input.preservedState.preservedArtifacts,
-    ...createHostedWorkspaceBridgePreservedInlineArtifacts({
-      effectiveManifest: input.preservedState.manifest,
-      inlineFiles: input.preservedState.inlineFiles,
-      pendingArtifactPuts,
-      skippedInlineFiles,
-      vaultRoot: input.vaultRoot,
-    }),
-  ];
-  const snapshotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle({
-    readCurrentLease: async () => {
-      leaseCheckCount += 1;
-      return await input.readCurrentLease();
-    },
-    request: input.request,
-    snapshotWorkspace: async () => {
-      try {
-        deltaSnapshot = await snapshotHostedPortableWorkspaceDelta({
-          artifactRefProvider: input.preservedState.artifactRefProvider,
-          artifactSink: async (artifact) => {
-            pendingArtifactPuts.push(artifact);
-          },
-          baseManifest: input.baseManifest,
-          baseSnapshotHash: input.baseSnapshotRef.hash,
-          codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
-          materializedArtifactPaths: await readHostedMaterializedArtifactPaths({
-            vaultRoot: input.vaultRoot,
-          }),
-          operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-          preservedArtifacts,
-          vaultRoot: input.vaultRoot,
-          workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
-            workspaceSnapshotSizeDiagnostics = diagnostics;
-            await writeHostedCheckpointSnapshotSizeDiagnosticLog({
-              checkpointPolicy: "working_delta",
-              diagnostics,
-              platform: input.platform,
-              request: input.request,
-              snapshotMode: "delta",
-            });
-          },
-        });
-      } catch (error) {
-        await writeHostedCodexHomeSnapshotFailureLog({
-          error,
-          platform: input.platform,
-          request: input.request,
-          snapshotMode: "delta",
-        });
-        throw error;
-      }
-      await writeHostedCodexHomeSnapshotDiagnosticLog({
-        diagnostics: deltaSnapshot.codexHomeSnapshotDiagnostics,
-        platform: input.platform,
-        request: input.request,
-      });
-      workspaceSnapshotSizeDiagnostics = deltaSnapshot.workspaceSnapshotSizeDiagnostics;
-
-      return deltaSnapshot.kind === "changed"
-        ? deltaSnapshot.bundle
-        : new Uint8Array();
-    },
-    userId: input.userId,
-    writeBundle: async ({ bundle }) => {
-      if (!deltaSnapshot) {
-        throw new Error("Hosted workspace working delta snapshot was not collected.");
-      }
-      if (deltaSnapshot.kind === "unchanged") {
-        return input.currentSnapshotRef;
-      }
-
-      const hash = sha256HostedBundleHex(bundle);
-      bundlePutBytes = bundle.byteLength;
-      bundlePutCount = 1;
-      const artifactPutMetrics = await putHostedWorkspaceArtifacts({
-        artifactStore: input.platform.artifactStore,
-        artifacts: pendingArtifactPuts,
-      });
-      externalArtifactPutBytes = artifactPutMetrics.putBytes;
-      externalArtifactPutCount = artifactPutMetrics.putCount;
-      await input.platform.artifactStore.put({
-        bytes: bundle,
-        sha256: hash,
-      });
-
-      return buildHostedExecutionWorkingSnapshotRef({
-        base: input.baseSnapshotRef,
-        delta: {
-          hash,
-          key: `cloudflare-workspace-deltas/${hash}.bundle`,
-          size: bundle.byteLength,
-          updatedAt: new Date().toISOString(),
-        },
-      });
-    },
-  });
-
-  await writeHostedCheckpointSnapshotMetricLog({
-    bundlePutBytes,
-    bundlePutCount,
-    checkpointPolicy: "working_delta",
-    commitKind: bundlePutCount > 0 ? "working_delta" : "working_unchanged",
-    externalArtifactPutBytes,
-    externalArtifactPutCount,
-    leaseCheckCount,
-    platform: input.platform,
-    request: input.request,
-    snapshotElapsedMs: Date.now() - startedAt,
-    snapshotMode: "delta",
     workspaceSnapshotSizeDiagnostics,
   });
 
@@ -1146,119 +927,10 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
   };
 }
 
-async function readHostedWorkspaceCurrentCheckpointState(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-}): Promise<{
-  baseManifest: HostedPortableWorkspaceManifest | null;
-  baseSnapshotRef: HostedExecutionBundleRef | null;
-  snapshotRef: HostedExecutionSnapshotRef | null;
-}> {
-  const refs = await readHostedWorkspaceCurrentCheckpointRefs(input);
-  if (!refs.baseSnapshotRef) {
-    return {
-      ...refs,
-      baseManifest: null,
-    };
-  }
-
-  const baseBundle = await input.platform.artifactStore.get(refs.baseSnapshotRef.hash);
-  if (!baseBundle) {
-    throw new HostedWorkspaceCommittedStateUnavailableError();
-  }
-
-  return {
-    ...refs,
-    baseManifest: readHostedPortableWorkspaceManifestFromBundle(baseBundle)
-      ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle),
-  };
-}
-
-async function createHostedWorkspaceBridgeIdleShutdownCheckpointSkip(input: {
-  codexHomeSnapshotHashSecret: string | null;
-  error: HostedWorkspaceIdleShutdownCheckpointSkipError;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceIdleShutdownCheckpointRequest;
-  userId: string;
-  vaultRoot: string;
-}): Promise<{
-  snapshotRef: HostedExecutionSnapshotRef;
-}> {
-  const currentRefs = await readHostedWorkspaceCurrentCheckpointRefs(input);
-  if (!currentRefs.snapshotRef) {
-    throw input.error;
-  }
-
-  await writeHostedCheckpointIdleShutdownSkippedLog({
-    error: input.error,
-    platform: input.platform,
-    request: input.request,
-  });
-
-  return {
-    snapshotRef: currentRefs.snapshotRef,
-  };
-}
-
-async function writeHostedCheckpointIdleShutdownSkippedLog(params: {
-  error: HostedWorkspaceIdleShutdownCheckpointSkipError;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleShutdownCheckpointRequest;
-}): Promise<void> {
-  const continuityError = params.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError
-    ? params.error
-    : null;
-  console.warn("Hosted idle-shutdown checkpoint snapshot skipped.", {
-    ...(continuityError ? { continuityReason: continuityError.reason } : {}),
-    errorName: params.error.name,
-  });
-  if (!params.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointReason: params.request.reason,
-    errorMessage: redactHostedRuntimeDiagnosticText(params.error.message),
-    errorName: params.error.name,
-    skipReason: continuityError
-      ? "codex_continuity_incomplete"
-      : "preserved_state_unavailable",
-    ...(continuityError ? { continuityReason: continuityError.reason } : {}),
-  };
-  if (continuityError) {
-    appendHostedCodexHomeSnapshotDiagnostics(
-      redactedJson,
-      continuityError.codexHomeSnapshotDiagnostics,
-    );
-  }
-
-  try {
-    await params.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: params.request.attemptId,
-          component: "workspace",
-          eventCode: "checkpoint.idle_shutdown_snapshot_skipped",
-          leaseGeneration: params.request.leaseGeneration,
-          level: "warn",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: params.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (error) {
-    console.warn("Hosted idle-shutdown checkpoint skip log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
-  }
-}
-
 async function writeHostedCodexHomeSnapshotFailureLog(input: {
   error: unknown;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceFullCheckpointRequest;
+  request: HostedWorkspaceIdleCheckpointRequest;
   snapshotMode?: HostedWorkspaceCheckpointSnapshotMode;
 }): Promise<void> {
   if (!(input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError)) {
@@ -1283,6 +955,9 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
     errorName,
     snapshotMode,
   };
+  if (input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError) {
+    redactedJson.continuityReason = input.error.reason;
+  }
   appendHostedCodexHomeSnapshotDiagnostics(redactedJson, diagnostics);
 
   try {
@@ -1317,7 +992,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   externalArtifactPutCount: number;
   leaseCheckCount: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceFullCheckpointRequest;
+  request: HostedWorkspaceIdleCheckpointRequest;
   snapshotElapsedMs: number;
   snapshotMode: HostedWorkspaceCheckpointSnapshotMode;
   workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
@@ -1373,7 +1048,7 @@ async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
   checkpointPolicy: HostedWorkspaceCheckpointPolicy;
   diagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceFullCheckpointRequest;
+  request: HostedWorkspaceIdleCheckpointRequest;
   snapshotMode: HostedWorkspaceCheckpointSnapshotMode;
 }): Promise<void> {
   if (!input.platform.logPort) {
@@ -1463,7 +1138,7 @@ function appendHostedCodexHomeSnapshotDiagnostics(
 async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
   diagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceFullCheckpointRequest;
+  request: HostedWorkspaceIdleCheckpointRequest;
 }): Promise<void> {
   if (!input.diagnostics || !input.platform.logPort) {
     return;
