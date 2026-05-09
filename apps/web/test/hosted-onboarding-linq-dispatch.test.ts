@@ -563,6 +563,15 @@ https://join.example.test/join/code_first_text`);
         }),
         "workflow-enqueued",
         expect.objectContaining({
+          directNudgeDeferred: true,
+        }),
+      );
+      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step: "hosted-onboarding.webhook.linq.direct-runner-nudge",
+        }),
+        "accepted",
+        expect.objectContaining({
           directNudgeAttempted: true,
           directNudgeConfigured: true,
           directNudgeErrorCode: null,
@@ -1133,8 +1142,18 @@ https://join.example.test/join/code_first_text`);
       }),
       "workflow-enqueued",
       expect.objectContaining({
+        directNudgeDeferred: true,
+      }),
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.direct-runner-nudge",
+      }),
+      "accepted",
+      expect.objectContaining({
         directNudgeAttempted: true,
         directNudgeConfigured: true,
+        directNudgeErrorCode: null,
       }),
     );
   });

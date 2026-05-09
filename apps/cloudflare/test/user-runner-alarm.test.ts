@@ -4058,14 +4058,16 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await runner.alarm();
+    await flushDetachedRunnerDrive();
 
     expect(reentrantNudge).toMatchObject({
       accepted: true,
       alreadyRunning: true,
       immediateDriveStarted: false,
     });
-    expect(invoke).not.toHaveBeenCalled();
-    expect(alarms.at(-1)).toBe(FIXED_NOW);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -4076,57 +4078,59 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
+      idle_shutdown_checkpoint_due_at: expect.any(String),
+      idle_shutdown_checkpoint_workspace_version: "4",
       in_flight: 0,
-      pending_nudge: 1,
+      pending_nudge: 0,
     }]);
   });
 
-  it("does not schedule an idle-shutdown checkpoint when a nudge arrives during idle scheduling", async () => {
-	    vi.useFakeTimers();
-	    vi.setSystemTime(new Date(FIXED_NOW));
-	    const workspace = createWorkspaceState({
-	      snapshotRef: createLayeredSnapshotRef("idle-schedule-race"),
-	      version: "4",
-	    });
-	    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-	      onWorkspaceRead: ({ readCount }) => {
-	        if (readCount !== 2) {
-	          return;
-	        }
-	        sql.exec(
-	          `UPDATE runner_meta
-	           SET pending_nudge = 1,
-	               next_wake_at = ?
-	           WHERE user_id = ?`,
-	          "2026-04-27T00:00:45.000Z",
-	          "member_123",
-	        );
-	      },
-	    });
-	    await runner.bindUser("member_123");
+  it("continues a pending nudge when work arrives during idle scheduling", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-schedule-race"),
+      version: "4",
+    });
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      onWorkspaceRead: ({ readCount }) => {
+        if (readCount !== 2) {
+          return;
+        }
+        sql.exec(
+          `UPDATE runner_meta
+           SET pending_nudge = 1,
+               next_wake_at = ?
+           WHERE user_id = ?`,
+          "2026-04-27T00:00:45.000Z",
+          "member_123",
+        );
+      },
+    });
+    await runner.bindUser("member_123");
 
-	    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
-	      status: "idle",
-	    });
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+    await flushDetachedRunnerDrive();
 
-	    expect(invoke).toHaveBeenCalledOnce();
-	    expect(alarms.at(-1)).toBe("2026-04-27T00:00:45.000Z");
-	    expect(
-	      sql.exec(
-	        `SELECT idle_shutdown_checkpoint_due_at,
-	                idle_shutdown_checkpoint_workspace_version,
-	                pending_nudge
-	         FROM runner_meta WHERE user_id = ?`,
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: null,
-	      idle_shutdown_checkpoint_workspace_version: null,
-	      pending_nudge: 1,
-	    }]);
-	  });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: expect.any(String),
+      idle_shutdown_checkpoint_workspace_version: "4",
+      pending_nudge: 0,
+    }]);
+  });
 
 	  it("starts a fresh nudge drive when idle alarm application reenters during setAlarm", async () => {
 	    vi.useFakeTimers();

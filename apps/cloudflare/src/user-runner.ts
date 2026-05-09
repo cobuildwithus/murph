@@ -824,9 +824,10 @@ export class HostedUserRunner {
             finishedAt: new Date().toISOString(),
             lease,
           });
-          const record = await this.reschedulePendingNudgeAfterInvocationLiveness(
-            completion.record,
-          ) ?? completion.record;
+          const record = await this.queuePendingNudgeContinuationAfterInvocation({
+            record: completion.record,
+            userId: initialRecord.userId,
+          });
           emitHostedExecutionStructuredLog({
             component: "hosted.runner",
             details: {
@@ -1117,6 +1118,16 @@ export class HostedUserRunner {
       return await this.syncInvocationRecoveryAlarm(record);
     }
     return record;
+  }
+
+  private async syncPendingWorkAfterInvocation(input: {
+    record: RunnerStateRecord;
+    userId: string;
+  }): Promise<RunnerStateRecord> {
+    if (input.record.pendingNudge) {
+      return await this.queuePendingNudgeContinuationAfterInvocation(input);
+    }
+    return await this.syncPendingWorkAlarm(input.record);
   }
 
   private async queuePendingNudgeContinuationAfterInvocation(input: {
@@ -1461,7 +1472,10 @@ export class HostedUserRunner {
   > {
     if (input.record.pendingNudge) {
       await this.stateStore.clearIdleShutdownCheckpoint();
-      const record = await this.syncPendingWorkAlarm(input.record);
+      const record = await this.queuePendingNudgeContinuationAfterInvocation({
+        record: input.record,
+        userId: input.record.userId,
+      });
       return {
         nextWakeAt: record.nextWakeAt,
         run: false,
@@ -1484,7 +1498,10 @@ export class HostedUserRunner {
     const latestRecord = await this.stateStore.readState();
     if (latestRecord.pendingNudge) {
       await this.stateStore.clearIdleShutdownCheckpoint();
-      const record = await this.syncPendingWorkAlarm(latestRecord);
+      const record = await this.queuePendingNudgeContinuationAfterInvocation({
+        record: latestRecord,
+        userId: latestRecord.userId,
+      });
       return {
         nextWakeAt: record.nextWakeAt,
         run: false,
@@ -1569,8 +1586,9 @@ export class HostedUserRunner {
     const workspace = workspaceRead.workspace;
     const currentRecord = await this.stateStore.readState();
     if (currentRecord.pendingNudge || currentRecord.inFlight) {
-      const record = await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: currentRecord.nextWakeAt,
+      const record = await this.syncPendingWorkAfterInvocation({
+        record: currentRecord,
+        userId: input.userId,
       });
       return {
         kind: "deferred",
@@ -1641,7 +1659,10 @@ export class HostedUserRunner {
       workspaceVersion: checkpointWorkspaceVersion,
     });
     if (!scheduledCheckpoint.scheduled) {
-      const record = await this.syncPendingWorkAlarm(scheduledCheckpoint.record);
+      const record = await this.syncPendingWorkAfterInvocation({
+        record: scheduledCheckpoint.record,
+        userId: input.userId,
+      });
       return {
         kind: "deferred",
         record,
@@ -1652,7 +1673,10 @@ export class HostedUserRunner {
     const latestRecord = await this.stateStore.readState();
     if (latestRecord.pendingNudge) {
       await this.stateStore.clearIdleShutdownCheckpoint();
-      const record = await this.syncPendingWorkAlarm(latestRecord);
+      const record = await this.queuePendingNudgeContinuationAfterInvocation({
+        record: latestRecord,
+        userId: input.userId,
+      });
       return {
         kind: "deferred",
         record,
@@ -1676,10 +1700,13 @@ export class HostedUserRunner {
     retryDelayMs: number;
     workspaceVersion: string;
   }): Promise<boolean> {
-	    const record = await this.stateStore.readState();
+    const record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
       const scheduledRecord = record.pendingNudge
-        ? await this.reschedulePendingNudgeAfterInvocationLiveness(record) ?? record
+        ? await this.queuePendingNudgeContinuationAfterInvocation({
+            record,
+            userId: record.userId,
+          })
         : await this.syncInvocationRecoveryAlarm(record);
       return scheduledRecord.pendingNudge || scheduledRecord.inFlight;
     }
