@@ -7,6 +7,7 @@ import { resolveStravaWebhookPreflightResponse } from "../src/providers/strava.t
 import { readUrl } from "./helpers.ts";
 import type {
   DeviceSyncAccount,
+  DeviceSyncJobRecord,
   DeviceSyncOAuthProvider,
   DeviceWebhookHandler,
   StoredDeviceSyncAccount,
@@ -131,6 +132,30 @@ function requireStravaWebhookVerifier(
   }
 
   return verifyAndParseWebhook;
+}
+
+function buildStravaJob(kind: string, payload: Record<string, unknown>): DeviceSyncJobRecord {
+  return {
+    id: `job-${kind}`,
+    accountId: "connection-1",
+    provider: "strava",
+    kind,
+    payload,
+    priority: 100,
+    attempts: 0,
+    maxAttempts: 5,
+    availableAt: "2026-04-16T00:00:00.000Z",
+    createdAt: "2026-04-16T00:00:00.000Z",
+    updatedAt: "2026-04-16T00:00:00.000Z",
+    status: "queued",
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    dedupeKey: null,
+    startedAt: null,
+    finishedAt: null,
+  };
 }
 
 describe("Strava device-sync provider", () => {
@@ -1037,6 +1062,94 @@ describe("Strava device-sync provider", () => {
       ),
     ).resolves.toEqual({});
     expect(importSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects Strava activity pagination that exceeds page or record caps", async () => {
+    const fullActivityPage = Array.from({ length: 200 }, (_, index) => ({
+      id: `activity-${index}`,
+    }));
+    const providerWithEndlessPages = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = readUrl(input);
+
+        if (url.startsWith("https://www.strava.com/api/v3/athlete/activities?")) {
+          return new Response(JSON.stringify(fullActivityPage), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch: ${url}`);
+      }),
+    });
+
+    await expect(
+      providerWithEndlessPages.jobExecutor.executeJob(
+        {
+          account: buildStravaAccount(),
+          now: "2026-04-16T00:00:00.000Z",
+          importSnapshot: vi.fn(async () => undefined),
+          refreshAccountTokens: async () => {
+            throw new Error("not needed");
+          },
+          logger: {},
+        },
+        buildStravaJob("backfill", {
+          windowStart: "2026-04-10T00:00:00.000Z",
+          windowEnd: "2026-04-16T00:00:00.000Z",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "STRAVA_ACTIVITY_PAGINATION_LIMIT_EXCEEDED",
+      retryable: true,
+    });
+
+    const oversizedActivityPage = Array.from({ length: 25_001 }, (_, index) => ({
+      id: `activity-${index}`,
+    }));
+    const providerWithOversizedPage = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = readUrl(input);
+
+        if (url.startsWith("https://www.strava.com/api/v3/athlete/activities?")) {
+          return new Response(JSON.stringify(oversizedActivityPage), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch: ${url}`);
+      }),
+    });
+
+    await expect(
+      providerWithOversizedPage.jobExecutor.executeJob(
+        {
+          account: buildStravaAccount(),
+          now: "2026-04-16T00:00:00.000Z",
+          importSnapshot: vi.fn(async () => undefined),
+          refreshAccountTokens: async () => {
+            throw new Error("not needed");
+          },
+          logger: {},
+        },
+        buildStravaJob("backfill", {
+          windowStart: "2026-04-10T00:00:00.000Z",
+          windowEnd: "2026-04-16T00:00:00.000Z",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "STRAVA_ACTIVITY_RECORD_LIMIT_EXCEEDED",
+      retryable: true,
+    });
   });
 
   it("ensures Strava webhook subscriptions only when a verify token is configured and tolerates benign deauthorization responses", async () => {

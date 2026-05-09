@@ -74,6 +74,8 @@ const DEFAULT_RECONCILE_DAYS = STRAVA_SYNC.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = STRAVA_SYNC.windows.reconcileIntervalMs;
 const STRAVA_DEFAULT_SCOPES = Object.freeze([...STRAVA_OAUTH.defaultScopes]);
 const STRAVA_PAGED_ACTIVITY_SIZE = 200;
+const STRAVA_MAX_ACTIVITY_PAGES = 100;
+const STRAVA_MAX_ACTIVITY_RECORDS = 25_000;
 const STRAVA_REFRESH_SKEW_MS = 60 * 60_000;
 const STRAVA_ACTIVITY_WEBHOOK_PRIORITY = 90;
 const STRAVA_DELETE_WEBHOOK_PRIORITY = 95;
@@ -616,6 +618,18 @@ export function createStravaDeviceSyncProvider(
     let page = 1;
 
     while (true) {
+      if (page > STRAVA_MAX_ACTIVITY_PAGES) {
+        throw deviceSyncError({
+          code: "STRAVA_ACTIVITY_PAGINATION_LIMIT_EXCEEDED",
+          message: `Strava activity listing exceeded ${STRAVA_MAX_ACTIVITY_PAGES} pages.`,
+          retryable: true,
+          httpStatus: 502,
+          details: {
+            maxPages: STRAVA_MAX_ACTIVITY_PAGES,
+          },
+        });
+      }
+
       const search = new URLSearchParams({
         page: String(page),
         per_page: String(STRAVA_PAGED_ACTIVITY_SIZE),
@@ -640,6 +654,18 @@ export function createStravaDeviceSyncProvider(
       }
 
       records.push(...pageRecords);
+
+      if (records.length > STRAVA_MAX_ACTIVITY_RECORDS) {
+        throw deviceSyncError({
+          code: "STRAVA_ACTIVITY_RECORD_LIMIT_EXCEEDED",
+          message: `Strava activity listing exceeded ${STRAVA_MAX_ACTIVITY_RECORDS} records.`,
+          retryable: true,
+          httpStatus: 502,
+          details: {
+            maxRecords: STRAVA_MAX_ACTIVITY_RECORDS,
+          },
+        });
+      }
 
       if (pageRecords.length < STRAVA_PAGED_ACTIVITY_SIZE) {
         break;

@@ -549,6 +549,143 @@ test("WHOOP provider backfills snapshot windows and refreshes once after a 401",
   assert.equal(requests.at(-1)?.url, "https://api.prod.whoop.com/developer/v2/user/measurement/body");
 });
 
+test("WHOOP provider rejects repeated cursors and excessive pagination", async () => {
+  const windowStart = "2026-03-15T00:00:00.000Z";
+  const windowEnd = "2026-03-16T00:00:00.000Z";
+  const sleepUrl = `https://api.prod.whoop.com/developer/v2/activity/sleep?limit=25&start=${encodeURIComponent(windowStart)}&end=${encodeURIComponent(windowEnd)}`;
+  const sleepCursorUrl = `${sleepUrl}&nextToken=cursor-1`;
+  const loopingProvider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === sleepUrl || url === sleepCursorUrl) {
+        return createJsonResponse({
+          records: [{ id: "sleep-1" }],
+          next_token: "cursor-1",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      loopingProvider.jobExecutor.executeJob(
+        {
+          account: createAccount(["offline", "read:sleep"]),
+          now: "2026-03-16T10:00:00.000Z",
+          logger: {},
+          async importSnapshot() {
+            return { ok: true };
+          },
+          async refreshAccountTokens() {
+            return createAccount(["offline", "read:sleep"]);
+          },
+        },
+        createJob("backfill", {
+          windowStart,
+          windowEnd,
+        }),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_PAGINATION_LOOP" &&
+      error.retryable === true,
+  );
+
+  const oversizedRecords = Array.from({ length: 25_001 }, (_, index) => ({
+    id: `sleep-${index}`,
+  }));
+  const oversizedProvider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === sleepUrl) {
+        return createJsonResponse({
+          records: oversizedRecords,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      oversizedProvider.jobExecutor.executeJob(
+        {
+          account: createAccount(["offline", "read:sleep"]),
+          now: "2026-03-16T10:00:00.000Z",
+          logger: {},
+          async importSnapshot() {
+            return { ok: true };
+          },
+          async refreshAccountTokens() {
+            return createAccount(["offline", "read:sleep"]);
+          },
+        },
+        createJob("backfill", {
+          windowStart,
+          windowEnd,
+        }),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_RECORD_LIMIT_EXCEEDED" &&
+      error.retryable === true,
+  );
+
+  let paginatedRequests = 0;
+  const unboundedProvider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url.startsWith(sleepUrl)) {
+        paginatedRequests += 1;
+        return createJsonResponse({
+          records: [],
+          next_token: `cursor-${paginatedRequests}`,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      unboundedProvider.jobExecutor.executeJob(
+        {
+          account: createAccount(["offline", "read:sleep"]),
+          now: "2026-03-16T10:00:00.000Z",
+          logger: {},
+          async importSnapshot() {
+            return { ok: true };
+          },
+          async refreshAccountTokens() {
+            return createAccount(["offline", "read:sleep"]);
+          },
+        },
+        createJob("backfill", {
+          windowStart,
+          windowEnd,
+        }),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_PAGINATION_LIMIT_EXCEEDED" &&
+      error.retryable === true,
+  );
+  assert.equal(paginatedRequests, 100);
+});
+
 test("WHOOP provider schedules reconcile jobs without profile/body-measurement sync flags", () => {
   const provider = createWhoopDeviceSyncProvider({
     clientId: "whoop-client-id",
