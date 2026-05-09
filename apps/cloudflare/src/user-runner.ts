@@ -175,6 +175,13 @@ class HostedRunnerInvocationLeaseExpiredError extends Error {
   }
 }
 
+class HostedRunnerUserDataDeletionRunnerStillActiveError extends Error {
+  constructor() {
+    super("Hosted runner container cleanup failed before user data deletion.");
+    this.name = "HostedRunnerUserDataDeletionRunnerStillActiveError";
+  }
+}
+
 export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
@@ -441,6 +448,7 @@ export class HostedUserRunner {
       }
 
       await this.stateStore.assertStateForUser(userId);
+      const runnerCleanup = await this.stopRunnerBeforeUserDataDeletion(userId);
       const r2 = await this.deleteHostedUserR2DataBestEffort(userId);
       const stateDeletion = await this.stateStore.deleteStateForUser(userId);
       await this.state.storage.delete(AI_USAGE_ALLOW_DECISION_NONCE_STORAGE_KEY);
@@ -449,20 +457,15 @@ export class HostedUserRunner {
       if (alarmCleared) {
         await deleteAlarm.call(this.state.storage);
       }
-      await destroyHostedExecutionContainer({
-        runnerContainerName: resolveHostedExecutionRunnerContainerName({
-          source: this.runnerRuntimeEnvSource,
-          userId,
-        }),
-        runnerContainerNamespace: this.runnerContainerNamespace,
-        userId,
-      });
 
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
+          activeInvocationPreempted: runnerCleanup.activeInvocationPreempted,
           r2DeletedObjectCount: r2.deletedObjectCount,
           r2Supported: r2.supported,
+          runnerContainerDestroyAttempted: runnerCleanup.runnerContainerDestroyAttempted,
+          runnerContainerDestroyOk: runnerCleanup.runnerContainerDestroyOk,
           runnerStateDeleted: stateDeletion.deleted,
         },
         message: "Hosted runner user data deletion completed.",
@@ -481,6 +484,59 @@ export class HostedUserRunner {
         userId,
       };
     });
+  }
+
+  private async stopRunnerBeforeUserDataDeletion(userId: string): Promise<{
+    activeInvocationPreempted: boolean;
+    runnerContainerDestroyAttempted: boolean;
+    runnerContainerDestroyOk: boolean;
+  }> {
+    const preemption = await this.stateStore.clearActiveInvocationForUserDeletion(userId);
+    const destroyed = await destroyHostedExecutionContainer({
+      runnerContainerName: resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId,
+      }),
+      runnerContainerNamespace: this.runnerContainerNamespace,
+      userId,
+    });
+
+    if (preemption.cleared) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          runnerContainerDestroyAttempted: destroyed.attempted,
+          runnerContainerDestroyOk: destroyed.ok,
+          workspaceAttemptId: preemption.attemptId,
+        },
+        level: destroyed.ok ? "info" : "warn",
+        message: "Hosted runner preempted active invocation before user data deletion.",
+        phase: "wake.running",
+        userId,
+      });
+    }
+
+    if (!destroyed.ok) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          runnerContainerDestroyAttempted: destroyed.attempted,
+          runnerContainerDestroyErrorCode: destroyed.errorCode,
+          workspaceAttemptId: preemption.attemptId,
+        },
+        level: "error",
+        message: "Hosted runner user data deletion blocked because runner container cleanup failed.",
+        phase: "wake.running",
+        userId,
+      });
+      throw new HostedRunnerUserDataDeletionRunnerStillActiveError();
+    }
+
+    return {
+      activeInvocationPreempted: preemption.cleared,
+      runnerContainerDestroyAttempted: destroyed.attempted,
+      runnerContainerDestroyOk: destroyed.ok,
+    };
   }
 
   private async deleteHostedUserR2DataBestEffort(userId: string): Promise<HostedRunnerUserDataDeletionResult["r2"]> {

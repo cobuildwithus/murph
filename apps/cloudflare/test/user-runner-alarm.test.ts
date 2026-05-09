@@ -382,6 +382,123 @@ describe("HostedUserRunner alarm routing", () => {
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
+  it("preempts persisted active invocations before deleting user R2 data", async () => {
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const bundlePrefix = await hostedBundleUserPrefix({ userId: "member_123" });
+    await bucket.put(`${bundlePrefix}bundle.bundle.json`, "bundle");
+
+    const events: string[] = [];
+    let sql!: ReturnType<typeof createTestSqlStorage>;
+    const destroyInstance = vi.fn(async () => {
+      events.push("destroy");
+      expect(
+        sql.exec(
+          "SELECT in_flight, active_invocation_id FROM runner_meta WHERE user_id = ?",
+          "member_123",
+        ).toArray(),
+      ).toEqual([{ active_invocation_id: null, in_flight: 0 }]);
+    });
+    const harness = createRunnerHarness({
+      bucket,
+      runnerContainerNamespace: createRunnerContainerNamespace(destroyInstance),
+    });
+    sql = harness.sql;
+    const { runner } = harness;
+    bucket.onList = () => {
+      events.push("list");
+      expect(events[0]).toBe("destroy");
+      expect(
+        sql.exec(
+          "SELECT in_flight, active_invocation_id FROM runner_meta WHERE user_id = ?",
+          "member_123",
+        ).toArray(),
+      ).toEqual([{ active_invocation_id: null, in_flight: 0 }]);
+    };
+
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET in_flight = 1,
+           active_invocation_id = ?,
+           active_invocation_reason = ?,
+           active_invocation_started_at = ?,
+           lease_generation = 1
+       WHERE user_id = ?`,
+      "workspace-invocation-delete",
+      "manual",
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      ok: true,
+      r2: {
+        deletedObjectCount: 1,
+        skippedUserScopedPrefixes: false,
+        supported: true,
+      },
+      userId: "member_123",
+    });
+
+    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(events[0]).toBe("destroy");
+    expect(bucket.objects.has(`${bundlePrefix}bundle.bundle.json`)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          runnerContainerDestroyOk: true,
+          workspaceAttemptId: "workspace-invocation-delete",
+        }),
+        message: "Hosted runner preempted active invocation before user data deletion.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
+  it("does not sweep R2 when active runner container teardown fails during user deletion", async () => {
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const bundlePrefix = await hostedBundleUserPrefix({ userId: "member_123" });
+    await bucket.put(`${bundlePrefix}bundle.bundle.json`, "bundle");
+    bucket.onList = vi.fn();
+
+    const destroyInstance = vi.fn(async () => {
+      throw new Error("container still active");
+    });
+    const { runner, sql } = createRunnerHarness({
+      bucket,
+      runnerContainerNamespace: createRunnerContainerNamespace(destroyInstance),
+    });
+
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET in_flight = 1,
+           active_invocation_id = ?,
+           active_invocation_reason = ?,
+           active_invocation_started_at = ?,
+           lease_generation = 1
+       WHERE user_id = ?`,
+      "workspace-invocation-delete-failed",
+      "manual",
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await expect(runner.deleteHostedUserData("member_123")).rejects.toThrow(
+      "Hosted runner container cleanup failed before user data deletion.",
+    );
+
+    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(bucket.onList).not.toHaveBeenCalled();
+    expect(bucket.objects.has(`${bundlePrefix}bundle.bundle.json`)).toBe(true);
+    expect(sql.exec("SELECT user_id, in_flight, active_invocation_id FROM runner_meta").toArray()).toEqual([
+      { active_invocation_id: null, in_flight: 0, user_id: "member_123" },
+    ]);
+  });
+
   it("preflights Durable Object ownership before deleting R2 objects", async () => {
     const destroyInstance = vi.fn(async () => {});
     const { r2Deletes, runner, sql } = createRunnerHarness({
@@ -4738,6 +4855,8 @@ async function flushDetachedRunnerDrive(): Promise<void> {
 }
 
 class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
+  onList: (() => void) | null = null;
+
   async list(input: {
     cursor?: string;
     limit?: number;
@@ -4747,6 +4866,7 @@ class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
     objects: Array<{ key: string }>;
     truncated: boolean;
   }> {
+    this.onList?.();
     const matchingKeys = [...this.objects.keys()]
       .filter((key) => input.prefix ? key.startsWith(input.prefix) : true)
       .sort();

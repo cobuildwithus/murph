@@ -21,7 +21,6 @@ import {
 import {
   createAssistantBoundedRuntimeCache,
   ASSISTANT_AUTOMATION_STATE_CACHE,
-  ASSISTANT_INDEX_CACHE,
 } from '../runtime-budget-policy.js'
 import {
   appendTextFile,
@@ -53,11 +52,6 @@ export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 // Keep aligned with the bootstrap transcript replay ceiling in provider-turn-runner.
 export const ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT = 100
-
-const assistantIndexStoreCache = createAssistantBoundedRuntimeCache<string, AssistantAliasStore>({
-  name: 'assistant.indexes',
-  ...ASSISTANT_INDEX_CACHE,
-})
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -110,6 +104,7 @@ export async function readAssistantSession(input: {
     await quarantineAssistantStateFile({
       artifactKind: 'session',
       error,
+      expectedContent: raw,
       filePath: sessionPath,
       paths: input.paths,
     })
@@ -519,12 +514,8 @@ export async function readAssistantIndexStore(
     fresh?: boolean
   },
 ): Promise<AssistantAliasStore> {
-  if (options?.fresh !== true) {
-    const cached = assistantIndexStoreCache.get(paths.indexesPath)
-    if (cached !== undefined) {
-      return cached
-    }
-  }
+  // Keep the option for API compatibility; the routing index must observe cross-process writes.
+  void options
 
   let raw: string
   try {
@@ -538,22 +529,23 @@ export async function readAssistantIndexStore(
     }
     const initial = createInitialAssistantIndexStore()
     await writeJsonFileAtomic(paths.indexesPath, initial)
-    assistantIndexStoreCache.set(paths.indexesPath, initial)
     return initial
   }
 
   try {
     const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw))
-    assistantIndexStoreCache.set(paths.indexesPath, parsed)
     return parsed
   } catch (error) {
-    assistantIndexStoreCache.delete(paths.indexesPath)
-    await quarantineAssistantStateFile({
+    const quarantine = await quarantineAssistantStateFile({
       artifactKind: 'indexes',
       error,
+      expectedContent: raw,
       filePath: paths.indexesPath,
       paths,
     })
+    if (!quarantine) {
+      return await readAssistantIndexStore(paths, { fresh: true })
+    }
     return await rebuildAssistantIndexStore(paths)
   }
 }
@@ -594,7 +586,6 @@ export async function synchronizeAssistantIndexes(
     conversationKeys,
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
-  assistantIndexStoreCache.set(paths.indexesPath, updated)
 }
 
 export async function writeAutomationState(
@@ -639,12 +630,16 @@ export async function readAutomationState(
     return parsed
   } catch (error) {
     assistantAutomationStateCache.delete(paths.automationStatePath)
-    await quarantineAssistantStateFile({
+    const quarantine = await quarantineAssistantStateFile({
       artifactKind: 'automation',
       error,
+      expectedContent: raw,
       filePath: paths.automationStatePath,
       paths,
     })
+    if (!quarantine) {
+      return await readAutomationState(paths, { fresh: true })
+    }
     const initial = createInitialAutomationState()
     await writeJsonFileAtomic(paths.automationStatePath, initial)
     assistantAutomationStateCache.set(paths.automationStatePath, initial)
@@ -713,7 +708,6 @@ async function rebuildAssistantIndexStore(
     conversationKeys,
   })
   await writeJsonFileAtomic(paths.indexesPath, rebuilt)
-  assistantIndexStoreCache.set(paths.indexesPath, rebuilt)
   await appendAssistantRuntimeEventAtPaths(paths, {
     component: 'state',
     entityId: 'indexes',

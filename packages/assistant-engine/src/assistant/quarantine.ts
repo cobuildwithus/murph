@@ -25,6 +25,7 @@ const QUARANTINE_RECENT_LIMIT = 12
 export async function quarantineAssistantStateFile(input: {
   artifactKind: AssistantQuarantineArtifactKind
   error: unknown
+  expectedContent?: string
   filePath: string
   paths: AssistantStatePaths
   quarantineDirectory?: string
@@ -38,12 +39,18 @@ export async function quarantineAssistantStateFile(input: {
   const quarantineId = `q_${randomUUID().replace(/-/gu, '')}`
   const quarantinedPath = path.join(
     quarantineRoot,
-    `${basename}.${Date.now()}.invalid${path.extname(basename) || '.json'}`,
+    `${basename}.${Date.now()}.${quarantineId}.invalid${path.extname(basename) || '.json'}`,
   )
   const metadataPath = `${quarantinedPath}.meta.json`
 
   try {
     await ensureAssistantStateDirectory(quarantineRoot)
+    if (input.expectedContent !== undefined) {
+      const currentContent = await readFile(input.filePath, 'utf8')
+      if (currentContent !== input.expectedContent) {
+        return null
+      }
+    }
     await rename(input.filePath, quarantinedPath)
   } catch (error) {
     if (isMissingFileError(error)) {

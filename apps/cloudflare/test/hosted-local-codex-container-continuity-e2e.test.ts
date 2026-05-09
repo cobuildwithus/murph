@@ -112,7 +112,7 @@ describe("hosted local Codex container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    const baselineContainerStopCount = countContainerLifecycleStopLogs();
+    const baselineIdleShutdownCleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
@@ -139,23 +139,25 @@ describe("hosted local Codex container continuity e2e", () => {
 
     const firstCompletionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
-    const firstSession = await readCodexSessionFromStatus(firstCompletionStatus, "first");
-    expect(firstSession.providerSessionId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
-    );
-    expect(firstSession.codexRolloutRelativePath).toContain(firstSession.providerSessionId);
-    expect(firstSession.rolloutText.length).toBeGreaterThan(0);
+    const firstCompletionBaseSnapshotHash = readHostedExecutionSnapshotBaseRef(
+      firstCompletionStatus.workspace?.snapshotRef ?? null,
+    )?.hash ?? null;
 
-    const idleShutdownStatus = await waitForIdleShutdownCheckpoint();
+    const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
+      baselineBaseSnapshotHash: firstCompletionBaseSnapshotHash,
+      baselineCleanupCount: baselineIdleShutdownCleanupCount,
+    });
     expect(idleShutdownStatus.workspace).not.toBeNull();
     expect(readHostedExecutionSnapshotHotRef(idleShutdownStatus.workspace?.snapshotRef ?? null))
       .toBeNull();
     expect(idleShutdownStatus.inFlight).toBe(false);
     expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
-    await waitForAdditionalContainerStopLog(baselineContainerStopCount);
     const idleSession = await readCodexSessionFromStatus(idleShutdownStatus, "idle");
-    expect(idleSession.providerSessionId).toBe(firstSession.providerSessionId);
-    expect(idleSession.codexRolloutRelativePath).toBe(firstSession.codexRolloutRelativePath);
+    expect(idleSession.providerSessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
+    );
+    expect(idleSession.codexRolloutRelativePath).toContain(idleSession.providerSessionId);
+    expect(idleSession.rolloutText.length).toBeGreaterThan(0);
 
     const providerRequestCountBeforeSecondTurn = countAssistantProviderResponsesApiRequests();
     const secondWebhookResponse = await postSignedLinqWebhook(
@@ -185,9 +187,9 @@ describe("hosted local Codex container continuity e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const secondSession = await readCodexSessionFromStatus(finalStatus, "second");
-    expect(secondSession.providerSessionId).toBe(firstSession.providerSessionId);
-    expect(secondSession.codexRolloutRelativePath).toBe(firstSession.codexRolloutRelativePath);
-    expect(secondSession.rolloutText.length).toBeGreaterThanOrEqual(firstSession.rolloutText.length);
+    expect(secondSession.providerSessionId).toBe(idleSession.providerSessionId);
+    expect(secondSession.codexRolloutRelativePath).toBe(idleSession.codexRolloutRelativePath);
+    expect(secondSession.rolloutText.length).toBeGreaterThanOrEqual(idleSession.rolloutText.length);
     await expect(readFile(secondSession.shimRolloutPath, "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
 
@@ -277,7 +279,10 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   return `sha256=${signature}`;
 }
 
-async function waitForIdleShutdownCheckpoint(): Promise<HostedRunnerStatusResponse> {
+async function waitForIdleShutdownCheckpoint(input: {
+  baselineBaseSnapshotHash: string | null;
+  baselineCleanupCount: number;
+}): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastAlarmError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
@@ -291,13 +296,19 @@ async function waitForIdleShutdownCheckpoint(): Promise<HostedRunnerStatusRespon
     const deltaRef = status.workspace
       ? readHostedExecutionSnapshotDeltaRef(status.workspace.snapshotRef)
       : null;
+    const baseRef = status.workspace
+      ? readHostedExecutionSnapshotBaseRef(status.workspace.snapshotRef)
+      : null;
 
     if (
       status.workspace
+      && baseRef
+      && baseRef.hash !== input.baselineBaseSnapshotHash
       && hotRef === null
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
+      && countSuccessfulIdleShutdownContainerCleanupLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -325,30 +336,14 @@ async function waitForIdleShutdownCheckpoint(): Promise<HostedRunnerStatusRespon
   ]));
 }
 
-async function waitForAdditionalContainerStopLog(baselineCount: number): Promise<void> {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < 30_000) {
-    if (countContainerLifecycleStopLogs() > baselineCount) {
-      return;
-    }
-
-    await sleep(250);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for hosted idle-shutdown container lifecycle stop log.",
-  ]));
-}
-
-function countContainerLifecycleStopLogs(): number {
+function countSuccessfulIdleShutdownContainerCleanupLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(1_000_000),
     requireScenario().harness.stderrTail(1_000_000),
   ].join("\n");
 
   return output
-    .split("Hosted execution container lifecycle hook reported non-zero stop.")
+    .split("Hosted execution container destroy confirmed stopped.")
     .length - 1;
 }
 

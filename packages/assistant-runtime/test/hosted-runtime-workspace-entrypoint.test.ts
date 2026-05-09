@@ -1849,6 +1849,96 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground member activation writes the bootstrap checkpoint before later turns", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const createCheckpointSnapshot = vi.fn(async (snapshotInput) => {
+      events.push(`snapshot:${snapshotInput.reason}`);
+      assert.equal(snapshotInput.reason, "activation_bootstrap");
+      return {
+        snapshotRef: createBundleRef({
+          hash: "b".repeat(64),
+          key: "users/bundles/member-synthetic/activation-bootstrap.bundle.json",
+          size: 512,
+        }),
+      };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        createCheckpointSnapshot,
+        async importItem(item) {
+          events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          events,
+          mailboxPort: createMailboxPort({
+            events,
+            items: [
+              createMailboxItem({
+                id: "mailbox_item_entrypoint_activation",
+                kind: "member.activated",
+                lane: "system",
+                laneSeq: "1",
+              }),
+            ],
+          }),
+          logRequests,
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          events.push("assistant.phase");
+          return {
+            checkpointReason: "activation_bootstrap",
+            progressed: true,
+            redactedStatus: {
+              hostedAssistantProgressed: true,
+            },
+          };
+        },
+        vaultRoot,
+      });
+
+      assert.equal(result.status, "idle");
+      assert.equal(result.deferredCheckpointRequired, undefined);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "activation_bootstrap",
+      ]);
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedAssistantProgressed: true,
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "0",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "1",
+      });
+      expect(createCheckpointSnapshot).toHaveBeenCalledOnce();
+      expect(events).toContain("workspace.checkpoint");
+      expect(events).toContain("snapshot:activation_bootstrap");
+      const assistantDeferredLogs = logRequests.flatMap((request) => request.entries)
+        .filter((entry) =>
+          entry.eventCode === "checkpoint.runtime_residue_deferred"
+          && entry.redactedJson?.checkpointPhase === "assistant"
+        );
+      assert.deepEqual(assistantDeferredLogs, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("normal foreground active-turn refresh does not build a checkpoint request", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

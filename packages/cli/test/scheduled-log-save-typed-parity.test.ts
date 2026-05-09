@@ -506,6 +506,55 @@ test("scheduled-log save rejects malformed typed measurements before writing", a
   }
 });
 
+test("scheduled-log save rejects sub-minute every schedules before writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-save-subminute-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Too frequent schedule",
+      "--slug",
+      "too-frequent-schedule",
+      "--schedule-kind",
+      "every",
+      "--schedule-every-ms",
+      "59999",
+      "--action-kind",
+      "measurement.add",
+      "--measurement-metric",
+      "weight",
+      "--measurement-value",
+      "72.5",
+      "--measurement-unit",
+      "kg",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.match(result.envelope.error.message ?? "", /60000 ms/u);
+    }
+
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    const writtenFiles = await readdir(scheduledLogDir).catch(() => []);
+    assert.deepEqual(writtenFiles, []);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("scheduled-log save rejects workout fields on non-activity actions before writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-scheduled-log-save-invalid-workout-",

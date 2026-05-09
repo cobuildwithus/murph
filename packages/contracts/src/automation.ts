@@ -7,6 +7,7 @@ import {
   executableScheduleIntentDailyLocalSchema,
   executableScheduleIntentEverySchema,
   isValidExecutableCronExpression,
+  MIN_EXECUTABLE_SCHEDULE_EVERY_MS,
 } from "./schedule-intent.ts";
 import { withContractMetadata } from "./schema-metadata.ts";
 
@@ -31,7 +32,7 @@ export const automationScheduleKindValues = [
   "dailyLocal",
 ] as const;
 
-export const MIN_AUTOMATION_EVERY_MS = 60_000;
+export const MIN_AUTOMATION_EVERY_MS = MIN_EXECUTABLE_SCHEDULE_EVERY_MS;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 function isoTimestampSchema() {
@@ -39,9 +40,7 @@ function isoTimestampSchema() {
 }
 export const isValidAutomationCronExpression = isValidExecutableCronExpression;
 export const automationScheduleAtSchema = executableScheduleIntentAtSchema;
-export const automationScheduleEverySchema = executableScheduleIntentEverySchema.extend({
-  everyMs: z.number().int().min(MIN_AUTOMATION_EVERY_MS),
-}).strict();
+export const automationScheduleEverySchema = executableScheduleIntentEverySchema;
 export const automationScheduleCronSchema = executableScheduleIntentCronSchema;
 export const automationScheduleDailyLocalSchema = executableScheduleIntentDailyLocalSchema;
 

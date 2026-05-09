@@ -1911,7 +1911,21 @@ test("hosted execution snapshots revalidate preserved artifact refs against the 
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"), "sqlite\n");
-    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
+    await writeFile(
+      path.join(operatorHomeRoot, ".murph", "config.json"),
+      `${JSON.stringify({
+        hostedAssistant: {
+          profiles: [{
+            target: {
+              adapter: "codex-cli",
+              codexCommand: "/tmp/unsafe-codex",
+              codexHome: "/tmp/unsafe-codex-home",
+            },
+          }],
+        },
+        schema: "murph.operator.v1",
+      })}\n`,
+    );
     await writeFile(path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"), "{\"secret\":true}\n");
 
     const snapshot = await snapshotHostedExecutionContext({
@@ -1969,7 +1983,7 @@ test("hosted execution snapshots revalidate preserved artifact refs against the 
         path: ".murph/config.json",
         root: "operator-home",
       }),
-      "{\"schema\":\"cfg\"}\n",
+      null,
     );
     assert.deepEqual(
       listHostedBundleArtifacts({
@@ -2366,7 +2380,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         path: ".runtime/operations/assistant/state/onboarding/first-contact/bootstrap.json",
         root: "vault",
       },
-      { expected: "{\"schema\":\"cfg\"}\n", path: ".murph/config.json", root: "operator-home" },
+      { expected: null, path: ".murph/config.json", root: "operator-home" },
       { expected: null, path: ".murph/hosted/user-env.json", root: "operator-home" },
       {
         expected: activeCodexContinuityManifestJson,
@@ -2621,9 +2635,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "runtime-budgets.json"), "utf8"),
       "{\"remainingMs\":1000}\n",
     );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
-      "{\"schema\":\"cfg\"}\n",
+    await assert.rejects(
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
+      { code: "ENOENT" },
     );
     assert.equal(
       await readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted-codex-continuity.json"), "utf8"),

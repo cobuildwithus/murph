@@ -74,6 +74,7 @@ describe("hosted local container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
+    const baselineIdleShutdownCleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
@@ -101,10 +102,10 @@ describe("hosted local container continuity e2e", () => {
     const firstCompletionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
     expect(firstCompletionStatus.workspace).not.toBeNull();
-    expect(readHostedExecutionSnapshotHotRef(firstCompletionStatus.workspace?.snapshotRef ?? null))
-      .not.toBeNull();
 
-    const idleShutdownStatus = await waitForIdleShutdownCheckpoint();
+    const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
+      baselineCleanupCount: baselineIdleShutdownCleanupCount,
+    });
     expect(idleShutdownStatus.workspace).not.toBeNull();
     expect(readHostedExecutionSnapshotHotRef(idleShutdownStatus.workspace?.snapshotRef ?? null))
       .toBeNull();
@@ -112,7 +113,8 @@ describe("hosted local container continuity e2e", () => {
       .toBeNull();
     expect(idleShutdownStatus.inFlight).toBe(false);
     expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
-    expect(hasSuccessfulIdleShutdownContainerCleanupLog()).toBe(true);
+    expect(countSuccessfulIdleShutdownContainerCleanupLogs())
+      .toBeGreaterThan(baselineIdleShutdownCleanupCount);
 
     const secondWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
@@ -165,6 +167,7 @@ async function startScenario(): Promise<void> {
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
     localDatabaseUrl,
@@ -176,7 +179,9 @@ async function startScenario(): Promise<void> {
   });
 }
 
-async function waitForIdleShutdownCheckpoint(): Promise<HostedRunnerStatusResponse> {
+async function waitForIdleShutdownCheckpoint(input: {
+  baselineCleanupCount: number;
+}): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastAlarmError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
@@ -197,6 +202,7 @@ async function waitForIdleShutdownCheckpoint(): Promise<HostedRunnerStatusRespon
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
+      && countSuccessfulIdleShutdownContainerCleanupLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -228,7 +234,7 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function hasSuccessfulIdleShutdownContainerCleanupLog(): boolean {
+function countSuccessfulIdleShutdownContainerCleanupLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(200_000),
     requireScenario().harness.stderrTail(200_000),
@@ -236,7 +242,7 @@ function hasSuccessfulIdleShutdownContainerCleanupLog(): boolean {
 
   return output
     .split(/\r?\n/u)
-    .some((line) => {
+    .filter((line) => {
       const trimmed = line.trim();
       if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
         return false;
@@ -263,7 +269,7 @@ function hasSuccessfulIdleShutdownContainerCleanupLog(): boolean {
       return candidate.message === "Hosted runner completed idle-shutdown checkpoint container cleanup."
         && candidate.userId === userId
         && candidate.details?.destroyOk === true;
-    });
+    }).length;
 }
 
 function countAssistantProviderResponsesApiRequests(): number {

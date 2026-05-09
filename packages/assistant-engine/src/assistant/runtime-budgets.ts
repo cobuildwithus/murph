@@ -195,9 +195,13 @@ async function readAssistantRuntimeBudgetSnapshotAtPaths(input: {
     const quarantine = await quarantineAssistantStateFile({
       artifactKind: 'runtime-budget',
       error,
+      expectedContent: raw,
       filePath: input.paths.resourceBudgetPath,
       paths: input.paths,
     })
+    if (!quarantine) {
+      return await readAssistantRuntimeBudgetSnapshotAtPaths(input)
+    }
     await writeJsonFileAtomic(input.paths.resourceBudgetPath, recoveredSnapshot)
     await appendAssistantRuntimeEventAtPaths(input.paths, {
       at: recoveredAt,

@@ -25,9 +25,6 @@ import {
   snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import {
-  saveHostedAssistantConfig,
-} from "@murphai/operator-config/operator-config";
-import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -52,7 +49,6 @@ const userId = `member_local_snapshot_stress_${Date.now()}`;
 const replyText = "Got it - snapshot stress reply delivered.";
 const linqWebhookSecret = "linq-local-snapshot-stress-secret";
 const productionLikeAssistantModel = "gpt-5.5";
-const hostedAssistantProfileId = "platform-default";
 const stressCodexThreadId = "00000000-0000-4000-8000-000000000025";
 const stressCodexRolloutRelativePath =
   `sessions/2026/05/05/rollout-2026-05-05T01-02-03-${stressCodexThreadId}.jsonl`;
@@ -147,10 +143,16 @@ describe("hosted local snapshot stress e2e", () => {
     const activationStatus = await requireScenario().waitForHostedCompletion(userId, {
       timeoutMs: 420_000,
     });
-    const importSnapshot = findLargestCheckpointLog(activationStatus.recentLogs, {
+    const importSnapshot = findLargestCheckpointLogOrNull(activationStatus.recentLogs, {
       eventCode: "checkpoint.snapshot_finished",
       reason: ["import", "system_mailbox_receipt"],
     });
+    if (!importSnapshot) {
+      expect(hasCheckpointLog(activationStatus.recentLogs, {
+        eventCode: "checkpoint.runtime_residue_deferred",
+        reason: ["activation_bootstrap", "system_mailbox_receipt"],
+      })).toBe(true);
+    }
 
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
@@ -219,27 +221,37 @@ describe("hosted local snapshot stress e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.workspace?.version).not.toBe(beforeInboundWorkspaceVersion);
+    expect(finalStatus.workspace?.version ?? null).toBe(beforeInboundWorkspaceVersion);
 
-    const postReplySnapshot = findLargestCheckpointLog(finalStatus.recentLogs, {
+    const postReplySnapshot = findLargestCheckpointLogOrNull(finalStatus.recentLogs, {
       eventCode: "checkpoint.snapshot_finished",
       reason: ["outbox_sending", "outbox_receipt", "canonical_runtime_commit"],
     });
+    if (!postReplySnapshot) {
+      expect(hasCheckpointLog(finalStatus.recentLogs, {
+        eventCode: "checkpoint.runtime_residue_deferred",
+        reason: ["outbox_sending", "outbox_receipt", "canonical_runtime_commit"],
+      })).toBe(true);
+    }
     expect(hasCheckpointLog(finalStatus.recentLogs, {
       eventCode: "checkpoint.hot_state_fallback",
       reason: ["outbox_sending", "outbox_receipt", "canonical_runtime_commit"],
     })).toBe(false);
 
-    expect(readRedactedJsonString(importSnapshot, "snapshotMode")).toBe("working");
-    expect(readRedactedJsonString(postReplySnapshot, "snapshotMode")).toBe("working");
-    expect(readRedactedJsonNumber(importSnapshot, "bundlePutBytes"))
-      .toBeLessThan(16 * 1024 * 1024);
-    expect(readRedactedJsonNumber(postReplySnapshot, "bundlePutBytes"))
-      .toBeLessThan(16 * 1024 * 1024);
-    expect(readRedactedJsonNumber(importSnapshot, "snapshotElapsedMs"))
-      .toBeGreaterThanOrEqual(0);
-    expect(readRedactedJsonNumber(postReplySnapshot, "snapshotElapsedMs"))
-      .toBeGreaterThanOrEqual(0);
+    if (importSnapshot) {
+      expect(readRedactedJsonString(importSnapshot, "snapshotMode")).toBe("working");
+      expect(readRedactedJsonNumber(importSnapshot, "bundlePutBytes"))
+        .toBeLessThan(16 * 1024 * 1024);
+      expect(readRedactedJsonNumber(importSnapshot, "snapshotElapsedMs"))
+        .toBeGreaterThanOrEqual(0);
+    }
+    if (postReplySnapshot) {
+      expect(readRedactedJsonString(postReplySnapshot, "snapshotMode")).toBe("working");
+      expect(readRedactedJsonNumber(postReplySnapshot, "bundlePutBytes"))
+        .toBeLessThan(16 * 1024 * 1024);
+      expect(readRedactedJsonNumber(postReplySnapshot, "snapshotElapsedMs"))
+        .toBeGreaterThanOrEqual(0);
+    }
   }, 480_000);
 });
 
@@ -279,7 +291,6 @@ async function createSnapshotStressFixture(): Promise<{
   await writeSyntheticVaultMetadata(vaultRoot);
   await writeSyntheticVaultFiles(vaultRoot);
   await writeSyntheticAssistantRuntimeState(vaultRoot);
-  await writeSyntheticHostedAssistantConfig(operatorHomeRoot);
   await writeSyntheticCodexContinuity(operatorHomeRoot);
 
   const snapshot = await snapshotHostedExecutionContext({
@@ -399,32 +410,6 @@ async function writeSyntheticAssistantRuntimeState(vaultRoot: string): Promise<v
   }
 }
 
-async function writeSyntheticHostedAssistantConfig(operatorHomeRoot: string): Promise<void> {
-  await saveHostedAssistantConfig({
-    activeProfileId: hostedAssistantProfileId,
-    profiles: [
-      {
-        id: hostedAssistantProfileId,
-        label: "OpenAI",
-        managedBy: "platform",
-        target: {
-          adapter: "codex-cli",
-          approvalPolicy: "never",
-          codexCommand: null,
-          model: productionLikeAssistantModel,
-          modelProvider: "openai",
-          oss: false,
-          profile: null,
-          reasoningEffort: "medium",
-          sandbox: "danger-full-access",
-        },
-      },
-    ],
-    schema: "murph.hosted-assistant-config.v1",
-    updatedAt: "2026-05-05T00:00:00.000Z",
-  }, operatorHomeRoot);
-}
-
 async function writeSyntheticCodexContinuity(operatorHomeRoot: string): Promise<void> {
   const rootSessionsDirectory = path.join(operatorHomeRoot, ".codex-hosted", "sessions");
   const datedSessionsDirectory = path.join(rootSessionsDirectory, "2026", "05", "05");
@@ -533,6 +518,23 @@ function findLargestCheckpointLog(
     );
   }
   return match;
+}
+
+function findLargestCheckpointLogOrNull(
+  logs: readonly HostedRuntimeLogEntry[] | undefined,
+  input: {
+    eventCode: string;
+    reason: string | readonly string[];
+  },
+): HostedRuntimeLogEntry | null {
+  const expectedReasons = Array.isArray(input.reason) ? input.reason : [input.reason];
+  return logs?.filter((entry) =>
+    entry.eventCode === input.eventCode
+    && expectedReasons.includes(readRedactedJsonString(entry, "checkpointReason") ?? "")
+  ).sort((left, right) =>
+    readRedactedJsonNumberOrZero(right, "bundlePutBytes")
+    - readRedactedJsonNumberOrZero(left, "bundlePutBytes")
+  )[0] ?? null;
 }
 
 function hasCheckpointLog(

@@ -488,12 +488,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     }
     const foregroundWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
       read: () => guardedWorkspacePort.read!(),
-      async checkpoint() {
+      async checkpoint(request) {
+        if (request.reason === "activation_bootstrap") {
+          const response = await guardedWorkspacePort.checkpoint!(request);
+          await recordHotRestoreCache(response);
+          return response;
+        }
         throw new Error("Foreground hosted runner must not checkpoint workspace.");
       },
     };
     const foregroundCheckpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder = {
-      async createRequest() {
+      async createRequest(requestInput) {
+        if (requestInput.reason === "activation_bootstrap") {
+          return await createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+            createSnapshot: createLivenessGuardedCheckpointSnapshot,
+            metadata: {
+              attemptId: input.request.attemptId,
+              expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
+              leaseGeneration: input.request.leaseGeneration,
+              nextWakeAt: null,
+              nextWakeReason: null,
+            },
+          }).createRequest(requestInput);
+        }
         throw new Error(
           "Foreground hosted runner must not build workspace checkpoint snapshots.",
         );
@@ -1022,13 +1039,7 @@ function resolveHostedWorkspaceInvocationStatus(input: {
 function foregroundRunRequiresDeferredCheckpoint(
   result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>,
 ): boolean {
-  return (
-    (
-      result.initialMailboxImport.checkpointDeferred
-      && result.initialMailboxImport.stateChanged
-    )
-    || result.assistantPhaseResult?.progressed === true
-  );
+  return result.deferredCheckpointRequired;
 }
 
 function resolveHostedWorkspaceRunNextWakeAt(input: {

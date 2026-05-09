@@ -268,6 +268,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint",
       ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(logRequests, [
@@ -790,6 +791,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.latestWorkspace?.version, "0");
+      assert.equal(result.deferredCheckpointRequired, true);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
     } finally {
       await rm(vaultRoot, {
@@ -2041,6 +2043,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult, null);
+      assert.equal(result.deferredCheckpointRequired, false);
       assert.equal(result.initialMailboxImport.stateChanged, false);
       assert.deepEqual(checkpointRequests, []);
     } finally {
@@ -2651,6 +2654,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
@@ -2668,6 +2672,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         limitPerLane: 10,
         platform: createPlatform({
+          logRequests,
           mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
@@ -2688,8 +2693,24 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         workspace: createWorkspaceState({ version: "0" }),
       });
 
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "activation_bootstrap",
+      ]);
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.equal(result.latestWorkspace?.nextWakeAt, null);
+      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.assistantPhaseResult?.nextWakeAt, null);
+      assert.deepEqual(
+        logRequests.flatMap((request) => request.entries)
+          .filter((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred")
+          .map((entry) => entry.redactedJson),
+        [
+          {
+            checkpointPhase: "post_assistant",
+            checkpointReason: "system_mailbox_receipt",
+          },
+        ],
+      );
     } finally {
       await rm(vaultRoot, {
         force: true,

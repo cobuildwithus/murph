@@ -541,6 +541,110 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
   assert.equal(provider.descriptor.webhook?.path, "/webhooks/oura");
 });
 
+test("Oura provider rejects repeated pagination tokens before accumulating unbounded records", async () => {
+  const requests: string[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+
+      if (url.startsWith("https://api.ouraring.com/v2/usercollection/daily_activity?")) {
+        return createJsonResponse({
+          data: [{ day: "2026-03-15", score: 80 }],
+          next_token: "same-token",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["daily"]),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot() {
+      throw new Error("import should not be called when pagination loops");
+    },
+    async refreshAccountTokens() {
+      throw new Error("refresh should not be called in this test");
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      provider.jobExecutor.executeJob(
+        context,
+        createJob("backfill", {
+          windowStart: "2026-03-15T00:00:00.000Z",
+          windowEnd: "2026-03-16T00:00:00.000Z",
+          includePersonalInfo: false,
+        }),
+      ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_PAGINATION_LOOP",
+  );
+
+  assert.equal(
+    requests.filter((url) => url.startsWith("https://api.ouraring.com/v2/usercollection/daily_activity?")).length,
+    2,
+  );
+});
+
+test("Oura provider rejects excessive unique pagination tokens", async () => {
+  const requests: string[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+
+      if (url.startsWith("https://api.ouraring.com/v2/usercollection/daily_activity?")) {
+        return createJsonResponse({
+          data: [],
+          next_token: `token-${requests.length}`,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["daily"]),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot() {
+      throw new Error("import should not be called when pagination exceeds the page limit");
+    },
+    async refreshAccountTokens() {
+      throw new Error("refresh should not be called in this test");
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      provider.jobExecutor.executeJob(
+        context,
+        createJob("backfill", {
+          windowStart: "2026-03-15T00:00:00.000Z",
+          windowEnd: "2026-03-16T00:00:00.000Z",
+          includePersonalInfo: false,
+        }),
+      ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_PAGINATION_LIMIT_EXCEEDED",
+  );
+
+  assert.equal(
+    requests.filter((url) => url.startsWith("https://api.ouraring.com/v2/usercollection/daily_activity?")).length,
+    500,
+  );
+});
+
 test("Oura provider splits heartrate backfills into 30-day chunks", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];

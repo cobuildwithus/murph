@@ -89,8 +89,11 @@ describe('knowledge service helpers', () => {
     expectKnowledgeSourcePathError('../escape.md', 'knowledge_invalid_source_path')
     expectKnowledgeSourcePathError('C:/vault/file.md', 'knowledge_invalid_source_path')
     expectKnowledgeSourcePathError('derived/knowledge/pages/sleep.md', 'knowledge_forbidden_source_path')
+    expectKnowledgeSourcePathError('Derived/knowledge/pages/sleep.md', 'knowledge_forbidden_source_path')
     expectKnowledgeSourcePathError('.runtime/cache/file.md', 'knowledge_forbidden_source_path')
+    expectKnowledgeSourcePathError('.Runtime/cache/file.md', 'knowledge_forbidden_source_path')
     expectKnowledgeSourcePathError('assistant-state/memory.md', 'knowledge_forbidden_source_path')
+    expectKnowledgeSourcePathError('Assistant-State/memory.md', 'knowledge_forbidden_source_path')
   })
 
   it('tails knowledge log entries newest-first, clamps the limit, and treats a missing log as empty', async () => {

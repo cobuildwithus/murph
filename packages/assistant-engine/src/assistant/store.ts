@@ -246,33 +246,34 @@ export async function listAssistantSessions(
 export async function listAssistantSessionsLocal(
   vault: string,
 ): Promise<AssistantSession[]> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
 
-  const entries = await readdir(paths.sessionsDirectory, {
-    withFileTypes: true,
-  })
-  const sessions: AssistantSession[] = []
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) {
-      continue
-    }
-
-    const sessionId = entry.name.replace(/\.json$/u, '')
-    const session = await readAssistantSession({
-      paths,
-      sessionId,
-      treatCorruptedAsMissing: true,
+    const entries = await readdir(paths.sessionsDirectory, {
+      withFileTypes: true,
     })
-    if (session) {
-      sessions.push(session)
-    }
-  }
+    const sessions: AssistantSession[] = []
 
-  return sessions.sort((left, right) =>
-    right.updatedAt.localeCompare(left.updatedAt),
-  )
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        continue
+      }
+
+      const sessionId = entry.name.replace(/\.json$/u, '')
+      const session = await readAssistantSession({
+        paths,
+        sessionId,
+        treatCorruptedAsMissing: true,
+      })
+      if (session) {
+        sessions.push(session)
+      }
+    }
+
+    return sessions.sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt),
+    )
+  })
 }
 
 export async function getAssistantSession(
@@ -286,18 +287,19 @@ export async function getAssistantSessionLocal(
   vault: string,
   sessionId: string,
 ): Promise<AssistantSession> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
 
-  const session = await readAssistantSession({ paths, sessionId })
-  if (!session) {
-    throw await createAssistantSessionNotFoundError({
-      paths,
-      sessionId,
-    })
-  }
+    const session = await readAssistantSession({ paths, sessionId })
+    if (!session) {
+      throw await createAssistantSessionNotFoundError({
+        paths,
+        sessionId,
+      })
+    }
 
-  return session
+    return session
+  })
 }
 
 export async function saveAssistantSession(

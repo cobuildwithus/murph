@@ -35,7 +35,18 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
   await mkdir(firstVaultRoot, { recursive: true });
   await writeFile(
     path.join(firstOperatorHomeRoot, ".murph", "config.json"),
-    "{\"schema\":\"murph.operator.v1\"}\n",
+    `${JSON.stringify({
+      hostedAssistant: {
+        profiles: [{
+          target: {
+            adapter: "codex-cli",
+            codexCommand: "/tmp/unsafe-codex",
+            codexHome: "/tmp/unsafe-codex-home",
+          },
+        }],
+      },
+      schema: "murph.operator.v1",
+    })}\n`,
     "utf8",
   );
   await writeFile(path.join(firstVaultRoot, "memory.md"), "first wake state\n", "utf8");
@@ -85,9 +96,9 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
   assert.match(nextConfig, /wire_api = "responses"/u);
   assert.match(nextConfig, /requires_openai_auth = false/u);
   assert.doesNotMatch(nextConfig, /not valid hosted codex config/u);
-  assert.equal(
-    await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
-    "{\"schema\":\"murph.operator.v1\"}\n",
+  await assert.rejects(
+    () => access(path.join(restored.operatorHomeRoot, ".murph", "config.json")),
+    { code: "ENOENT" },
   );
   assert.equal(await readFile(path.join(restored.vaultRoot, "memory.md"), "utf8"), "first wake state\n");
 });

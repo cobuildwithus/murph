@@ -15,7 +15,6 @@ import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { resolveAssistantOpaqueStateFilePath } from './state-ids.js'
 import { ensureAssistantState } from './store/persistence.js'
 import {
-  resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
@@ -85,12 +84,13 @@ export async function readAssistantTurnReceipt(
   vault: string,
   turnId: string,
 ): Promise<AssistantTurnReceipt | null> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-  return readAssistantTurnReceiptAtPath(
-    paths,
-    resolveAssistantTurnReceiptPath(paths, turnId),
-  )
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    return readAssistantTurnReceiptAtPath(
+      paths,
+      resolveAssistantTurnReceiptPath(paths, turnId),
+    )
+  })
 }
 
 export async function saveAssistantTurnReceipt(
@@ -261,30 +261,31 @@ async function listRecentAssistantTurnReceiptsInternal(
   }
 
   const sessionFilter = input.sessionId?.trim() || null
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-  const entries = await readdir(paths.turnsDirectory, {
-    withFileTypes: true,
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const entries = await readdir(paths.turnsDirectory, {
+      withFileTypes: true,
+    })
+    const receipts: AssistantTurnReceipt[] = []
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        continue
+      }
+
+      const receipt = await readAssistantTurnReceiptAtPath(
+        paths,
+        path.join(paths.turnsDirectory, entry.name),
+      )
+      if (!receipt || (sessionFilter && receipt.sessionId !== sessionFilter)) {
+        continue
+      }
+
+      insertRecentAssistantTurnReceipt(receipts, receipt, normalizedLimit)
+    }
+
+    return receipts
   })
-  const receipts: AssistantTurnReceipt[] = []
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) {
-      continue
-    }
-
-    const receipt = await readAssistantTurnReceiptAtPath(
-      paths,
-      path.join(paths.turnsDirectory, entry.name),
-    )
-    if (!receipt || (sessionFilter && receipt.sessionId !== sessionFilter)) {
-      continue
-    }
-
-    insertRecentAssistantTurnReceipt(receipts, receipt, normalizedLimit)
-  }
-
-  return receipts
 }
 
 function insertRecentAssistantTurnReceipt(
@@ -324,8 +325,9 @@ async function readAssistantTurnReceiptAtPath(
   paths: AssistantStatePaths,
   receiptPath: string,
 ): Promise<AssistantTurnReceipt | null> {
+  let raw: string | null = null
   try {
-    const raw = await readFile(receiptPath, 'utf8')
+    raw = await readFile(receiptPath, 'utf8')
     return assistantTurnReceiptSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -335,6 +337,7 @@ async function readAssistantTurnReceiptAtPath(
     await quarantineAssistantStateFile({
       artifactKind: 'turn-receipt',
       error,
+      ...(raw === null ? {} : { expectedContent: raw }),
       filePath: receiptPath,
       paths,
     }).catch(() => undefined)

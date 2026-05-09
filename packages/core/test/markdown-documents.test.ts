@@ -213,6 +213,31 @@ describe("markdown document primitives", () => {
     expect(parsed.body).toContain(result.record.instructions);
   });
 
+  it("preserves existing automation tags when an upsert omits tags", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        tags: ["sleep", "recovery"],
+      }),
+    });
+
+    const updated = await upsertAutomation({
+      vaultRoot,
+      automationId: created.record.automationId,
+      title: created.record.title,
+      slug: created.record.slug,
+      instructions: "Report only the most important sleep trend.",
+      schedule: created.record.schedule,
+      route: created.record.route,
+      continuityPolicy: created.record.continuityPolicy,
+      status: created.record.status,
+      summary: created.record.summary ?? undefined,
+    });
+
+    expect(updated.record.tags).toEqual(["sleep", "recovery"]);
+  });
+
   it("lists automations with status/text filters and limit", async () => {
     const vaultRoot = await makeVaultRoot();
     const now = new Date("2026-04-08T00:00:00.000Z");

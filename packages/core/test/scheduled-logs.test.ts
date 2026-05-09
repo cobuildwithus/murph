@@ -240,6 +240,24 @@ test("scheduled logs reject schedules the cron runner cannot execute", async () 
     }),
     /Invalid ISO datetime/u,
   );
+
+  await assert.rejects(
+    () => upsertScheduledLog({
+      vaultRoot,
+      scheduledLogId: "slog_01JX8VEQY2M5ZBV64ZP4N1DRBE",
+      title: "Too Frequent",
+      status: "active",
+      schedule: {
+        kind: "every",
+        everyMs: 59_999,
+      },
+      action: {
+        kind: "measurement.add",
+        measurements: [{ metric: "body-weight", value: 181, unit: "lb" }],
+      },
+    }),
+    /schedule\.everyMs must be at least 60000 ms/u,
+  );
 });
 
 test("scheduled log upserts resolve creates and updates under one registry lock", async () => {

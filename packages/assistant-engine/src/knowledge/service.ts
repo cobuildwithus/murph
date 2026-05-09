@@ -903,7 +903,7 @@ function normalizeKnowledgeSourcePolicyPath(
 }
 
 function isKnowledgeSourcePathAllowed(relativePath: string): boolean {
-  const firstSegment = relativePath.split('/')[0] ?? ''
+  const firstSegment = (relativePath.split('/')[0] ?? '').toLowerCase()
   return !FORBIDDEN_KNOWLEDGE_SOURCE_ROOTS.includes(
     firstSegment as (typeof FORBIDDEN_KNOWLEDGE_SOURCE_ROOTS)[number],
   )

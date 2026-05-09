@@ -60,7 +60,7 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("rejects every non-idle checkpoint reason before snapshot side effects", async () => {
+  it("rejects every non-full checkpoint reason before snapshot side effects", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -92,15 +92,60 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS.filter((reason) =>
-      reason !== "idle_shutdown"
+      reason !== "activation_bootstrap" && reason !== "idle_shutdown"
     )) {
       await expect(createOptions().createCheckpointSnapshot(createCheckpointInput(reason)))
-        .rejects.toThrow("Hosted workspace checkpoint snapshots are idle-shutdown only.");
+        .rejects.toThrow("Hosted workspace checkpoint snapshots are activation-bootstrap or idle-shutdown only.");
     }
 
     expect(readWorkspace).not.toHaveBeenCalled();
     expect(putArtifact).not.toHaveBeenCalled();
     expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+  });
+
+  it("allows activation bootstrap full checkpoint snapshots", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "activation.md"), "activation bootstrap\n", "utf8");
+    const putArtifact = vi.fn(async () => {});
+    const readWorkspace = vi.fn(async () => createWorkspaceReadResponse({
+      snapshotRef: null,
+      version: "7",
+    }));
+
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(
+      createCheckpointInput("activation_bootstrap"),
+    );
+
+    const snapshotRef = result.snapshotRef;
+    if (!snapshotRef || !("hash" in snapshotRef)) {
+      throw new Error("Expected activation bootstrap to produce a base bundle ref.");
+    }
+    expect(snapshotRef.hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(readWorkspace).toHaveBeenCalledOnce();
+    expect(putArtifact).toHaveBeenCalled();
   });
 
   it("lets web CAS own workspace version conflicts", async () => {
