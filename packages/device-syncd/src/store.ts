@@ -153,9 +153,9 @@ export class SqliteDeviceSyncStore {
     state: string,
     now: string,
     expectedProvider?: string,
-    _expectedOwnerId?: string,
+    expectedOwnerId?: string,
   ): ConsumeOAuthStateResult {
-    return consumeOAuthState(this.database, state, now, expectedProvider);
+    return consumeOAuthState(this.database, state, now, expectedProvider, expectedOwnerId);
   }
 
   listAccounts(input: ListDeviceSyncAccountsInput | string = {}): StoredDeviceSyncAccount[] {

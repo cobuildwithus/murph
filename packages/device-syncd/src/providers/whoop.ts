@@ -67,6 +67,8 @@ const DEFAULT_RECONCILE_DAYS = WHOOP_SYNC.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = WHOOP_SYNC.windows.reconcileIntervalMs;
 const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
 const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
+const WHOOP_MAX_COLLECTION_PAGES = 100;
+const WHOOP_MAX_COLLECTION_RECORDS = 25_000;
 
 type WhoopScope =
   | "offline"
@@ -446,8 +448,24 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
   ): Promise<Record<string, unknown>[]> {
     const records: Record<string, unknown>[] = [];
     let nextToken: string | null | undefined = null;
+    const seenNextTokens = new Set<string>();
+    let pageCount = 0;
 
     do {
+      pageCount += 1;
+      if (pageCount > WHOOP_MAX_COLLECTION_PAGES) {
+        throw deviceSyncError({
+          code: "WHOOP_PAGINATION_LIMIT_EXCEEDED",
+          message: `WHOOP API pagination exceeded ${WHOOP_MAX_COLLECTION_PAGES} pages for ${path}.`,
+          retryable: true,
+          httpStatus: 502,
+          details: {
+            maxPages: WHOOP_MAX_COLLECTION_PAGES,
+            path,
+          },
+        });
+      }
+
       const search = new URLSearchParams({
         limit: "25",
         start,
@@ -463,7 +481,36 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           records: [],
         };
       records.push(...((response.records ?? []).map((entry) => coerceRecord(entry))));
-      nextToken = response.next_token ?? response.nextToken ?? null;
+
+      if (records.length > WHOOP_MAX_COLLECTION_RECORDS) {
+        throw deviceSyncError({
+          code: "WHOOP_RECORD_LIMIT_EXCEEDED",
+          message: `WHOOP API pagination exceeded ${WHOOP_MAX_COLLECTION_RECORDS} records for ${path}.`,
+          retryable: true,
+          httpStatus: 502,
+          details: {
+            maxRecords: WHOOP_MAX_COLLECTION_RECORDS,
+            path,
+          },
+        });
+      }
+
+      nextToken = normalizeString(response.next_token ?? response.nextToken) ?? null;
+      if (nextToken) {
+        if (seenNextTokens.has(nextToken)) {
+          throw deviceSyncError({
+            code: "WHOOP_PAGINATION_LOOP",
+            message: `WHOOP API pagination repeated a next token for ${path}.`,
+            retryable: true,
+            httpStatus: 502,
+            details: {
+              pageCount,
+              path,
+            },
+          });
+        }
+        seenNextTokens.add(nextToken);
+      }
     } while (nextToken);
 
     return records;

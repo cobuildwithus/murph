@@ -5,7 +5,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 5;
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 6;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -35,6 +35,10 @@ function readDeviceCredentialStateColumns(database: DatabaseSync): SqliteTableCo
 
 function readDeviceConnectionColumns(database: DatabaseSync): SqliteTableColumn[] {
   return database.prepare("pragma table_info(device_connection)").all() as SqliteTableColumn[];
+}
+
+function readOAuthStateColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(oauth_state)").all() as SqliteTableColumn[];
 }
 
 function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
@@ -187,6 +191,17 @@ function ensureWebhookTraceClaimTokenColumn(database: DatabaseSync): void {
   }
 }
 
+function ensureOAuthStateOwnerColumn(database: DatabaseSync): void {
+  if (!tableExists(database, "oauth_state")) {
+    return;
+  }
+
+  const names = columnNames(readOAuthStateColumns(database));
+  if (!names.has("owner_id")) {
+    database.exec("alter table oauth_state add column owner_id text");
+  }
+}
+
 function clearLegacyEmptyTokenCredentials(database: DatabaseSync): void {
   if (!tableExists(database, "device_credential_state")) {
     return;
@@ -214,6 +229,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
       create table if not exists oauth_state (
         state text primary key,
         provider text not null,
+        owner_id text,
         return_to text,
         metadata_json text not null,
         created_at text not null,
@@ -337,6 +353,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
     `);
 
   ensureDeviceCredentialStateSchema(database);
+  ensureOAuthStateOwnerColumn(database);
   ensureDeviceConnectionSetupColumns(database);
   ensureWebhookTraceClaimTokenColumn(database);
   clearLegacyEmptyTokenCredentials(database);

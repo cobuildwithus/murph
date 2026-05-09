@@ -2904,6 +2904,15 @@ test("sqlite store splits connection, credential, and observation state into exp
     "created_at",
     "updated_at",
   ]);
+  assert.deepEqual(readTableColumnsForTesting(store, "oauth_state"), [
+    "state",
+    "provider",
+    "owner_id",
+    "return_to",
+    "metadata_json",
+    "created_at",
+    "expires_at",
+  ]);
   assert.deepEqual(readTableColumnsForTesting(store, "device_credential_state"), [
     "account_id",
     "credential_kind",

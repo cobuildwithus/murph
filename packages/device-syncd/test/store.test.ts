@@ -2445,6 +2445,145 @@ test("device sync store preserves unexpired OAuth state on provider mismatch", a
   }
 });
 
+test("device sync store preserves OAuth state on owner mismatch and returns owner binding when consumed", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-owner-mismatch");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    store.createOAuthState({
+      state: "owner-bound-state",
+      provider: "demo",
+      ownerId: "member_a",
+      returnTo: "/devices",
+      metadata: {
+        intent: "connect",
+      },
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:10:00.000Z",
+    });
+
+    assert.deepEqual(
+      store.consumeOAuthState(
+        "owner-bound-state",
+        "2026-04-07T00:05:00.000Z",
+        "demo",
+        "member_b",
+      ),
+      {
+        status: "owner_mismatch",
+      },
+    );
+    assert.deepEqual(
+      store.consumeOAuthState(
+        "owner-bound-state",
+        "2026-04-07T00:05:01.000Z",
+        "demo",
+        "member_a",
+      ),
+      {
+        status: "consumed",
+        record: {
+          state: "owner-bound-state",
+          provider: "demo",
+          ownerId: "member_a",
+          returnTo: "/devices",
+          metadata: {
+            intent: "connect",
+          },
+          createdAt: "2026-04-07T00:00:00.000Z",
+          expiresAt: "2026-04-07T00:10:00.000Z",
+        },
+      },
+    );
+    assert.deepEqual(
+      store.consumeOAuthState(
+        "owner-bound-state",
+        "2026-04-07T00:05:02.000Z",
+        "demo",
+        "member_a",
+      ),
+      {
+        status: "missing",
+      },
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store migrates existing OAuth state tables to preserve owner binding", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-oauth-owner-migration");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  const database = openSqliteRuntimeDatabase(databasePath);
+
+  database.exec(`
+    create table oauth_state (
+      state text primary key,
+      provider text not null,
+      return_to text,
+      metadata_json text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+
+    insert into oauth_state (
+      state,
+      provider,
+      return_to,
+      metadata_json,
+      created_at,
+      expires_at
+    ) values (
+      'legacy-state',
+      'demo',
+      '/devices',
+      '{}',
+      '2026-04-07T00:00:00.000Z',
+      '2026-04-07T00:10:00.000Z'
+    );
+
+    pragma user_version = 5;
+  `);
+  database.close();
+
+  const store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    assert.deepEqual(
+      store.consumeOAuthState(
+        "legacy-state",
+        "2026-04-07T00:05:00.000Z",
+        "demo",
+        "member_a",
+      ),
+      {
+        status: "owner_mismatch",
+      },
+    );
+    assert.deepEqual(store.consumeOAuthState("legacy-state", "2026-04-07T00:05:01.000Z", "demo"), {
+      status: "consumed",
+      record: {
+        state: "legacy-state",
+        provider: "demo",
+        returnTo: "/devices",
+        metadata: {},
+        createdAt: "2026-04-07T00:00:00.000Z",
+        expiresAt: "2026-04-07T00:10:00.000Z",
+      },
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store hydrates new hosted accounts, guards token updates, and respects running-job ownership", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-insert");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
