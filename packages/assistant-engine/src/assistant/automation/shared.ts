@@ -310,7 +310,7 @@ export function normalizeScanLimit(value?: number): number {
     return 50
   }
 
-  return Math.min(Math.max(Math.trunc(value), 1), 200)
+  return Math.max(Math.trunc(value), 1)
 }
 
 export function createEmptyInboxScanResult(): AssistantInboxScanResult {

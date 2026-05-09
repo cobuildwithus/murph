@@ -1511,6 +1511,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("keeps restored foreground replay accountable while limiting prompt-visible inputs", async () => {
+    const assistantInputIds = [
+      "ain_00000000000000000000000000000001",
+      "ain_00000000000000000000000000000002",
+      "ain_00000000000000000000000000000003",
+      "ain_00000000000000000000000000000004",
+      "ain_00000000000000000000000000000005",
+      "ain_00000000000000000000000000000006",
+    ];
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds,
+      importedCount: assistantInputIds.length,
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        foregroundReplayInputIds: assistantInputIds,
+        foregroundReplayPromptInputIds: assistantInputIds.slice(-5),
+        preferredInputIds: assistantInputIds,
+        skipActiveTurnMailboxRefresh: false,
+        skipInitialMailboxRefresh: true,
+      }),
+    );
+  });
+
   it("treats imported assistant input ids as fresh even when no new mailbox rows were imported", async () => {
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce(null);
 
@@ -1522,6 +1548,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
+        foregroundReplayInputIds: ["ain_00000000000000000000000000000007"],
+        foregroundReplayPromptInputIds: ["ain_00000000000000000000000000000007"],
         preferredInputIds: ["ain_00000000000000000000000000000007"],
         skipActiveTurnMailboxRefresh: false,
         skipInitialMailboxRefresh: true,
@@ -1538,6 +1566,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
+        foregroundReplayInputIds: [],
+        foregroundReplayPromptInputIds: [],
         preferredInputIds: [],
         skipActiveTurnMailboxRefresh: false,
         skipInitialMailboxRefresh: false,

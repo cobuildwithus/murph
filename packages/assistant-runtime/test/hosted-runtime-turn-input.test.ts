@@ -416,6 +416,155 @@ describe("createHostedAssistantInputSource", () => {
     expect(second.nextCursor).toEqual(preferred.cursor);
   });
 
+  it("can coalesce foreground replay prompt content without hiding terminal candidates", async () => {
+    const vaultRoot = await createTempVault();
+    const older = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_older",
+        eventId: "evt_older",
+        itemId: "item_older",
+        laneSeq: "10",
+        messageId: "msg_older",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "older replayed note",
+      }),
+    });
+    const latest = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_latest",
+        eventId: "evt_latest",
+        itemId: "item_latest",
+        laneSeq: "20",
+        messageId: "msg_latest",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "latest foreground note",
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      foregroundReplayInputIds: [older.inputId, latest.inputId],
+      foregroundReplayPromptInputIds: [latest.inputId],
+      preferredInputIds: [latest.inputId],
+      requestId: "req_foreground_replay",
+      runtime: createRuntime(),
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    const listed = await source.listInputCandidates({
+      limit: 2,
+      sourceId: "linq",
+    });
+    const afterLatest = await source.listInputCandidates({
+      afterCursor: latest.cursor,
+      limit: 2,
+      sourceId: "linq",
+    });
+
+    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      older.inputId,
+      latest.inputId,
+    ]);
+    expect(listed.inputs[0]?.event.text).toBeNull();
+    expect(listed.inputs[0]?.event.transcriptText).toBeNull();
+    expect(listed.inputs[0]?.event.userMessageContent).toBeNull();
+    expect(listed.inputs[1]?.event.text).toBe("latest foreground note");
+    expect(listed.nextCursor).toEqual(latest.cursor);
+    expect(afterLatest.inputs).toEqual([]);
+    expect(afterLatest.nextCursor).toEqual(latest.cursor);
+  });
+
+  it("keeps older base candidates ahead of foreground replay candidates", async () => {
+    const vaultRoot = await createTempVault();
+    const older = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_older_base",
+        eventId: "evt_older_base",
+        itemId: "item_older_base",
+        laneSeq: "10",
+        messageId: "msg_older_base",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "older base note",
+      }),
+    });
+    const latest = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_latest_replay",
+        eventId: "evt_latest_replay",
+        itemId: "item_latest_replay",
+        laneSeq: "20",
+        messageId: "msg_latest_replay",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "latest replay note",
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      foregroundReplayInputIds: [latest.inputId],
+      foregroundReplayPromptInputIds: [latest.inputId],
+      requestId: "req_foreground_replay_with_base",
+      runtime: createRuntime(),
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    const listed = await source.listInputCandidates({
+      limit: 2,
+      sourceId: "linq",
+    });
+
+    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      older.inputId,
+      latest.inputId,
+    ]);
+    expect(listed.inputs[0]?.event.text).toBe("older base note");
+    expect(listed.inputs[1]?.event.text).toBe("latest replay note");
+    expect(listed.nextCursor).toEqual(latest.cursor);
+  });
+
+  it("masks replay prompt content when no prompt-visible replay ids are provided", async () => {
+    const vaultRoot = await createTempVault();
+    const replay = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_replay_masked",
+        eventId: "evt_replay_masked",
+        itemId: "item_replay_masked",
+        laneSeq: "30",
+        messageId: "msg_replay_masked",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        text: "replay note should be masked",
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      foregroundReplayInputIds: [replay.inputId],
+      requestId: "req_foreground_replay_masked",
+      runtime: createRuntime(),
+      vaultRoot,
+      wake: TIMER_WAKE,
+    });
+
+    const listed = await source.listInputCandidates({
+      limit: 1,
+      sourceId: "linq",
+    });
+
+    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      replay.inputId,
+    ]);
+    expect(listed.inputs[0]?.event.text).toBeNull();
+    expect(listed.inputs[0]?.event.transcriptText).toBeNull();
+    expect(listed.inputs[0]?.event.userMessageContent).toBeNull();
+    expect(listed.nextCursor).toEqual(replay.cursor);
+  });
+
   it("logs and rethrows hosted mailbox refresh failures", async () => {
     const hostedError = new Error("hosted mailbox refresh failed");
     const source = createHostedAssistantInputSource({

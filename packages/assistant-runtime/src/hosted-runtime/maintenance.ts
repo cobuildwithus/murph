@@ -128,6 +128,8 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
+  foregroundReplayInputIds?: readonly string[] | null;
+  foregroundReplayPromptInputIds?: readonly string[] | null;
   preferredInputIds?: readonly string[] | null;
   deferReceiptRecovery?: boolean;
   signal?: AbortSignal;
@@ -185,6 +187,8 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.skipActiveTurnMailboxRefresh === true,
         input.deferReceiptRecovery === true,
         input.signal,
+        input.foregroundReplayInputIds ?? [],
+        input.foregroundReplayPromptInputIds ?? [],
       )
     : {
         currentTurnDeliveryIntentIds: [],
@@ -246,6 +250,8 @@ export async function runHostedAssistantAutomation(
   skipActiveTurnMailboxRefresh = false,
   deferReceiptRecovery = false,
   signal?: AbortSignal,
+  foregroundReplayInputIds: readonly string[] = [],
+  foregroundReplayPromptInputIds: readonly string[] = [],
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
   deferredReceiptRecoveryWakeAt: string | null;
@@ -269,6 +275,8 @@ export async function runHostedAssistantAutomation(
   let redactedAutomationEventLogCount = 0;
   let activeTurnInputIngested = false;
   const inputSource = createHostedAssistantInputSource({
+    foregroundReplayInputIds,
+    foregroundReplayPromptInputIds,
     onActiveTurnMailboxRefresh(result) {
       if (result.progressed && result.reason === "ingested_input") {
         activeTurnInputIngested = true;
@@ -349,6 +357,13 @@ export async function runHostedAssistantAutomation(
       requestId,
       signal,
       inputSource,
+      ...(foregroundReplayInputIds.length > 0
+        ? {
+            maxPerScan: normalizeHostedForegroundReplayScanLimit(
+              foregroundReplayInputIds.length,
+            ),
+          }
+        : {}),
       vault: vaultRoot,
     });
     const deferredReceiptRecoveryWakeAt = result.deferredReceiptRecoveryWakeAt ?? null;
@@ -457,6 +472,11 @@ export async function runHostedAssistantAutomation(
     });
     throw error;
   }
+}
+
+function normalizeHostedForegroundReplayScanLimit(count: number): number {
+  void count;
+  return Number.MAX_SAFE_INTEGER;
 }
 
 function buildHostedAssistantAutomationEventCountLogDetails(

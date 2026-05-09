@@ -25,7 +25,9 @@ import {
 } from "./mailbox-checkpoint.ts";
 
 export function createHostedAssistantInputSource(input: {
+  foregroundReplayPromptInputIds?: readonly string[] | null;
   onActiveTurnMailboxRefresh?: ((result: AssistantTurnInputRefreshResult) => void) | null;
+  foregroundReplayInputIds?: readonly string[] | null;
   preferredInputIds?: readonly string[] | null;
   requestId: string;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
@@ -41,6 +43,8 @@ export function createHostedAssistantInputSource(input: {
   const baseSource = createStoreBackedAssistantInputSource({
     vault: input.vaultRoot,
   });
+  const foregroundReplayInputIds = [...new Set(input.foregroundReplayInputIds ?? [])];
+  const foregroundReplayPromptInputIds = new Set(input.foregroundReplayPromptInputIds ?? []);
   const preferredInputIds = [...new Set(input.preferredInputIds ?? [])];
   let source: AssistantInputSource = baseSource;
 
@@ -124,27 +128,125 @@ export function createHostedAssistantInputSource(input: {
     };
   }
 
-  if (preferredInputIds.length === 0) {
+  if (preferredInputIds.length > 0) {
+    const preferredBaseSource = source;
+    source = {
+      ...preferredBaseSource,
+      async listInputCandidates(query) {
+        const base = await preferredBaseSource.listInputCandidates(query);
+        const preferred = await listPreferredAssistantInputCandidates({
+          preferredInputIds,
+          query,
+          vaultRoot: input.vaultRoot,
+        });
+        if (preferred.length === 0) {
+          return base;
+        }
+        return mergePreferredAssistantInputCandidates({
+          base,
+          preferred,
+          query,
+        });
+      },
+    };
+  }
+
+  if (foregroundReplayInputIds.length === 0) {
     return source;
   }
 
+  const foregroundReplayBaseSource = source;
   return {
-    ...source,
+    ...foregroundReplayBaseSource,
     async listInputCandidates(query) {
-      const base = await source.listInputCandidates(query);
-      const preferred = await listPreferredAssistantInputCandidates({
-        preferredInputIds,
+      const base = await foregroundReplayBaseSource.listInputCandidates(query);
+      const replay = await listPreferredAssistantInputCandidates({
+        preferredInputIds: foregroundReplayInputIds,
         query,
         vaultRoot: input.vaultRoot,
       });
-      if (preferred.length === 0) {
+      if (replay.length === 0) {
         return base;
       }
-      return mergePreferredAssistantInputCandidates({
+      return buildForegroundReplayCandidateBatch({
         base,
-        preferred,
+        foregroundReplayPromptInputIds,
         query,
+        replay,
       });
+    },
+  };
+}
+
+function buildForegroundReplayCandidateBatch(input: {
+  base: AssistantInputCandidateBatch;
+  foregroundReplayPromptInputIds: ReadonlySet<string>;
+  query: AssistantInputCandidateQuery;
+  replay: readonly AssistantInputCandidate[];
+}): AssistantInputCandidateBatch {
+  const limit = normalizePreferredAssistantInputLimit(input.query.limit);
+  const replayInputIds = new Set(
+    input.replay.map((candidate) => candidate.event.inputId),
+  );
+  const latestReplayCursor = latestAssistantInputCursor(
+    input.replay.map((candidate) => candidate.event.cursor),
+    input.query.afterCursor ?? null,
+  );
+  const candidatesByInputId = new Map<string, AssistantInputCandidate>();
+
+  for (const candidate of [...input.base.inputs, ...input.replay]) {
+    if (
+      latestReplayCursor
+      && compareAssistantInputCursors(candidate.event.cursor, latestReplayCursor) > 0
+    ) {
+      continue;
+    }
+    if (!candidatesByInputId.has(candidate.event.inputId)) {
+      candidatesByInputId.set(candidate.event.inputId, candidate);
+    }
+  }
+
+  const selected = [...candidatesByInputId.values()]
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.event.cursor, right.event.cursor)
+    )
+    .slice(0, limit);
+
+  return {
+    inputs: selected.map((candidate) =>
+      !replayInputIds.has(candidate.event.inputId) ||
+      input.foregroundReplayPromptInputIds.has(candidate.event.inputId)
+        ? candidate
+        : maskForegroundReplayCandidatePromptContent(candidate)
+    ),
+    nextCursor: latestAssistantInputCursor(
+      selected.map((candidate) => candidate.event.cursor),
+      input.query.afterCursor ?? null,
+    ),
+  };
+}
+
+function maskForegroundReplayCandidatePromptContent(
+  candidate: AssistantInputCandidate,
+): AssistantInputCandidate {
+  return {
+    ...candidate,
+    event: {
+      ...candidate.event,
+      attachmentCount: 0,
+      attachmentDescriptors: [],
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: null,
+        reasonCode: null,
+        source: null,
+        status: "not_attempted",
+        updatedAt: null,
+      },
+      sourceMetadata: null,
+      text: null,
+      transcriptText: null,
+      userMessageContent: null,
     },
   };
 }
