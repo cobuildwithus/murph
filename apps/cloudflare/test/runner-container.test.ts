@@ -1267,6 +1267,80 @@ describe("RunnerContainer", () => {
     );
   });
 
+  it("aborts active workspace fetches on destroy so queued invokes are not blocked", async () => {
+    const firstWorkspaceFetchStarted = createDeferred<void>();
+    let workspaceFetchCount = 0;
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (!url.endsWith("/internal/workspace-invocation")) {
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        workspaceFetchCount += 1;
+        if (workspaceFetchCount === 1) {
+          firstWorkspaceFetchStarted.resolve();
+          const signal = init?.signal;
+          if (!(signal instanceof AbortSignal)) {
+            throw new Error("Expected workspace invocation fetch to include an abort signal.");
+          }
+          await new Promise<never>((_resolve, reject) => {
+            signal.addEventListener("abort", () => {
+              reject(signal.reason instanceof Error
+                ? signal.reason
+                : new Error("workspace invocation aborted"));
+            }, { once: true });
+          });
+        }
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const activeInvoke = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_active_destroyed"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+    await firstWorkspaceFetchStarted.promise;
+
+    const queuedInvoke = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_queued_after_destroy"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    expect(workspaceFetchCount).toBe(1);
+    await container.destroyInstance();
+    await expect(activeInvoke).resolves.toBeInstanceOf(Error);
+    await expect(queuedInvoke).resolves.toEqual(createRunnerResult());
+    expect(workspaceFetchCount).toBe(2);
+  });
+
   it("propagates safe configuration failures from the runner shell with the inner error code", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
@@ -2682,6 +2756,21 @@ function createContainerStorageDouble(): ContainerStorageDouble {
     async put<T>(key: string, value: T): Promise<void> {
       values.set(key, value);
     },
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
   };
 }
 
