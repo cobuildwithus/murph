@@ -149,29 +149,31 @@ describe("hosted-member-store", () => {
 
   it("looks up identity by privy user id without exposing blind-index columns", async () => {
     const member = createHostedMember();
-    const findFirst = vi.fn().mockResolvedValue({
-      maskedPhoneNumberHint: "*** 4567",
-      member,
-      memberId: member.id,
-      phoneLookupKey: "hbidx:phone:v1:abc123",
-      phoneNumberVerifiedAt: null,
-      privyUserIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-identity.privy-user-id",
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        maskedPhoneNumberHint: "*** 4567",
+        member,
         memberId: member.id,
-        value: "did:privy:user_123",
-      }),
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumberEncrypted: null,
-      walletAddressEncrypted: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
-    });
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberVerifiedAt: null,
+        privyUserIdEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-identity.privy-user-id",
+          memberId: member.id,
+          value: "did:privy:user_123",
+        }),
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: null,
+        walletAddressEncrypted: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+    ]);
     const prisma = {
       hostedMemberIdentity: {
-        findFirst,
+        findMany,
       },
     } as never;
 
@@ -190,7 +192,7 @@ describe("hosted-member-store", () => {
       matchedBy: "privyUserId",
     });
 
-    expect(findFirst).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       where: {
         privyUserLookupKey: {
           in: [expect.stringMatching(/^hbidx:privy-user:v1:/u)],
@@ -257,25 +259,27 @@ describe("hosted-member-store", () => {
 
   it("looks up identity by raw phone number through read candidates", async () => {
     const member = createHostedMember();
-    const findFirst = vi.fn().mockResolvedValue({
-      maskedPhoneNumberHint: "*** 4567",
-      member,
-      memberId: member.id,
-      phoneLookupKey: "hbidx:phone:v1:abc123",
-      phoneNumberVerifiedAt: null,
-      privyUserIdEncrypted: null,
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumberEncrypted: null,
-      walletAddressEncrypted: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
-    });
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        maskedPhoneNumberHint: "*** 4567",
+        member,
+        memberId: member.id,
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+        phoneNumberVerifiedAt: null,
+        privyUserIdEncrypted: null,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: null,
+        walletAddressEncrypted: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+    ]);
     const prisma = {
       hostedMemberIdentity: {
-        findFirst,
+        findMany,
       },
     } as never;
 
@@ -292,10 +296,100 @@ describe("hosted-member-store", () => {
       matchedBy: "phoneNumber",
     });
 
-    expect(findFirst).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       where: {
         phoneLookupKey: {
           in: [expect.stringMatching(/^hbidx:phone:v1:/u)],
+        },
+      },
+      include: {
+        member: true,
+      },
+    });
+  });
+
+  it("fails closed when rotated Privy user lookup candidates resolve to multiple members", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+
+    const firstMember = createHostedMember({
+      id: "member_v1",
+    });
+    const secondMember = createHostedMember({
+      billingStatus: HostedBillingStatus.active,
+      id: "member_v2",
+    });
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        maskedPhoneNumberHint: null,
+        member: firstMember,
+        memberId: firstMember.id,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+        privyUserIdEncrypted: null,
+        privyUserLookupKey: "hbidx:privy-user:v1:abc123",
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: null,
+        walletAddressEncrypted: null,
+        walletAddressLookupKey: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+      {
+        maskedPhoneNumberHint: null,
+        member: secondMember,
+        memberId: secondMember.id,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+        privyUserIdEncrypted: null,
+        privyUserLookupKey: "hbidx:privy-user:v2:def456",
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumberEncrypted: null,
+        walletAddressEncrypted: null,
+        walletAddressLookupKey: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+    ]);
+    const prisma = {
+      hostedMemberIdentity: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberIdentityByPrivyUserId({
+        prisma,
+        privyUserId: "did:privy:user_123",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: 2,
+        matchedBy: "privyUserId",
+      },
+      httpStatus: 500,
+      retryable: true,
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        privyUserLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:privy-user:v2:/u),
+            expect.stringMatching(/^hbidx:privy-user:v1:/u),
+          ]),
         },
       },
       include: {

@@ -1612,6 +1612,13 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
           },
         });
       }),
+      findMany: vi.fn(async (input: {
+        include?: { member?: boolean };
+        where: Record<string, unknown>;
+      }) => {
+        const identity = await hostedMemberIdentityFallback.findFirst(input);
+        return identity ? [identity] : [];
+      }),
       findUnique: vi.fn(async ({
         include,
         where,
@@ -1741,6 +1748,22 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
               },
             },
           ]);
+        }),
+      });
+    }
+
+    if (
+      typeof hostedMemberIdentityRecord.findMany !== "function"
+      && typeof hostedMemberIdentityRecord.findFirst === "function"
+    ) {
+      Object.defineProperty(hostedMemberIdentityRecord, "findMany", {
+        configurable: true,
+        value: vi.fn(async (input: {
+          include?: { member?: boolean };
+          where: Record<string, unknown>;
+        }) => {
+          const identity = await hostedMemberIdentityRecord.findFirst?.(input);
+          return identity ? [identity] : [];
         }),
       });
     }

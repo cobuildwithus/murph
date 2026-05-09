@@ -414,6 +414,49 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  codex-auth-deploy-guard:
+    name: Hosted Codex auth deploy guard
+    if: ${{ !(inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm
+        run: corepack enable pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run hosted Codex auth deploy guard
+        shell: bash
+        env:
+          MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"
+        run: |
+          set -euo pipefail
+
+          codex_cli_version="$(
+            sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
+          )"
+          if [[ -z "${codex_cli_version}" ]]; then
+            echo "Missing CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base" >&2
+            exit 1
+          fi
+
+          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"
+          mkdir -p "${npm_prefix}"
+          npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"
+          export PATH="${npm_prefix}/bin:${PATH}"
+          codex --version
+          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts
+
   deploy:
     name: Deploy hosted execution (${{ inputs.environment }})
     needs:
@@ -422,7 +465,8 @@ jobs:
       - linq-scheduled-reminder-gate
       - cloudflare-runner-smoke-gate
       - immediate-build-prep-gate
-    if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker) || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
+      - codex-auth-deploy-guard
+    if: ${{ !cancelled() && ((inputs.skip_predeploy_e2e && !inputs.deploy_worker && needs.codex-auth-deploy-guard.result == 'success') || (inputs.skip_predeploy_e2e && inputs.deploy_worker && inputs.container_rollout == 'immediate' && needs.immediate-build-prep-gate.result == 'success') || (!inputs.skip_predeploy_e2e && needs.codex-auth-deploy-guard.result == 'success' && needs.codex-cache-prefix-gate.result == 'success' && needs.linq-delivery-gate.result == 'success' && needs.linq-scheduled-reminder-gate.result == 'success' && (!inputs.deploy_worker || needs.cloudflare-runner-smoke-gate.result == 'success'))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: ${{ inputs.environment }}
@@ -575,29 +619,6 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Run hosted Codex auth deploy guard
-        if: ${{ !(inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate') }}
-        shell: bash
-        env:
-          MURPH_RUN_HOSTED_CODEX_AUTH_E2E: "1"
-        run: |
-          set -euo pipefail
-
-          codex_cli_version="$(
-            sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
-          )"
-          if [[ -z "${codex_cli_version}" ]]; then
-            echo "Missing CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base" >&2
-            exit 1
-          fi
-
-          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-codex-auth-guard-npm"
-          mkdir -p "${npm_prefix}"
-          npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"
-          export PATH="${npm_prefix}/bin:${PATH}"
-          codex --version
-          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-codex-config.test.ts
 
       - name: Download immediate build handoff
         if: ${{ inputs.deploy_worker && inputs.skip_predeploy_e2e && inputs.container_rollout == 'immediate' }}

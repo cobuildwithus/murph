@@ -271,6 +271,10 @@ type HostedMemberIdentityFixture = {
     include?: Record<string, unknown>;
     where: Record<string, unknown>;
   }) => Promise<unknown>;
+  findMany?: (input: {
+    include?: Record<string, unknown>;
+    where: Record<string, unknown>;
+  }) => Promise<unknown[]>;
   findUnique?: (input: {
     include?: Record<string, unknown>;
     where: Record<string, unknown>;
@@ -3063,6 +3067,15 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 
           return include?.member ? { ...identity, member } : identity;
         }),
+        findMany: vi.fn(async (
+          input: {
+            include?: Record<string, unknown>;
+            where: Record<string, unknown>;
+          },
+        ) => {
+          const identity = await prisma.hostedMemberIdentity?.findFirst?.(input);
+          return identity ? [identity] : [];
+        }),
         findUnique: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
           const member = await hostedMember?.findUnique?.({
             include,
@@ -3111,6 +3124,21 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
             : {}),
         },
       });
+    });
+  }
+  if (
+    prisma.hostedMemberIdentity
+    && !prisma.hostedMemberIdentity.findMany
+    && prisma.hostedMemberIdentity.findFirst
+  ) {
+    prisma.hostedMemberIdentity.findMany = vi.fn(async (
+      input: {
+        include?: Record<string, unknown>;
+        where: Record<string, unknown>;
+      },
+    ) => {
+      const identity = await prisma.hostedMemberIdentity?.findFirst?.(input);
+      return identity ? [identity] : [];
     });
   }
   if (prisma.hostedMemberIdentity && !prisma.hostedMemberIdentity.createMany) {

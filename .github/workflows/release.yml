@@ -105,9 +105,6 @@ jobs:
           scope: "@murphai"
           cache: pnpm
 
-      - name: Update npm
-        run: npm install -g npm@latest
-
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
@@ -182,9 +179,6 @@ jobs:
           node-version-file: .nvmrc
           registry-url: "https://registry.npmjs.org"
           scope: "@murphai"
-
-      - name: Update npm
-        run: npm install -g npm@latest
 
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
