@@ -79,6 +79,7 @@ const AUTHENTICATED_SENDER = {
   dmarcPass: true,
   spfAligned: false,
 };
+const VALID_REPLY_ALIAS_KEY = "0123456789abcdef0123456789abcdef";
 
 describe("hosted execution email callback routes", () => {
   beforeAll(async () => {
@@ -133,7 +134,7 @@ describe("hosted execution email callback routes", () => {
   it("accepts a signed reply-alias registration callback for the bound member", async () => {
     const response = await registerReplyAliasRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        aliasKey: "replyalias1234",
+        aliasKey: VALID_REPLY_ALIAS_KEY,
       }),
       path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
@@ -144,7 +145,7 @@ describe("hosted execution email callback routes", () => {
     expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: prismaClient.transactionClient,
-      replyAliasLookupKey: "replyalias1234",
+      replyAliasLookupKey: VALID_REPLY_ALIAS_KEY,
     });
     await expect(response.json()).resolves.toEqual({
       ok: true,
@@ -164,7 +165,28 @@ describe("hosted execution email callback routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_EMAIL_REPLY_ALIAS_INVALID",
-        message: "Hosted email reply alias registration requires a non-empty alias key.",
+        message: "Hosted email reply alias registration requires a current-format alias key.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("rejects reply-alias registration callbacks with malformed alias keys", async () => {
+    const response = await registerReplyAliasRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        aliasKey: "replyalias1234",
+      }),
+      path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_EMAIL_REPLY_ALIAS_INVALID",
+        message: "Hosted email reply alias registration requires a current-format alias key.",
         retryable: false,
       },
     });
@@ -201,7 +223,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        aliasKey: "replyalias1234",
+        aliasKey: VALID_REPLY_ALIAS_KEY,
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
@@ -214,7 +236,7 @@ describe("hosted execution email callback routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.readHostedMemberIdByReplyAliasLookupKey).toHaveBeenCalledWith({
       prisma: prismaClient,
-      replyAliasLookupKey: "replyalias1234",
+      replyAliasLookupKey: VALID_REPLY_ALIAS_KEY,
     });
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -229,7 +251,7 @@ describe("hosted execution email callback routes", () => {
   it("returns userId null for alias-route resolution when the alias lookup misses", async () => {
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        aliasKey: "replyalias1234",
+        aliasKey: VALID_REPLY_ALIAS_KEY,
         authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
@@ -253,7 +275,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        aliasKey: "replyalias1234",
+        aliasKey: VALID_REPLY_ALIAS_KEY,
         authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "attacker@example.com",
         hasRepeatedHeaderFrom: false,
@@ -267,7 +289,7 @@ describe("hosted execution email callback routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.readHostedMemberIdByReplyAliasLookupKey).toHaveBeenCalledWith({
       prisma: prismaClient,
-      replyAliasLookupKey: "replyalias1234",
+      replyAliasLookupKey: VALID_REPLY_ALIAS_KEY,
     });
     expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
@@ -280,7 +302,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        aliasKey: "replyalias1234",
+        aliasKey: VALID_REPLY_ALIAS_KEY,
       }),
       path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
@@ -327,7 +349,7 @@ describe("hosted execution email callback routes", () => {
 
       const response = await resolveRoute.POST(await createSignedCallbackRequest({
         body: JSON.stringify({
-          aliasKey: "replyalias1234",
+          aliasKey: VALID_REPLY_ALIAS_KEY,
           authenticatedSender: AUTHENTICATED_SENDER,
           envelopeFrom: "owner@example.com",
           hasRepeatedHeaderFrom: false,

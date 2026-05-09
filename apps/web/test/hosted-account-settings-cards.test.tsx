@@ -25,6 +25,26 @@ describe("HostedAccountSettingsCards", () => {
     expect(withPhone).toContain("Text Murph");
     expect(withPhone).toContain("sms:+15550100001");
   });
+
+  test("shows the private Murph email alias after the member has one", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          email: {
+            address: "member@example.com",
+            murphEmailAddress: "murph+u2-private-alias@mail.example.test",
+            verifiedAt: "2026-05-02T00:00:00.000Z",
+          },
+        },
+      }),
+    );
+
+    expect(markup).toContain("member@example.com");
+    expect(markup).toContain("Email murph+u2-private-alias@mail.example.test");
+    expect(markup).toContain("mailto:murph+u2-private-alias@mail.example.test");
+    expect(markup).not.toContain("murph@mail.withmurph.ai");
+  });
 });
 
 function makeAccountSnapshot(input: {

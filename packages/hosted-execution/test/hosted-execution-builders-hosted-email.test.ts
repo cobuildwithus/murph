@@ -18,6 +18,10 @@ import {
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+  createHostedEmailReplyAliasRoute,
+  createHostedEmailUserReplyAliasRoute,
+  isHostedEmailReplyAliasLookupKey,
+  normalizeHostedEmailReplyAliasLookupKey,
   parseHostedEmailReplyAliasRegistrationCallbackRequest,
   parseHostedEmailRouteResolutionCallbackRequest,
   parseHostedEmailRouteResolutionCallbackResponse,
@@ -433,6 +437,35 @@ describe("hosted execution wake builders", () => {
 });
 
 describe("hosted email helpers", () => {
+  it("creates stable current-format reply alias routes for a hosted user", async () => {
+    const route = await createHostedEmailUserReplyAliasRoute({
+      domain: "Mail.Example.TEST",
+      localPart: "Murph",
+      signingSecret: "test-email-signing-secret",
+      userId: " member_123 ",
+    });
+    const derivedAgain = await createHostedEmailReplyAliasRoute({
+      aliasKey: route.aliasKey,
+      domain: "mail.example.test",
+      localPart: "murph",
+      signingSecret: "test-email-signing-secret",
+    });
+
+    expect(route.aliasKey).toMatch(/^[0-9a-f]{32}$/u);
+    expect(route.token).toMatch(/^u2-[0-9a-z]{25}-[0-9a-z]{25}$/u);
+    expect(route.address).toBe(`murph+${route.token}@mail.example.test`);
+    expect(derivedAgain).toEqual(route);
+  });
+
+  it("normalizes and validates only current reply alias lookup keys", () => {
+    expect(normalizeHostedEmailReplyAliasLookupKey(
+      "  0123456789ABCDEF0123456789abcdef  ",
+    )).toBe("0123456789abcdef0123456789abcdef");
+    expect(isHostedEmailReplyAliasLookupKey("0123456789abcdef0123456789abcdef")).toBe(true);
+    expect(isHostedEmailReplyAliasLookupKey("0123456789abcdef")).toBe(false);
+    expect(isHostedEmailReplyAliasLookupKey("replyalias1234")).toBe(false);
+  });
+
   it("prefers and normalizes an explicit sender identity", () => {
     expect(resolveHostedEmailSenderIdentity({
       HOSTED_EMAIL_DOMAIN: "example.com",

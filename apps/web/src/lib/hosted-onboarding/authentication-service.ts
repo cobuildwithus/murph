@@ -19,6 +19,7 @@ import {
   syncHostedMemberVerifiedEmailAuthorization,
   updateHostedMemberPendingActivationTimeZoneIfActivationPending,
 } from "./hosted-member-store";
+import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
 import {
   projectHostedMemberRoutingState,
   syncHostedMemberTelegramRoutingBinding,
@@ -197,10 +198,14 @@ async function syncHostedPrivyBindings(input: {
   verifiedPrivyUser: HostedPrivyUser | null;
 }): Promise<void> {
   if (input.identity.email?.verifiedAt) {
+    const replyAlias = await createHostedMemberReplyAliasRoute({
+      memberId: input.memberId,
+    });
     await syncHostedMemberVerifiedEmailAuthorization({
       address: input.identity.email.address,
       memberId: input.memberId,
       prisma: input.prisma,
+      replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
       verifiedAt: new Date(input.identity.email.verifiedAt * 1000),
     });
   }

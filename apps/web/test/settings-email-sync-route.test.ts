@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
+  createHostedMemberReplyAliasRoute: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   nudgeHostedRunnerBestEffort: vi.fn(),
   prismaClient: {
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   requireActivePrivyMemberAuth: vi.fn(),
   sendHostedSignupWelcomeEmailForRecentMember: vi.fn(),
   upsertHostedMemberEmailAuthorization: vi.fn(),
+  upsertHostedMemberReplyAliasLookupKeyTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -25,6 +27,14 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
   upsertHostedMemberEmailAuthorization: mocks.upsertHostedMemberEmailAuthorization,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-email-reply-alias", () => ({
+  createHostedMemberReplyAliasRoute: mocks.createHostedMemberReplyAliasRoute,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  upsertHostedMemberReplyAliasLookupKeyTx: mocks.upsertHostedMemberReplyAliasLookupKeyTx,
 }));
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
@@ -124,7 +134,12 @@ describe("settings email sync route", () => {
     });
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
+    mocks.createHostedMemberReplyAliasRoute.mockResolvedValue({
+      address: "assistant+u2-alias-token@example.test",
+      replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
+    });
     mocks.upsertHostedMemberEmailAuthorization.mockResolvedValue({});
+    mocks.upsertHostedMemberReplyAliasLookupKeyTx.mockResolvedValue(undefined);
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({});
     mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
     mocks.sendHostedSignupWelcomeEmailForRecentMember.mockResolvedValue({
@@ -164,6 +179,14 @@ describe("settings email sync route", () => {
         address: "user@example.com",
         verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
       },
+    });
+    expect(mocks.createHostedMemberReplyAliasRoute).toHaveBeenCalledWith({
+      memberId: "member_123",
+    });
+    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
       emailLinked: true,
@@ -221,6 +244,11 @@ describe("settings email sync route", () => {
       prisma: mocks.prismaClient,
     });
     expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
+    });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
@@ -251,6 +279,11 @@ describe("settings email sync route", () => {
         address: "user@example.com",
         verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
       },
+    });
+    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
     });
   });
 

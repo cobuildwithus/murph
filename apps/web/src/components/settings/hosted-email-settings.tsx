@@ -19,6 +19,7 @@ export function HostedEmailSettings(props: {
   authenticated: boolean;
   changeFlow?: boolean;
   initialEmail?: HostedEmailSettingsInitialEmail | null;
+  murphEmailAddress?: string | null;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
   const emailInputRef = useRef<HTMLInputElement | null>(null);
@@ -57,6 +58,7 @@ export function HostedEmailSettings(props: {
         currentVerifiedEmail={controller.effectiveVerifiedEmail}
         emailAddress={controller.emailAddress}
         emailInputRef={emailInputRef}
+        murphEmailAddress={props.murphEmailAddress ?? null}
         canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
         isBusy={controller.isBusy}
         isSendingCode={controller.isSendingCode}

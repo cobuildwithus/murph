@@ -132,7 +132,10 @@ member or the fixed public sender route plus a trusted authenticated-sender
 verdict, stores the encrypted raw message, appends the canonical encrypted
 mailbox item through web, and attempts to start the same pointer-only nudge
 workflow through a signed web callback. Signed reply aliases are private routing
-capabilities; they do not prove SMTP sender identity.
+capabilities; they do not prove SMTP sender identity. Web may derive the same
+deterministic per-member alias as Cloudflare so settings can show the reachable
+address, but settings should only present the alias after web has persisted the
+matching reply-alias lookup key for route resolution.
 Raw provider bodies, raw email messages, message content, verification headers,
 provider secrets, and decrypted mailbox payloads must not be Vercel Workflow
 inputs or outputs. If the pointer workflow cannot be accepted after the mailbox

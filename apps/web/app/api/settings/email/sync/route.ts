@@ -2,10 +2,14 @@ import { getPrisma } from "@/src/lib/prisma";
 import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { createHostedMemberReplyAliasRoute } from "@/src/lib/hosted-onboarding/hosted-email-reply-alias";
 import {
   readHostedMemberEmailAuthorization,
   upsertHostedMemberEmailAuthorization,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
+  upsertHostedMemberReplyAliasLookupKeyTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import {
@@ -45,6 +49,9 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const verifiedAtDate = new Date(verifiedAt);
   const occurredAt = new Date().toISOString();
+  const replyAlias = await createHostedMemberReplyAliasRoute({
+    memberId: auth.member.id,
+  });
   const channelsUpdated = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, auth.member.id);
     const currentAuthorization = await readHostedMemberEmailAuthorization({
@@ -52,26 +59,39 @@ export const POST = withJsonError(async (request: Request) => {
       prisma: tx,
     });
 
-    if (hostedEmailAuthorizationMatchesVerifiedEmail({
+    const emailAuthorizationMatches = hostedEmailAuthorizationMatchesVerifiedEmail({
       address: verifiedEmail.address,
       currentAuthorization,
       verifiedAt: verifiedAtDate,
-    })) {
+    });
+
+    if (!emailAuthorizationMatches) {
+      await upsertHostedMemberEmailAuthorization({
+        directPublicSender: {
+          address: verifiedEmail.address,
+          authorizedAt: verifiedAtDate,
+        },
+        memberId: auth.member.id,
+        prisma: tx,
+        verifiedEmail: {
+          address: verifiedEmail.address,
+          verifiedAt: verifiedAtDate,
+        },
+      });
+    }
+
+    if (replyAlias) {
+      await upsertHostedMemberReplyAliasLookupKeyTx({
+        memberId: auth.member.id,
+        prisma: tx,
+        replyAliasLookupKey: replyAlias.replyAliasLookupKey,
+      });
+    }
+
+    if (emailAuthorizationMatches) {
       return false;
     }
 
-    await upsertHostedMemberEmailAuthorization({
-      directPublicSender: {
-        address: verifiedEmail.address,
-        authorizedAt: verifiedAtDate,
-      },
-      memberId: auth.member.id,
-      prisma: tx,
-      verifiedEmail: {
-        address: verifiedEmail.address,
-        verifiedAt: verifiedAtDate,
-      },
-    });
     await enqueueHostedMemberChannelsUpdatedTx({
       emailLinked: true,
       memberId: auth.member.id,

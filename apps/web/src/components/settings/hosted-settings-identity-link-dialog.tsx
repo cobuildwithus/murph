@@ -85,6 +85,7 @@ export function HostedSettingsIdentityLinkDialog({
                 authenticated
                 changeFlow={hasExisting}
                 initialEmail={toInitialEmail(account.email)}
+                murphEmailAddress={account.email.murphEmailAddress}
                 onSynced={closeAndRefresh}
               />
             ) : null}

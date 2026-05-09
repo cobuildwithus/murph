@@ -1,4 +1,7 @@
-import { parseHostedEmailReplyAliasRegistrationCallbackRequest } from "@murphai/hosted-execution/hosted-email";
+import {
+  normalizeHostedEmailReplyAliasLookupKey,
+  parseHostedEmailReplyAliasRegistrationCallbackRequest,
+} from "@murphai/hosted-execution/hosted-email";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -22,12 +25,12 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedEmailReplyAliasRegistrationCallbackRequest(
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
-  const aliasKey = body.aliasKey?.trim() ?? "";
+  const aliasKey = normalizeHostedEmailReplyAliasLookupKey(body.aliasKey);
 
   if (!aliasKey) {
     throw hostedOnboardingError({
       code: "HOSTED_EMAIL_REPLY_ALIAS_INVALID",
-      message: "Hosted email reply alias registration requires a non-empty alias key.",
+      message: "Hosted email reply alias registration requires a current-format alias key.",
       httpStatus: 400,
     });
   }

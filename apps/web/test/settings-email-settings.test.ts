@@ -129,8 +129,25 @@ describe("HostedEmailSettings", () => {
     assert.match(markup, /id="settings-email-address"[^>]*value="verified@example\.com"/);
     assert.doesNotMatch(markup, /stale@example\.com/);
     assert.match(markup, /Save verified email/);
-    assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai"/);
-    assert.match(markup, /Email murph@mail\.withmurph\.ai/);
+    assert.doesNotMatch(markup, /murph@mail\.withmurph\.ai/);
+  });
+
+  it("shows the server-provided private Murph email alias when one is ready", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+
+    const markup = renderToStaticMarkup(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail: {
+          address: "verified@example.com",
+          verifiedAt: 1741194420,
+        },
+        murphEmailAddress: "murph+u2-private-alias@mail.example.test",
+      }),
+    );
+
+    assert.match(markup, /href="mailto:murph\+u2-private-alias@mail\.example\.test"/);
+    assert.match(markup, /Email murph\+u2-private-alias@mail\.example\.test/);
   });
 
   it("does not use Privy client user state as the displayed email authority", async () => {
