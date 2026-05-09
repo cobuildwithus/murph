@@ -521,6 +521,30 @@ test.sequential(
       await runSliceCli<unknown>(['init', '--timezone', 'UTC', '--vault', vaultRoot])
       const experiment = await createActiveSaunaExperiment(vaultRoot, 'sauna-window')
 
+      const unlinked = await runSliceCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--occurred-at',
+        '2026-04-20T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(unlinked.ok, true)
+      assert.equal(requireData(unlinked).experimentId, null)
+      assert.equal(requireData(unlinked).experimentSlug, null)
+      assert.equal(requireData(unlinked).experimentLinkMode, null)
+
+      const shownUnlinked = await runSliceCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(unlinked).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shownUnlinked.ok, true)
+      assertEntityExperimentLink(requireData(shownUnlinked).entity, null)
+
       const blocked = await runSliceCli<unknown>([
         'intervention',
         'add',
@@ -551,6 +575,48 @@ test.sequential(
       assert.equal(requireData(linked).experimentId, experiment.experimentId)
       assert.equal(requireData(linked).experimentSlug, 'sauna-window')
       assert.equal(requireData(linked).experimentLinkMode, 'explicit')
+
+      const unusedOverride = await runSliceCli<unknown>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--allow-out-of-window',
+        '--occurred-at',
+        '2026-04-20T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(unusedOverride.ok, false)
+      assert.match(unusedOverride.error.message ?? '', /only applies with --experiment/u)
+
+      const explicitSkipConflict = await runSliceCli<unknown>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--experiment',
+        'sauna-window',
+        '--skip-experiment-link',
+        '--occurred-at',
+        '2026-04-20T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(explicitSkipConflict.ok, false)
+      assert.match(explicitSkipConflict.error.message ?? '', /either --experiment/u)
+
+      const skipOverrideConflict = await runSliceCli<unknown>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--skip-experiment-link',
+        '--allow-out-of-window',
+        '--occurred-at',
+        '2026-04-20T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(skipOverrideConflict.ok, false)
+      assert.match(skipOverrideConflict.error.message ?? '', /either --allow-out-of-window/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -585,6 +651,56 @@ test.sequential(
         vaultRoot,
       ])
       assert.equal(created.ok, true)
+
+      const outOfWindow = await runSliceCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--skip-experiment-link',
+        '--occurred-at',
+        '2026-04-20T18:00:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(outOfWindow.ok, true)
+
+      const attachOutOfWindowBlocked = await runSliceCli<unknown>([
+        'experiment',
+        'session',
+        'attach',
+        'sauna-one',
+        requireData(outOfWindow).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(attachOutOfWindowBlocked.ok, false)
+      assert.match(
+        attachOutOfWindowBlocked.error.message ?? '',
+        /outside the intervention window/u,
+      )
+
+      const attachOutOfWindow = await runSliceCli<{
+        experimentId: string
+        experimentSlug: string
+        linked: boolean
+      }>([
+        'experiment',
+        'session',
+        'attach',
+        'sauna-one',
+        requireData(outOfWindow).eventId,
+        '--allow-out-of-window',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(
+        attachOutOfWindow.ok,
+        true,
+        attachOutOfWindow.ok ? undefined : attachOutOfWindow.error.message,
+      )
+      assert.equal(requireData(attachOutOfWindow).experimentId, experiments['sauna-one'])
+      assert.equal(requireData(attachOutOfWindow).experimentSlug, 'sauna-one')
+      assert.equal(requireData(attachOutOfWindow).linked, true)
 
       const attached = await runSliceCli<{
         eventId: string
