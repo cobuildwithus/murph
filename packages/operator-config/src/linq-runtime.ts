@@ -526,7 +526,11 @@ async function fetchLinqResponse(input: {
         method: input.method,
         path: input.path,
         timedOut,
-        retryable: shouldRetryLinqTransportFailure(input.method, input.allowDeleteRetries),
+        retryable: shouldRetryLinqTransportFailure(
+          input.method,
+          input.allowDeleteRetries,
+          input.details.hasIdempotencyKey === true,
+        ),
       }),
     fetchImplementation: input.fetchImplementation,
     headers: input.headers,
@@ -555,7 +559,12 @@ async function createLinqHttpError(
       failureStage: 'http',
       method,
       path,
-      retryable: shouldRetryLinqHttpStatus(method, response.status, allowDeleteRetries),
+      retryable: shouldRetryLinqHttpStatus(
+        method,
+        response.status,
+        allowDeleteRetries,
+        details.hasIdempotencyKey === true,
+      ),
       status: response.status,
     },
   )
@@ -615,13 +624,18 @@ function shouldRetryLinqHttpStatus(
   method: LinqHttpMethod,
   status: number,
   allowDeleteRetries = false,
+  hasIdempotencyKey = false,
 ): boolean {
   if (status === 429) {
     return method !== 'DELETE' || allowDeleteRetries
   }
 
   return (
-    (method === 'GET' || (method === 'DELETE' && allowDeleteRetries)) &&
+    (
+      method === 'GET' ||
+      (method === 'POST' && hasIdempotencyKey) ||
+      (method === 'DELETE' && allowDeleteRetries)
+    ) &&
     (status === 408 || status >= 500)
   )
 }
@@ -629,8 +643,11 @@ function shouldRetryLinqHttpStatus(
 function shouldRetryLinqTransportFailure(
   method: LinqHttpMethod,
   allowDeleteRetries = false,
+  hasIdempotencyKey = false,
 ): boolean {
-  return method === 'GET' || (method === 'DELETE' && allowDeleteRetries)
+  return method === 'GET' ||
+    (method === 'POST' && hasIdempotencyKey) ||
+    (method === 'DELETE' && allowDeleteRetries)
 }
 
 async function waitForLinqRetryDelay(

@@ -1971,10 +1971,17 @@ export class HostedUserRunner {
       ? workspace.version === input.expectedWorkspaceVersion
       : input.expectedWorkspaceVersion === "0"
         && latestRecord.deferredCheckpointRequired;
-    const recordWakePreemptsIdleCheckpoint =
+    const recordWakeWouldPreemptIdleCheckpoint =
       latestRecord.nextWakeAt && idleCheckpointDueAt
         ? Date.parse(latestRecord.nextWakeAt) <= Date.parse(idleCheckpointDueAt)
         : Boolean(latestRecord.nextWakeAt);
+    const deferredIdleCheckpointShouldDrainFirst =
+      latestRecord.deferredCheckpointRequired
+      && idleCheckpointDueAt !== null
+      && Date.parse(idleCheckpointDueAt) <= Date.now();
+    const recordWakePreemptsIdleCheckpoint =
+      recordWakeWouldPreemptIdleCheckpoint
+      && !deferredIdleCheckpointShouldDrainFirst;
     if (
       !workspaceVersionMatches
       || recordWakePreemptsIdleCheckpoint

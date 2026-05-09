@@ -28,12 +28,14 @@ Done:
 - Confirmed the live reply engine is currently reaching the assistant provider but failing with `ASSISTANT_CODEX_USAGE_LIMIT`; this is separate from the mailbox/read durability fix and points at the configured OpenAI provider quota/billing boundary.
 - Found a fourth live alarm risk: optional browser-vault refresh continuation could replace an earlier runner-owned checkpoint alarm when Durable Object `getAlarm()` reported no current alarm.
 - Patched browser-vault refresh scheduling to read runner state and yield to earlier or due runner alarms, with a focused regression covering a due idle-shutdown checkpoint plus empty `getAlarm()`.
+- After the deploy, confirmed the lagged runner still replayed from the old checkpoint and found a fifth alarm-ordering bug: a deferred idle checkpoint that was already due could lose to an already-due retry wake, and that non-idle wake cleared the checkpoint before it could commit.
+- Found the Linq reply delivery failure was also being made terminal: idempotent Linq POST sends were marked non-retryable on transient 5xx/transport failures, so one provider/effect 502 could permanently fail the outbox reply.
 
 Now:
-- Run required verification, commit/push the browser-vault alarm ordering fix, deploy immediately, and watch the lagged hosted mailbox recover.
+- Patch and verify the due-deferred-checkpoint priority and idempotent Linq send retryability, then commit/push and deploy immediately.
 
 Next:
-- Verify cold/warm reply scenarios after provider capacity is available and run required final checks/audits.
+- Watch the lagged hosted mailbox recover, then verify cold/warm iMessage reply scenarios after provider capacity is available.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: live post-deploy iMessage reply latency until the fixed Worker is deployed, the lagged runner drains, and the assistant provider stops returning capacity/quota failure.
@@ -42,6 +44,7 @@ Working set (files/ids/commands):
 - `apps/cloudflare/src/**`
 - `packages/assistant-runtime/src/hosted-runtime/**`
 - `packages/hosted-execution/src/**`
+- `packages/operator-config/src/linq-runtime.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `pnpm cf:deploy:immediate`
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts`

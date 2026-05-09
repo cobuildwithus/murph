@@ -804,6 +804,70 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
   )
 
   vi.useFakeTimers()
+  const idempotentSendRequests: string[] = []
+  const idempotentSend = sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      idempotencyKey: 'reply-key-1',
+      message: 'hello',
+    },
+    {
+      env: {
+        LINQ_API_TOKEN: 'token',
+      },
+      fetchImplementation: async (_url, init) => {
+        idempotentSendRequests.push(init.body ?? '')
+        if (idempotentSendRequests.length === 1) {
+          return createJsonResponse(
+            { message: 'temporarily unavailable' },
+            { status: 500 },
+          )
+        }
+
+        return createJsonResponse({
+          message: {
+            id: 'msg-retry-succeeded',
+          },
+        })
+      },
+    },
+  )
+  await vi.advanceTimersByTimeAsync(1_000)
+  assert.deepEqual(await idempotentSend, {
+    message: {
+      id: 'msg-retry-succeeded',
+    },
+  })
+  assert.equal(idempotentSendRequests.length, 2)
+  assert.deepEqual(
+    idempotentSendRequests.map((body) => JSON.parse(body)),
+    [
+      {
+        message: {
+          idempotency_key: 'reply-key-1',
+          parts: [
+            {
+              type: 'text',
+              value: 'hello',
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          idempotency_key: 'reply-key-1',
+          parts: [
+            {
+              type: 'text',
+              value: 'hello',
+            },
+          ],
+        },
+      },
+    ],
+  )
+
+  vi.useFakeTimers()
   const timeoutAssertion = assert.rejects(
     sendLinqChatMessage(
       {
