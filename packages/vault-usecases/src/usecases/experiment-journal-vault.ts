@@ -2085,6 +2085,7 @@ async function buildRunPlanForOnboardingApply(
   input: ApplyExperimentOnboardingRecordInput,
   existing: ExperimentFrontmatterValue['runPlan'],
 ): Promise<ExperimentRunPlanValue | undefined> {
+  const clearBaselineWindow = input.baselineDays === 0
   const datePatch = buildRunPlanDatePatch(input)
   const logging = buildRunLoggingForOnboardingApply(input, existing?.logging)
   const schedule = await buildRunScheduleForOnboardingApply(input)
@@ -2117,16 +2118,33 @@ async function buildRunPlanForOnboardingApply(
     patch.stopConditions = stopConditions
   }
 
-  if (Object.keys(patch).length === 0) {
+  if (Object.keys(patch).length === 0 && (!clearBaselineWindow || existing === undefined)) {
     return undefined
   }
 
+  const baseRunPlan = clearBaselineWindow
+    ? omitRunBaselineWindow(existing)
+    : existing
+
   return experimentRunPlanSchema.parse(
     compactObject({
-      ...(existing ?? {}),
+      ...(baseRunPlan ?? {}),
       ...patch,
     }),
   )
+}
+
+function omitRunBaselineWindow(
+  runPlan: ExperimentFrontmatterValue['runPlan'],
+): ExperimentFrontmatterValue['runPlan'] {
+  if (runPlan === undefined) {
+    return undefined
+  }
+
+  const { baselineStart, baselineEnd, ...withoutRunBaselineWindow } = runPlan
+  void baselineStart
+  void baselineEnd
+  return withoutRunBaselineWindow
 }
 
 async function buildRunScheduleForOnboardingApply(

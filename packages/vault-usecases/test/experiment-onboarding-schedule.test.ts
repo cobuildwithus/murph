@@ -90,6 +90,82 @@ test("applyExperimentOnboardingRecord writes structured run-plan schedules", asy
   });
 });
 
+test("applyExperimentOnboardingRecord clears run baseline windows with zero baseline days", async () => {
+  const experimentEntity = {
+    entityId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+    family: "experiment",
+    kind: "experiment",
+    title: "Psyllium LDL",
+    status: "active",
+    occurredAt: null,
+    date: null,
+    path: "bank/experiments/psyllium-ldl.md",
+    body: "---\n",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+      slug: "psyllium-ldl",
+      status: "active",
+      title: "Psyllium LDL",
+      startedOn: "2026-05-09",
+      runPlan: {
+        baselineStart: "2026-05-02",
+        baselineEnd: "2026-05-08",
+        interventionStart: "2026-05-09",
+        interventionEnd: "2026-08-01",
+        modality: "psyllium",
+      },
+    },
+    links: [],
+    relatedIds: [],
+    stream: null,
+    experimentSlug: "psyllium-ldl",
+    tags: [],
+    frontmatter: null,
+  };
+  const queryRuntime = {
+    readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
+    lookupEntityById: vi.fn(() => experimentEntity),
+  };
+  const updateExperiment = vi.fn(
+    async (_input: { runPlan?: Record<string, unknown> }) => ({
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+      slug: "psyllium-ldl",
+      relativePath: "bank/experiments/psyllium-ldl.md",
+      status: "active",
+      updated: true as const,
+    }),
+  );
+
+  const module = await importWithMocks<
+    typeof import("../src/usecases/experiment-journal-vault.ts")
+  >("../src/usecases/experiment-journal-vault.ts", {
+    "../src/query-runtime.js": () => ({
+      loadQueryRuntime: vi.fn(async () => queryRuntime),
+    }),
+    "../src/runtime-import.js": () => ({
+      loadRuntimeModule: vi.fn(async (specifier: string) => {
+        assert.equal(specifier, "@murphai/core");
+        return { updateExperiment };
+      }),
+    }),
+  });
+
+  await module.applyExperimentOnboardingRecord({
+    vault: "test-vault",
+    lookup: "psyllium-ldl",
+    baselineDays: 0,
+  });
+
+  const updateInput = updateExperiment.mock.calls[0]?.[0];
+  assert.ok(updateInput);
+  assert.equal("baselineStart" in (updateInput.runPlan ?? {}), false);
+  assert.equal("baselineEnd" in (updateInput.runPlan ?? {}), false);
+  assert.equal(updateInput.runPlan?.interventionStart, "2026-05-09");
+  assert.equal(updateInput.runPlan?.interventionEnd, "2026-08-01");
+});
+
 test("applyExperimentOnboardingRecord rejects legacy string schedule payloads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-onboarding-schedule-"));
   const schedulePayloadPath = path.join(vaultRoot, "schedule.json");

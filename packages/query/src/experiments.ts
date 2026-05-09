@@ -660,6 +660,10 @@ function buildCoverageSummary(input: {
   let status: ExperimentCoverageStatus = "insufficient";
 
   const hasCompleteMetricWindow = hasAnalysisMetricWindow(input.frontmatter);
+  const hasPointMeasurementData =
+    hasCompletePrimaryPointMeasurementWindow(input.frontmatter) &&
+    (input.primarySignal?.baselineDayCount ?? 0) >= 1 &&
+    (input.primarySignal?.interventionDayCount ?? 0) >= 1;
 
   if (
     input.primarySignal !== null &&
@@ -667,6 +671,11 @@ function buildCoverageSummary(input: {
     primaryMetricDaysAvailable === 0
   ) {
     status = "no_wearable_data";
+  } else if (
+    hasPointMeasurementData &&
+    (input.progressPhase === "review_due" || input.progressPhase === "completed")
+  ) {
+    status = "ready_for_review";
   } else if (
     (input.progressPhase === "review_due" || input.progressPhase === "completed") &&
     (input.primarySignal?.baselineDayCount ?? 0) >= 3 &&
@@ -714,7 +723,10 @@ function buildSetupReadiness(
   if (!runPlan) {
     blockingReasons.push("missing_run_plan");
   }
-  if (!runPlan?.baselineStart || !runPlan.baselineEnd) {
+  if (
+    !hasCompletePrimaryPointMeasurementWindow(frontmatter) &&
+    (!runPlan?.baselineStart || !runPlan.baselineEnd)
+  ) {
     blockingReasons.push("missing_baseline_window");
   }
   if (!runPlan?.interventionStart || !runPlan.interventionEnd) {
@@ -1164,12 +1176,8 @@ function hasAnalysisMetricWindow(frontmatter: ExperimentFrontmatter): boolean {
     return false;
   }
 
-  if (hasMeasurementPlanForBiomarker(frontmatter.analysisPlan, primaryBiomarkerKey)) {
-    return (
-      hasMeasurementAnchorForRole(frontmatter.analysisPlan, primaryBiomarkerKey, "baseline") &&
-      (hasMeasurementAnchorForRole(frontmatter.analysisPlan, primaryBiomarkerKey, "followup") ||
-        hasPlannedMeasurementForRole(frontmatter.analysisPlan, primaryBiomarkerKey, "followup"))
-    );
+  if (hasCompletePrimaryPointMeasurementWindow(frontmatter)) {
+    return true;
   }
 
   if (
@@ -1184,17 +1192,27 @@ function hasAnalysisMetricWindow(frontmatter: ExperimentFrontmatter): boolean {
   return false;
 }
 
-function hasMeasurementPlanForBiomarker(
-  analysisPlan: QueryExperimentFrontmatter["analysisPlan"] | undefined,
-  biomarkerKey: string,
+function hasCompletePrimaryPointMeasurementWindow(
+  frontmatter: ExperimentFrontmatter,
 ): boolean {
-  return (
-    (analysisPlan?.measurementAnchors ?? []).some((anchor) =>
-      anchor.biomarkerKeys.includes(biomarkerKey)
-    ) ||
-    (analysisPlan?.plannedMeasurements ?? []).some((measurement) =>
-      measurement.biomarkerKeys.includes(biomarkerKey)
-    )
+  const primaryBiomarkerKey = frontmatter.analysisPlan?.primaryBiomarkerKey;
+  return Boolean(
+    primaryBiomarkerKey &&
+      hasMeasurementAnchorForRole(
+        frontmatter.analysisPlan,
+        primaryBiomarkerKey,
+        "baseline",
+      ) &&
+      (hasMeasurementAnchorForRole(
+        frontmatter.analysisPlan,
+        primaryBiomarkerKey,
+        "followup",
+      ) ||
+        hasPlannedMeasurementForRole(
+          frontmatter.analysisPlan,
+          primaryBiomarkerKey,
+          "followup",
+        )),
   );
 }
 
@@ -1387,18 +1405,15 @@ function resolveProgressPhase(
     return "planned";
   }
 
-  if (
-    !frontmatter.runPlan?.baselineStart ||
-    !frontmatter.runPlan.baselineEnd ||
-    !frontmatter.runPlan.interventionStart ||
-    !frontmatter.runPlan.interventionEnd
-  ) {
+  const runPlan = frontmatter.runPlan;
+  if (!runPlan?.interventionStart || !runPlan.interventionEnd) {
     return "planned";
   }
 
-  const interventionStart = frontmatter.runPlan?.interventionStart;
-  const interventionEnd = frontmatter.runPlan?.interventionEnd;
-  const baselineEnd = frontmatter.runPlan?.baselineEnd;
+  const interventionStart = runPlan.interventionStart;
+  const interventionEnd = runPlan.interventionEnd;
+  const baselineStart = runPlan.baselineStart;
+  const baselineEnd = runPlan.baselineEnd;
 
   if (interventionEnd && asOf > interventionEnd) {
     return "review_due";
@@ -1408,11 +1423,11 @@ function resolveProgressPhase(
     return "intervention";
   }
 
-  if (baselineEnd && asOf <= baselineEnd) {
+  if (baselineStart && baselineEnd && asOf >= baselineStart && asOf <= baselineEnd) {
     return "baseline";
   }
 
-  return "baseline";
+  return "planned";
 }
 
 function findExperimentEvents(
@@ -1492,16 +1507,12 @@ function computeExpectedSessionsByNow(
 }
 
 function dayInRun(frontmatter: ExperimentFrontmatter, asOf: string): number | null {
-  if (
-    !frontmatter.runPlan?.baselineStart ||
-    !frontmatter.runPlan.baselineEnd ||
-    !frontmatter.runPlan.interventionStart ||
-    !frontmatter.runPlan.interventionEnd
-  ) {
+  const runPlan = frontmatter.runPlan;
+  if (!runPlan?.interventionStart || !runPlan.interventionEnd) {
     return null;
   }
 
-  const start = frontmatter.runPlan?.baselineStart;
+  const start = runPlan.baselineStart ?? runPlan.interventionStart;
   if (!start || asOf < start) {
     return null;
   }
