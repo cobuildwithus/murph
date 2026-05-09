@@ -137,17 +137,22 @@ async function readAssistantDiagnosticsSnapshotAtPath(
   paths: AssistantStatePaths,
   snapshotPath: string,
 ): Promise<AssistantDiagnosticsSnapshot> {
+  let raw: string | null = null
   try {
-    const raw = await readFile(snapshotPath, 'utf8')
+    raw = await readFile(snapshotPath, 'utf8')
     return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (!isMissingFileError(error)) {
-      await quarantineAssistantStateFile({
+      const quarantine = await quarantineAssistantStateFile({
         artifactKind: 'diagnostics-snapshot',
         error,
+        ...(raw === null ? {} : { expectedContent: raw }),
         filePath: snapshotPath,
         paths,
       }).catch(() => undefined)
+      if (quarantine === null) {
+        return await readAssistantDiagnosticsSnapshotAtPath(paths, snapshotPath)
+      }
       const recovered = createAssistantDiagnosticsSnapshot(new Date().toISOString())
       await writeJsonFileAtomic(snapshotPath, recovered)
       await appendAssistantRuntimeEventAtPaths(paths, {

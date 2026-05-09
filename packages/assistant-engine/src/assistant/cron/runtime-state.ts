@@ -72,8 +72,9 @@ export async function readAssistantCronCanonicalRuntimeStore(
 ): Promise<AssistantCronCanonicalRuntimeStore> {
   await ensureAssistantStateDirectory(paths.cronDirectory)
 
+  let raw: string | null = null
   try {
-    const raw = await readFile(paths.cronAutomationStatePath, 'utf8')
+    raw = await readFile(paths.cronAutomationStatePath, 'utf8')
     return normalizeAssistantCronCanonicalRuntimeStore(JSON.parse(raw), policy)
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -83,6 +84,7 @@ export async function readAssistantCronCanonicalRuntimeStore(
     await quarantineAssistantStateFile({
       artifactKind: 'cron-store',
       error,
+      ...(raw === null ? {} : { expectedContent: raw }),
       filePath: paths.cronAutomationStatePath,
       paths,
     }).catch(() => undefined)

@@ -8,7 +8,10 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { listAssistantQuarantineEntriesAtPaths } from '../src/assistant/quarantine.ts'
+import {
+  listAssistantQuarantineEntriesAtPaths,
+  quarantineAssistantStateFile,
+} from '../src/assistant/quarantine.ts'
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
 import {
   appendAssistantTranscriptEntriesWithRefs,
@@ -38,6 +41,8 @@ import { createTempVaultContext } from './test-helpers.ts'
 const tempRoots: string[] = []
 
 afterEach(async () => {
+  vi.useRealTimers()
+  vi.doUnmock('../src/assistant/quarantine.js')
   vi.doUnmock('../src/assistant/shared.ts')
   vi.resetModules()
   vi.restoreAllMocks()
@@ -491,6 +496,32 @@ describe('assistant store persistence seams', () => {
     })
   })
 
+  it('reads session index updates written outside the current process', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-indexes-external-')
+    await ensureAssistantState(paths)
+
+    await readAssistantIndexStore(paths)
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {
+        external: 'session-external',
+      },
+      conversationKeys: {
+        'telegram:user-1:thread-external': 'session-external',
+      },
+    }))
+
+    await expect(readAssistantIndexStore(paths)).resolves.toEqual({
+      version: 1,
+      aliases: {
+        external: 'session-external',
+      },
+      conversationKeys: {
+        'telegram:user-1:thread-external': 'session-external',
+      },
+    })
+  })
+
   it('rebuilds corrupted index stores from durable sessions and skips corrupted sessions as missing', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-index-rebuild-')
     await ensureAssistantState(paths)
@@ -755,6 +786,53 @@ describe('assistant store persistence seams', () => {
     )
   })
 
+  it('rereads automation state when quarantine sees a concurrently repaired file', async () => {
+    vi.resetModules()
+    const repairedState = {
+      version: 1,
+      autoReply: [
+        {
+          channel: 'telegram',
+          enabledAt: '2026-04-08T00:08:00.000Z',
+          eligibleAfter: null,
+        },
+      ],
+      updatedAt: '2026-04-08T00:09:00.000Z',
+    }
+    let automationStatePath = ''
+    const quarantineAssistantStateFile = vi.fn(async () => {
+      await writeFile(automationStatePath, JSON.stringify(repairedState), 'utf8')
+      return null
+    })
+    vi.doMock('../src/assistant/quarantine.js', async () => {
+      const actual = await vi.importActual<
+        typeof import('../src/assistant/quarantine.ts')
+      >('../src/assistant/quarantine.ts')
+      return {
+        ...actual,
+        quarantineAssistantStateFile,
+      }
+    })
+    const persistence = await import('../src/assistant/store/persistence.ts')
+    const pathsModule = await import('../src/assistant/store/paths.ts')
+    const context = await createTempVaultContext(
+      'assistant-store-persistence-automation-repaired-',
+    )
+    tempRoots.push(context.parentRoot)
+    const paths = pathsModule.resolveAssistantStatePaths(context.vaultRoot)
+    automationStatePath = paths.automationStatePath
+    await persistence.ensureAssistantState(paths)
+    await writeFile(paths.automationStatePath, '{bad-automation', 'utf8')
+
+    await expect(persistence.readAutomationState(paths)).resolves.toEqual(
+      repairedState,
+    )
+    expect(quarantineAssistantStateFile).toHaveBeenCalledOnce()
+    await expect(readFile(paths.automationStatePath, 'utf8')).resolves.toEqual(
+      JSON.stringify(repairedState),
+    )
+  })
+
   it('updates automation state from the durable file instead of a stale process cache', async () => {
     const context = await createTempVaultContext('assistant-store-persistence-automation-fresh-')
     tempRoots.push(context.parentRoot)
@@ -848,6 +926,69 @@ describe('assistant store persistence seams', () => {
     await expect(readFile(quarantines[0]!.quarantinedPath, 'utf8')).resolves.toContain(
       '"adapter":"unsupported-provider"',
     )
+  })
+
+  it('uses unique quarantine payload names when basenames and timestamps collide', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T04:05:06.789Z'))
+    const paths = await createAssistantPaths('assistant-store-persistence-quarantine-collision-')
+    await ensureAssistantState(paths)
+    const firstRoot = path.join(paths.assistantStateRoot, 'collision-one')
+    const secondRoot = path.join(paths.assistantStateRoot, 'collision-two')
+    await mkdir(firstRoot, { recursive: true })
+    await mkdir(secondRoot, { recursive: true })
+    const firstPath = path.join(firstRoot, 'session.json')
+    const secondPath = path.join(secondRoot, 'session.json')
+    await writeFile(firstPath, 'first corrupt payload', 'utf8')
+    await writeFile(secondPath, 'second corrupt payload', 'utf8')
+
+    const first = await quarantineAssistantStateFile({
+      artifactKind: 'session',
+      error: new Error('first parse failure'),
+      expectedContent: 'first corrupt payload',
+      filePath: firstPath,
+      paths,
+    })
+    const second = await quarantineAssistantStateFile({
+      artifactKind: 'session',
+      error: new Error('second parse failure'),
+      expectedContent: 'second corrupt payload',
+      filePath: secondPath,
+      paths,
+    })
+
+    expect(first?.quarantinedPath).toBeTruthy()
+    expect(second?.quarantinedPath).toBeTruthy()
+    expect(first?.quarantinedPath).not.toBe(second?.quarantinedPath)
+    await expect(readFile(first!.quarantinedPath, 'utf8')).resolves.toBe(
+      'first corrupt payload',
+    )
+    await expect(readFile(second!.quarantinedPath, 'utf8')).resolves.toBe(
+      'second corrupt payload',
+    )
+  })
+
+  it('skips quarantine when the source file no longer matches the failed read', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-quarantine-replaced-')
+    await ensureAssistantState(paths)
+    const sessionPath = resolveAssistantSessionPath(paths, 'session-repaired')
+    await writeFile(sessionPath, 'corrupt session payload', 'utf8')
+    await writeFile(sessionPath, JSON.stringify(createSession({
+      sessionId: 'session-repaired',
+    })), 'utf8')
+
+    await expect(quarantineAssistantStateFile({
+      artifactKind: 'session',
+      error: new Error('parse failed before repair'),
+      expectedContent: 'corrupt session payload',
+      filePath: sessionPath,
+      paths,
+    })).resolves.toBeNull()
+
+    await expect(readFile(sessionPath, 'utf8')).resolves.toContain('session-repaired')
+    await expect(listAssistantQuarantineEntriesAtPaths(paths, {
+      artifactKind: 'session',
+    })).resolves.toEqual([])
   })
 })
 

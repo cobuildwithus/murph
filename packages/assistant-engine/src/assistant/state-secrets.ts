@@ -60,9 +60,10 @@ export async function readAssistantSessionSecrets(input: {
 }): Promise<AssistantSessionSecrets | null> {
   const secretsPath = resolveAssistantSessionSecretsPath(input.paths, input.sessionId)
   let secrets: AssistantSessionSecrets
+  let raw: string | null = null
 
   try {
-    const raw = await readFile(secretsPath, 'utf8')
+    raw = await readFile(secretsPath, 'utf8')
     secrets = assistantSessionSecretsSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -72,6 +73,7 @@ export async function readAssistantSessionSecrets(input: {
     await quarantineAssistantStateFile({
       artifactKind: 'session',
       error,
+      ...(raw === null ? {} : { expectedContent: raw }),
       filePath: secretsPath,
       paths: input.paths,
     }).catch(() => undefined)
@@ -94,6 +96,7 @@ export async function readAssistantSessionSecrets(input: {
     await quarantineAssistantStateFile({
       artifactKind: 'session',
       error,
+      ...(raw === null ? {} : { expectedContent: raw }),
       filePath: secretsPath,
       paths: input.paths,
     }).catch(() => undefined)

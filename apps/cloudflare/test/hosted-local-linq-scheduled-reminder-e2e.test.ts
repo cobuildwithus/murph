@@ -15,14 +15,11 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   sha256HostedBundleHex,
-  snapshotHostedBundleRoots,
+  snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
-import {
-  saveHostedAssistantConfig,
-} from "@murphai/operator-config/operator-config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -44,7 +41,6 @@ const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
 const scheduledReminderTimes = resolveScheduledReminderTimes();
 const productionLikeAssistantModel = "gpt-5.5";
-const hostedAssistantProfileId = "platform-default";
 const hostedLocalWorkerRestartBody = "Your worker restarted mid-request.";
 const hostedLocalWorkerRestartMaxRetries = 4;
 
@@ -171,7 +167,6 @@ async function createScheduledReminderSnapshot(): Promise<{
   const operatorHomeRoot = `${vaultRoot}-operator-home`;
   cleanupPaths.push(vaultRoot, operatorHomeRoot);
   await writeSyntheticVaultMetadata(vaultRoot);
-  await writeSyntheticHostedAssistantConfig(operatorHomeRoot);
   await upsertAutomation({
     automationId: "automation_01JX8VBQY2M5ZBV64ZP4N1DRBB",
     continuityPolicy: "preserve",
@@ -196,26 +191,14 @@ async function createScheduledReminderSnapshot(): Promise<{
     vaultRoot,
   });
 
-  const bytes = await snapshotHostedBundleRoots({
-    kind: "vault",
-    roots: [
-      {
-        root: vaultRoot,
-        rootKey: "vault",
-      },
-      {
-        root: operatorHomeRoot,
-        rootKey: "operator-home",
-      },
-    ],
+  const snapshot = await snapshotHostedExecutionContext({
+    operatorHomeRoot,
+    vaultRoot,
   });
-  if (!bytes) {
-    throw new Error("Scheduled reminder snapshot could not be created.");
-  }
 
   return {
-    bytes,
-    hash: sha256HostedBundleHex(bytes),
+    bytes: snapshot.bundle,
+    hash: sha256HostedBundleHex(snapshot.bundle),
   };
 }
 
@@ -299,32 +282,6 @@ async function writeSyntheticVaultMetadata(vaultRoot: string): Promise<void> {
     }, null, 2)}\n`,
     "utf8",
   );
-}
-
-async function writeSyntheticHostedAssistantConfig(operatorHomeRoot: string): Promise<void> {
-  await saveHostedAssistantConfig({
-    activeProfileId: hostedAssistantProfileId,
-    profiles: [
-      {
-        id: hostedAssistantProfileId,
-        label: "OpenAI",
-        managedBy: "platform",
-        target: {
-          adapter: "codex-cli",
-          approvalPolicy: "never",
-          codexCommand: null,
-          model: productionLikeAssistantModel,
-          modelProvider: "openai",
-          oss: false,
-          profile: null,
-          reasoningEffort: "medium",
-          sandbox: "danger-full-access",
-        },
-      },
-    ],
-    schema: "murph.hosted-assistant-config.v1",
-    updatedAt: scheduledReminderTimes.createdAtIso,
-  }, operatorHomeRoot);
 }
 
 function resolveScheduledReminderTimes(now = new Date()): {

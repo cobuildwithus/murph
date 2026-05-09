@@ -4,6 +4,7 @@ import { isValidIanaTimeZone } from "./time.ts";
 
 export const scheduleIntentKindValues = Object.freeze(["at", "every", "cron", "dailyLocal"] as const);
 export const experimentRunScheduleIntentKindValues = Object.freeze(["dailyLocal", "cron"] as const);
+export const MIN_EXECUTABLE_SCHEDULE_EVERY_MS = 60_000;
 
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 export const experimentRunCronExpressionPattern =
@@ -108,7 +109,9 @@ export const executableScheduleIntentAtSchema = z.object({
   at: z.string().datetime({ offset: true }),
 }).strict();
 
-export const executableScheduleIntentEverySchema = scheduleIntentEverySchema;
+export const executableScheduleIntentEverySchema = scheduleIntentEverySchema.extend({
+  everyMs: z.number().int().min(MIN_EXECUTABLE_SCHEDULE_EVERY_MS),
+}).strict();
 
 export const executableScheduleIntentCronSchema = z.object({
   kind: z.literal("cron"),
@@ -172,6 +175,9 @@ function formatScheduleIntentIssue(issue: z.ZodIssue): string {
     case "at":
       return isMissingOrEmptyScheduleField(issue) ? "schedule.at is required." : issue.message;
     case "everyMs":
+      if (issue.code === "too_small" && issue.minimum === MIN_EXECUTABLE_SCHEDULE_EVERY_MS) {
+        return `schedule.everyMs must be at least ${MIN_EXECUTABLE_SCHEDULE_EVERY_MS} ms.`;
+      }
       return "schedule.everyMs must be a positive integer.";
     case "expression":
       return isMissingOrEmptyScheduleField(issue) ? "schedule.expression is required." : issue.message;

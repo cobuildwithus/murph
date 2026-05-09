@@ -146,8 +146,9 @@ export async function readAssistantStatusSnapshot(
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
 
+  let raw: string | null = null
   try {
-    const raw = await readFile(paths.statusPath, 'utf8')
+    raw = await readFile(paths.statusPath, 'utf8')
     return parseVersionedJsonStateEnvelope(JSON.parse(raw), {
       label: 'Assistant status snapshot',
       parseValue(value) {
@@ -164,6 +165,7 @@ export async function readAssistantStatusSnapshot(
     await quarantineAssistantStateFile({
       artifactKind: 'status',
       error,
+      ...(raw === null ? {} : { expectedContent: raw }),
       filePath: paths.statusPath,
       paths,
     }).catch(() => undefined)

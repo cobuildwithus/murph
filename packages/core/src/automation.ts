@@ -561,7 +561,10 @@ async function upsertAutomationWithLatestRegistry(
         : existingRecord?.route ?? scaffoldAutomationPayload().route,
     continuityPolicy:
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
-    tags: normalizeAutomationTags(input.tags) ?? existingRecord?.tags ?? [],
+    tags:
+      input.tags === undefined
+        ? existingRecord?.tags ?? []
+        : normalizeAutomationTags(input.tags),
     createdAt,
     updatedAt,
     instructions: normalizeAutomationInstructions(input.instructions),

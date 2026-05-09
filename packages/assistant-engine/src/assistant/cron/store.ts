@@ -66,8 +66,9 @@ export async function readAssistantCronStore(
 ): Promise<AssistantCronStore> {
   await ensureAssistantCronState(paths)
 
+  let raw: string | null = null
   try {
-    const raw = await readFile(paths.cronJobsPath, 'utf8')
+    raw = await readFile(paths.cronJobsPath, 'utf8')
     return normalizeAssistantCronStore(
       assistantCronStoreSchema.parse(JSON.parse(raw)),
     )
@@ -79,6 +80,7 @@ export async function readAssistantCronStore(
     await quarantineAssistantStateFile({
       artifactKind: 'cron-store',
       error,
+      ...(raw === null ? {} : { expectedContent: raw }),
       filePath: paths.cronJobsPath,
       paths,
     }).catch(() => undefined)
@@ -98,9 +100,10 @@ export async function readAssistantCronRuns(
   jobId: string,
 ): Promise<AssistantCronRunRecord[]> {
   const runsPath = resolveAssistantCronRunsPath(paths, jobId)
+  let raw: string | null = null
 
   try {
-    const raw = await readFile(runsPath, 'utf8')
+    raw = await readFile(runsPath, 'utf8')
     const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
       assistantCronRunRecordSchema.parse(value),
     )
@@ -111,6 +114,7 @@ export async function readAssistantCronRuns(
           'ASSISTANT_CRON_RUN_CORRUPTED',
           `Assistant cron run journal contains ${parsed.malformedLineCount} malformed committed line(s).`,
         ),
+        expectedContent: raw,
         filePath: runsPath,
         paths,
       }).catch(() => undefined)
@@ -126,6 +130,7 @@ export async function readAssistantCronRuns(
     await quarantineAssistantStateFile({
       artifactKind: 'cron-run',
       error,
+      ...(raw === null ? {} : { expectedContent: raw }),
       filePath: runsPath,
       paths,
     }).catch(() => undefined)

@@ -191,6 +191,7 @@ interface HostedMailboxPostCheckpointEffectsResult {
 
 export interface HostedWorkspaceRunnerResult {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+  deferredCheckpointRequired: boolean;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
 }
@@ -289,6 +290,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
     return {
       assistantPhaseResult: null,
+      deferredCheckpointRequired: initialMailboxImportRequiresDeferredCheckpoint({
+        checkpointRequestSession,
+        initialMailboxImport,
+      }),
       initialMailboxImport,
       latestWorkspace: checkpointRequestSession.latestWorkspace()
         ?? initialMailboxImport.checkpoint?.workspace
@@ -316,19 +321,22 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     input,
   });
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  let assistantCheckpointDeferred = false;
   try {
     assistantPhaseResult = await withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
-    await checkpointHostedWorkspaceAssistantPhase({
+    const assistantCheckpoint = await checkpointHostedWorkspaceAssistantPhase({
       assistantPhaseResult,
       checkpointRequestBuilder: checkpointRequestSession,
+      expectedUserId: input.expectedUserId,
       initialMailboxImport,
       now: input.now,
       platform: input.platform,
       runtimeLogContext: input.runtimeLogContext,
     });
+    assistantCheckpointDeferred = assistantCheckpoint.deferred;
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
@@ -357,6 +365,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           runtimeLogContext: input.runtimeLogContext,
         });
         if (postCheckpointResult.deferred) {
+          assistantCheckpointDeferred = true;
           mergeDeferredPostCheckpointWake({
             assistantPhaseResult,
             postCheckpoint,
@@ -392,11 +401,27 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 
   return {
     assistantPhaseResult,
+    deferredCheckpointRequired: assistantCheckpointDeferred
+      || initialMailboxImportRequiresDeferredCheckpoint({
+        checkpointRequestSession,
+        initialMailboxImport,
+      }),
     initialMailboxImport,
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
   };
+}
+
+function initialMailboxImportRequiresDeferredCheckpoint(input: {
+  checkpointRequestSession: HostedWorkspaceCheckpointRequestSession;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+}): boolean {
+  return (
+    input.initialMailboxImport.checkpointDeferred
+    && input.initialMailboxImport.stateChanged
+    && !input.checkpointRequestSession.latestMailboxImportCoveredByWorkspace()
+  );
 }
 
 function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): void {
@@ -913,20 +938,47 @@ async function runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort(input:
 async function checkpointHostedWorkspaceAssistantPhase(input: {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  expectedUserId: string;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   now?: () => string;
-  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
+  platform: Pick<HostedWorkspaceRunnerPlatform, "logPort" | "workspacePort">;
   runtimeLogContext?: HostedRuntimeLogContext | null;
-}): Promise<void> {
+}): Promise<{ deferred: boolean }> {
   if (input.assistantPhaseResult.progressed !== true) {
-    return;
+    return { deferred: false };
   }
 
   const checkpointReason = requireHostedWorkspaceAssistantPhaseCheckpointReason(
     input.assistantPhaseResult,
   );
-  void input.checkpointRequestBuilder;
-  void input.initialMailboxImport;
+  if (checkpointReason === "activation_bootstrap") {
+    const redactedStatus = {
+      ...buildHostedMailboxImportRedactedStatus(input.initialMailboxImport.importResult),
+      ...(input.assistantPhaseResult.redactedStatus ?? {}),
+    };
+    const request = await input.checkpointRequestBuilder.createRequest({
+      importResult: input.initialMailboxImport.importResult,
+      nextWakeAt: null,
+      nextWakeReason: null,
+      previousState: input.initialMailboxImport.previousState,
+      reason: checkpointReason,
+      redactedStatus,
+      state: input.initialMailboxImport.state,
+    });
+    const checkpoint = await input.platform.workspacePort.checkpoint(request);
+    if (checkpoint.workspace.userId !== input.expectedUserId) {
+      throw new HostedMailboxImportCheckpointUserMismatchError({
+        actualUserId: checkpoint.workspace.userId,
+        expectedUserId: input.expectedUserId,
+      });
+    }
+    if (!checkpoint.checkpointed) {
+      throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+    }
+    input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
+    return { deferred: false };
+  }
+
   await writeHostedForegroundCheckpointDeferredLog({
     checkpointPhase: "assistant",
     now: input.now,
@@ -934,6 +986,7 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
     reason: checkpointReason,
     runtimeLogContext: input.runtimeLogContext,
   });
+  return { deferred: true };
 }
 
 function requireHostedWorkspaceAssistantPhaseCheckpointReason(

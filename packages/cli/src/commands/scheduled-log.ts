@@ -3,15 +3,16 @@ import { Cli, z } from "incur";
 import {
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
+  executableScheduleIntentSchema,
+  formatScheduleIntentIssues,
   scheduleIntentKindValues,
-  scheduleIntentSchema,
   scheduledLogActionSchema,
   scheduledLogScaffoldPayloadSchema,
   scheduledLogStatusValues,
   workoutSessionSchema,
+  type ExecutableScheduleIntent,
   type MeasurementEntry,
   type MealNutrition,
-  type ScheduleIntent,
   type ScheduledLogAction,
   type ScheduledLogScaffoldPayload,
   type ScheduledLogStatus,
@@ -54,7 +55,7 @@ export const scheduledLogRecordSchema = z
     title: z.string().min(1),
     status: z.enum(scheduledLogStatusValues),
     summary: z.string().min(1).nullable(),
-    schedule: scheduleIntentSchema,
+    schedule: executableScheduleIntentSchema,
     action: scheduledLogActionSchema,
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),
@@ -297,29 +298,40 @@ function buildScheduleIntentFromOptions(options: {
   scheduleEveryMs?: number;
   scheduleKind: (typeof scheduleIntentKindValues)[number];
   scheduleLocalTime?: string;
-}): ScheduleIntent {
+}): ExecutableScheduleIntent {
   switch (options.scheduleKind) {
     case "at":
-      return scheduleIntentSchema.parse({
+      return parseScheduledLogScheduleIntent({
         kind: "at",
         at: requireStringOption(options.scheduleAt, "schedule-at"),
       });
     case "every":
-      return scheduleIntentSchema.parse({
+      return parseScheduledLogScheduleIntent({
         kind: "every",
         everyMs: requireNumberOption(options.scheduleEveryMs, "schedule-every-ms"),
       });
     case "cron":
-      return scheduleIntentSchema.parse({
+      return parseScheduledLogScheduleIntent({
         kind: "cron",
         expression: requireStringOption(options.scheduleCron, "schedule-cron"),
       });
     case "dailyLocal":
-      return scheduleIntentSchema.parse({
+      return parseScheduledLogScheduleIntent({
         kind: "dailyLocal",
         localTime: requireStringOption(options.scheduleLocalTime, "schedule-local-time"),
       });
   }
+}
+
+function parseScheduledLogScheduleIntent(value: unknown): ExecutableScheduleIntent {
+  const parsed = executableScheduleIntentSchema.safeParse(value);
+  if (!parsed.success) {
+    const message =
+      formatScheduleIntentIssues(parsed.error) ||
+      "schedule must match a supported scheduled-log schedule.";
+    invalidScheduledLogOption(message);
+  }
+  return parsed.data;
 }
 
 function buildMealNutritionFromOptions(options: {

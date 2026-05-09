@@ -93,6 +93,8 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
   ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 >;
+type HostedWorkspaceFullCheckpointRequest =
+  HostedWorkspaceCheckpointRequest & { reason: "activation_bootstrap" | "idle_shutdown" };
 type HostedWorkspaceIdleShutdownCheckpointRequest =
   HostedWorkspaceCheckpointRequest & { reason: "idle_shutdown" };
 
@@ -258,7 +260,7 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
 }): Promise<{
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
-  const request = requireHostedWorkspaceBridgeIdleShutdownCheckpointRequest(input.request);
+  const request = requireHostedWorkspaceBridgeFullCheckpointRequest(input.request);
 
   try {
     const currentRefs = input.platform.workspacePort?.read
@@ -285,29 +287,43 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
           request,
         });
   } catch (error) {
+    if (request.reason !== "idle_shutdown") {
+      throw error;
+    }
+    const idleShutdownRequest: HostedWorkspaceIdleShutdownCheckpointRequest = {
+      ...request,
+      reason: "idle_shutdown",
+    };
     if (error instanceof HostedWorkspaceCommittedStateUnavailableError) {
       return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
         ...input,
         error: new HostedWorkspaceIdleCompactionPreservedStateUnavailableError(),
-        request,
+        request: idleShutdownRequest,
       });
     }
     if (isHostedWorkspaceIdleShutdownCheckpointSkippableError(error)) {
       return await createHostedWorkspaceBridgeIdleShutdownCheckpointSkip({
         ...input,
         error,
-        request,
+        request: idleShutdownRequest,
       });
     }
     throw error;
   }
 }
 
-function requireHostedWorkspaceBridgeIdleShutdownCheckpointRequest(
+function requireHostedWorkspaceBridgeFullCheckpointRequest(
   request: HostedWorkspaceCheckpointRequest,
-): HostedWorkspaceIdleShutdownCheckpointRequest {
-  if (request.reason !== "idle_shutdown") {
-    throw new Error("Hosted workspace checkpoint snapshots are idle-shutdown only.");
+): HostedWorkspaceFullCheckpointRequest {
+  if (request.reason !== "activation_bootstrap" && request.reason !== "idle_shutdown") {
+    throw new Error("Hosted workspace checkpoint snapshots are activation-bootstrap or idle-shutdown only.");
+  }
+
+  if (request.reason === "activation_bootstrap") {
+    return {
+      ...request,
+      reason: "activation_bootstrap",
+    };
   }
 
   return {
@@ -373,7 +389,7 @@ interface HostedWorkspaceBridgeFullSnapshotInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   preservedState?: HostedWorkspaceEffectivePreservedState | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceIdleShutdownCheckpointRequest;
+  request: HostedWorkspaceFullCheckpointRequest;
   userId: string;
   vaultRoot: string;
 }
@@ -969,7 +985,7 @@ async function writeHostedCheckpointIdleShutdownSkippedLog(params: {
 async function writeHostedCodexHomeSnapshotFailureLog(input: {
   error: unknown;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleShutdownCheckpointRequest;
+  request: HostedWorkspaceFullCheckpointRequest;
 }): Promise<void> {
   if (!(input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError)) {
     return;
@@ -1025,7 +1041,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   externalArtifactPutCount: number;
   leaseCheckCount: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleShutdownCheckpointRequest;
+  request: HostedWorkspaceFullCheckpointRequest;
   snapshotElapsedMs: number;
   workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;
 }): Promise<void> {
@@ -1079,7 +1095,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
 async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
   diagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleShutdownCheckpointRequest;
+  request: HostedWorkspaceFullCheckpointRequest;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
@@ -1168,7 +1184,7 @@ function appendHostedCodexHomeSnapshotDiagnostics(
 async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
   diagnostics: HostedCodexHomeSnapshotDiagnostics | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleShutdownCheckpointRequest;
+  request: HostedWorkspaceFullCheckpointRequest;
 }): Promise<void> {
   if (!input.diagnostics || !input.platform.logPort) {
     return;

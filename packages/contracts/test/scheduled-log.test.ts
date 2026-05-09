@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SCHEDULED_LOG_DOC_TYPE,
   SCHEDULED_LOG_SCHEMA_VERSION,
+  executableScheduleIntentSchema,
   scheduleIntentAtSchema,
   scheduleIntentCronSchema,
   scheduleIntentDailyLocalSchema,
@@ -225,6 +226,31 @@ describe("scheduled-log contracts", () => {
     if (!strictResult.success) {
       expect(formatScheduleIntentIssues(strictResult.error)).toContain("Unrecognized");
     }
+  });
+
+  it("rejects sub-minute executable every schedules before persistence", () => {
+    const scheduleResult = executableScheduleIntentSchema.safeParse({
+      kind: "every",
+      everyMs: 59_999,
+    });
+    expect(scheduleResult.success).toBe(false);
+    if (!scheduleResult.success) {
+      expect(formatScheduleIntentIssues(scheduleResult.error)).toBe(
+        "schedule.everyMs must be at least 60000 ms.",
+      );
+    }
+
+    expect(scheduledLogScaffoldPayloadSchema.safeParse({
+      title: "Too Frequent",
+      schedule: {
+        kind: "every",
+        everyMs: 59_999,
+      },
+      action: {
+        kind: "measurement.add",
+        measurements: [{ metric: "body-weight", value: 181, unit: "lb" }],
+      },
+    }).success).toBe(false);
   });
 
   it("accepts each meal.add template source without requiring note-only content", () => {

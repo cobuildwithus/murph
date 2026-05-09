@@ -2730,10 +2730,7 @@ function parseWorkspaceSnapshotArtifactPath(relativePath: string): {
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
 
-  return (
-    normalizedRelativePath === ".murph"
-    || normalizedRelativePath === ".murph/config.json"
-  );
+  return normalizedRelativePath === ".murph";
 }
 
 function createHostedCodexContinuitySnapshotExplicitFiles(

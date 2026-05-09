@@ -483,6 +483,7 @@ describe('assistant status', () => {
     expect(statusMocks.quarantineAssistantStateFile).toHaveBeenCalledWith({
       artifactKind: 'status',
       error: expect.any(SyntaxError),
+      expectedContent: '{"schema":"broken"',
       filePath: paths.statusPath,
       paths,
     })

@@ -215,6 +215,7 @@ export async function appendJournal(input: AppendJournalInput): Promise<AppendJo
 async function mutateJournalLinks(
   input: MutateJournalLinksInput,
 ): Promise<MutateJournalLinksResult> {
+  const values = normalizeJournalLinkValues(input);
   const ensured =
     input.operation === "link"
       ? await ensureJournalDay({
@@ -247,7 +248,7 @@ async function mutateJournalLinks(
   const currentValues = new Set<string>(document.attributes[input.key]);
   let changed = 0;
 
-  for (const value of uniqueTrimmedStringList(input.values) ?? []) {
+  for (const value of values) {
     if (input.operation === "link") {
       if (!currentValues.has(value)) {
         currentValues.add(value);
@@ -321,6 +322,35 @@ async function mutateJournalLinks(
   });
 
   return result.result;
+}
+
+function normalizeJournalLinkValues(input: MutateJournalLinksInput): string[] {
+  const values = uniqueTrimmedStringList(input.values);
+  if (!values) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      `Journal ${input.key} requires at least one value.`,
+    );
+  }
+
+  const attributes = validateContract(
+    journalDayFrontmatterSchema,
+    {
+      schemaVersion: FRONTMATTER_SCHEMA_VERSIONS.journalDay,
+      docType: "journal_day",
+      dayKey: "2000-01-01",
+      eventIds: input.key === "eventIds" ? values : [],
+      sampleStreams: input.key === "sampleStreams" ? values : [],
+    },
+    "JOURNAL_LINK_INVALID",
+    `Journal ${input.key} for "${input.date}" contains invalid values.`,
+    {
+      key: input.key,
+      operation: input.operation,
+    },
+  );
+
+  return attributes[input.key];
 }
 
 export async function linkJournalEventIds(

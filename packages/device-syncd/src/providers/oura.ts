@@ -72,6 +72,7 @@ const OURA_SECONDS_TIMESTAMP_THRESHOLD = 10_000_000_000;
 const OURA_WEBHOOK_RESOURCE_PRIORITY = 90;
 const OURA_WEBHOOK_DELETE_PRIORITY = 95;
 const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_OAUTH.defaultScopes]);
+const OURA_MAX_PAGINATION_PAGES = 500;
 
 interface OuraTokenResponse {
   access_token?: unknown;
@@ -673,8 +674,22 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   ): Promise<Record<string, unknown>[]> {
     const records: Record<string, unknown>[] = [];
     let nextToken: string | null | undefined = null;
+    const seenNextTokens = new Set<string>();
+    let pageCount = 0;
 
     do {
+      pageCount += 1;
+      if (pageCount > OURA_MAX_PAGINATION_PAGES) {
+        throw deviceSyncError({
+          code: "OURA_PAGINATION_LIMIT_EXCEEDED",
+          message: `Oura API pagination exceeded ${OURA_MAX_PAGINATION_PAGES} pages for ${path}.`,
+          details: {
+            maxPages: OURA_MAX_PAGINATION_PAGES,
+            path,
+          },
+        });
+      }
+
       const search = new URLSearchParams();
 
       for (const [key, value] of Object.entries(parameters)) {
@@ -695,6 +710,19 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         };
       records.push(...((response.data ?? []).map((entry) => coerceRecord(entry))));
       nextToken = normalizeString(response.next_token) ?? null;
+      if (nextToken) {
+        if (seenNextTokens.has(nextToken)) {
+          throw deviceSyncError({
+            code: "OURA_PAGINATION_LOOP",
+            message: `Oura API pagination repeated a next token for ${path}.`,
+            details: {
+              pageCount,
+              path,
+            },
+          });
+        }
+        seenNextTokens.add(nextToken);
+      }
     } while (nextToken);
 
     return records;

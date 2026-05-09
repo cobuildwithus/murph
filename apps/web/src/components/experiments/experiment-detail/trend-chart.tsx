@@ -163,7 +163,7 @@ export function TrendChart({ data, className }: TrendChartProps) {
               return (
                 <div className="rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
                   <div className="font-medium text-foreground">
-                    {day < 1 ? dayToDate(data.startDate, day) : `Day ${day}`}
+                    {dayToDate(data.startDate, day)}
                   </div>
                   <div className="mt-1 grid gap-1">
                     {rows.map((row) => (

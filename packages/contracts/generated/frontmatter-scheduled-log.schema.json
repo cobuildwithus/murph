@@ -63,7 +63,7 @@
             },
             "everyMs": {
               "type": "integer",
-              "exclusiveMinimum": 0,
+              "minimum": 60000,
               "maximum": 9007199254740991
             }
           },
