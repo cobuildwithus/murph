@@ -2016,7 +2016,7 @@ function stringOrNull(value: unknown) {
 }
 
 function hasExperimentOnboardingApplyPatch(input: ApplyExperimentOnboardingRecordInput) {
-  const contextKeys = new Set(['vault', 'requestId', 'lookup', 'status'])
+  const contextKeys = new Set(['vault', 'requestId', 'lookup'])
 
   for (const [key, value] of Object.entries(input)) {
     if (contextKeys.has(key) || value === undefined) {

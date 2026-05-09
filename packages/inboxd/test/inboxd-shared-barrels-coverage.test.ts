@@ -158,6 +158,14 @@ test("shared helpers normalize ids, snippets, search text, and attachment record
   assert.equal(sanitizeSegment("  My File.Name  "), "my-file-name");
   assert.equal(sanitizeSegment("***", "fallback"), "fallback");
   assert.equal(sanitizeFileName("../Quarterly Report.PDF"), "quarterly-report.pdf");
+  const longFileName = sanitizeFileName(`${"Quarterly ".repeat(40)}Report.PDF`);
+  assert.ok(longFileName.length <= 180);
+  assert.match(longFileName, /^quarterly-quarterly/u);
+  assert.match(longFileName, /-[a-f0-9]{12}\.pdf$/u);
+  assert.notEqual(
+    sanitizeFileName(`${"a".repeat(240)}.pdf`),
+    sanitizeFileName(`${"b".repeat(240)}.pdf`),
+  );
 
   const attachments = normalizeStoredAttachments("cap_123", [
     { attachmentId: "att_cap_123_01", ordinal: 1, kind: "image" },

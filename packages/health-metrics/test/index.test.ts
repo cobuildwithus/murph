@@ -11,6 +11,7 @@ import {
   listMetricPoints,
   listMetricDefinitions,
   normalizeMetricKey,
+  normalizeUnit,
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
@@ -57,6 +58,9 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
 });
 
 test("normalizes supported metric units without hiding unsupported unit mismatches", () => {
+  assert.equal(normalizeUnit("constructor"), "constructor");
+  assert.equal(normalizeUnit("__proto__"), "__proto__");
+
   assert.deepEqual(normalizeMetricValue({
     metricKey: "body-weight",
     unit: null,

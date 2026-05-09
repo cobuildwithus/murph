@@ -354,6 +354,27 @@ describe("garmin provider coverage", () => {
     });
   });
 
+  it("preserves raw ingest prototype-named payload fields as data", () => {
+    const envelope = buildWearableRawIngestEnvelope({
+      provider: "garmin",
+      payload: JSON.parse(
+        '{"id":"activity-1","__proto__":"blocked","nested":{"__proto__":"inner"}}',
+      ),
+    });
+
+    expect(
+      envelope.payload &&
+      typeof envelope.payload === "object" &&
+      !Array.isArray(envelope.payload),
+    ).toBe(true);
+    const payload = envelope.payload as Record<string, unknown>;
+    const nested = payload.nested as Record<string, unknown>;
+
+    expect(Object.getOwnPropertyDescriptor(payload, "__proto__")?.value).toBe("blocked");
+    expect(Object.getOwnPropertyDescriptor(nested, "__proto__")?.value).toBe("inner");
+    expect(JSON.stringify(envelope.payload)).toContain('"__proto__":"blocked"');
+  });
+
   it("covers Garmin health timing fallbacks, sleep stage sampling, and aggregate stage durations", () => {
     const dailyContext = makeHealthContext("2026-03-16T12:00:00.000Z");
     normalizeGarminDailySummaries(dailyContext, [

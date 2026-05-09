@@ -90,6 +90,73 @@ test("applyExperimentOnboardingRecord writes structured run-plan schedules", asy
   });
 });
 
+test("applyExperimentOnboardingRecord accepts status-only updates", async () => {
+  const experimentEntity = {
+    entityId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+    family: "experiment",
+    kind: "experiment",
+    title: "Sauna Daily",
+    status: "planned",
+    occurredAt: null,
+    date: null,
+    path: "bank/experiments/sauna-daily.md",
+    body: "---\n",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+      slug: "sauna-daily",
+      status: "planned",
+      title: "Sauna Daily",
+      startedOn: "2026-04-29",
+    },
+    links: [],
+    relatedIds: [],
+    stream: null,
+    experimentSlug: "sauna-daily",
+    tags: [],
+    frontmatter: null,
+  };
+  const queryRuntime = {
+    readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
+    lookupEntityById: vi.fn(() => experimentEntity),
+  };
+  const updateExperiment = vi.fn(
+    async (_input: { runPlan?: unknown; status?: string }) => ({
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
+      slug: "sauna-daily",
+      relativePath: "bank/experiments/sauna-daily.md",
+      status: "active",
+      updated: true as const,
+    }),
+  );
+
+  const module = await importWithMocks<
+    typeof import("../src/usecases/experiment-journal-vault.ts")
+  >("../src/usecases/experiment-journal-vault.ts", {
+    "../src/query-runtime.js": () => ({
+      loadQueryRuntime: vi.fn(async () => queryRuntime),
+    }),
+    "../src/runtime-import.js": () => ({
+      loadRuntimeModule: vi.fn(async (specifier: string) => {
+        assert.equal(specifier, "@murphai/core");
+        return { updateExperiment };
+      }),
+    }),
+  });
+
+  await module.applyExperimentOnboardingRecord({
+    vault: "test-vault",
+    lookup: "sauna-daily",
+    status: "active",
+  });
+
+  const updateInput = updateExperiment.mock.calls[0]?.[0];
+  assert.ok(updateInput);
+  assert.equal(updateInput.status, "active");
+  assert.equal(updateInput.runPlan, undefined);
+});
+
 test("applyExperimentOnboardingRecord clears run baseline windows with zero baseline days", async () => {
   const experimentEntity = {
     entityId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",
