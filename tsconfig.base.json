@@ -292,6 +292,9 @@
       "@murphai/vault-usecases": [
         "packages/vault-usecases/src/index.ts"
       ],
+      "@murphai/vault-usecases/records": [
+        "packages/vault-usecases/src/records.ts"
+      ],
       "@murphai/vault-usecases/testing": [
         "packages/vault-usecases/src/testing.ts"
       ],

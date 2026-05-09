@@ -4,6 +4,7 @@ import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   interventionAddResultSchema,
   occurredAtOptionSchema,
+  slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
@@ -96,6 +97,19 @@ export function registerInterventionCommands(
         .describe(
           'Optional regimen id to relate this intervention session back to one active therapy or habit.',
         ),
+      experiment: slugSchema
+        .optional()
+        .describe(
+          'Optional experiment slug to link explicitly. Omit for automatic single-match linking.',
+        ),
+      skipExperimentLink: z
+        .boolean()
+        .optional()
+        .describe('Disable automatic experiment linking for this capture.'),
+      allowOutOfWindow: z
+        .boolean()
+        .optional()
+        .describe('Allow an explicit --experiment link outside the intervention window.'),
       occurredAt: occurredAtOptionSchema
         .optional()
         .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
@@ -117,6 +131,10 @@ export function registerInterventionCommands(
           typeof options.regimenId === 'string'
             ? options.regimenId
             : undefined,
+        experiment:
+          typeof options.experiment === 'string' ? options.experiment : undefined,
+        noExperiment: options.skipExperimentLink === true,
+        allowOutOfWindow: options.allowOutOfWindow === true,
         occurredAt: await normalizeOccurredAtOption({
           vault: options.vault,
           occurredAt:
@@ -162,15 +180,8 @@ export function registerInterventionCommands(
       appendTypedSet(set, 'interventionType', stringOption(options.type))
       appendTypedSet(set, 'durationMinutes', numberOption(options.duration))
       appendTypedSet(set, 'regimenId', stringOption(options.regimenId))
-      if (typeof options.regimenId === 'string') {
-        appendTypedSet(set, 'links', [{
-          type: 'related_to',
-          targetId: options.regimenId,
-        }])
-      }
       appendTypedClear(clear, 'durationMinutes', options.clearDuration === true)
       appendTypedClear(clear, 'regimenId', options.clearRegimenId === true)
-      appendTypedClear(clear, 'links', options.clearRegimenId === true)
       return {
         set: emptyToUndefined(set),
         clear: emptyToUndefined(clear),

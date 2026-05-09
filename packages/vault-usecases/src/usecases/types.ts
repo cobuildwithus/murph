@@ -330,6 +330,16 @@ export interface ExperimentSessionLogResult {
   kind: "intervention_session"
 }
 
+export interface ExperimentSessionAttachResult {
+  vault: string
+  eventId: string
+  lookupId: string
+  experimentId: string | null
+  experimentSlug: string | null
+  linked: boolean
+  entity: ShowResult["entity"]
+}
+
 export interface ExperimentContextLogResult {
   vault: string
   experimentId: string
@@ -810,6 +820,19 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       inputFile: string
     },
   ): Promise<ExperimentSessionLogResult>
+  attachExperimentSession(
+    input: CommandContext & {
+      lookup: string
+      eventId: string
+      replace?: boolean
+      allowOutOfWindow?: boolean
+    },
+  ): Promise<ExperimentSessionAttachResult>
+  detachExperimentSession(
+    input: CommandContext & {
+      eventId: string
+    },
+  ): Promise<ExperimentSessionAttachResult>
   logExperimentContext(
     input: CommandContext & {
       lookup: string

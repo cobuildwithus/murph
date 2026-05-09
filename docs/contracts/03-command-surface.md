@@ -117,7 +117,7 @@ vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>
 vault-cli workout format show <name> --vault <path> [--request-id <id>]
 vault-cli workout format list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli workout format log <name> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
-vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--regimen-id <regimenId>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--regimen-id <regimenId>] [--experiment <slug>] [--skip-experiment-link] [--allow-out-of-window] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli intervention edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--type <type>] [--duration <minutes>] [--regimen-id <id>] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-duration] [--clear-regimen-id] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal manifest <id> --vault <path> [--request-id <id>]
 vault-cli samples add --vault <path> --stream <stream> --unit <unit> --recorded-at <ts> [--value <number>] [--source <source>] [--quality <quality>] [--stage <stage>] [--start-at <ts>] [--end-at <ts>] [--duration-minutes <n>] [--source-path <path>] [--batch-source-file-name <name>] [--batch-preset-id <id>] [--batch-delimiter <char>] [--batch-timestamp-column <name>] [--batch-value-column <name>] [--batch-metadata-columns <name> ...] [--request-id <id>]
@@ -137,6 +137,8 @@ vault-cli experiment edit <id> --vault <path> [--title <title>] [--hypothesis <t
 vault-cli experiment checkpoint <lookup> --vault <path> [--occurred-at <ts>] [--title <title>] [--note <text>] [--request-id <id>]
 vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note "..."] [--request-id <id>]
 vault-cli experiment session log <lookup> --vault <path> [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--intervention-type <type>] [--status completed|partial|missed|skipped] [--session-status completed|partial|missed|skipped] [--duration-minutes <n>] [--protocol-id <id>] [--timing <text>] [--temperature-c <number>] [--after-exercise] [--symptoms <text> ...] [--confounders <text> ...] [--confounder <key=value> ...] [--request-id <id>]
+vault-cli experiment session attach <lookup> <eventId> --vault <path> [--replace] [--allow-out-of-window] [--request-id <id>]
+vault-cli experiment session detach <eventId> --vault <path> [--request-id <id>]
 vault-cli experiment context log <lookup> --vault <path> [--kind experiment_context|note|supplement_intake] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--context-type <slug>] [--severity info|potential_confounder|safety|blocking] [--tag <tag> ...] [--supplement-name <name>] [--dose <number>] [--unit <unit>] [--request-id <id>]
 vault-cli experiment followup due <id> --vault <path> --kind missed-log|weekly-digest [--date <YYYY-MM-DD>] [--request-id <id>]
 vault-cli journal ensure <date> --vault <path> [--request-id <id>]
@@ -488,11 +490,16 @@ Saved workout formats are vault-local Markdown docs only. They store a reusable 
   "interventionType": "sauna",
   "durationMinutes": 20,
   "regimenId": "reg_123",
+  "experimentId": "exp_123",
+  "experimentSlug": "sauna-rhr",
+  "experimentLinkMode": "auto",
   "note": "20 min sauna after lifting."
 }
 ```
 
-The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `intervention_session` event plus one inferred or explicit `interventionType`, optional `durationMinutes`, and an optional `regimenId` link back to one therapy or habit regimen when the session should stay attached to a longer-running plan.
+The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `intervention_session` event plus one inferred or explicit `interventionType`, optional `durationMinutes`, an optional `regimenId` link back to one therapy or habit regimen, and optional experiment relation fields.
+
+Experiment linking is conservative. If exactly one active experiment matches the intervention type and the session date falls inside that experiment's intervention window, `intervention add` links it automatically and returns `experimentLinkMode: "auto"`. If multiple active experiments match, the command fails before writing; pass `--experiment <slug>` to choose one or `--skip-experiment-link` to save the session unlinked. `--allow-out-of-window` is only valid with an explicit `--experiment`.
 
 ### `samples csv profile`
 

@@ -85,8 +85,10 @@ import {
   applyExperimentOnboardingRecord,
   analyzeExperimentOutcomeRecord,
   appendJournalText,
+  attachExperimentSessionRecord,
   checkpointExperimentRecord,
   checkpointExperimentRecordFromInput,
+  detachExperimentSessionRecord,
   logExperimentContextRecord,
   logExperimentContextRecordFromInput,
   logExperimentSessionRecord,
@@ -317,6 +319,12 @@ function createIntegratedCoreServices(): CoreWriteServices {
       inputFile: string
     }) {
       return logExperimentSessionRecordFromInput(input)
+    },
+    async attachExperimentSession(input) {
+      return attachExperimentSessionRecord(input)
+    },
+    async detachExperimentSession(input) {
+      return detachExperimentSessionRecord(input)
     },
     async logExperimentContext(input) {
       return logExperimentContextRecord(input)
