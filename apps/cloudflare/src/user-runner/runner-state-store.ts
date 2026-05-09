@@ -329,6 +329,20 @@ export class RunnerStateStore {
     };
   }
 
+  async ageActiveInvocationForTest(input: {
+    startedAt: string;
+  }): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    if (!meta.active_invocation_id) {
+      throw new Error("Hosted runner has no active invocation to age for test.");
+    }
+    meta.active_invocation_started_at = normalizeIsoDateString(input.startedAt);
+    meta.active_invocation_last_heartbeat_at = null;
+    meta.active_invocation_orphan_observed_at = null;
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
   async completeInvocation(input: {
     finishedAt?: string | null;
     lease: RunnerInvocationLease;

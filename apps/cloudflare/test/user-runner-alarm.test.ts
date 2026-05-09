@@ -1045,15 +1045,25 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("backs off duplicate recovery alarms while the active invocation remains locked after timeout", async () => {
+  it("replays from a durable alarm when a local active invocation is still locked after timeout", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const invocation = createDeferred<{
+    const firstInvocation = createDeferred<{
       nextWakeAt: null;
       status: "idle";
     }>();
+    let callCount = 0;
     const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
-      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return await firstInvocation.promise;
+        }
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }),
       runnerTimeoutMs: 1_000,
     });
     await runner.bindUser("member_123");
@@ -1075,27 +1085,25 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(runner.alarm()).resolves.toBeUndefined();
 
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toEqual(["2026-04-27T00:00:03.100Z"]);
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(alarms).toEqual(["deleted"]);
     expect(
       sql.exec(
-        `SELECT idle_shutdown_checkpoint_due_at,
+        `SELECT in_flight,
+                active_invocation_id,
+                idle_shutdown_checkpoint_due_at,
                 idle_shutdown_checkpoint_workspace_version
          FROM runner_meta WHERE user_id = ?`,
         "member_123",
       ).toArray(),
     ).toEqual([{
+      active_invocation_id: null,
+      in_flight: 0,
       idle_shutdown_checkpoint_due_at: null,
       idle_shutdown_checkpoint_workspace_version: null,
     }]);
 
-    invocation.resolve({
-      nextWakeAt: null,
-      status: "idle",
-    });
-    await expect(activeRun).resolves.toMatchObject({
-      status: "idle",
-    });
+    await expect(activeRun).rejects.toThrow("Hosted runner invocation lease expired.");
   });
 
   it("syncs only a recovery alarm when runUntilIdleOrBudget is called during an active invocation", async () => {

@@ -22,6 +22,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-scheduled-reminder"
   | "linq-webhook"
   | "snapshot-stress"
+  | "stuck-invocation-recovery"
   | "telegram"
   | "telegram-first-contact"
   | "vault-persistence";
@@ -85,6 +86,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-snapshot-stress-e2e.test.ts",
     manualOnly: true,
     name: "snapshot-stress",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-stuck-invocation-recovery-e2e.test.ts",
+    manualOnly: true,
+    name: "stuck-invocation-recovery",
   },
   {
     file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
