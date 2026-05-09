@@ -7,13 +7,16 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
+  assertBrowserMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   exportTokenBundle: vi.fn(),
   handleWebhook: vi.fn(),
   listSignals: vi.fn(),
+  pairAgent: vi.fn(),
   readWebhookRawBody: vi.fn(),
   refreshTokenBundle: vi.fn(),
   requireAgentSession: vi.fn(),
+  requireAuthenticatedUser: vi.fn(),
   webhookRegistry: {
     get: vi.fn(),
   },
@@ -24,11 +27,13 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 }));
 
 type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
+type PairRouteModule = typeof import("../app/api/device-sync/agents/pair/route");
 type RefreshRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
 type SignalsRouteModule = typeof import("../app/api/device-sync/agent/signals/route");
 type WebhookRouteModule = typeof import("../app/api/device-sync/webhooks/[provider]/route");
 
 let exportRoute: ExportRouteModule;
+let pairRoute: PairRouteModule;
 let refreshRoute: RefreshRouteModule;
 let signalsRoute: SignalsRouteModule;
 let webhookRoute: WebhookRouteModule;
@@ -36,6 +41,7 @@ let webhookRoute: WebhookRouteModule;
 describe("hosted device-sync agent and webhook routes", () => {
   beforeAll(async () => {
     exportRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
+    pairRoute = await import("../app/api/device-sync/agents/pair/route");
     refreshRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
     signalsRoute = await import("../app/api/device-sync/agent/signals/route");
     webhookRoute = await import("../app/api/device-sync/webhooks/[provider]/route");
@@ -44,13 +50,22 @@ describe("hosted device-sync agent and webhook routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
       exportTokenBundle: mocks.exportTokenBundle,
       handleWebhook: mocks.handleWebhook,
       listSignals: mocks.listSignals,
+      pairAgent: mocks.pairAgent,
       readWebhookRawBody: mocks.readWebhookRawBody,
       registry: mocks.webhookRegistry,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
+      requireAuthenticatedUser: mocks.requireAuthenticatedUser,
+    });
+    mocks.requireAuthenticatedUser.mockResolvedValue({
+      email: "person@example.test",
+      id: "user-123",
+      name: "Person",
+      source: "trusted-header",
     });
     mocks.requireAgentSession.mockResolvedValue({
       id: "dsa_current",
@@ -73,6 +88,15 @@ describe("hosted device-sync agent and webhook routes", () => {
       ],
     });
     mocks.readWebhookRawBody.mockResolvedValue(Buffer.from('{"event":"sleep.updated"}', "utf8"));
+    mocks.pairAgent.mockResolvedValue({
+      agent: {
+        createdAt: "2026-03-26T12:00:00.000Z",
+        expiresAt: "2026-04-25T12:00:00.000Z",
+        id: "dsa_pair_123",
+        label: "local laptop",
+      },
+      token: "device-sync-agent-token",
+    });
     mocks.webhookRegistry.get.mockImplementation((provider: string) =>
       provider === "oura" || provider === "oura/legacy"
         ? createOuraDeviceSyncProvider({
@@ -82,6 +106,89 @@ describe("hosted device-sync agent and webhook routes", () => {
           })
         : undefined
     );
+  });
+
+  it("authenticates browser pair requests before parsing the body", async () => {
+    mocks.requireAuthenticatedUser.mockRejectedValueOnce(deviceSyncError({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+      message: "Hosted device-sync browser routes require authentication.",
+      retryable: false,
+    }));
+
+    const response = await pairRoute.POST(
+      new Request("https://example.test/api/device-sync/agents/pair", {
+        body: "{",
+        headers: {
+          origin: "https://example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.assertBrowserMutationOrigin).toHaveBeenCalledTimes(1);
+    expect(mocks.requireAuthenticatedUser).toHaveBeenCalledTimes(1);
+    expect(mocks.pairAgent).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "AUTH_REQUIRED",
+      },
+    });
+  });
+
+  it("bounds authenticated browser pair request bodies before creating a session", async () => {
+    const response = await pairRoute.POST(
+      new Request("https://example.test/api/device-sync/agents/pair", {
+        body: JSON.stringify({
+          label: "x".repeat(2_000),
+        }),
+        headers: {
+          origin: "https://example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(mocks.requireAuthenticatedUser).toHaveBeenCalledTimes(1);
+    expect(mocks.pairAgent).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AGENT_PAIR_BODY_TOO_LARGE",
+        message: "Hosted device-sync agent pair request body is too large.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("passes the authenticated browser user when pairing an agent", async () => {
+    const response = await pairRoute.POST(
+      createJsonPostRequest("https://example.test/api/device-sync/agents/pair", {
+        label: "local laptop",
+      }, {
+        headers: {
+          origin: "https://example.test",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.pairAgent).toHaveBeenCalledWith({
+      email: "person@example.test",
+      id: "user-123",
+      name: "Person",
+      source: "trusted-header",
+    }, "local laptop");
+    await expect(response.json()).resolves.toEqual({
+      agent: {
+        createdAt: "2026-03-26T12:00:00.000Z",
+        expiresAt: "2026-04-25T12:00:00.000Z",
+        id: "dsa_pair_123",
+        label: "local laptop",
+      },
+      token: "device-sync-agent-token",
+    });
   });
 
   it("rejects export-token-bundle when the bearer token has expired", async () => {

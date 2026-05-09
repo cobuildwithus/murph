@@ -170,6 +170,32 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
+  it("rejects oversized reply-alias registration bodies before callback nonce consumption", async () => {
+    const response = await registerReplyAliasRoute.POST(
+      new Request(`https://join.example.test${HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH}`, {
+        body: JSON.stringify({
+          aliasKey: "x".repeat(3_000),
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(prismaClient.transactionClient.hostedWebInternalRequestNonce.create).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_EMAIL_REPLY_ALIAS_BODY_TOO_LARGE",
+        message: "Hosted email reply alias registration body is too large.",
+        retryable: false,
+      },
+    });
+  });
+
   it("accepts a signed alias-route resolution callback without provider sender authentication", async () => {
     mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
 
