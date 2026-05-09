@@ -77,7 +77,7 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 ## Flow Rules
 
 - Check for an already active experiment before starting another meaningful one by default.
-- When a user logs an intervention session, route it to an experiment only when there is exactly one active matching run, the session date is inside that run's intervention window, and the intervention modality matches the run plan or protocol key. If there are multiple candidates, do not silently choose; ask for an explicit experiment slug or save with an explicit skip-experiment-link choice.
+- When a user logs an intervention session, route it to an experiment only when there is exactly one active matching run, the session date is inside that run's intervention window, and the intervention modality matches the run plan or protocol key. If there are multiple candidates, do not silently choose; ask for an explicit experiment slug or id, or save with an explicit skip-experiment-link choice.
 - Ask what the user wants to get out of the experiment unless the goal is already clear.
 - Review relevant saved context and wearable availability before asking setup questions that Murph can already answer from the vault.
 - Ask the safety screen even when the vault is silent for high-caution protocols.

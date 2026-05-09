@@ -179,6 +179,7 @@ export async function editInterventionRecord(input: {
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
 }) {
+  await assertExperimentLinkedEditIsSafe(input)
   const normalizedPatch = await preserveInterventionRelationLinks(input)
   const result = await editEventRecord({
     vault: input.vault,
@@ -192,6 +193,30 @@ export async function editInterventionRecord(input: {
   })
 
   return showEventRecord(input.vault, result.lookupId)
+}
+
+async function assertExperimentLinkedEditIsSafe(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+}) {
+  if (!patchMayChangeExperimentRouting(input)) {
+    return
+  }
+
+  const shown = await showEventRecord(input.vault, input.lookup)
+  const data = shown.entity.data as Record<string, unknown>
+  const currentLinks = Array.isArray(data.links) ? data.links : []
+  if (!hasExperimentState(data, currentLinks)) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'Detach the session with `vault-cli experiment session detach <eventId>` or reattach it with `vault-cli experiment session attach <experiment> <eventId> --replace` before editing intervention type or session date fields.',
+  )
 }
 
 async function preserveInterventionRelationLinks(input: {
@@ -215,14 +240,39 @@ async function preserveInterventionRelationLinks(input: {
   const shown = await showEventRecord(input.vault, input.lookup)
   const data = shown.entity.data as Record<string, unknown>
   const currentLinks = Array.isArray(data.links) ? data.links : []
-  const oldRegimenId =
+  const currentRegimenId =
     typeof data.regimenId === 'string' ? data.regimenId : undefined
   const links = replaceExperimentLink(
     currentLinks,
     readExperimentTarget(data, currentLinks),
   )
+  const regimenLinkIds = links
+    .map((link) => link.targetId)
+    .filter((targetId) => targetId.startsWith('reg_'))
+  const ownedRegimenId = currentRegimenId ??
+    (regimenLinkIds.length === 1 ? regimenLinkIds[0] : undefined)
+  if (ownedRegimenId === undefined && regimenLinkIds.length > 1) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Intervention session has multiple regimen links but no regimenId owner. Repair the links before editing regimen state.',
+    )
+  }
+
+  const regimenLinkToRemove = new Set(
+    ownedRegimenId === undefined ? [] : [ownedRegimenId],
+  )
+
+  if (regimenId !== undefined) {
+    regimenLinkToRemove.add(regimenId)
+  }
+
+  if (clearRegimenId && currentRegimenId !== undefined) {
+    regimenLinkToRemove.add(currentRegimenId)
+  }
+
+  const nextLinks = links
     .filter((link) => {
-      if (typeof oldRegimenId === 'string' && link.targetId === oldRegimenId) {
+      if (regimenLinkToRemove.has(link.targetId)) {
         return false
       }
 
@@ -230,7 +280,7 @@ async function preserveInterventionRelationLinks(input: {
     })
 
   if (regimenId !== undefined) {
-    links.push({
+    nextLinks.push({
       type: 'related_to',
       targetId: regimenId,
     })
@@ -238,8 +288,8 @@ async function preserveInterventionRelationLinks(input: {
 
   removePatchPath(nextSet, 'links')
   removePatchPath(nextClear, 'links')
-  if (links.length > 0) {
-    nextSet.push(`links=${JSON.stringify(links)}`)
+  if (nextLinks.length > 0) {
+    nextSet.push(`links=${JSON.stringify(nextLinks)}`)
   } else {
     nextClear.push('links')
   }
@@ -248,6 +298,34 @@ async function preserveInterventionRelationLinks(input: {
     set: nextSet.length > 0 ? nextSet : undefined,
     clear: nextClear.length > 0 ? nextClear : undefined,
   }
+}
+
+function patchMayChangeExperimentRouting(input: {
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+}): boolean {
+  if (input.inputFile !== undefined) {
+    return true
+  }
+
+  return ['interventionType', 'occurredAt', 'timeZone', 'dayKey'].some((path) =>
+    patchHasPath(input.set ?? [], path) ||
+    patchHasPath(input.clear ?? [], path),
+  )
+}
+
+function patchHasPath(values: readonly string[], path: string): boolean {
+  const prefix = `${path}=`
+  return values.some((value) => value === path || value.startsWith(prefix))
+}
+
+function hasExperimentState(
+  data: Record<string, unknown>,
+  links: readonly unknown[],
+): boolean {
+  return readExperimentTarget(data, links) !== null ||
+    typeof data.experimentSlug === 'string'
 }
 
 function readExperimentTarget(

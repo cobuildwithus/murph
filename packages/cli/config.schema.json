@@ -5298,9 +5298,10 @@
                           "pattern": "^reg_[0-9A-Za-z]+$"
                         },
                         "experiment": {
-                          "description": "Optional experiment slug to link explicitly. Omit for automatic single-match linking.",
+                          "description": "Optional experiment slug or id to link explicitly. Omit for automatic single-match linking.",
                           "type": "string",
-                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                          "minLength": 1,
+                          "maxLength": 160
                         },
                         "skipExperimentLink": {
                           "description": "Disable automatic experiment linking for this capture.",
