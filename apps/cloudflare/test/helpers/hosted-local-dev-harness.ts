@@ -25,6 +25,11 @@ export interface HostedLocalDevHarness {
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
+  startStuckInvocationForTest(userId: string): Promise<{
+    attemptId: string;
+    nextWakeAt: string | null;
+    ok: true;
+  }>;
   runtimeEnv: NodeJS.ProcessEnv;
   workerRuntimeEnv: NodeJS.ProcessEnv | null;
   stderrTail(maxChars?: number): string;
@@ -151,6 +156,23 @@ export async function startHostedLocalDevHarness(input: {
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
         return await requestJsonForRuntime<{ ok: true }>(
           `/__test/users/${encodeURIComponent(userId)}/alarm`,
+          {
+            headers: statusHeaders(userId),
+            method: "POST",
+          },
+        );
+      },
+      startStuckInvocationForTest: async (userId: string): Promise<{
+        attemptId: string;
+        nextWakeAt: string | null;
+        ok: true;
+      }> => {
+        return await requestJsonForRuntime<{
+          attemptId: string;
+          nextWakeAt: string | null;
+          ok: true;
+        }>(
+          `/__test/users/${encodeURIComponent(userId)}/stuck-invocation`,
           {
             headers: statusHeaders(userId),
             method: "POST",

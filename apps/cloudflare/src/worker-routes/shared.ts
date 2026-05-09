@@ -11,6 +11,7 @@ import type {
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
+import type { HostedRunnerStuckInvocationTestResult } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import {
   requireHostedUserCryptoContextFromEnvironment,
@@ -68,6 +69,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   }): Promise<{ recorded: boolean }>;
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
+  startStuckInvocationForTest?(input: { userId: string }): Promise<HostedRunnerStuckInvocationTestResult>;
   runnerStatus(): Promise<HostedRunnerStatusResponse>;
 }
 

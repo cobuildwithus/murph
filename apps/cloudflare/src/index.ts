@@ -82,6 +82,7 @@ import {
 } from "./browser-vault-store.ts";
 import {
   HostedUserRunner,
+  type HostedRunnerStuckInvocationTestResult,
   type DurableObjectStateLike,
 } from "./user-runner.ts";
 import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
@@ -175,6 +176,19 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     match: matchTestUserRoute("/__test/users/", "/alarm"),
     methods: ["POST"],
     name: "test-run-alarm",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return isHostedWorkerTestEnvironment(context.env) ? null : notFound();
+    },
+    async handle(context, params) {
+      return handleTestStartStuckInvocationRoute(context, params.userId);
+    },
+    match: matchTestUserRoute("/__test/users/", "/stuck-invocation"),
+    methods: ["POST"],
+    name: "test-start-stuck-invocation",
     wrongMethodResponse: "not-found",
   },
   {
@@ -406,6 +420,13 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     await this.runner.bindUser(input.userId);
     await this.runner.alarm();
     return { ok: true };
+  }
+
+  async startStuckInvocationForTest(input: {
+    userId: string;
+  }): Promise<HostedRunnerStuckInvocationTestResult> {
+    await this.runner.bindUser(input.userId);
+    return this.runner.startStuckInvocationForTest(input);
   }
 
   async fetch(): Promise<Response> {
@@ -809,6 +830,34 @@ async function handleTestRunAlarmRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId);
   return json(await stub.runAlarmForTest({ userId }));
+}
+
+async function handleTestStartStuckInvocationRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-start-stuck-invocation",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId) as UserRunnerDurableObjectStubLike & {
+    startStuckInvocationForTest(input: {
+      userId: string;
+    }): Promise<HostedRunnerStuckInvocationTestResult>;
+  };
+  return json(await stub.startStuckInvocationForTest({ userId }));
 }
 
 async function handleRunnerNudgeRoute(

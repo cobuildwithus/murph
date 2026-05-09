@@ -97,6 +97,9 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("codex-container-continuity")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
     );
+    expect(resolveHostedLocalE2eScenarios("stuck-invocation-recovery")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-stuck-invocation-recovery-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "active-turn-latency",
     );
@@ -106,6 +109,9 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "codex-container-continuity",
     );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
+      "stuck-invocation-recovery",
+    );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "active-turn-latency",
     );
@@ -114,6 +120,9 @@ describe("hosted-local harness", () => {
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "codex-container-continuity",
+    );
+    expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
+      "stuck-invocation-recovery",
     );
   });
 

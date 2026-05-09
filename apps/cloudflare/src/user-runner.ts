@@ -155,10 +155,23 @@ interface RunnerDrainInput {
   reason: HostedWorkspaceInvocationReason;
 }
 
+export interface HostedRunnerStuckInvocationTestResult {
+  attemptId: string;
+  nextWakeAt: string | null;
+  ok: true;
+}
+
 class HostedRunnerInvocationPreemptedForNudgeError extends Error {
   constructor() {
     super("Hosted runner invocation preempted for a pending foreground nudge.");
     this.name = "HostedRunnerInvocationPreemptedForNudgeError";
+  }
+}
+
+class HostedRunnerInvocationLeaseExpiredError extends Error {
+  constructor() {
+    super("Hosted runner invocation lease expired.");
+    this.name = "HostedRunnerInvocationLeaseExpiredError";
   }
 }
 
@@ -659,7 +672,18 @@ export class HostedUserRunner {
 
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
-      const runningRecord = await this.stateStore.readState();
+      let runningRecord = await this.stateStore.readState();
+      if (runningRecord.inFlight && runningRecord.workspaceInvocation) {
+        const recovery = await this.clearExpiredActiveInvocationForRecovery();
+        runningRecord = recovery.record;
+        if (recovery.cleared) {
+          this.abortActiveInvocationAfterExpiredLease({
+            attemptId: recovery.attemptId,
+            userId: runningRecord.userId,
+          });
+          return this.withInvocationLock(async () => this.runUntilIdleOrBudgetInternal(input));
+        }
+      }
       const record = await this.syncInvocationRecoveryAlarm(runningRecord, {
         minimumDelayMs: ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
       });
@@ -681,20 +705,49 @@ export class HostedUserRunner {
     return this.withInvocationLock(async () => this.runUntilIdleOrBudgetInternal(input));
   }
 
+  async startStuckInvocationForTest(input: {
+    reason?: HostedWorkspaceInvocationReason;
+    userId: string;
+  }): Promise<HostedRunnerStuckInvocationTestResult> {
+    await this.stateStore.bindUser(input.userId);
+    if (this.invocationLock !== null) {
+      throw new Error("Hosted runner already has an active local invocation lock.");
+    }
+
+    const lease = await this.stateStore.beginInvocation({
+      reason: input.reason ?? "manual",
+      userId: input.userId,
+    });
+    await this.stateStore.ageActiveInvocationForTest({
+      startedAt: "2000-01-01T00:00:00.000Z",
+    });
+    const record = await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: new Date().toISOString(),
+    });
+    this.invocationLock = new Promise<void>(() => undefined);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        workspaceAttemptId: lease.attemptId,
+      },
+      message: "Hosted runner started test-only stuck active invocation.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+
+    return {
+      attemptId: lease.attemptId,
+      nextWakeAt: record.nextWakeAt,
+      ok: true,
+    };
+  }
+
   private async runUntilIdleOrBudgetInternal(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     let initialRecord = await this.stateStore.readState();
     if (initialRecord.inFlight) {
       if (initialRecord.workspaceInvocation) {
-        const nowMs = Date.now();
-        const recovery = await this.stateStore.clearStaleInvocationIfExpired({
-          nowMs,
-          orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
-          timeoutMs: this.env.runnerTimeoutMs,
-        });
+        const recovery = await this.clearExpiredActiveInvocationForRecovery();
         initialRecord = recovery.record;
-        if (recovery.cleared) {
-          this.logStaleInvocationLeaseCleared(recovery.attemptId, initialRecord.userId);
-        }
       }
 
       if (initialRecord.inFlight) {
@@ -1157,6 +1210,44 @@ export class HostedUserRunner {
       userId: input.userId,
     });
     return true;
+  }
+
+  private abortActiveInvocationAfterExpiredLease(input: {
+    attemptId: string | null;
+    userId: string;
+  }): void {
+    const abortController = this.activeWorkspaceInvocationAbortController;
+    if (abortController && !abortController.signal.aborted) {
+      abortController.abort(new HostedRunnerInvocationLeaseExpiredError());
+    }
+    this.invocationLock = null;
+    this.pendingRunnerDriveAfterInvocation = null;
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        workspaceAttemptId: input.attemptId,
+      },
+      level: "warn",
+      message: "Hosted runner dropped stale active invocation lock after lease expiry.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+  }
+
+  private async clearExpiredActiveInvocationForRecovery(): Promise<{
+    attemptId: string | null;
+    cleared: boolean;
+    record: RunnerStateRecord;
+  }> {
+    const recovery = await this.stateStore.clearStaleInvocationIfExpired({
+      nowMs: Date.now(),
+      orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
+    if (recovery.cleared) {
+      this.logStaleInvocationLeaseCleared(recovery.attemptId, recovery.record.userId);
+    }
+    return recovery;
   }
 
   private async preemptPersistedWorkspaceInvocationForPendingNudge(input: {
@@ -2241,6 +2332,19 @@ export class HostedUserRunner {
       reason: input.reason,
     })
       .then(() => undefined, async (error) => {
+        if (error instanceof HostedRunnerInvocationLeaseExpiredError) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              reason: input.reason,
+            },
+            message: "Hosted runner stale invocation handoff completed without scheduling an extra retry.",
+            phase: "scheduled",
+            userId: input.userId,
+          });
+          return;
+        }
+
         const record = await this.tryReadStateForRetryScheduling();
         const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
           defaultRetryDelayMs: this.env.retryDelayMs,

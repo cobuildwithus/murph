@@ -780,6 +780,23 @@ describe("cloudflare worker routes", () => {
     await expect(alarmResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the test runner user.",
     });
+
+    const stuckInvocationResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/stuck-invocation",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(stuckInvocationResponse.status).toBe(401);
+    await expect(stuckInvocationResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
   });
 
   it("stores and reads hosted-local test artifacts for correctly bound callers", async () => {
@@ -913,6 +930,40 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
     expect(stub.runAlarmForTest).toHaveBeenCalledWith({ userId: "member_123" });
+  });
+
+  it("starts the hosted-local stuck invocation test route for correctly bound callers", async () => {
+    const stub = createUserRunnerStub({
+      startStuckInvocationForTest: vi.fn(async () => ({
+        attemptId: "workspace-invocation-test",
+        nextWakeAt: "2026-05-09T00:00:00.000Z",
+        ok: true as const,
+      })),
+    });
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/stuck-invocation",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      attemptId: "workspace-invocation-test",
+      nextWakeAt: "2026-05-09T00:00:00.000Z",
+      ok: true,
+    });
+    expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({ userId: "member_123" });
   });
 
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
@@ -2308,6 +2359,11 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       status: "idle" as const,
     })),
     runAlarmForTest: vi.fn(async () => ({ ok: true as const })),
+    startStuckInvocationForTest: vi.fn(async () => ({
+      attemptId: "workspace-invocation-test",
+      nextWakeAt: null,
+      ok: true as const,
+    })),
     runnerStatus: vi.fn(async () => ({
       inFlight: false,
       mailboxLag: [],
