@@ -446,7 +446,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       timeoutMs: 5000,
       userId: "member_123",
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_evt_123",
+      source: "linq",
+    });
     expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();

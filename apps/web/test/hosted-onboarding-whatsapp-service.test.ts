@@ -255,7 +255,10 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       timeoutMs: 5000,
       userId: "member_whatsapp_123",
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
+      source: "whatsapp",
+    });
   });
 
   it("falls back to the pointer nudge workflow for opted-in WhatsApp texts", async () => {

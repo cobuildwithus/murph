@@ -2,9 +2,6 @@ import {
   startHostedWebhookNudgeWorkflow,
 } from "./webhook-workflow-start";
 import {
-  sendHostedLinqReadReceipt,
-} from "./linq";
-import {
   nudgeHostedRunnerUserBestEffortResult,
 } from "../hosted-runner/control";
 import {
@@ -19,19 +16,11 @@ import {
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
 
-const HOSTED_WEBHOOK_LINQ_DIRECT_READ_RECEIPT_TIMEOUT_MS = 5_000;
-
 export type HostedWebhookWakeHandoffResult =
-  | {
-      reason: "runner-nudged";
-      runnerNudgeAccepted: true;
-      started: true;
-      workflowStarted: false;
-    }
   | {
       reason: "workflow-started";
       runId: string;
-      runnerNudgeAccepted: false;
+      runnerNudgeAccepted: boolean;
       started: true;
       workflowStarted: true;
     }
@@ -53,7 +42,6 @@ interface HostedWebhookDirectNudgeSummary {
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   eventId: string;
-  linqChatId?: string | null;
   mailboxItemId?: string;
   response: HostedWebhookServiceResponse;
   source: "linq" | "telegram" | "whatsapp";
@@ -86,31 +74,11 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       };
     }
 
-    const directNudge = await tryNudgeHostedWebhookRunnerDirect(input);
-    if (directNudge.accepted) {
-      if (input.source === "linq") {
-        await sendHostedLinqDirectReadReceiptBestEffort({
-          chatId: input.linqChatId ?? null,
-          eventId: input.eventId,
-        });
-      }
-      finishHostedOnboardingTiming(handoffTiming, "runner-nudged", {
-        directNudgeAttempted: directNudge.attempted,
-        directNudgeConfigured: directNudge.configured,
-        directNudgeErrorCode: directNudge.errorCode,
-      });
-      return {
-        reason: "runner-nudged",
-        runnerNudgeAccepted: true,
-        started: true,
-        workflowStarted: false,
-      };
-    }
-
     const workflow = await startHostedWebhookNudgeWorkflow({
       mailboxItemId: input.mailboxItemId,
       source: input.source,
     });
+    const directNudge = await tryNudgeHostedWebhookRunnerDirect(input);
     finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
       directNudgeAttempted: directNudge.attempted,
       directNudgeConfigured: directNudge.configured,
@@ -120,7 +88,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     return {
       reason: "workflow-started",
       runId: workflow.runId,
-      runnerNudgeAccepted: false,
+      runnerNudgeAccepted: directNudge.accepted,
       started: true,
       workflowStarted: true,
     };
@@ -168,43 +136,4 @@ async function tryNudgeHostedWebhookRunnerDirect(input: {
     configured: result.configured,
     errorCode: result.errorCode,
   };
-}
-
-async function sendHostedLinqDirectReadReceiptBestEffort(input: {
-  chatId: string | null;
-  eventId: string;
-}): Promise<void> {
-  const chatId = input.chatId?.trim() ?? "";
-  const chatIdPresent = chatId.length > 0;
-  const timing = startHostedOnboardingTiming(
-    "hosted-onboarding.webhook.linq.direct-read-receipt",
-    {
-      chatIdPresent,
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_READ_RECEIPT_TIMEOUT_MS,
-    },
-  );
-
-  if (!chatIdPresent) {
-    finishHostedOnboardingTiming(timing, "skipped-missing-chat", {
-      chatIdPresent: false,
-    });
-    return;
-  }
-
-  try {
-    const result = await sendHostedLinqReadReceipt({
-      chatId,
-      timeoutMs: HOSTED_WEBHOOK_LINQ_DIRECT_READ_RECEIPT_TIMEOUT_MS,
-    });
-    finishHostedOnboardingTiming(timing, result.ok ? "sent" : "failed", {
-      chatIdPresent: true,
-      httpStatus: result.status,
-    });
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      chatIdPresent: true,
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-    });
-  }
 }

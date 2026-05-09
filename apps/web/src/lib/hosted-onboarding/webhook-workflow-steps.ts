@@ -2,18 +2,19 @@ import {
   FatalError,
   RetryableError,
 } from "workflow";
-import {
-  parseHostedExecutionWake,
-} from "@murphai/hosted-execution/parsers";
 
 import {
-  decodeHostedMailboxStoredPayload,
   readHostedMailboxItemById,
-  readHostedMailboxItemOwnerById,
-  readHostedMailboxPayload,
+  type HostedMailboxItemRecord,
 } from "../hosted-mailbox/store";
-import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
 import {
+  isHostedMailboxLaneCheckpointed,
+} from "../hosted-mailbox/lag";
+import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
+import { readHostedWorkspace } from "../hosted-workspace/store";
+import {
+  HOSTED_WEBHOOK_CHECKPOINT_WORKFLOW_RETRY_AFTER,
+  HOSTED_WEBHOOK_CHECKPOINT_WORKFLOW_STEP_MAX_RETRIES,
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER,
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_STEP_MAX_RETRIES,
   type HostedWebhookNudgeWorkflowInput,
@@ -21,35 +22,29 @@ import {
 import {
   HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
 } from "./webhook-nudge-policy";
-import {
-  sendHostedLinqReadReceipt,
-} from "./linq";
-import {
-  deriveHostedOnboardingTimingErrorName,
-  finishHostedOnboardingTiming,
-  startHostedOnboardingTiming,
-} from "./logging";
 import { withHostedWorkflowStepMaxRetries } from "./workflow-step-options";
-
-const HOSTED_WEBHOOK_LINQ_READ_RECEIPT_TIMEOUT_MS = 5_000;
 
 export async function nudgeHostedWebhookMailboxItemStep(
   input: HostedWebhookNudgeWorkflowInput,
 ): Promise<void> {
   "use step";
 
-  const mailboxItemOwner = await readHostedMailboxItemOwnerById({
+  const mailboxItem = await readHostedMailboxItemById({
     mailboxItemId: input.mailboxItemId,
   });
 
-  if (!mailboxItemOwner) {
+  if (!mailboxItem) {
     throw new FatalError("Hosted webhook mailbox item is missing.");
+  }
+
+  if (await isHostedWebhookMailboxItemCheckpointed(mailboxItem)) {
+    return;
   }
 
   const result = await nudgeHostedRunnerUserBestEffortResult({
     context: resolveHostedNudgeWorkflowContext(input.source),
     timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-    userId: mailboxItemOwner.userId,
+    userId: mailboxItem.userId,
   });
 
   if (!result.accepted) {
@@ -67,51 +62,34 @@ withHostedWorkflowStepMaxRetries(
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_STEP_MAX_RETRIES,
 );
 
-export async function sendHostedWebhookLinqReadReceiptStep(
+export async function waitHostedWebhookMailboxItemCheckpointStep(
   input: HostedWebhookNudgeWorkflowInput,
 ): Promise<void> {
   "use step";
 
-  if (input.source !== "linq") {
-    return;
+  const mailboxItem = await readHostedMailboxItemById({
+    mailboxItemId: input.mailboxItemId,
+  });
+
+  if (!mailboxItem) {
+    throw new FatalError("Hosted webhook mailbox item is missing.");
   }
 
-  const timing = startHostedOnboardingTiming(
-    "hosted-onboarding.workflow.linq.ingress-read-receipt",
-    {
-      mailboxItemIdPresent: input.mailboxItemId.trim().length > 0,
-      timeoutMs: HOSTED_WEBHOOK_LINQ_READ_RECEIPT_TIMEOUT_MS,
-    },
-  );
-
-  try {
-    const chatId = await readHostedLinqChatIdFromMailboxItem({
-      mailboxItemId: input.mailboxItemId,
-    });
-
-    if (!chatId) {
-      finishHostedOnboardingTiming(timing, "skipped-missing-chat", {
-        chatIdPresent: false,
-      });
-      return;
-    }
-
-    const result = await sendHostedLinqReadReceipt({
-      chatId,
-      timeoutMs: HOSTED_WEBHOOK_LINQ_READ_RECEIPT_TIMEOUT_MS,
-    });
-
-    finishHostedOnboardingTiming(timing, result.ok ? "sent" : "failed", {
-      chatIdPresent: true,
-      httpStatus: result.status,
-    });
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      chatIdPresent: false,
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-    });
+  const checkpointed = await isHostedWebhookMailboxItemCheckpointed(mailboxItem);
+  if (!checkpointed) {
+    throw new RetryableError(
+      "Hosted webhook mailbox item import is not checkpointed yet.",
+      {
+        retryAfter: HOSTED_WEBHOOK_CHECKPOINT_WORKFLOW_RETRY_AFTER,
+      },
+    );
   }
 }
+
+withHostedWorkflowStepMaxRetries(
+  waitHostedWebhookMailboxItemCheckpointStep,
+  HOSTED_WEBHOOK_CHECKPOINT_WORKFLOW_STEP_MAX_RETRIES,
+);
 
 function resolveHostedNudgeWorkflowContext(
   source: HostedWebhookNudgeWorkflowInput["source"],
@@ -121,47 +99,16 @@ function resolveHostedNudgeWorkflowContext(
     : `webhook:${source}:workflow`;
 }
 
-async function readHostedLinqChatIdFromMailboxItem(input: {
-  mailboxItemId: string;
-}): Promise<string | null> {
-  const item = await readHostedMailboxItemById({
-    mailboxItemId: input.mailboxItemId,
+async function isHostedWebhookMailboxItemCheckpointed(
+  mailboxItem: HostedMailboxItemRecord,
+): Promise<boolean> {
+  const workspace = await readHostedWorkspace({
+    userId: mailboxItem.userId,
   });
 
-  if (!item || item.kind !== "conversation.message") {
-    return null;
-  }
-
-  const payload = item.payloadInlineCiphertext
-    ? null
-    : await readHostedMailboxPayload({
-      dedupeKey: item.dedupeKey,
-      mailboxItemId: item.id,
-      payloadRef: item.payloadRef,
-      userId: item.userId,
-    });
-  const decoded = await decodeHostedMailboxStoredPayload({
-    dedupeKey: item.dedupeKey,
-    kind: item.kind,
-    lane: item.lane,
-    laneSeq: item.laneSeq,
-    mailboxItemId: item.id,
-    occurredAt: item.occurredAt,
-    payloadCiphertext: payload?.payloadCiphertext ?? null,
-    payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
-    payloadSchema: item.payloadSchema,
-    userId: item.userId,
+  return isHostedMailboxLaneCheckpointed({
+    lane: mailboxItem.lane,
+    laneSeq: mailboxItem.laneSeq,
+    redactedStatusJson: workspace?.redactedStatusJson ?? null,
   });
-
-  if (!decoded) {
-    return null;
-  }
-
-  const wake = parseHostedExecutionWake(decoded);
-  if (wake.kind !== "conversation.message" || wake.message.channel !== "linq") {
-    return null;
-  }
-
-  const chatId = wake.message.linqMessage.chatId.trim();
-  return chatId.length > 0 ? chatId : null;
 }

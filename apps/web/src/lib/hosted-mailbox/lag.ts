@@ -23,27 +23,19 @@ export function computeHostedMailboxLaneLag(input: {
   };
 }
 
-export function mergeLatestHostedMailboxImportRedactedStatus(
-  workspaceStatus: Record<string, unknown> | null,
-  latestImportStatus: Record<string, unknown> | null,
-): Record<string, unknown> | null {
-  if (!latestImportStatus) {
-    return workspaceStatus;
-  }
+export function isHostedMailboxLaneCheckpointed(input: {
+  lane: HostedMailboxLane;
+  laneSeq: bigint | number | string;
+  redactedStatusJson: unknown;
+}): boolean {
+  const redactedStatus = readHostedMailboxRedactedStatusRecord(input.redactedStatusJson);
+  const importedSeq = readHostedMailboxImportedSeqForLane(redactedStatus, input.lane);
+  const laneSeq = readRequiredNonNegativeBigInt(
+    input.laneSeq,
+    "Hosted mailbox lane seq",
+  );
 
-  return {
-    ...(workspaceStatus ?? {}),
-    hostedMailboxConversationImportedSeq: maxHostedMailboxImportedSeq(
-      workspaceStatus,
-      latestImportStatus,
-      "conversation",
-    ),
-    hostedMailboxSystemImportedSeq: maxHostedMailboxImportedSeq(
-      workspaceStatus,
-      latestImportStatus,
-      "system",
-    ),
-  };
+  return importedSeq >= laneSeq;
 }
 
 export function readHostedMailboxImportedSeqForLane(
@@ -84,17 +76,6 @@ export function readHostedMailboxRedactedStatusRecord(
   return Object.fromEntries(Object.entries(value));
 }
 
-function maxHostedMailboxImportedSeq(
-  workspaceStatus: Record<string, unknown> | null,
-  latestImportStatus: Record<string, unknown>,
-  lane: HostedMailboxLane,
-): string {
-  const workspaceSeq = readHostedMailboxImportedSeqForLane(workspaceStatus, lane);
-  const latestSeq = readHostedMailboxImportedSeqForLane(latestImportStatus, lane);
-
-  return (latestSeq > workspaceSeq ? latestSeq : workspaceSeq).toString();
-}
-
 function readNonNegativeBigInt(value: unknown): bigint | null {
   if (typeof value === "bigint" && value >= 0n) {
     return value;
@@ -109,4 +90,14 @@ function readNonNegativeBigInt(value: unknown): bigint | null {
   }
 
   return null;
+}
+
+function readRequiredNonNegativeBigInt(value: unknown, label: string): bigint {
+  const parsed = readNonNegativeBigInt(value);
+
+  if (parsed === null) {
+    throw new TypeError(`${label} must be a non-negative integer.`);
+  }
+
+  return parsed;
 }

@@ -1,6 +1,6 @@
 import {
   nudgeHostedWebhookMailboxItemStep,
-  sendHostedWebhookLinqReadReceiptStep,
+  waitHostedWebhookMailboxItemCheckpointStep,
 } from "./webhook-workflow-steps";
 import type {
   HostedWebhookNudgeWorkflowInput,
@@ -12,5 +12,5 @@ export async function hostedWebhookNudgeWorkflow(
   "use workflow";
 
   await nudgeHostedWebhookMailboxItemStep(input);
-  await sendHostedWebhookLinqReadReceiptStep(input);
+  await waitHostedWebhookMailboxItemCheckpointStep(input);
 }
