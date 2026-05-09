@@ -753,6 +753,61 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toContain("2026-04-27T00:00:30.100Z");
   });
 
+  it("times out a live invocation through the owning invocation path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return activeInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      destroyInstance,
+      invoke,
+      runnerTimeoutMs: 1_000,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    void activeRun.catch(() => undefined);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(activeRun).rejects.toThrow(/timeout|aborted/i);
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(
+      sql.exec(
+        `SELECT in_flight, pending_nudge, retry_failure_count, next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      next_wake_at: "2026-04-27T00:00:31.100Z",
+      pending_nudge: 0,
+      retry_failure_count: 1,
+    }]);
+
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.100Z"));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    activeInvocation.reject(new Error("late invocation finished after timeout"));
+  });
+
   it("starts a fresh nudge follow-up when the active invocation releases during nudge alarm application", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1307,7 +1362,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
       invoke,
-      runnerTimeoutMs: 1_000,
+      runnerTimeoutMs: 10_000,
     });
     await runner.bindUser("member_123");
 
@@ -1345,16 +1400,14 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(deferredRow?.idle_shutdown_checkpoint_workspace_version).toBe("4");
     expect(deferredRow?.next_wake_at).not.toBeNull();
     expect(
-      Date.parse(deferredRow?.next_wake_at ?? "")
-        - Date.parse(deferredRow?.idle_shutdown_checkpoint_due_at ?? ""),
-    ).toBe(1);
+      Date.parse(deferredRow?.idle_shutdown_checkpoint_due_at ?? ""),
+    ).toBeLessThan(Date.parse(deferredRow?.next_wake_at ?? ""));
     expect(alarms.at(-1)).toBe(deferredRow?.idle_shutdown_checkpoint_due_at);
 
     vi.setSystemTime(new Date("2026-04-27T00:00:02.000Z"));
     await runner.alarm();
 
-    expect(invoke).toHaveBeenCalledTimes(2);
-    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke).toHaveBeenCalledOnce();
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -1365,12 +1418,36 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
-      in_flight: 0,
-      next_wake_at: null,
+      idle_shutdown_checkpoint_due_at: deferredRow?.idle_shutdown_checkpoint_due_at,
+      idle_shutdown_checkpoint_workspace_version: "4",
+      in_flight: 1,
+      next_wake_at: deferredRow?.next_wake_at,
     }]);
-    await expect(activeRun).rejects.toThrow("Hosted runner invocation lease expired.");
+
+    activeInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await expect(activeRun).resolves.toMatchObject({ status: "idle" });
+
+    const completedRows = sql.exec<{
+      idle_shutdown_checkpoint_due_at: string | null;
+      idle_shutdown_checkpoint_workspace_version: string | null;
+      in_flight: number;
+      next_wake_at: string | null;
+    }>(
+      `SELECT idle_shutdown_checkpoint_due_at,
+              idle_shutdown_checkpoint_workspace_version,
+              in_flight,
+              next_wake_at
+       FROM runner_meta WHERE user_id = ?`,
+      "member_123",
+    ).toArray();
+    expect(completedRows).toHaveLength(1);
+    expect(completedRows[0]?.in_flight).toBe(0);
+    expect(completedRows[0]?.idle_shutdown_checkpoint_workspace_version).toBe("4");
+    expect(Date.parse(completedRows[0]?.idle_shutdown_checkpoint_due_at ?? "")).toBeGreaterThan(
+      Date.parse(deferredRow?.idle_shutdown_checkpoint_due_at ?? ""),
+    );
+    expect(completedRows[0]?.next_wake_at).toBeNull();
+    expect(invoke).toHaveBeenCalledOnce();
   });
 
   it("syncs a recovery alarm instead of waiting behind a long active invocation", async () => {
@@ -1410,67 +1487,6 @@ describe("HostedUserRunner runtime crypto context", () => {
         userId: "member_123",
       }),
     );
-  });
-
-  it("re-drives once when recovery clears an expired invocation that consumed pending work", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const activeInvocation = createDeferred<{
-      nextWakeAt: null;
-      status: "idle";
-    }>();
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-      if (invoke.mock.calls.length === 1) {
-        return activeInvocation.promise;
-      }
-      if (invoke.mock.calls.length === 2) {
-        return {
-          nextWakeAt: null,
-          status: "idle" as const,
-        };
-      }
-      throw new Error("Unexpected extra workspace invocation.");
-    });
-    const { runner, sql } = createRunnerCryptoContextHarness(null, {
-      invoke,
-      runnerTimeoutMs: 1_000,
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      immediateDriveStarted: true,
-    });
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    expect(
-      sql.exec(
-        `SELECT in_flight, pending_nudge, pending_work
-         FROM runner_meta WHERE user_id = ?`,
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      in_flight: 1,
-      pending_nudge: 0,
-      pending_work: 0,
-    }]);
-
-    await vi.advanceTimersByTimeAsync(2_000);
-    await expect(runner.alarm()).resolves.toBeUndefined();
-
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("alarm");
-    expect(invoke.mock.calls[1]?.[0].job.request.leaseGeneration).toBe("2");
-    expect(
-      sql.exec(
-        `SELECT active_invocation_id, in_flight, pending_nudge, pending_work
-         FROM runner_meta WHERE user_id = ?`,
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      active_invocation_id: null,
-      in_flight: 0,
-      pending_nudge: 0,
-      pending_work: 0,
-    }]);
   });
 
   it("replays from a durable alarm after cold restore clears an expired active invocation", async () => {

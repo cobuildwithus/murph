@@ -48,15 +48,20 @@ Done:
 - Checked dbhub after the user-reported cold-start/stale-reply symptom. The active high-volume hosted mailbox row is now caught up to its conversation high-water, but recent runtime logs show the previous stale-prefix replay pattern followed by a pass that considered multiple queued conversation inputs and replied to one older pending input.
 - Found a regression in the latest runner priority change: foreground nudges could preempt active or persisted deferred checkpoint invocations even when `deferred_checkpoint_required` was set, reopening the same durability hole that lets a cold container restore an older mailbox/import watermark.
 - Restored the deferred-checkpoint preemption guard and regression coverage so foreground nudges queue behind required checkpoint work instead of destroying it.
+- Landed and deployed the hosted runner hard cut, then used repeated Pro review loops to check for bug risks and simplification targets.
+- Live iMessage probing exposed a stale recovery drain bug where an expired persisted invocation could consume pending work without forcing the replacement drain; fixed and deployed the recovery path with a focused runner-alarm regression.
+- A follow-up live warm iMessage probe exposed a same-isolate recovery race: alarm/nudge recovery could clear a still-running local invocation before the foreground runner reached Linq/outbound delivery.
+- Patched local active-invocation recovery so alarms only sync a recovery wake while the live invocation owns its timeout/failure path, removed the stale live-abort branch, and preserved persisted-orphan replay coverage.
+- Added focused regressions for live invocation timeout ownership, active idle-checkpoint preservation, and persisted cold-restore replay; full Cloudflare verification passed.
 
 Now:
-- Re-run focused Cloudflare verification and completion audits for the deferred-checkpoint preemption regression.
+- Commit and push the active-invocation recovery fix, run another Pro review in the open ChatGPT thread, then deploy Cloudflare immediately.
 
 Next:
-- Commit through the active-plan path, deploy Cloudflare, then recheck cold/warm iMessage reply scenarios after provider capacity is available.
+- Recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: live post-deploy iMessage reply latency until the fixed Worker is deployed, the lagged runner drains, and the assistant provider stops returning capacity/quota failure.
+- UNCONFIRMED: live post-deploy iMessage reply latency until the active-invocation recovery fix is deployed and the runner drains a fresh inbound message.
 
 Working set (files/ids/commands):
 - `apps/cloudflare/src/**`
