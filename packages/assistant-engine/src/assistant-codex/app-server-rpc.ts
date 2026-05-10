@@ -1,5 +1,4 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
-import { once } from 'node:events'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -16,6 +15,14 @@ export interface PendingCodexRpcRequest {
   method: string
   reject: (error: unknown) => void
   resolve: (result: unknown) => void
+}
+
+interface StoppableCodexAppServerChild {
+  exitCode: number | null
+  kill(signal?: NodeJS.Signals): boolean
+  killed: boolean
+  once(eventName: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown
+  signalCode: NodeJS.Signals | null
 }
 
 export function attachCodexAbortListener(input: {
@@ -86,12 +93,15 @@ export async function waitForCodexSpawn(
 }
 
 export async function stopCodexAppServerChild(input: {
-  child: ChildProcessWithoutNullStreams
+  child: StoppableCodexAppServerChild
   closeStdin: () => VaultCliError | null
+  processGroupPid?: number | null
 }): Promise<void> {
   const stdinCloseError = input.closeStdin()
+  const processGroupPid = normalizeCodexProcessGroupPid(input.processGroupPid)
 
   if (input.child.exitCode !== null || input.child.signalCode !== null) {
+    killCodexProcessGroupBestEffort(processGroupPid, 'SIGKILL')
     if (stdinCloseError) {
       throw stdinCloseError
     }
@@ -99,26 +109,69 @@ export async function stopCodexAppServerChild(input: {
   }
 
   if (!input.child.killed) {
-    input.child.kill()
+    terminateCodexAppServerChild(input.child, processGroupPid, 'SIGTERM')
   }
 
   if (await waitForCodexChildExit(input.child, CODEX_APP_SERVER_STOP_TIMEOUT_MS)) {
+    killCodexProcessGroupBestEffort(processGroupPid, 'SIGKILL')
     if (stdinCloseError) {
       throw stdinCloseError
     }
     return
   }
 
-  input.child.kill('SIGKILL')
+  terminateCodexAppServerChild(input.child, processGroupPid, 'SIGKILL')
   await waitForCodexChildExit(input.child, CODEX_APP_SERVER_STOP_TIMEOUT_MS)
+  killCodexProcessGroupBestEffort(processGroupPid, 'SIGKILL')
 
   if (stdinCloseError) {
     throw stdinCloseError
   }
 }
 
+function normalizeCodexProcessGroupPid(value: number | null | undefined): number | null {
+  return process.platform !== 'win32' && typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null
+}
+
+function terminateCodexAppServerChild(
+  child: StoppableCodexAppServerChild,
+  processGroupPid: number | null,
+  signal: NodeJS.Signals,
+): void {
+  if (killCodexProcessGroupBestEffort(processGroupPid, signal)) {
+    return
+  }
+
+  child.kill(signal)
+}
+
+function killCodexProcessGroupBestEffort(
+  processGroupPid: number | null,
+  signal: NodeJS.Signals,
+): boolean {
+  if (processGroupPid === null) {
+    return false
+  }
+
+  try {
+    process.kill(-processGroupPid, signal)
+    return true
+  } catch (error) {
+    if (isNodeErrnoException(error) && error.code === 'ESRCH') {
+      return false
+    }
+    return false
+  }
+}
+
+function isNodeErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === 'object' && 'code' in error)
+}
+
 export async function waitForCodexChildExit(
-  child: ChildProcessWithoutNullStreams,
+  child: Pick<StoppableCodexAppServerChild, 'exitCode' | 'once' | 'signalCode'>,
   timeoutMs: number,
 ): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) {
@@ -127,12 +180,10 @@ export async function waitForCodexChildExit(
 
   let timeoutId: NodeJS.Timeout | undefined
   try {
-    await Promise.race([
-      once(child, 'exit'),
-      new Promise<void>((resolve) => {
-        timeoutId = setTimeout(resolve, timeoutMs)
-      }),
-    ])
+    await new Promise<void>((resolve) => {
+      child.once('exit', () => resolve())
+      timeoutId = setTimeout(resolve, timeoutMs)
+    })
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId)

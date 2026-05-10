@@ -281,8 +281,10 @@ async function runCodexAppServerTurn(
     workingDirectory: string
   },
 ): Promise<CodexAppServerTurnResult> {
+  const useProcessGroup = process.platform !== 'win32'
   const child: ChildProcessWithoutNullStreams = spawn(input.codexCommand, [...input.args], {
     cwd: input.workingDirectory,
+    detached: useProcessGroup,
     env: input.env,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
@@ -823,6 +825,7 @@ async function runCodexAppServerTurn(
     await stopCodexAppServerChild({
       child,
       closeStdin: tryCloseCodexStdin,
+      processGroupPid: useProcessGroup ? child.pid ?? null : null,
     })
     emitAppServerTimingTrace('shutdown')
     if (stdinFailure) {
@@ -835,6 +838,7 @@ async function runCodexAppServerTurn(
     await stopCodexAppServerChild({
       child,
       closeStdin: tryCloseCodexStdin,
+      processGroupPid: useProcessGroup ? child.pid ?? null : null,
     }).catch(() => undefined)
     throw error
   } finally {

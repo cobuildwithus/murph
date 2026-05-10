@@ -283,6 +283,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       requestId: input.requestId,
     });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
+  if (input.runAssistantPhase) {
+    await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      input,
+      phase: "import",
+    });
+  }
 
   if (!input.runAssistantPhase) {
     await runHostedMailboxPostCheckpointEffectsAndLogBestEffort({
@@ -479,13 +486,11 @@ function withActiveTurnInputWorkspacePorts(input: {
       if (shouldRecordHostedActiveTurnMailboxRefreshResult(result)) {
         input.checkpointRequestBuilder.recordCheckpointResult(result);
       }
-      if (result.checkpoint?.checkpointed === true) {
-        scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
-          checkpointRequestBuilder: input.checkpointRequestBuilder,
-          input: input.input,
-          phase: "active_turn_input",
-        });
-      }
+      await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+        checkpointRequestBuilder: input.checkpointRequestBuilder,
+        input: input.input,
+        phase: "active_turn_input",
+      });
 
       return summarizeMailboxRefreshResult(result);
     },
@@ -888,6 +893,19 @@ function scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
   }
 
   void runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
+    effects,
+    input: input.input,
+    phase: input.phase,
+  });
+}
+
+async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  input: HostedWorkspaceRunnerInput;
+  phase: "active_turn_input" | "import";
+}): Promise<void> {
+  const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
+  await runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
     effects,
     input: input.input,
     phase: input.phase,

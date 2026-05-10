@@ -28,6 +28,7 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const linqWebhookSecret = "linq-local-webhook-secret";
+const hostedLinqVoiceNoteTranscriptText = "Remember to log the voice note";
 const hostedLinqVoiceNoteAssistantReplyText = "Logged the voice note.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const linqWebhookRunId = Date.now();
@@ -254,11 +255,15 @@ describe("hosted local Linq webhook e2e", () => {
     expect(inputFiles).toEqual([]);
     expect(assistantProviderRequests[0]?.body).toContain("Attachment context:");
     expect(assistantProviderRequests[0]?.body).toContain("fileName: lab-results.pdf");
-    expect(assistantProviderRequests[0]?.body).toContain("raw evidence: not_attempted");
+    expect(assistantProviderRequests[0]?.body).toContain("raw/assistant-input/");
+    expect(assistantProviderRequests[0]?.body).toContain("attachments/001.pdf");
+    expect(assistantProviderRequests[0]?.body).toContain("storedPath");
+    expect(assistantProviderRequests[0]?.body).not.toContain("raw evidence: not_attempted");
     expectNoNativeAttachmentLeaks(assistantProviderRequests[0]?.body, [
       attachmentId,
       expectedAttachmentDownloadPath,
       expectedAttachmentDownloadUrl,
+      "pdfEvidencePath:",
       "stub-local-openai-key",
       "OPENAI_API_KEY",
     ]);
@@ -332,7 +337,8 @@ describe("hosted local Linq webhook e2e", () => {
     const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
     expect(assistantProviderBody).toContain("Attachment context:");
     expect(assistantProviderBody).toContain("fileName: Audio Message.m4a");
-    expect(assistantProviderBody).toContain("raw evidence: not_attempted");
+    expect(assistantProviderBody).toContain(hostedLinqVoiceNoteTranscriptText);
+    expect(assistantProviderBody).not.toContain("raw evidence: not_attempted");
     expectNoNativeAttachmentLeaks(assistantProviderBody, [
       attachmentId,
       expectedAttachmentDownloadPath,

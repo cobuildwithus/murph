@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
   fakeHome: '/home/tester',
@@ -37,6 +37,9 @@ import {
   type CodexAppServerInputItem,
 } from '../src/assistant-codex/app-server-requests.ts'
 import {
+  stopCodexAppServerChild,
+} from '../src/assistant-codex/app-server-rpc.ts'
+import {
   extractAssistantMessageFallback,
   extractCodexErrorMessage,
   extractCodexProgressEventFromNormalized,
@@ -56,6 +59,10 @@ type Deferred<T> = {
   reject(error: unknown): void
   resolve(value: T): void
 }
+
+beforeEach(() => {
+  vi.spyOn(process, 'kill').mockImplementation(() => true)
+})
 
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -481,7 +488,9 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
       ['-s', 'workspace-write', '-a', 'never', '--config', 'model="gpt-5"', 'app-server'],
-      expect.any(Object),
+      expect.objectContaining({
+        detached: process.platform !== 'win32',
+      }),
     )
     expect(onProgress).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1753,6 +1762,30 @@ describe('assistant codex runtime', () => {
       },
     })
     expect(spawnedChild.kill).toHaveBeenCalledWith('SIGINT')
+  })
+
+  it('terminates Codex app-server process groups during shutdown', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    const child = new MockChildProcess()
+    child.pid = 424_242
+    const killSpy = vi.mocked(process.kill)
+
+    const stopped = stopCodexAppServerChild({
+      child,
+      closeStdin: () => null,
+      processGroupPid: child.pid,
+    })
+    await Promise.resolve()
+    child.emit('exit', null, 'SIGTERM')
+
+    await stopped
+
+    expect(killSpy).toHaveBeenCalledWith(-424_242, 'SIGTERM')
+    expect(killSpy).toHaveBeenCalledWith(-424_242, 'SIGKILL')
+    expect(child.kill).not.toHaveBeenCalled()
   })
 })
 

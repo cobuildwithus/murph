@@ -102,6 +102,7 @@ const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "authorizationHeaderValue",
   "bodyJson",
+  "executionContextHosted",
   "failureAssistantProviderErrorBodyMessage",
   "failureAssistantProviderErrorMessage",
   "failureAssistantProviderErrorStatusText",

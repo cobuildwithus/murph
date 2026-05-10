@@ -376,6 +376,7 @@ export async function runCommand(
         return;
       }
 
+      killChildProcessTree("SIGKILL");
       finishResolve({ stdout, stderr, exitCode });
     });
   });
