@@ -1047,6 +1047,7 @@ describe("hosted workspace restore Codex continuity", () => {
         path.join(hotAssistantRoot, "sessions", "session.json"),
         JSON.stringify({
           providerSessionId: "thread-test",
+          resumeRouteId: "route-test",
           session: "latest",
         }) + "\n",
         "utf8",

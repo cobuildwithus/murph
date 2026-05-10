@@ -331,8 +331,14 @@ export const assistantPersistedSessionSchema = z
   })
   .strict()
 
+const assistantPersistedSessionInputSchema = assistantPersistedSessionSchema
+  .extend({
+    codexResume: z.unknown().nullable().default(null),
+  })
+  .strict()
+
 const assistantPersistedSessionRecordSchema = z.union([
-  assistantPersistedSessionSchema,
+  assistantPersistedSessionInputSchema,
   assistantPersistedSessionV1Schema,
 ])
 

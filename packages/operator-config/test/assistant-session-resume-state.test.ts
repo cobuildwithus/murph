@@ -73,6 +73,20 @@ describe('assistant session resume state normalization', () => {
     expect(session.codexResume).toEqual(session.resumeState)
   })
 
+  it('drops legacy thread ids without route fingerprints', () => {
+    const session = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          providerSessionId: 'provider-session-123',
+          resumeRouteId: null,
+        },
+      }),
+    )
+
+    expect(session.codexResume).toBeNull()
+    expect(session.resumeState).toBeNull()
+  })
+
   it('drops legacy thread instruction fingerprints', () => {
     const trimmed = parseAssistantSessionRecord(
       createPersistedSessionRecord({
@@ -150,5 +164,28 @@ describe('assistant session resume state normalization', () => {
       threadId: providerSessionId,
     })
     expect(session.resumeState).toEqual(session.codexResume)
+  })
+
+  it('normalizes v2 Codex resume without route fingerprint to null', () => {
+    const {
+      sessionId: _sessionId,
+      target,
+      resumeState: _resumeState,
+      ...baseRecord
+    } = createPersistedSessionRecord()
+    const session = parseAssistantSessionRecord({
+      ...baseRecord,
+      schema: 'murph.assistant-conversation.v2',
+      conversationId: 'session_123',
+      codexTarget: target,
+      codexResume: {
+        rolloutRelativePath: codexRolloutRelativePath,
+        routeFingerprint: null,
+        threadId: providerSessionId,
+      },
+    })
+
+    expect(session.codexResume).toBeNull()
+    expect(session.resumeState).toBeNull()
   })
 })

@@ -366,6 +366,7 @@ async function executeAssistantProviderAttempt(input: {
             binding: attemptPlan.session.binding,
           }
         : undefined,
+      freshThreadFallback: attemptPlan.routePlan.freshThreadFallback,
       resumeProviderSessionId: attemptPlan.routePlan.resumeProviderSessionId,
       refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
       codexCommand:

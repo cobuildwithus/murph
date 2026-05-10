@@ -134,6 +134,12 @@ describe('assistant protocol index planning', () => {
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockClear()
     planningMocks.resolveAssistantVaultOverviewBlock.mockClear()
 
+    const resumedSession = createSession({
+      resumeState: {
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        threadId: 'thread-resume',
+      },
+    })
     const resumedPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       input: createMessageInput(),
@@ -143,12 +149,7 @@ describe('assistant protocol index planning', () => {
         currentTimeZone: 'Asia/Kuala_Lumpur',
       },
       route,
-      session: createSession({
-        resumeState: {
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
-          threadId: 'thread-resume',
-        },
-      }),
+      session: resumedSession,
       sharedPlan: createSharedPlan(),
     })
 
@@ -156,10 +157,15 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.refreshThreadInstructions).toBe(false)
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
+    expect(resumedPlan.freshThreadFallback?.developerInstructions).toContain(
+      'bootstrap contract',
+    )
+    expect(resumedPlan.freshThreadFallback?.sessionContext).toEqual({
+      binding: resumedSession.binding,
+    })
     expect(
       planningMocks.resolveAssistantCliSurfaceBootstrapContext,
-    ).not.toHaveBeenCalled()
-    expect(planningMocks.resolveAssistantVaultOverviewBlock).not.toHaveBeenCalled()
+    ).toHaveBeenCalledTimes(1)
   })
 
   it('plans native resume while keeping active-turn history available for fallback', async () => {

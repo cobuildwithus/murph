@@ -8,7 +8,7 @@ const codexRolloutRelativePathPattern =
 export const codexResumeStateSchema = z
   .object({
     rolloutRelativePath: z.string().min(1).nullable().optional(),
-    routeFingerprint: z.string().min(1).nullable().default(null),
+    routeFingerprint: z.string().min(1),
     threadId: z.string().min(1),
   })
   .strict()
@@ -67,6 +67,9 @@ export function normalizeCodexResumeState(value: unknown): CodexResumeState | nu
   const routeFingerprint =
     normalizeUnknownString(record.routeFingerprint) ??
     normalizeUnknownString(record.resumeRouteId)
+  if (!routeFingerprint) {
+    return null
+  }
   const rolloutRelativePath =
     normalizeCodexRolloutRelativePath(record.rolloutRelativePath) ??
     normalizeCodexRolloutRelativePath(record.codexRolloutRelativePath)
@@ -89,6 +92,9 @@ export function buildCodexResumeState(input: {
   }
 
   const routeFingerprint = normalizeNullableString(input.routeFingerprint)
+  if (!routeFingerprint) {
+    return null
+  }
   const rolloutRelativePath = normalizeCodexRolloutRelativePath(
     input.rolloutRelativePath,
   )

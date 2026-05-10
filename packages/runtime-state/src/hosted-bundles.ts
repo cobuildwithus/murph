@@ -2489,6 +2489,14 @@ function readAssistantSessionProviderResumeRequirementsFromText(text: string): A
   if (!providerSessionId) {
     return [];
   }
+  const routeFingerprint =
+    recordStringProperty(resumeState, "routeFingerprint")
+    ?? recordStringProperty(resumeState, "resumeRouteId")
+    ?? recordStringProperty(parsed, "routeFingerprint")
+    ?? recordStringProperty(parsed, "resumeRouteId");
+  if (!routeFingerprint) {
+    return [];
+  }
   const target =
     recordProperty(parsed, "codexTarget") ?? recordProperty(parsed, "target");
   const targetAdapter = recordStringProperty(target, "adapter");

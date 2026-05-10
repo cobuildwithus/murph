@@ -67,6 +67,7 @@ export interface AssistantRouteTurnPlan {
   developerInstructions: string | null
   activeTurnMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
+  freshThreadFallback?: AssistantRouteFreshThreadFallbackPlan
   onboardingGuidanceInjected: boolean
   providerContinuation: AssistantProviderContinuation
   refreshThreadInstructions: boolean
@@ -78,6 +79,14 @@ export interface AssistantRouteTurnPlan {
   systemPrompt: string | null
   turnContextPrompt: string | null
   workingDirectory: string
+}
+
+export interface AssistantRouteFreshThreadFallbackPlan {
+  developerInstructions: string | null
+  sessionContext?: {
+    binding: AssistantSession['binding']
+  }
+  turnContextPrompt: string | null
 }
 
 export interface AssistantPromptCapabilityAvailability {
@@ -309,6 +318,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const resumeProviderSessionId = threadPlan.resumeProviderSessionId
   const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
+  const shouldPrepareFreshThreadFallback = resumeProviderSessionId !== null
+  const shouldPrepareAnyBootstrapContext =
+    shouldPrepareBootstrapContext || shouldPrepareFreshThreadFallback
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
@@ -321,8 +333,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     executionContext: input.executionContext,
   })
   const shouldPrepareConversationThreadInstructions =
-    shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
-  const assistantCliContract = shouldPrepareConversationThreadInstructions
+    shouldPrepareAnyBootstrapContext && input.profile.promptProfile === 'conversation'
+  const bootstrapAssistantCliContract = shouldPrepareConversationThreadInstructions
     ? await resolveAssistantCliSurfaceBootstrapContext({
         cliEnv: input.sharedPlan.cliAccess.env,
         executionContext: input.input.executionContext,
@@ -335,7 +347,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation'
       ? resolveAssistantSupportedExperimentProtocols()
       : []
-  const vaultOverview = shouldPrepareBootstrapContext
+  const bootstrapVaultOverview = shouldPrepareAnyBootstrapContext
     ? await resolveAssistantVaultOverviewBlock(input.input.vault)
     : null
   const activeExperimentContext = input.sharedPlan.allowSensitiveHealthContext
@@ -345,7 +357,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.route.providerOptions,
   )
   const toolSchemaHash = null
-  const buildRouteSystemPromptResult = (routeAssistantCliContract: string | null) =>
+  const buildRouteSystemPromptResult = (options: {
+    assistantCliContract: string | null
+    injectBootstrapContext: boolean
+    injectOnboardingGuidance: boolean
+  }) =>
     input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             activeExperimentContext,
@@ -359,13 +375,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
-            vaultOverview,
+            vaultOverview: options.injectBootstrapContext
+              ? bootstrapVaultOverview
+              : null,
           }, {
             toolSchemaHash,
           })
       : buildAssistantSystemPromptWithCacheMetadata({
             activeExperimentContext,
-            assistantCliContract: routeAssistantCliContract,
+            assistantCliContract: options.assistantCliContract,
             allowSensitiveHealthContext:
               input.sharedPlan.allowSensitiveHealthContext,
             assistantHostedDeviceConnectAvailable:
@@ -383,37 +401,71 @@ export async function resolveAssistantRouteTurnPlan(input: {
             murphProductBaseUrl: resolveAssistantMurphProductBaseUrl(
               input.sharedPlan.cliAccess.env,
             ),
-            onboardingGuidance: shouldInjectOnboardingGuidance,
+            onboardingGuidance: options.injectOnboardingGuidance,
             modelBehaviorProfile,
             turnTrigger: input.input.turnTrigger ?? null,
-            vaultOverview,
+            vaultOverview: options.injectBootstrapContext
+              ? bootstrapVaultOverview
+              : null,
           }, {
             toolSchemaHash,
           })
-  const systemPromptResult = buildRouteSystemPromptResult(assistantCliContract)
+  const buildDeveloperInstructions = (
+    promptResult: ReturnType<typeof buildAssistantSystemPromptWithCacheMetadata>,
+  ) =>
+    [
+      promptResult.layers.staticCacheableCorePrompt,
+      promptResult.layers.stableRouteCapabilityPrompt,
+    ]
+      .filter((section): section is string =>
+        Boolean(normalizeNullableString(section)),
+      )
+      .join('\n\n')
+  const actualAssistantCliContract = shouldPrepareBootstrapContext
+    ? bootstrapAssistantCliContract
+    : null
+  const systemPromptResult = buildRouteSystemPromptResult({
+    assistantCliContract: actualAssistantCliContract,
+    injectBootstrapContext: shouldPrepareBootstrapContext,
+    injectOnboardingGuidance: shouldInjectOnboardingGuidance,
+  })
+  const freshThreadFallbackPromptResult = shouldPrepareFreshThreadFallback
+    ? buildRouteSystemPromptResult({
+        assistantCliContract: bootstrapAssistantCliContract,
+        injectBootstrapContext: true,
+        injectOnboardingGuidance: shouldInjectOnboardingGuidance,
+      })
+    : null
   const refreshThreadInstructions = resumeProviderSessionId === null
   const systemPrompt = systemPromptResult.prompt
   const developerInstructions =
     resumeProviderSessionId === null
-      ? [
-          systemPromptResult.layers.staticCacheableCorePrompt,
-          systemPromptResult.layers.stableRouteCapabilityPrompt,
-        ]
-          .filter((section): section is string =>
-            Boolean(normalizeNullableString(section)),
-          )
-          .join('\n\n')
+      ? buildDeveloperInstructions(systemPromptResult)
       : null
   const turnContextPrompt = normalizeNullableString(
     systemPromptResult.layers.dynamicTurnContextPrompt,
   )
+  const freshThreadFallback = freshThreadFallbackPromptResult
+    ? {
+        developerInstructions: normalizeNullableString(
+          buildDeveloperInstructions(freshThreadFallbackPromptResult),
+        ),
+        sessionContext: {
+          binding: input.session.binding,
+        },
+        turnContextPrompt: normalizeNullableString(
+          freshThreadFallbackPromptResult.layers.dynamicTurnContextPrompt,
+        ),
+      }
+    : undefined
 
   return {
-    assistantCliContract,
+    assistantCliContract: actualAssistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
     diagnosticsPolicy,
+    freshThreadFallback,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
     providerContinuation: resolveAssistantProviderContinuation({
       resumeProviderSessionId,

@@ -9,12 +9,10 @@ import {
   compactAssistantProviderConfigInput,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
+import { buildCodexResumeState } from '@murphai/operator-config/assistant/codex-resume-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   readAssistantSessionResumeState,
-  writeAssistantProviderResumeRouteId,
-  writeAssistantSessionCodexRolloutRelativePath,
-  writeAssistantSessionProviderSessionId,
 } from './provider-state.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
@@ -39,13 +37,11 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
   providerSessionId: string | null
   routeFingerprint: string
 }): AssistantSession['resumeState'] {
-  return writeAssistantSessionCodexRolloutRelativePath(
-    writeAssistantProviderResumeRouteId(
-      writeAssistantSessionProviderSessionId(null, input.providerSessionId),
-      input.routeFingerprint,
-    ),
-    input.codexRolloutRelativePath,
-  )
+  return buildCodexResumeState({
+    rolloutRelativePath: input.codexRolloutRelativePath,
+    routeFingerprint: input.routeFingerprint,
+    threadId: input.providerSessionId,
+  })
 }
 
 export async function persistAssistantTurnAndSession(input: {

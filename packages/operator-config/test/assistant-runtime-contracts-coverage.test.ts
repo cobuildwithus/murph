@@ -70,7 +70,7 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     lastTurnAt: null,
     resumeState: {
       providerSessionId: 'codex-thread-123',
-      resumeRouteId: null,
+      resumeRouteId: runtimeTarget.continuityFingerprint,
     },
     schema: 'murph.assistant-session.v1',
     sessionId: 'session_codex_runtime',

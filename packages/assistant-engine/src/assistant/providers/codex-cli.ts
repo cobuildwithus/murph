@@ -225,13 +225,19 @@ export async function executeCodexAssistantTurnAttempt(
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
   let providerContinuation
   const runFreshThreadFallback = async () => {
-    const prompt = resolveAssistantProviderPrompt({
+    const fallbackInput = {
       ...input,
+      ...(input.freshThreadFallback ?? {}),
       resumeProviderSessionId: null,
-    })
+    }
+    const prompt = resolveAssistantProviderPrompt(fallbackInput)
     const appServerResult = await executeCodexAppServerTurn({
       ...baseAppServerInput,
+      developerInstructions: normalizeNullableString(
+        fallbackInput.developerInstructions,
+      ),
       prompt,
+      refreshThreadInstructions: true,
       resumeSessionId: undefined,
     })
     return appServerResult

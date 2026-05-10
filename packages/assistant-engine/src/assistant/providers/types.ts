@@ -77,6 +77,7 @@ export interface AssistantProviderTurnInput {
   reasoningEffort?: string | null
   refreshThreadInstructions?: boolean
   resumeProviderSessionId?: string | null
+  freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -88,6 +89,14 @@ export interface AssistantProviderTurnInput {
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
+}
+
+export interface AssistantProviderFreshThreadFallbackInput {
+  developerInstructions?: string | null
+  sessionContext?: {
+    binding?: AssistantSessionBinding | null
+  }
+  turnContextPrompt?: string | null
 }
 
 export interface AssistantProviderTurnExecutionInput {
@@ -107,6 +116,7 @@ export interface AssistantProviderTurnExecutionInput {
   providerConfig: AssistantProviderConfig
   refreshThreadInstructions?: boolean
   resumeProviderSessionId?: string | null
+  freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }
