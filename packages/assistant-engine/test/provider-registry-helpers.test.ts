@@ -144,10 +144,7 @@ describe('Codex assistant registry helpers', () => {
       activeTurnMessagesPresent: true,
       attemptCount: 2,
       at: '2026-05-04T00:00:00.000Z',
-      conversationMessagesPresent: false,
       hasResumeProviderSessionId: true,
-      hasStoredThreadInstructionsFingerprint: false,
-      hasThreadInstructionsFingerprint: true,
       providerContinuationKind: 'provider-state-optimization',
       refreshThreadInstructions: false,
       route,
@@ -163,7 +160,7 @@ describe('Codex assistant registry helpers', () => {
           attempt: '2',
           model: 'gpt-5.4',
           provider: 'codex-cli',
-          routeId: 'route-1',
+          routeFingerprint: 'route-1',
         },
       }),
     )
@@ -176,17 +173,14 @@ describe('Codex assistant registry helpers', () => {
         data: {
           activeTurnMessagesPresent: true,
           attempt: 2,
-          conversationMessagesPresent: false,
           hasResumeProviderSessionId: true,
-          hasStoredThreadInstructionsFingerprint: false,
-          hasThreadInstructionsFingerprint: true,
           model: 'gpt-5.4',
           modelProvider: 'vercel-ai-gateway',
           provider: 'codex-cli',
           providerContinuationKind: 'provider-state-optimization',
           reasoningEffort: 'high',
           refreshThreadInstructions: false,
-          routeId: 'route-1',
+          routeFingerprint: 'route-1',
         },
       }),
     )
@@ -195,17 +189,14 @@ describe('Codex assistant registry helpers', () => {
     ).toEqual({
       activeTurnMessagesPresent: true,
       attempt: 2,
-      conversationMessagesPresent: false,
       hasResumeProviderSessionId: true,
-      hasStoredThreadInstructionsFingerprint: false,
-      hasThreadInstructionsFingerprint: true,
       model: 'gpt-5.4',
       modelProvider: 'vercel-ai-gateway',
       provider: 'codex-cli',
       providerContinuationKind: 'provider-state-optimization',
       reasoningEffort: 'high',
       refreshThreadInstructions: false,
-      routeId: 'route-1',
+      routeFingerprint: 'route-1',
     })
   })
 
@@ -237,8 +228,6 @@ describe('Codex assistant registry helpers', () => {
       resumeProviderSessionIdPresent: true,
       route,
       sessionId: 'session-plan',
-      storedThreadInstructionsFingerprintPresent: true,
-      threadInstructionsFingerprintPresent: true,
       turnId: 'turn-plan',
       vault: '/vaults/test',
       vaultRoot: '/vaults/test',
@@ -260,10 +249,8 @@ describe('Codex assistant registry helpers', () => {
           providerRequestOrdinal: 1,
           refreshThreadInstructions: false,
           resumeProviderSessionIdPresent: true,
-          routeId: 'route-plan',
+          routeFingerprint: 'route-plan',
           sessionId: 'session-plan',
-          storedThreadInstructionsFingerprintPresent: true,
-          threadInstructionsFingerprintPresent: true,
           vaultRootHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
           workingDirectoryHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
           workingDirectoryKind: 'hosted-stable-proc-cwd',
@@ -919,7 +906,7 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
-  it('composes turn prompts from binding context, continuity, and the user prompt', () => {
+  it('composes turn prompts from binding context and the user prompt', () => {
     const binding = createAssistantBinding({
       actorId: 'actor-1',
       channel: 'telegram',
@@ -940,7 +927,6 @@ describe('Codex assistant registry helpers', () => {
 
     expect(
       resolveAssistantProviderPrompt({
-        continuityContext: 'Stay grounded in the saved thread context.',
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
@@ -961,8 +947,6 @@ describe('Codex assistant registry helpers', () => {
         'thread is direct: true',
         'delivery: thread -> thread-1',
         '',
-        'Stay grounded in the saved thread context.',
-        '',
         'User message:',
         'What changed today?',
       ].join('\n'),
@@ -982,7 +966,6 @@ describe('Codex assistant registry helpers', () => {
 
     expect(
       resolveAssistantProviderPrompt({
-        continuityContext: 'Do not resend this on native resume.',
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
@@ -1019,7 +1002,7 @@ describe('Codex assistant registry helpers', () => {
     ).toThrow('Assistant provider turns require either prompt or userPrompt.')
   })
 
-  it('serializes conversation history and active turn content into a Codex flat prompt', () => {
+  it('serializes active turn content into a Codex flat prompt', () => {
     const binding = createAssistantBinding({
       actorId: 'actor-9',
       channel: 'linq',
@@ -1036,46 +1019,6 @@ describe('Codex assistant registry helpers', () => {
             content: '  Draft answer  ',
           },
         ],
-        continuityContext: 'Prefer the latest delivery target.',
-        conversationMessages: [
-          {
-            role: 'assistant',
-            content: '   ',
-          },
-          {
-            role: 'assistant',
-            content: [
-              {
-                type: 'text',
-                text: '  Earlier assistant answer  ',
-              },
-              {
-                type: 'file',
-                data: 'file-blob',
-                filename: 'notes.pdf',
-                mediaType: 'application/pdf',
-              },
-              {
-                type: 'image',
-                image: 'image-blob',
-                mediaType: 'image/png',
-              },
-            ],
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: '   ',
-              },
-              {
-                type: 'text',
-                text: '  Earlier user reply  ',
-              },
-            ],
-          },
-        ],
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
@@ -1088,17 +1031,6 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toBe(
       [
-        'Conversation so far:',
-        'Assistant:',
-        [
-          'Earlier assistant answer',
-          'Assistant shared file (notes.pdf).',
-          'Assistant shared image (image/png).',
-        ].join('\n\n'),
-        '',
-        'User:',
-        'Earlier user reply',
-        '',
         'Active turn so far:',
         'Assistant:',
         'Draft answer',
@@ -1111,8 +1043,6 @@ describe('Codex assistant registry helpers', () => {
         'thread is direct: false',
         'delivery: thread route available',
         'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
-        '',
-        'Prefer the latest delivery target.',
         '',
         'User message:',
         'Latest question.',

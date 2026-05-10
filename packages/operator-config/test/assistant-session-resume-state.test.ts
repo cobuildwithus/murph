@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import { parseAssistantSessionRecord } from '../src/assistant-cli-contracts.js'
 
-const threadInstructionsFingerprint =
-  `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`
 const providerSessionId = '00000000-0000-4000-8000-000000000123'
 const codexRolloutRelativePath =
   `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${providerSessionId}.jsonl`
@@ -56,42 +54,54 @@ describe('assistant session resume state normalization', () => {
     expect(session.resumeState).toBeNull()
   })
 
-  it('retains complete resumable state', () => {
+  it('normalizes complete legacy resumable state into Codex resume state', () => {
     const session = parseAssistantSessionRecord(
       createPersistedSessionRecord({
         resumeState: {
           codexRolloutRelativePath: ` ${codexRolloutRelativePath} `,
           providerSessionId,
           resumeRouteId: 'route-new',
-          threadInstructionsFingerprint,
         },
       }),
     )
 
     expect(session.resumeState).toEqual({
-      codexRolloutRelativePath,
-      providerSessionId,
-      resumeRouteId: 'route-new',
-      threadInstructionsFingerprint,
+      rolloutRelativePath: codexRolloutRelativePath,
+      routeFingerprint: 'route-new',
+      threadId: providerSessionId,
     })
+    expect(session.codexResume).toEqual(session.resumeState)
   })
 
-  it('trims and drops blank thread instruction fingerprints', () => {
+  it('drops legacy thread ids without route fingerprints', () => {
+    const session = parseAssistantSessionRecord(
+      createPersistedSessionRecord({
+        resumeState: {
+          providerSessionId: 'provider-session-123',
+          resumeRouteId: null,
+        },
+      }),
+    )
+
+    expect(session.codexResume).toBeNull()
+    expect(session.resumeState).toBeNull()
+  })
+
+  it('drops legacy thread instruction fingerprints', () => {
     const trimmed = parseAssistantSessionRecord(
       createPersistedSessionRecord({
         resumeState: {
           providerSessionId: 'provider-session-123',
           resumeRouteId: 'route-new',
           threadInstructionsFingerprint:
-            ` ${threadInstructionsFingerprint} `,
+            `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
         },
       }),
     )
 
     expect(trimmed.resumeState).toEqual({
-      providerSessionId: 'provider-session-123',
-      resumeRouteId: 'route-new',
-      threadInstructionsFingerprint,
+      routeFingerprint: 'route-new',
+      threadId: 'provider-session-123',
     })
 
     const withoutFingerprint = parseAssistantSessionRecord(
@@ -105,8 +115,8 @@ describe('assistant session resume state normalization', () => {
     )
 
     expect(withoutFingerprint.resumeState).toEqual({
-      providerSessionId: 'provider-session-123',
-      resumeRouteId: 'route-new',
+      routeFingerprint: 'route-new',
+      threadId: 'provider-session-123',
     })
   })
 
@@ -122,8 +132,60 @@ describe('assistant session resume state normalization', () => {
     )
 
     expect(session.resumeState).toEqual({
-      providerSessionId: 'provider-session-123',
-      resumeRouteId: 'route-new',
+      routeFingerprint: 'route-new',
+      threadId: 'provider-session-123',
     })
+  })
+
+  it('parses v2 conversation records with Codex resume state', () => {
+    const {
+      sessionId: _sessionId,
+      target,
+      resumeState: _resumeState,
+      ...baseRecord
+    } = createPersistedSessionRecord()
+    const session = parseAssistantSessionRecord({
+      ...baseRecord,
+      schema: 'murph.assistant-conversation.v2',
+      conversationId: 'session_123',
+      codexTarget: target,
+      codexResume: {
+        rolloutRelativePath: codexRolloutRelativePath,
+        routeFingerprint: 'route-v2',
+        threadId: providerSessionId,
+      },
+    })
+
+    expect(session.conversationId).toBe('session_123')
+    expect(session.sessionId).toBe('session_123')
+    expect(session.codexResume).toEqual({
+      rolloutRelativePath: codexRolloutRelativePath,
+      routeFingerprint: 'route-v2',
+      threadId: providerSessionId,
+    })
+    expect(session.resumeState).toEqual(session.codexResume)
+  })
+
+  it('normalizes v2 Codex resume without route fingerprint to null', () => {
+    const {
+      sessionId: _sessionId,
+      target,
+      resumeState: _resumeState,
+      ...baseRecord
+    } = createPersistedSessionRecord()
+    const session = parseAssistantSessionRecord({
+      ...baseRecord,
+      schema: 'murph.assistant-conversation.v2',
+      conversationId: 'session_123',
+      codexTarget: target,
+      codexResume: {
+        rolloutRelativePath: codexRolloutRelativePath,
+        routeFingerprint: null,
+        threadId: providerSessionId,
+      },
+    })
+
+    expect(session.codexResume).toBeNull()
+    expect(session.resumeState).toBeNull()
   })
 })

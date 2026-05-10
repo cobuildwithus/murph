@@ -1,12 +1,8 @@
 import {
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   normalizeAssistantSessionSnapshot,
-  readAssistantProviderSessionId,
-  writeAssistantProviderResumeRouteId,
-  writeAssistantSessionProviderSessionId,
 } from './provider-state.js'
 
 export async function recoverAssistantSessionAfterProviderFailure(input: {
@@ -20,30 +16,15 @@ export async function recoverAssistantSessionAfterProviderFailure(input: {
   }
 
   const providerSessionId = extractRecoveredProviderSessionId(input.error)
-  if (
-    !providerSessionId ||
-    readAssistantProviderSessionId(input.session) === providerSessionId
-  ) {
+  if (!providerSessionId) {
     return null
   }
 
-  try {
-    const recoveredAt = new Date().toISOString()
-    const recoveredSession = normalizeAssistantSessionSnapshot({
-      ...input.session,
-      resumeState: buildRecoveredProviderResumeState({
-        providerSessionId,
-        resumeState: input.session.resumeState,
-        routeId: input.routeId,
-      }),
-      updatedAt: recoveredAt,
-    })
-    return await createAssistantRuntimeStateService(input.vault).sessions.save(
-      recoveredSession,
-    )
-  } catch {
-    return null
-  }
+  attachRecoveredProviderSessionId(input.error, providerSessionId)
+  void input.routeId
+  void input.session
+  void input.vault
+  return null
 }
 
 export function attachRecoveredAssistantSession(
@@ -121,18 +102,6 @@ function shouldRecoverAssistantSessionAfterProviderFailure(
   )
 }
 
-function buildRecoveredProviderResumeState(input: {
-  providerSessionId: string
-  resumeState: AssistantSession['resumeState']
-  routeId: string
-}) {
-  const seededState = writeAssistantSessionProviderSessionId(
-    input.resumeState,
-    input.providerSessionId,
-  )
-  return writeAssistantProviderResumeRouteId(seededState, input.routeId) ?? seededState
-}
-
 function readAssistantProviderErrorContext(
   error: unknown,
 ): Record<string, unknown> | null {
@@ -148,4 +117,19 @@ function readAssistantProviderErrorContext(
       ? (maybeContext as Record<string, unknown>)
       : null
   )
+}
+
+function attachRecoveredProviderSessionId(
+  error: unknown,
+  providerSessionId: string,
+): void {
+  if (!error || typeof error !== 'object') {
+    return
+  }
+
+  const currentContext = readAssistantProviderErrorContext(error) ?? {}
+  ;(error as { context?: Record<string, unknown> }).context = {
+    ...currentContext,
+    recoveredCodexThreadId: providerSessionId,
+  }
 }

@@ -311,8 +311,8 @@ describe("assistant service turn route", () => {
       paths: resolveAssistantStatePaths("/vault"),
       session: createAssistantSession({
         resumeState: {
-          providerSessionId: "provider-session-existing",
-          resumeRouteId: "route-existing",
+          routeFingerprint: "route-existing",
+          threadId: "provider-session-existing",
         },
       }),
     };
@@ -335,7 +335,6 @@ describe("assistant service turn route", () => {
       override: expect.objectContaining({
         model: "gpt-5-mini",
       }),
-      resumeState: resolved.session.resumeState,
       sessionTarget: resolved.session.target,
     });
   });
@@ -371,7 +370,6 @@ describe("assistant service turn route", () => {
     });
     expect(seamMocks.resolveAssistantExecutionPlan).toHaveBeenCalledWith(
       expect.objectContaining({
-        resumeState: resolved.session.resumeState,
         sessionTarget: resolved.session.target,
       })
     );
@@ -1652,8 +1650,8 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       resumeState: {
-        providerSessionId: "provider-session-existing",
-        resumeRouteId: "route-existing",
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
       },
       turnCount: 2,
     });
@@ -1717,14 +1715,14 @@ describe("assistant turn finalizer seam", () => {
           model: "gpt-5-mini",
         }),
         resumeState: expect.objectContaining({
-          providerSessionId: "provider-session-existing",
-          resumeRouteId: "route-backup",
+          routeFingerprint: "route-backup",
+          threadId: "provider-session-existing",
         }),
         turnCount: 3,
         updatedAt: "2026-04-08T14:00:00.000Z",
       })
     );
-    expect(saved.resumeState?.resumeRouteId).toBe("route-backup");
+    expect(saved.resumeState?.routeFingerprint).toBe("route-backup");
   });
 
   it("clears provider resume state when requested and only persists the assistant transcript", async () => {
@@ -1736,8 +1734,8 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       resumeState: {
-        providerSessionId: "provider-session-existing",
-        resumeRouteId: "route-existing",
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
       },
       turnCount: 2,
     });
@@ -1800,8 +1798,8 @@ describe("assistant turn finalizer seam", () => {
         reasoningEffort: "medium",
       }),
       resumeState: {
-        providerSessionId: "provider-session-stale",
-        resumeRouteId: "route-existing",
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-stale",
       },
       turnCount: 2,
     });
@@ -1834,16 +1832,16 @@ describe("assistant turn finalizer seam", () => {
         lastTurnAt: "2026-04-08T15:45:00.000Z",
         providerOptions: session.providerOptions,
         resumeState: {
-          providerSessionId: "provider-session-stale",
-          resumeRouteId: "route-existing",
+          routeFingerprint: "route-existing",
+          threadId: "provider-session-stale",
         },
         target: session.target,
         turnCount: 3,
         updatedAt: "2026-04-08T15:45:00.000Z",
       })
     );
-    expect(saved.resumeState?.providerSessionId).toBe("provider-session-stale");
-    expect(saved.resumeState?.resumeRouteId).toBe("route-existing");
+    expect(saved.resumeState?.threadId).toBe("provider-session-stale");
+    expect(saved.resumeState?.routeFingerprint).toBe("route-existing");
     expect(saved.providerOptions.model).toBe("gpt-5.5");
     expect(saved.target.model).toBe("gpt-5.5");
   });
@@ -1857,8 +1855,8 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       resumeState: {
-        providerSessionId: "provider-session-existing",
-        resumeRouteId: "route-existing",
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
       },
       turnCount: 2,
     });
@@ -1887,17 +1885,17 @@ describe("assistant turn finalizer seam", () => {
       expect.objectContaining({
         lastTurnAt: "2026-04-08T15:50:00.000Z",
         resumeState: {
-          providerSessionId: "provider-session-existing",
-          resumeRouteId: "route-existing",
+          routeFingerprint: "route-existing",
+          threadId: "provider-session-existing",
         },
         turnCount: 3,
         updatedAt: "2026-04-08T15:50:00.000Z",
       })
     );
-    expect(saved.resumeState?.providerSessionId).toBe(
+    expect(saved.resumeState?.threadId).toBe(
       "provider-session-existing"
     );
-    expect(saved.resumeState?.resumeRouteId).toBe("route-existing");
+    expect(saved.resumeState?.routeFingerprint).toBe("route-existing");
   });
 
   it("persists successful provider tool audit entries before the assistant transcript", async () => {
@@ -1977,8 +1975,8 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       resumeState: {
-        providerSessionId: "provider-session-old",
-        resumeRouteId: "route-old",
+        routeFingerprint: "route-old",
+        threadId: "provider-session-old",
       },
     });
 
@@ -2003,8 +2001,8 @@ describe("assistant turn finalizer seam", () => {
 
     expect(runtimeState.turns.appendEvent).not.toHaveBeenCalled();
     expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
-    expect(saved.resumeState?.providerSessionId).toBe("provider-session-new");
-    expect(saved.resumeState?.resumeRouteId).toBe("route-new");
+    expect(saved.resumeState?.threadId).toBe("provider-session-new");
+    expect(saved.resumeState?.routeFingerprint).toBe("route-new");
   });
 
   it("keeps the Codex session target when no provider override is supplied", async () => {
@@ -2135,12 +2133,15 @@ function createAssistantSession(input?: {
       threadId: null,
       threadIsDirect: null,
     },
+    codexResume: input?.resumeState ?? null,
+    codexTarget: target,
+    conversationId: input?.sessionId ?? "session-test",
     createdAt: "2026-04-08T00:00:00.000Z",
     lastTurnAt: null,
     provider: "codex-cli",
     providerOptions,
     resumeState: input?.resumeState ?? null,
-    schema: "murph.assistant-session.v1",
+    schema: "murph.assistant-conversation.v2",
     sessionId: input?.sessionId ?? "session-test",
     target,
     turnCount: input?.turnCount ?? 0,

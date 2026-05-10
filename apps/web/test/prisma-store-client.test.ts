@@ -71,10 +71,12 @@ describe("prisma module", () => {
     expect(normalizePrismaConnectionString(databaseUrl)).toBe(databaseUrl);
   });
 
-  it("fails at import time when DATABASE_URL is missing", async () => {
+  it("fails when creating a Prisma client without DATABASE_URL", async () => {
     delete process.env.DATABASE_URL;
 
-    await expect(import("@/src/lib/prisma")).rejects.toThrow(
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    expect(() => getPrisma()).toThrow(
       "DATABASE_URL is required for the hosted web control plane.",
     );
   });
@@ -113,7 +115,9 @@ describe("prisma module", () => {
       DATABASE_URL: "postgresql://user:pass@example.com/db?sslmode=require",
     };
 
-    await import("@/src/lib/prisma");
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
 
     expect(PrismaClient).toHaveBeenCalledWith({
       adapter: expect.any(Object),
@@ -133,7 +137,9 @@ describe("prisma module", () => {
       DATABASE_URL: "postgresql://user:pass@example.com/db?sslmode=require",
     };
 
-    await import("@/src/lib/prisma");
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
 
     expect(PrismaPg).toHaveBeenCalledWith({
       connectionString: "postgresql://user:pass@example.com/db?sslmode=require",

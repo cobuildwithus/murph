@@ -31,8 +31,21 @@ vi.mock('@murphai/assistant-engine/assistant-runtime', async () => {
 import { inspectAndRepairAssistantStateSecrecy } from '../src/assistant/doctor-security.ts'
 
 const BASE_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v1',
+  schema: 'murph.assistant-conversation.v2',
+  conversationId: 'session-security-demo',
   sessionId: 'session-security-demo',
+  codexTarget: {
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
+    model: null,
+    modelProvider: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: 'danger-full-access',
+  },
   target: {
     adapter: 'codex-cli',
     approvalPolicy: 'never',
@@ -45,6 +58,7 @@ const BASE_SESSION: AssistantSession = {
     reasoningEffort: null,
     sandbox: 'danger-full-access',
   },
+  codexResume: null,
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
@@ -78,9 +92,9 @@ const BASE_SESSION: AssistantSession = {
 function toPersistedSessionFile(session: AssistantSession) {
   return {
     schema: session.schema,
-    sessionId: session.sessionId,
-    target: session.target,
-    resumeState: session.resumeState,
+    conversationId: session.conversationId,
+    codexTarget: session.codexTarget,
+    codexResume: session.codexResume,
     alias: session.alias,
     binding: session.binding,
     createdAt: session.createdAt,

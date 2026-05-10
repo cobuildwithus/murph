@@ -490,7 +490,7 @@ describe('assistant infra final coverage', () => {
 
     const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
     expect(JSON.parse(await readFile(sessionPath, 'utf8'))).toMatchObject({
-      sessionId: session.sessionId,
+      conversationId: session.sessionId,
     })
   })
 

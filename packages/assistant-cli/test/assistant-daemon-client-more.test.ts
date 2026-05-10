@@ -90,8 +90,19 @@ const TEST_CRON_RUN = {
 } satisfies AssistantCronRunRecord
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v1',
+  schema: 'murph.assistant-conversation.v2',
+  conversationId: 'session-daemon-more',
   sessionId: 'session-daemon-more',
+  codexTarget: {
+    adapter: 'codex-cli',
+    approvalPolicy: null,
+    codexCommand: null,
+    model: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+  },
   target: {
     adapter: 'codex-cli',
     approvalPolicy: null,
@@ -102,6 +113,7 @@ const TEST_SESSION = {
     reasoningEffort: null,
     sandbox: null,
   },
+  codexResume: null,
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {

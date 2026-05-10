@@ -167,21 +167,8 @@ function appendThreadAssistantMessage(threadId, text) {
   });
 }
 
-function buildThreadHistoryPrompt(threadId) {
-  const history = readThreadAssistantHistory(threadId);
-  if (history.length === 0) {
-    return "";
-  }
-
-  return "Conversation so far:\\n"
-    + history.map((text) => "Assistant:\\n" + text).join("\\n\\n");
-}
-
 function buildTurnPrompt(turn) {
-  return [
-    buildThreadHistoryPrompt(turn.threadId),
-    turn.prompts.filter(Boolean).join("\\n\\n"),
-  ].filter(Boolean).join("\\n\\n");
+  return turn.prompts.filter(Boolean).join("\\n\\n");
 }
 
 function extractResponseText(payload) {

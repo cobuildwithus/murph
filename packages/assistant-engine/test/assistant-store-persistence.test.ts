@@ -109,7 +109,7 @@ describe('assistant store persistence seams', () => {
       binding: {
         conversationKey: 'telegram:user-1:thread-1',
       },
-      target: {
+      codexTarget: {
         adapter: 'codex-cli',
         modelProvider: 'vercel-ai-gateway',
       },
@@ -132,7 +132,7 @@ describe('assistant store persistence seams', () => {
       lastTurnAt: session.lastTurnAt,
       provider: session.provider,
       resumeState: null,
-      schema: 'murph.assistant-session.v1',
+      schema: 'murph.assistant-conversation.v2',
       sessionId: session.sessionId,
       target: session.target,
       turnCount: session.turnCount,
@@ -677,7 +677,7 @@ describe('assistant store persistence seams', () => {
     })
     await expect(
       readFile(resolveAssistantSessionPath(sidecarPaths, session.sessionId), 'utf8'),
-    ).resolves.toContain('"sessionId": "session-corrupt-sidecar"')
+    ).resolves.toContain('"conversationId": "session-corrupt-sidecar"')
     await expect(
       readFile(resolveAssistantSessionSecretsPath(sidecarPaths, session.sessionId), 'utf8'),
     ).resolves.toBe('{bad-sidecar')

@@ -53,10 +53,6 @@ import { createAssistantRuntimeStateService } from '../src/assistant/runtime-sta
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
-const threadInstructionsFingerprint =
-  `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`
-const nextThreadInstructionsFingerprint =
-  `thread-instructions-v1:${'c'.repeat(64)}:${'d'.repeat(64)}`
 const codexProviderSessionId = '00000000-0000-4000-8000-000000000123'
 const codexRolloutRelativePath =
   `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${codexProviderSessionId}.jsonl`
@@ -135,7 +131,10 @@ describe('assistant provider seam helpers', () => {
         }),
         sessionResumeState: previousResumeState,
       }),
-    ).toEqual(previousResumeState)
+    ).toEqual({
+      routeFingerprint: 'route-primary',
+      threadId: 'provider_session_alpha',
+    })
 
     expect(
       doesAssistantResumeBindingMatchRoute({
@@ -151,7 +150,7 @@ describe('assistant provider seam helpers', () => {
     ).toBeNull()
   })
 
-  it('recovers and persists a replacement provider session after connection loss', async () => {
+  it('records recovered Codex thread ids without persisting failed-turn resume state', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-assistant-provider-recovery-',
     )
@@ -175,19 +174,15 @@ describe('assistant provider seam helpers', () => {
       vault: vaultRoot,
     })
 
-    expect(recovered).not.toBeNull()
-    expect(readAssistantProviderSessionId(recovered!)).toBe('provider_session_new')
-    expect(readAssistantProviderResumeRouteId(recovered!)).toBe('route-recovered')
-    expect(recovered?.updatedAt).not.toBe(session.updatedAt)
+    expect(recovered).toBeNull()
+    expect(error.context).toMatchObject({
+      recoveredCodexThreadId: 'provider_session_new',
+    })
 
-    const persisted = await createAssistantRuntimeStateService(vaultRoot).sessions.get(
-      session.sessionId,
-    )
-    expect(readAssistantProviderSessionId(persisted)).toBe('provider_session_new')
-    expect(readAssistantProviderResumeRouteId(persisted)).toBe('route-recovered')
-    expect(persisted?.resumeState).toEqual({
-      providerSessionId: 'provider_session_new',
-      resumeRouteId: 'route-recovered',
+    await expect(
+      createAssistantRuntimeStateService(vaultRoot).sessions.get(session.sessionId),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_NOT_FOUND',
     })
   })
 
@@ -309,23 +304,36 @@ describe('assistant provider seam helpers', () => {
     const persisted = serializeAssistantSessionForPersistence({
       ...createAssistantSession(),
       resumeState: {
-        codexRolloutRelativePath: ` ${codexRolloutRelativePath} `,
-        providerSessionId: codexProviderSessionId,
-        resumeRouteId: 'route-resume',
-        threadInstructionsFingerprint,
+        rolloutRelativePath: codexRolloutRelativePath,
+        routeFingerprint: 'route-resume',
+        threadId: codexProviderSessionId,
       },
     })
-    expect(persisted.resumeState).toEqual({
-      codexRolloutRelativePath,
-      providerSessionId: codexProviderSessionId,
-      resumeRouteId: 'route-resume',
-      threadInstructionsFingerprint,
+    expect(persisted.codexResume).toEqual({
+      rolloutRelativePath: codexRolloutRelativePath,
+      routeFingerprint: 'route-resume',
+      threadId: codexProviderSessionId,
     })
     expect(readAssistantCodexRolloutRelativePath(persisted)).toBe(codexRolloutRelativePath)
 
     expect(normalizeAssistantSessionResumeState(null)).toBeNull()
     expect(readAssistantSessionResumeState(null)).toBeNull()
     expect(readAssistantSessionResumeState({})).toBeNull()
+    expect(
+      readAssistantSessionResumeState({
+        codexResume: {
+          routeFingerprint: 'canonical-route',
+          threadId: 'canonical-thread',
+        },
+        resumeState: {
+          routeFingerprint: 'legacy-route',
+          threadId: 'legacy-thread',
+        },
+      }),
+    ).toEqual({
+      routeFingerprint: 'canonical-route',
+      threadId: 'canonical-thread',
+    })
     expect(writeAssistantProviderResumeRouteId(null, null)).toBeNull()
     expect(writeAssistantSessionProviderSessionId(null, null)).toBeNull()
     expect(
@@ -337,49 +345,47 @@ describe('assistant provider seam helpers', () => {
     expect(
       writeAssistantSessionThreadInstructionsFingerprint(
         {
-          codexRolloutRelativePath,
-          providerSessionId: codexProviderSessionId,
-          resumeRouteId: 'route-resume',
+          rolloutRelativePath: codexRolloutRelativePath,
+          routeFingerprint: 'route-resume',
+          threadId: codexProviderSessionId,
         },
-        ` ${nextThreadInstructionsFingerprint} `,
+        `thread-instructions-v1:${'c'.repeat(64)}:${'d'.repeat(64)}`,
       ),
     ).toEqual({
-      codexRolloutRelativePath,
-      providerSessionId: codexProviderSessionId,
-      resumeRouteId: 'route-resume',
-      threadInstructionsFingerprint: nextThreadInstructionsFingerprint,
+      rolloutRelativePath: codexRolloutRelativePath,
+      routeFingerprint: 'route-resume',
+      threadId: codexProviderSessionId,
     })
     expect(
       writeAssistantSessionCodexRolloutRelativePath(
         {
-          providerSessionId: codexProviderSessionId,
-          resumeRouteId: 'route-resume',
+          routeFingerprint: 'route-resume',
+          threadId: codexProviderSessionId,
         },
         codexRolloutRelativePath,
       ),
     ).toEqual({
-      codexRolloutRelativePath,
-      providerSessionId: codexProviderSessionId,
-      resumeRouteId: 'route-resume',
+      rolloutRelativePath: codexRolloutRelativePath,
+      routeFingerprint: 'route-resume',
+      threadId: codexProviderSessionId,
     })
     expect(
       resolveAssistantResumeStateFromProviderTurn({
         codexRolloutRelativePath,
         providerSessionId: codexProviderSessionId,
-        routeId: 'route-resume',
-        threadInstructionsFingerprint,
+        routeFingerprint: 'route-resume',
       }),
     ).toEqual({
-      codexRolloutRelativePath,
-      providerSessionId: codexProviderSessionId,
-      resumeRouteId: 'route-resume',
-      threadInstructionsFingerprint,
+      rolloutRelativePath: codexRolloutRelativePath,
+      routeFingerprint: 'route-resume',
+      threadId: codexProviderSessionId,
     })
 
     const missingTargetSession = createAssistantSession()
     Reflect.set(missingTargetSession, 'target', null)
+    Reflect.set(missingTargetSession, 'codexTarget', null)
     expect(() => serializeAssistantSessionForPersistence(missingTargetSession)).toThrow(
-      'Assistant session target is required.',
+      'Assistant conversation Codex target is required.',
     )
   })
 
@@ -492,12 +498,14 @@ function createRoute(input?: {
   providerOptions?: Partial<AssistantProviderSessionOptions>
   routeId?: string
 }): CodexThreadIdentity {
+  const routeFingerprint = input?.routeId ?? 'route-primary'
   return {
     codexCommand: null,
     label: 'primary',
     provider: 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),
-    routeId: input?.routeId ?? 'route-primary',
+    routeFingerprint,
+    routeId: routeFingerprint,
   }
 }
 
@@ -527,27 +535,28 @@ function createAssistantSession(input?: {
   const resumeState =
     input?.providerSessionId || input?.resumeRouteId
       ? {
-          providerSessionId: input?.providerSessionId ?? null,
-          resumeRouteId: input?.resumeRouteId ?? null,
+          routeFingerprint: input?.resumeRouteId ?? null,
+          threadId: input?.providerSessionId ?? '',
         }
       : null
+  const target = {
+    adapter: 'codex-cli' as const,
+    approvalPolicy: 'never' as const,
+    codexCommand: null,
+    codexHome: null,
+    model: 'gpt-5.5',
+    modelProvider: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: 'medium' as const,
+    sandbox: 'danger-full-access' as const,
+  }
 
-  return {
-    schema: 'murph.assistant-session.v1',
-    sessionId: 'session_provider_seam_test',
-    target: {
-      adapter: 'codex-cli',
-      approvalPolicy: 'never',
-      codexCommand: null,
-      codexHome: null,
-      model: 'gpt-5.5',
-      modelProvider: null,
-      oss: false,
-      profile: null,
-      reasoningEffort: 'medium',
-      sandbox: 'danger-full-access',
-    },
-    resumeState,
+  return parseAssistantSessionRecord({
+    schema: 'murph.assistant-conversation.v2',
+    conversationId: 'session_provider_seam_test',
+    codexTarget: target,
+    codexResume: resumeState,
     alias: null,
     binding: {
       actorId: null,
@@ -562,9 +571,7 @@ function createAssistantSession(input?: {
     updatedAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     turnCount: 0,
-    provider: 'codex-cli',
-    providerOptions: createProviderOptions(),
-  }
+  })
 }
 
 function createProgressEvent(

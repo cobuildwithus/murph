@@ -108,8 +108,21 @@ import {
 } from './helpers.ts'
 
 const TEST_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v1',
+  schema: 'murph.assistant-conversation.v2',
+  conversationId: 'session-ink-ui',
   sessionId: 'session-ink-ui',
+  codexTarget: {
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
+    model: 'gpt-5.5',
+    modelProvider: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
+  },
   target: {
     adapter: 'codex-cli',
     approvalPolicy: 'never',
@@ -122,6 +135,7 @@ const TEST_SESSION: AssistantSession = {
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
   },
+  codexResume: null,
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {

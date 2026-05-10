@@ -80,16 +80,12 @@ function resolveAssistantProviderContextSections(
       ? getAssistantBindingContextLines(input.sessionContext.binding)
       : []
   const turnContextPrompt = normalizeNullableString(input.turnContextPrompt)
-  const continuityContext = hasAssistantProviderUsableNativeResume(input)
-    ? null
-    : normalizeNullableString(input.continuityContext)
 
   return [
     turnContextPrompt,
     contextLines.length > 0
       ? `Conversation context:\n${contextLines.join('\n')}`
       : null,
-    continuityContext,
   ].filter((section): section is string => Boolean(section))
 }
 
@@ -124,30 +120,6 @@ function sanitizeAssistantModelContentParts(
 
     return [part]
   })
-}
-
-function resolveAssistantProviderFlatPromptTranscriptSection(
-  input: AssistantProviderTurnExecutionInput,
-): string | null {
-  if (hasAssistantProviderUsableNativeResume(input)) {
-    return null
-  }
-
-  const transcriptLines = (input.conversationMessages ?? []).flatMap((message) => {
-    const content = Array.isArray(message.content)
-      ? serializeAssistantConversationContent(message.content)
-      : message.content.trim()
-    if (content.length === 0) {
-      return []
-    }
-
-    const label = message.role === 'assistant' ? 'Assistant' : 'User'
-    return [`${label}:\n${content}`]
-  })
-
-  return transcriptLines.length > 0
-    ? `Conversation so far:\n${transcriptLines.join('\n\n')}`
-    : null
 }
 
 function resolveAssistantProviderFlatPromptActiveTurnSection(
@@ -198,7 +170,6 @@ export function resolveAssistantProviderPrompt(
   }
 
   return [
-    resolveAssistantProviderFlatPromptTranscriptSection(input),
     resolveAssistantProviderFlatPromptActiveTurnSection(input),
     resolveAssistantProviderComposedUserContent(input, {
       labelUserPrompt: true,

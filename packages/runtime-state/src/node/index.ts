@@ -28,7 +28,6 @@ export * from "../assistant-state.ts";
 export * from "../assistant-runtime-issues.ts";
 export * from "../atomic-write.ts";
 export * from "../hosted-bundles.ts";
-export * from "../hosted-provider-continuity-repair.ts";
 export * from "../hosted-email.ts";
 export * from "../locks.ts";
 export * from "../loopback-control-plane.ts";

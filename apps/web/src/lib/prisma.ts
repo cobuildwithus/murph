@@ -43,13 +43,15 @@ function createPrisma(): PrismaClient {
   });
 }
 
-const prisma = globalForPrisma.__murphHostedWebPrisma ?? createPrisma();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.__murphHostedWebPrisma = prisma;
-}
+let prisma = globalForPrisma.__murphHostedWebPrisma;
 
 export function getPrisma(): PrismaClient {
+  prisma = prisma ?? createPrisma();
+
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.__murphHostedWebPrisma = prisma;
+  }
+
   return prisma;
 }
 

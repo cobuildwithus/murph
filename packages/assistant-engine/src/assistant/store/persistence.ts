@@ -50,8 +50,7 @@ import type { ResolvedAssistantSession } from './types.js'
 
 export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
-// Keep aligned with the bootstrap transcript replay ceiling in provider-turn-runner.
-export const ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT = 100
+export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -297,7 +296,7 @@ export async function pruneAssistantTranscriptRetention(
       continue
     }
 
-    const retained = trimAssistantTranscriptEntriesForReplay(parsed.values)
+    const retained = trimAssistantTranscriptEntriesForAudit(parsed.values)
     if (retained.length === parsed.values.length) {
       continue
     }
@@ -319,10 +318,10 @@ export async function pruneAssistantTranscriptRetention(
   }
 }
 
-export function trimAssistantTranscriptEntriesForReplay(
+export function trimAssistantTranscriptEntriesForAudit(
   entries: readonly AssistantTranscriptEntry[],
 ): AssistantTranscriptEntry[] {
-  let replayableSeen = 0
+  let conversationEntrySeen = 0
   let startIndex = entries.length
 
   for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -331,9 +330,9 @@ export function trimAssistantTranscriptEntriesForReplay(
       continue
     }
     if (entry.kind === 'assistant' || entry.kind === 'user') {
-      replayableSeen += 1
+      conversationEntrySeen += 1
     }
-    if (replayableSeen === ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT) {
+    if (conversationEntrySeen === ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT) {
       startIndex = index
       break
     }
@@ -343,11 +342,11 @@ export function trimAssistantTranscriptEntriesForReplay(
     return entries.slice(startIndex)
   }
 
-  if (entries.length <= ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT) {
+  if (entries.length <= ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT) {
     return [...entries]
   }
 
-  return entries.slice(-ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT)
+  return entries.slice(-ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT)
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

@@ -717,7 +717,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.lease_superseded",
   "runner.started",
   "workspace.codex_home_snapshot",
-  "workspace.legacy_codex_resume_repaired",
 ] as const;
 
 export type HostedRuntimeLogEventCode =

@@ -338,7 +338,7 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
   }
 });
 
-test("hosted Codex runtime local E2E app-server stub preserves resumed assistant context", async () => {
+test("hosted Codex runtime local E2E app-server stub records resumed assistant context internally", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const requests: string[] = [];
   const server = await startResponsesStubServer({
@@ -375,10 +375,7 @@ test("hosted Codex runtime local E2E app-server stub preserves resumed assistant
     assert.equal(requests.length, 2);
     assert.match(readResponsesRequestInput(requests[0]!), /first hosted local prompt/u);
     assert.match(readResponsesRequestInput(requests[1]!), /second hosted local prompt/u);
-    assert.match(
-      readResponsesRequestInput(requests[1]!),
-      /Conversation so far:\nAssistant:\nfirst assistant reply/u,
-    );
+    assert.doesNotMatch(readResponsesRequestInput(requests[1]!), /Conversation so far:/u);
     const threadId = readHostedLocalCodexStubThreadId(messages);
     const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
     assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(rolloutLog), [
@@ -509,7 +506,7 @@ test("hosted Codex rollout snapshot restores thread-id resume without SQLite", a
 
     assert.equal(secondResult.finalMessage, "second restored reply");
     assert.equal(secondResult.threadId, firstResult.threadId);
-    assert.match(readResponsesRequestInput(requests[1]!), /first restored reply/u);
+    assert.doesNotMatch(readResponsesRequestInput(requests[1]!), /first restored reply/u);
     assert.match(readResponsesRequestInput(requests[1]!), /second prompt after restore/u);
   } finally {
     await closeHttpServer(server);

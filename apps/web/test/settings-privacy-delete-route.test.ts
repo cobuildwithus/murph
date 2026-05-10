@@ -169,10 +169,10 @@ describe("settings privacy delete route", () => {
 
     const response = await settingsPrivacyDeleteRoute.POST(request);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(413);
     await expect(response.json()).resolves.toMatchObject({
       error: {
-        code: "INVALID_REQUEST",
+        code: "REQUEST_BODY_TOO_LARGE",
       },
     });
     expect(mocks.parseHostedAccountDeletionRequest).not.toHaveBeenCalled();

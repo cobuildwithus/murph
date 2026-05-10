@@ -13,7 +13,10 @@ import {
   executeProviderTurnWithRecovery,
   type AssistantProviderTurnThreadScopeProfile,
 } from './provider-turn-runner.js'
-import type { CodexThreadIdentity } from './provider-route.js'
+import {
+  readCodexThreadRouteFingerprint,
+  type CodexThreadIdentity,
+} from './provider-route.js'
 import { recordAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
@@ -431,7 +434,7 @@ function buildAssistantNotificationObservabilityDetails(input: {
     assistantNotificationProviderBaseUrlOrigin: providerBaseUrl.origin,
     assistantNotificationProviderBaseUrlPath: providerBaseUrl.path,
     assistantNotificationProviderModel: providerOptions.model ?? null,
-    assistantNotificationRouteId: input.route.routeId,
+    assistantNotificationRouteId: readCodexThreadRouteFingerprint(input.route),
     assistantNotificationStage: input.stage,
     assistantNotificationThreadIdPresent:
       normalizeNullableString(input.input.threadId) !== null,
@@ -440,7 +443,7 @@ function buildAssistantNotificationObservabilityDetails(input: {
     assistantNotificationTurnTrigger: input.input.turnTrigger ?? null,
     assistantNotificationWorkingDirectoryPresent:
       normalizeNullableString(input.input.workingDirectory) !== null,
-    executionContextHosted: input.input.executionContext?.hosted != null,
+    assistantNotificationHostedExecutionPresent: input.input.executionContext?.hosted != null,
   }
 }
 

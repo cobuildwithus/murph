@@ -272,6 +272,9 @@ function createFakeInboxRuntimeModule(input?: {
     getCapture() {
       return null
     },
+    getAttachment() {
+      return null
+    },
     requeueAttachmentParseJobs() {
       return 0
     },

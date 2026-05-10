@@ -16,6 +16,7 @@ import {
 
 const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusPollIntervalMs = 250;
+const hostedLocalNudgeTimeoutMs = 2_000;
 
 export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
@@ -24,6 +25,7 @@ export interface HostedLocalDevHarness {
   request(pathname: string, init?: RequestInit): Promise<Response>;
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  nudgeUserBestEffort(userId: string): Promise<void>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string): Promise<{
     attemptId: string;
@@ -151,6 +153,7 @@ export async function startHostedLocalDevHarness(input: {
           userId,
         });
       },
+      nudgeUserBestEffort: nudgeHostedUserBestEffort,
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
@@ -194,7 +197,7 @@ export async function startHostedLocalDevHarness(input: {
         const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
-        let nextLagNudgeAt = startedAt;
+        let nextRecoveryNudgeAt = startedAt;
         let lastStatus: HostedRunnerStatusResponse | null = null;
 
         while ((Date.now() - startedAt) < timeoutMs) {
@@ -223,8 +226,14 @@ export async function startHostedLocalDevHarness(input: {
           }
 
           const now = Date.now();
-          if (now >= nextLagNudgeAt && hostedStatusHasMailboxLag(status)) {
-            nextLagNudgeAt = now + 2_000;
+          if (
+            now >= nextRecoveryNudgeAt
+            && (
+              hostedStatusHasMailboxLag(status)
+              || hostedStatusHasDueScheduledRecovery(status, now)
+            )
+          ) {
+            nextRecoveryNudgeAt = now + 2_000;
             await nudgeHostedUserBestEffort(userId);
           }
 
@@ -364,6 +373,7 @@ export async function startHostedLocalDevHarness(input: {
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
+      signal: AbortSignal.timeout(hostedLocalNudgeTimeoutMs),
     }).catch(() => {});
   }
 }
@@ -385,7 +395,24 @@ function hostedStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean 
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {
   return !status.inFlight
     && Boolean(status.lastErrorCode)
-    && !hostedStatusHasMailboxLag(status);
+    && !hostedStatusHasMailboxLag(status)
+    && !hostedStatusHasScheduledRecovery(status);
+}
+
+function hostedStatusHasScheduledRecovery(status: HostedRunnerStatusResponse): boolean {
+  return typeof status.nextAlarmAt === "string" && status.nextAlarmAt.trim().length > 0;
+}
+
+function hostedStatusHasDueScheduledRecovery(
+  status: HostedRunnerStatusResponse,
+  nowMs: number,
+): boolean {
+  if (status.inFlight || !status.lastErrorCode || !hostedStatusHasScheduledRecovery(status)) {
+    return false;
+  }
+
+  const nextAlarmAtMs = Date.parse(status.nextAlarmAt!);
+  return Number.isFinite(nextAlarmAtMs) && nextAlarmAtMs <= nowMs;
 }
 
 function resolveHostedLocalHarnessDistDir(
