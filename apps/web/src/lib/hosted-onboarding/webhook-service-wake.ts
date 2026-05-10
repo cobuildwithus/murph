@@ -22,21 +22,25 @@ import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runti
 
 export type HostedWebhookWakeHandoffResult =
   | {
-      directRunnerNudgeAccepted: boolean | null;
-      directRunnerNudgeDeferred: boolean;
+      directRunnerNudgeStatus: HostedWebhookDirectNudgeStatus;
       reason: "workflow-started";
       runId: string;
       started: true;
       workflowStarted: true;
     }
   | {
-      directRunnerNudgeAccepted: boolean | null;
-      directRunnerNudgeDeferred: boolean;
+      directRunnerNudgeStatus: HostedWebhookDirectNudgeStatus;
       errorName?: string | null;
       reason: "missing-mailbox-item" | "workflow-start-failed";
       started: false;
       workflowStarted: false;
     };
+
+type HostedWebhookDirectNudgeStatus =
+  | "accepted"
+  | "deferred"
+  | "not-accepted"
+  | "not-attempted";
 
 interface HostedWebhookDirectNudgeSummary {
   accepted: boolean;
@@ -72,8 +76,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
     });
     return {
-      directRunnerNudgeAccepted: null,
-      directRunnerNudgeDeferred: false,
+      directRunnerNudgeStatus: "not-attempted",
       reason: "missing-mailbox-item",
       started: false,
       workflowStarted: false,
@@ -109,8 +112,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       errorName,
     });
     return {
-      directRunnerNudgeAccepted: directNudge.accepted,
-      directRunnerNudgeDeferred: false,
+      directRunnerNudgeStatus: directNudge.accepted ? "accepted" : "not-accepted",
       errorName,
       reason: "workflow-start-failed",
       started: false,
@@ -126,8 +128,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
   });
   return {
-    directRunnerNudgeAccepted: null,
-    directRunnerNudgeDeferred: true,
+    directRunnerNudgeStatus: "deferred",
     reason: "workflow-started",
     runId: workflow.runId,
     started: true,
