@@ -372,7 +372,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "session:session-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:workout-1"));
   assert.ok(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout-deleted:")),
+    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
@@ -581,7 +581,7 @@ test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias preceden
 
   const deletionEvent = payload.events?.find((event) => event.externalRef?.facet === "deleted");
   const deletionArtifact = payload.rawArtifacts?.find((artifact) =>
-    artifact.role.startsWith("deletion:session:session-42:"),
+    artifact.role.startsWith("deletion:session:session.deleted:"),
   );
 
   assert.equal(deletionEvent?.externalRef?.system, "oura");
@@ -590,7 +590,8 @@ test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias preceden
   assert.equal(deletionEvent?.occurredAt, "2026-03-16T10:30:00.000Z");
   assert.equal(deletionEvent?.note, "Webhook event: session.deleted");
   assert.equal(deletionEvent?.fields?.sourceEventType, "session.deleted");
-  assert.match(deletionArtifact?.fileName ?? "", /^deletion-session-session-42-.+\.json$/u);
+  assert.match(deletionArtifact?.fileName ?? "", /^deletion-session-session.deleted-[0-9a-f]{64}\.json$/u);
+  assert.ok(!deletionArtifact?.role.includes("session-42"));
 });
 
 test("prepareDeviceProviderSnapshotImport records Oura daily aggregate deletions through explicit deletion markers", async () => {
@@ -619,7 +620,7 @@ test("prepareDeviceProviderSnapshotImport records Oura daily aggregate deletions
   assert.equal(deletionEvent?.fields?.sourceEventType, "daily_readiness.deleted");
   assert.ok(
     payload.rawArtifacts?.some(
-      (artifact) => artifact.role.startsWith("deletion:daily-readiness:2026-03-16:"),
+      (artifact) => artifact.role.startsWith("deletion:daily-readiness:daily_readiness.deleted:"),
     ),
   );
 });
@@ -811,7 +812,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-asset:activity-1:fit"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "women-health:cycle-1"));
   assert.ok(
-    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:activity:activity-deleted:")),
+    payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("deletion:activity:activity.deleted:")),
   );
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
@@ -1714,13 +1715,14 @@ test("prepareDeviceProviderSnapshotImport records WHOOP deletions as append-only
 
   const deletionEvent = payload.events?.find((event) => event.externalRef?.facet === "deleted");
   const deletionArtifact = payload.rawArtifacts?.find((artifact) =>
-    artifact.role.startsWith("deletion:sleep:sleep-9:"),
+    artifact.role.startsWith("deletion:sleep:sleep.deleted:"),
   );
 
   assert.equal(deletionEvent?.kind, "observation");
   assert.equal(deletionEvent?.fields?.metric, "external-resource-deleted");
   assert.equal(deletionEvent?.fields?.deleted, true);
-  assert.match(deletionArtifact?.fileName ?? "", /^deletion-sleep-sleep-9-.+\.json$/u);
+  assert.match(deletionArtifact?.fileName ?? "", /^deletion-sleep-sleep.deleted-[0-9a-f]{64}\.json$/u);
+  assert.ok(!deletionArtifact?.role.includes("sleep-9"));
 });
 
 test("device provider registry normalizes provider keys and rejects invalid registrations", () => {

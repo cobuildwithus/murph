@@ -43,13 +43,13 @@ function expectSyntheticDeletionArtifact(
   expect(rawArtifact).toEqual({
     role: expect.stringMatching(
       new RegExp(
-        `^deletion:${resourceType}:deleted-[0-9a-f]{16}:${occurredAt}:${sourceEventType}:[0-9a-f]{64}$`,
+        `^deletion:${resourceType}:${sourceEventType}:[0-9a-f]{64}$`,
         "u",
       ),
     ),
     fileName: expect.stringMatching(
       new RegExp(
-        `^deletion-${resourceType}-deleted-[0-9a-f]{16}-${occurredAt.replaceAll(":", "-")}-${sourceEventType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[0-9a-f]{64}\\.json$`,
+        `^deletion-${resourceType}-${sourceEventType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[0-9a-f]{64}\\.json$`,
         "u",
       ),
     ),
@@ -62,6 +62,8 @@ function expectSyntheticDeletionArtifact(
       sourceEventType,
     },
   });
+  expect(rawArtifact?.role).not.toContain(occurredAt);
+  expect(rawArtifact?.fileName).not.toContain(occurredAt.replaceAll(":", "-"));
   expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([rawArtifact?.role]);
   expect(normalized.events?.[0]?.externalRef?.resourceId).toMatch(
     /^deleted-[0-9a-f]{16}$/u,
@@ -86,9 +88,9 @@ describe("pushDeletionObservation", () => {
     expect(rawArtifacts).toEqual([
       {
         role: expect.stringMatching(
-          /^deletion:sleep:sleep_123:2026-04-10T00:00:00.000Z:sleep.deleted:[0-9a-f]{64}$/u,
+          /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
         ),
-        fileName: expect.stringMatching(/^deletion-sleep-sleep_123-2026-04-10T00-00-00.000Z-sleep.deleted-[0-9a-f]{64}\.json$/u),
+        fileName: expect.stringMatching(/^deletion-sleep-sleep.deleted-[0-9a-f]{64}\.json$/u),
         mediaType: "application/json",
         content: {
           provider: "oura",
@@ -127,12 +129,13 @@ describe("pushDeletionObservation", () => {
 
     expect(rawArtifacts.map((artifact) => artifact.role)).toEqual([
       expect.stringMatching(
-        /^deletion:sleep:sleep_123:2026-04-10T00:00:00.000Z:sleep.deleted:[0-9a-f]{64}$/u,
+        /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
       ),
       expect.stringMatching(
-        /^deletion:sleep:sleep_123:2026-04-10T00:01:00.000Z:sleep.deleted:[0-9a-f]{64}$/u,
+        /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
       ),
     ]);
+    expect(rawArtifacts[0]?.role).not.toEqual(rawArtifacts[1]?.role);
     expect(events.map((event) => event.rawArtifactRoles)).toEqual([
       [rawArtifacts[0]?.role],
       [rawArtifacts[1]?.role],
@@ -194,9 +197,9 @@ describe("pushDeletionObservation", () => {
     }))).toEqual([
       {
         role: expect.stringMatching(
-          /^deletion:sleep:sleep_123:2026-04-10T00:00:00.000Z:sleep.deleted:[0-9a-f]{64}$/u,
+          /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
         ),
-        fileName: expect.stringMatching(/^deletion-sleep-sleep_123-2026-04-10T00-00-00.000Z-sleep.deleted-[0-9a-f]{64}\.json$/u),
+        fileName: expect.stringMatching(/^deletion-sleep-sleep.deleted-[0-9a-f]{64}\.json$/u),
       },
     ]);
     expect(events.map((event) => event.rawArtifactRoles)).toEqual([[rawArtifacts[0]?.role]]);
@@ -334,9 +337,9 @@ describe("normalizeOuraSnapshot", () => {
     expect(normalized.rawArtifacts).toEqual([
       {
         role: expect.stringMatching(
-          /^deletion:sleep:sleep_123:2026-04-09T09:30:00.000Z:sleep.deleted:[0-9a-f]{64}$/u,
+          /^deletion:sleep:sleep.deleted:[0-9a-f]{64}$/u,
         ),
-        fileName: expect.stringMatching(/^deletion-sleep-sleep_123-2026-04-09T09-30-00.000Z-sleep.deleted-[0-9a-f]{64}\.json$/u),
+        fileName: expect.stringMatching(/^deletion-sleep-sleep.deleted-[0-9a-f]{64}\.json$/u),
         mediaType: "application/json",
         content: {
           provider: "oura",
