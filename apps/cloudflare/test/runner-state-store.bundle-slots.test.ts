@@ -587,6 +587,45 @@ describe("RunnerStateStore schema guard", () => {
     }
   });
 
+  it("does not clear a work alarm when the expected pending-nudge generation matches but pending_nudge is already consumed", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    const workAlarmAt = "2026-04-27T00:05:00.000Z";
+    db.prepare(`
+      UPDATE runner_meta
+      SET pending_nudge = 0,
+          pending_work = 0,
+          pending_nudge_generation = 3,
+          alarm_kind = 'work',
+          alarm_due_at = ?,
+          alarm_workspace_version = NULL,
+          alarm_checkpoint_next_wake_at = NULL
+      WHERE singleton = 1
+    `).run(workAlarmAt);
+
+    await expect(store.clearPendingInvocationNudge({
+      expectedPendingNudgeGeneration: 3,
+    })).resolves.toMatchObject({
+      alarm: {
+        dueAt: workAlarmAt,
+        kind: "work",
+      },
+      pendingNudge: false,
+      pendingWork: false,
+    });
+    expect(db.prepare(`
+      SELECT pending_nudge, pending_work, pending_nudge_generation, alarm_kind, alarm_due_at
+      FROM runner_meta
+      WHERE singleton = 1
+    `).get()).toEqual({
+      alarm_due_at: workAlarmAt,
+      alarm_kind: "work",
+      pending_nudge: 0,
+      pending_nudge_generation: 3,
+      pending_work: 0,
+    });
+  });
+
   it("records active invocation heartbeats and rejects stale heartbeat leases", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");
