@@ -562,6 +562,7 @@ describe("RunnerStateStore schema guard", () => {
         currentWorkerVersionId: null,
         heartbeatStaleMs: 3_000,
         nowMs: Date.parse("2026-04-27T00:00:06.000Z"),
+        readyTimeoutMs: 20_000,
         timeoutMs: 45_000,
       })).resolves.toMatchObject({
         cleared: true,

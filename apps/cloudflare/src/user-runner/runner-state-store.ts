@@ -748,6 +748,7 @@ export class RunnerStateStore {
     currentWorkerVersionId?: string | null;
     heartbeatStaleMs?: number | null;
     nowMs: number;
+    readyTimeoutMs: number;
     timeoutMs: number;
   }): Promise<RunnerStaleInvocationRecoveryResult> {
     const meta = this.requireMetaRowSync();
@@ -780,9 +781,14 @@ export class RunnerStateStore {
     const lastHeartbeatAtMs = meta.active_invocation_last_heartbeat_at
       ? Date.parse(meta.active_invocation_last_heartbeat_at)
       : Number.NaN;
+    const hasRecordedHeartbeat = Number.isFinite(lastHeartbeatAtMs);
     const hasRecentHeartbeat = heartbeatStaleMs !== null
-      && Number.isFinite(lastHeartbeatAtMs)
+      && hasRecordedHeartbeat
       && input.nowMs - lastHeartbeatAtMs < heartbeatStaleMs;
+    const readyTimeoutMs = Math.max(0, Math.floor(input.readyTimeoutMs));
+    const isWithinNoHeartbeatReadyWindow = !hasRecordedHeartbeat
+      && Number.isFinite(startedAtMs)
+      && input.nowMs - startedAtMs < readyTimeoutMs;
     if (meta.active_invocation_container_stopped_at !== null) {
       preserveConsumedNudgeAfterActiveInvocationClears(meta);
       this.clearActiveInvocationMetaSync(meta);
@@ -806,6 +812,7 @@ export class RunnerStateStore {
       && activeWorkerVersionId !== currentWorkerVersionId
       && !hasRecentHeartbeat
     ) {
+      preserveConsumedNudgeAfterActiveInvocationClears(meta);
       this.clearActiveInvocationMetaSync(meta);
       meta.in_flight = 0;
       meta.last_error_at = new Date(input.nowMs).toISOString();
@@ -823,7 +830,7 @@ export class RunnerStateStore {
       };
     }
 
-    if (!isHardExpired && hasRecentHeartbeat) {
+    if (!isHardExpired && (hasRecentHeartbeat || isWithinNoHeartbeatReadyWindow)) {
       return {
         attemptId,
         cleared: false,
@@ -832,6 +839,7 @@ export class RunnerStateStore {
       };
     }
 
+    preserveConsumedNudgeAfterActiveInvocationClears(meta);
     this.clearActiveInvocationMetaSync(meta);
     meta.in_flight = 0;
     meta.last_error_at = new Date(input.nowMs).toISOString();
@@ -1048,6 +1056,7 @@ export class RunnerStateStore {
       return false;
     }
 
+    preserveConsumedNudgeAfterActiveInvocationClears(meta);
     this.clearActiveInvocationMetaSync(meta);
     meta.in_flight = 0;
     meta.last_error_at = new Date(nowMs).toISOString();
