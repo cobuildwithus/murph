@@ -62,24 +62,13 @@ export interface HostedBillingCheckoutLineItem {
   quantity?: number;
 }
 
-export function buildHostedBillingCheckoutLineItems(input: {
-  priceId: string;
-  usagePriceId?: string | null;
-}): HostedBillingCheckoutLineItem[] {
-  const lineItems: HostedBillingCheckoutLineItem[] = [
+export function buildHostedBillingCheckoutLineItems(priceId: string): HostedBillingCheckoutLineItem[] {
+  return [
     {
-      price: input.priceId,
+      price: priceId,
       quantity: 1,
     },
   ];
-
-  if (input.usagePriceId) {
-    lineItems.push({
-      price: input.usagePriceId,
-    });
-  }
-
-  return lineItems;
 }
 
 export async function createHostedBillingCheckout(
@@ -157,7 +146,7 @@ export async function createHostedBillingCheckout(
       checkoutOffer,
       currentBillingRef,
     });
-    const { priceId, stripe, usagePriceId } = requireHostedStripeCheckoutConfig({
+    const { priceId, stripe } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
@@ -177,7 +166,6 @@ export async function createHostedBillingCheckout(
       memberId: invite.member.id,
       priceId,
       stripeCustomerId: customerId,
-      usagePriceId,
       verifiedEmail,
     });
     const checkoutSession = await stripe.checkout.sessions.create({
@@ -185,10 +173,7 @@ export async function createHostedBillingCheckout(
       client_reference_id: invite.member.id,
       ...(customerId ? { customer: customerId } : {}),
       ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
-      line_items: buildHostedBillingCheckoutLineItems({
-        priceId,
-        usagePriceId,
-      }),
+      line_items: buildHostedBillingCheckoutLineItems(priceId),
       metadata: checkoutMetadata,
       mode: "subscription",
       payment_method_types: ["card"],
@@ -244,17 +229,13 @@ export function buildHostedBillingCheckoutIdempotencyKey(input: {
   memberId: string;
   priceId: string;
   stripeCustomerId?: string | null;
-  usagePriceId?: string | null;
   verifiedEmail?: string | null;
 }): string {
   const customerBindingKey = deriveHostedBillingCheckoutCustomerBindingKey({
     stripeCustomerId: input.stripeCustomerId,
     verifiedEmail: input.verifiedEmail,
   });
-  const lineItemBindingKey = deriveHostedBillingCheckoutLineItemBindingKey({
-    priceId: input.priceId,
-    usagePriceId: input.usagePriceId,
-  });
+  const lineItemBindingKey = deriveHostedBillingCheckoutLineItemBindingKey(input.priceId);
   const offerBindingKey = deriveHostedBillingCheckoutOfferBindingKey({
     checkoutOffer: input.checkoutOffer ?? HOSTED_STANDARD_CHECKOUT_OFFER,
   });
@@ -364,12 +345,8 @@ function buildHostedBillingCheckoutMetadata(input: {
   };
 }
 
-function deriveHostedBillingCheckoutLineItemBindingKey(input: {
-  priceId: string;
-  usagePriceId?: string | null;
-}): string {
-  const usagePriceId = normalizeNullableString(input.usagePriceId) ?? "none";
-  return `items:${sha256Hex(`${input.priceId}:${usagePriceId}`).slice(0, 12)}`;
+function deriveHostedBillingCheckoutLineItemBindingKey(priceId: string): string {
+  return `items:${sha256Hex(priceId).slice(0, 12)}`;
 }
 
 function deriveHostedBillingCheckoutCustomerBindingKey(input: {

@@ -1,8 +1,3 @@
-import {
-  readHostedAiUsageBillingMode,
-  type HostedAiUsageBillingMode,
-} from "@murphai/hosted-execution";
-
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
 import { normalizeNullableString, parseInteger } from "../primitives";
@@ -24,7 +19,6 @@ export interface HostedContactPrivacyKeyring {
 }
 
 export interface HostedOnboardingEnvironment {
-  aiUsageBillingMode: HostedAiUsageBillingMode;
   allowedMutationOrigins?: readonly string[];
   contactPrivacyKeyring: HostedContactPrivacyKeyring;
   inviteTtlHours: number;
@@ -42,8 +36,6 @@ export interface HostedOnboardingEnvironment {
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeSecretKey: string | null;
-  stripeUsageMeterEventName: string | null;
-  stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeWebhookSecret: string | null;
   telegramBotUsername: string | null;
   telegramWebhookSecret: string | null;
@@ -59,7 +51,6 @@ export function readHostedOnboardingEnvironment(
   const isProduction = (source.NODE_ENV ?? "development") === "production";
 
   return {
-    aiUsageBillingMode: readHostedAiUsageBillingMode(source),
     allowedMutationOrigins: readHostedOnboardingAllowedMutationOrigins(source, isProduction),
     contactPrivacyKeyring: readHostedContactPrivacyKeyring(source),
     inviteTtlHours: readPositiveInteger(
@@ -86,8 +77,6 @@ export function readHostedOnboardingEnvironment(
     publicBaseUrl,
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
-    stripeUsageMeterEventName: readEnv(source, "HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME"),
-    stripeUsagePriceIdsByPlan: readHostedStripeUsagePriceIdsByPlan(source),
     stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
     telegramBotUsername: readEnv(source, "TELEGRAM_BOT_USERNAME"),
     telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
@@ -390,12 +379,6 @@ function readHostedStripePriceIdsByPlan(
   source: HostedOnboardingEnvSource,
 ): Record<HostedBillingPlanCode, string | null> {
   return readHostedStripePriceIdsByEnvKey(source, (definition) => definition.priceIdEnvKey);
-}
-
-function readHostedStripeUsagePriceIdsByPlan(
-  source: HostedOnboardingEnvSource,
-): Record<HostedBillingPlanCode, string | null> {
-  return readHostedStripePriceIdsByEnvKey(source, (definition) => definition.usagePriceIdEnvKey);
 }
 
 function readHostedStripePriceIdsByEnvKey(

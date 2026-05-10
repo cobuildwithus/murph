@@ -1481,11 +1481,6 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 351 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 352 }));
 
-    vi.stubEnv(
-      "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
-      "price_shell_edge_usage",
-    );
-
     const environmentModule = await import("./environment.ts");
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_vercel_edge",
@@ -1512,7 +1507,6 @@ describe("hosted local dev stack", () => {
       expect.objectContaining({
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
-        HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_shell_edge_usage",
         STRIPE_SECRET_KEY: "sk_test_local",
       }),
       expect.any(Object),

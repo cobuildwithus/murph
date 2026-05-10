@@ -13,7 +13,6 @@ function createHostedOnboardingEnvironment(
   overrides: Partial<HostedOnboardingEnvironment> = {},
 ): HostedOnboardingEnvironment {
   return {
-    aiUsageBillingMode: "disabled",
     contactPrivacyKeyring: {
       currentVersion: "v1",
       keysByVersion: {
@@ -38,11 +37,6 @@ function createHostedOnboardingEnvironment(
       launch_monthly: "price_monthly_123",
     },
     stripeSecretKey: "sk_test_123",
-    stripeUsageMeterEventName: null,
-    stripeUsagePriceIdsByPlan: {
-      launch_edge_monthly: null,
-      launch_monthly: null,
-    },
     stripeWebhookSecret: null,
     telegramBotUsername: null,
     telegramWebhookSecret: null,
@@ -55,7 +49,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
     delete globalForHostedOnboarding.__murphHostedOnboardingEnv;
   });
 
-  it("allows base-only checkout config while AI usage billing is disabled", () => {
+  it("allows checkout config with the hosted recurring price", () => {
     globalForHostedOnboarding.__murphHostedOnboardingEnv =
       createHostedOnboardingEnvironment();
 
@@ -65,55 +59,6 @@ describe("requireHostedStripeCheckoutConfig", () => {
 
     expect(config.billingPlanCode).toBe("launch_monthly");
     expect(config.priceId).toBe("price_monthly_123");
-    expect(config.usagePriceId).toBeNull();
     expect(config.stripe).toBeTruthy();
-  });
-
-  it("requires the usage meter event and usage price only when Stripe metering is enabled", () => {
-    globalForHostedOnboarding.__murphHostedOnboardingEnv =
-      createHostedOnboardingEnvironment({
-        aiUsageBillingMode: "stripe_meter",
-        stripeUsageMeterEventName: null,
-        stripeUsagePriceIdsByPlan: {
-          launch_edge_monthly: "price_usage_edge_monthly_123",
-          launch_monthly: "price_usage_monthly_123",
-        },
-      });
-
-    let meterEventError: unknown;
-    try {
-      requireHostedStripeCheckoutConfig({
-        billingPlanCode: "launch_monthly",
-      });
-    } catch (error) {
-      meterEventError = error;
-    }
-    expect(meterEventError).toMatchObject({
-      code: "STRIPE_USAGE_METER_EVENT_NAME_REQUIRED",
-      httpStatus: 500,
-    });
-
-    globalForHostedOnboarding.__murphHostedOnboardingEnv =
-      createHostedOnboardingEnvironment({
-        aiUsageBillingMode: "stripe_meter",
-        stripeUsageMeterEventName: "ai_total_tokens",
-        stripeUsagePriceIdsByPlan: {
-          launch_edge_monthly: "price_usage_edge_monthly_123",
-          launch_monthly: null,
-        },
-      });
-
-    let usagePriceError: unknown;
-    try {
-      requireHostedStripeCheckoutConfig({
-        billingPlanCode: "launch_monthly",
-      });
-    } catch (error) {
-      usagePriceError = error;
-    }
-    expect(usagePriceError).toMatchObject({
-      code: "STRIPE_USAGE_PRICE_ID_REQUIRED",
-      httpStatus: 500,
-    });
   });
 });

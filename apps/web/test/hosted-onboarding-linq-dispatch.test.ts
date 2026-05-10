@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => {
     enqueueHostedExecutionOutbox: vi.fn(),
     finishHostedOnboardingTiming: vi.fn(),
     hostedOnboardingEnvironment: {
-      aiUsageBillingMode: "disabled",
       contactPrivacyKeyring: {
         currentVersion: "v1",
         keysByVersion: {

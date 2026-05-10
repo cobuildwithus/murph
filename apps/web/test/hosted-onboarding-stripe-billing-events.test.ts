@@ -267,15 +267,13 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).not.toHaveBeenCalled();
   });
 
-  it("infers subscription plan code from any base price before usage prices", async () => {
+  it("infers subscription plan code from the configured base price", async () => {
     vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_base");
-    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_usage");
     vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge_base");
-    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge_usage");
 
     await applyStripeSubscriptionUpdated(
       makeStripeSubscription({
-        items: ["price_edge_usage", "price_edge_base"],
+        items: ["price_edge_base"],
       }),
       {
         eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
@@ -295,13 +293,11 @@ describe("hosted onboarding stripe billing events", () => {
 
   it("prefers configured Pulse prices over stale Edge subscription metadata", async () => {
     vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_base");
-    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_usage");
     vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge_base");
-    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge_usage");
 
     await applyStripeSubscriptionUpdated(
       makeStripeSubscription({
-        items: ["price_pulse_base", "price_pulse_usage"],
+        items: ["price_pulse_base"],
         metadata: {
           billingPlanCode: "launch_edge_monthly",
         },

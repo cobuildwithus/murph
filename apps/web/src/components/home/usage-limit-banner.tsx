@@ -17,10 +17,10 @@ const usageLimitBannerCopy: Record<
     title: string;
   }
 > = {
-  edge_enable_usage_based_pricing: {
-    action: "Enable usage-based pricing",
+  edge_usage_limit_reached: {
+    action: "View settings",
     body:
-      "Your included assistant usage is used up. Turn on usage-based pricing to keep Murph replying now.",
+      "Your included assistant usage is used up for this month. Murph will resume when the allowance resets.",
     title: "Assistant usage is paused",
   },
   pulse_upgrade_edge: {

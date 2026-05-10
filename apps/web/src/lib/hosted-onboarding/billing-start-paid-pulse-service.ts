@@ -26,6 +26,7 @@ import {
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
+import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import { requireHostedStripeBillingPlanConfig } from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
@@ -110,10 +111,9 @@ export async function startHostedPulseTrialPaidPlan(input: {
     stripeCustomerId,
     subscription,
   });
-  assertHostedStripeCanonicalPulseTrialSubscriptionItems({
+  const legacyMeteredItems = buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes({
     priceId: pulseConfig.priceId,
     subscription,
-    usagePriceId: pulseConfig.usagePriceId,
   });
 
   const existingInvoiceResult = await maybeResolveHostedPulseTrialStartPaidInvoiceResult({
@@ -144,6 +144,7 @@ export async function startHostedPulseTrialPaidPlan(input: {
     "subscription.update.trial-end-now",
     () => stripe.subscriptions.update(stripeSubscriptionId, {
       expand: [...START_PAID_PULSE_STRIPE_EXPANSIONS],
+      ...(legacyMeteredItems.length > 0 ? { items: legacyMeteredItems } : {}),
       payment_behavior: "allow_incomplete",
       trial_end: "now",
     }, {
@@ -152,7 +153,6 @@ export async function startHostedPulseTrialPaidPlan(input: {
         priceId: pulseConfig.priceId,
         stripeSubscriptionId,
         trialEnd: billingRef?.currentTrialEndsAt ?? null,
-        usagePriceId: pulseConfig.usagePriceId,
       }),
     }),
   );
@@ -256,32 +256,18 @@ function assertHostedStripePulseTrialSubscriptionCanStartPaid(input: {
   }
 }
 
-function assertHostedStripeCanonicalPulseTrialSubscriptionItems(input: {
+function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
   priceId: string;
   subscription: Stripe.Subscription;
-  usagePriceId: string | null;
-}): void {
+}): Stripe.SubscriptionUpdateParams.Item[] {
   const activeItems = input.subscription.items.data;
-  const recurringItems = activeItems.filter((item) => item.price.id === input.priceId);
-  const usageItems = input.usagePriceId
-    ? activeItems.filter((item) => item.price.id === input.usagePriceId)
-    : [];
-  const knownItemIds = new Set([
-    input.priceId,
-    ...(input.usagePriceId ? [input.usagePriceId] : []),
-  ]);
-  const unknownItem = activeItems.find((item) => !knownItemIds.has(item.price.id));
+  const recurringItems = activeItems.filter((item) => item.price?.id === input.priceId);
 
-  if (
-    recurringItems.length !== 1 ||
-    (input.usagePriceId ? usageItems.length !== 1 : usageItems.length !== 0) ||
-    unknownItem
-  ) {
+  if (recurringItems.length !== 1) {
     throw buildHostedPulseTrialStartPaidItemError();
   }
 
   const recurringItem = recurringItems[0];
-  const usageItem = usageItems[0] ?? null;
 
   if (
     recurringItem.price.recurring?.interval !== "month" ||
@@ -291,16 +277,25 @@ function assertHostedStripeCanonicalPulseTrialSubscriptionItems(input: {
     throw buildHostedPulseTrialStartPaidItemError();
   }
 
-  if (
-    usageItem &&
-    (
-      usageItem.price.recurring?.interval !== "month" ||
-      usageItem.price.recurring?.usage_type !== "metered" ||
-      usageItem.quantity != null
-    )
-  ) {
+  const legacyMeteredItems: Stripe.SubscriptionUpdateParams.Item[] = [];
+
+  for (const item of activeItems) {
+    if (item.id === recurringItem.id) {
+      continue;
+    }
+
+    if (isHostedStripeLegacyAiUsageMeteredItem(item)) {
+      legacyMeteredItems.push({
+        deleted: true,
+        id: item.id,
+      });
+      continue;
+    }
+
     throw buildHostedPulseTrialStartPaidItemError();
   }
+
+  return legacyMeteredItems;
 }
 
 function buildHostedPulseTrialStartPaidItemError(): Error {
@@ -552,13 +547,11 @@ function buildHostedPulseTrialStartPaidIdempotencyKey(input: {
   priceId: string;
   stripeSubscriptionId: string;
   trialEnd: Date | null;
-  usagePriceId: string | null;
 }): string {
   return `hosted-billing-start-paid-pulse:${sha256Hex(JSON.stringify({
     memberId: input.memberId,
     priceId: input.priceId,
     stripeSubscriptionId: input.stripeSubscriptionId,
     trialEnd: input.trialEnd?.toISOString() ?? null,
-    usagePriceId: input.usagePriceId,
   }))}`;
 }

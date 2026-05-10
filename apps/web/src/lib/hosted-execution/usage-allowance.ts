@@ -33,7 +33,7 @@ export type HostedAiUsageGateDeniedReason =
   | "trial_expired_pending_billing";
 
 export type HostedAiUsageGateNoticeCode =
-  | "edge_enable_usage_based_pricing"
+  | "edge_usage_limit_reached"
   | "pulse_upgrade_edge"
   | "trial_usage_limit_reached"
   | "trial_conversion_pending";
@@ -1080,9 +1080,9 @@ function buildHostedAiUsageGateLimitNotice(input: {
 
   if (input.billingPlanCode === "launch_edge_monthly") {
     return {
-      code: "edge_enable_usage_based_pricing",
+      code: "edge_usage_limit_reached",
       message:
-        `${base} Enable usage-based pricing: ${HOSTED_AI_USAGE_HOME_URL}`,
+        `${base} Murph will resume when your included allowance resets: ${HOSTED_AI_USAGE_HOME_URL}`,
     };
   }
 

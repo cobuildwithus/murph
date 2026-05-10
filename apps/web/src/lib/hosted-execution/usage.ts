@@ -4,16 +4,9 @@ import {
 } from "@prisma/client";
 import {
   parseAssistantUsageRecord,
-  type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 
-import {
-  HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
-  readHostedAiUsageBillingMode,
-  type HostedAiUsageBillingMode,
-} from "@murphai/hosted-execution";
-import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
 import { accountHostedAiUsageForAllowanceTx } from "./usage-allowance";
 
@@ -22,46 +15,8 @@ export interface RecordHostedAiUsageResult {
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
-export type HostedAiUsageStripeMeterStatus =
-  | "failed"
-  | "metered"
-  | "pending"
-  | "processing"
-  | "skipped";
-
-export interface HostedAiUsageStripeCandidate {
-  apiKeyEnv: string | null;
-  credentialSource: AssistantUsageCredentialSource;
-  id: string;
-  inputTokens: number | null;
-  memberId: string;
-  occurredAt: Date;
-  outputTokens: number | null;
-  provider: string;
-  requestedModel: string | null;
-  servedModel: string | null;
-  stripeCustomerId: string;
-  stripeMeterAttemptCount: number;
-  stripeMeterIdentifier: string | null;
-  stripeMeterStatus: HostedAiUsageStripeMeterStatus;
-  totalTokens: number | null;
-  updatedAt: Date;
-}
-
-export interface HostedAiUsageStripeMeterLease {
-  attemptCount: number;
-  leaseExpiresAt: Date;
-  updatedAt: Date;
-}
-
-export class HostedAiUsageStripeMeterClaimLostError extends Error {
-  constructor(id: string) {
-    super(
-      `Hosted AI usage ${id} changed while Stripe metering progress was being written.`,
-    );
-    this.name = "HostedAiUsageStripeMeterClaimLostError";
-  }
-}
+const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
+  "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
 
 const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   apiKeyEnv: true,
@@ -103,422 +58,13 @@ type StoredHostedAiUsageImmutableFields = Prisma.HostedAiUsageGetPayload<{
   select: typeof HOSTED_AI_USAGE_IMMUTABLE_SELECT;
 }>;
 
-export async function listHostedAiUsagePendingStripeMetering(input: {
-  limit?: number;
-  now?: Date | string;
-  prisma?: HostedAiUsageClient;
-} = {}): Promise<HostedAiUsageStripeCandidate[]> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = normalizeHostedAiUsageDate(input.now ?? new Date().toISOString(), "now");
-
-  const records = await prisma.hostedAiUsage.findMany({
-    where: {
-      credentialSource: {
-        not: null,
-      },
-      stripeMeterSource: "murph",
-      stripeMeterStatus: {
-        in: ["pending", "processing"],
-      },
-      OR: buildHostedAiUsageStripeMeterDueWhere(now),
-      member: {
-        billingRef: {
-          is: {
-            stripeCustomerLookupKey: {
-              not: null,
-            },
-          },
-        },
-      },
-    },
-    orderBy: [
-      {
-        stripeMeterNextAttemptAt: "asc",
-      },
-      {
-        occurredAt: "asc",
-      },
-      {
-        createdAt: "asc",
-      },
-    ],
-    take: Math.max(1, input.limit ?? 32),
-    select: {
-      apiKeyEnv: true,
-      credentialSource: true,
-      id: true,
-      inputTokens: true,
-      member: {
-        select: {
-          billingRef: {
-            select: {
-              memberId: true,
-              stripeCustomerIdEncrypted: true,
-              stripeSubscriptionIdEncrypted: true,
-            },
-          },
-        },
-      },
-      memberId: true,
-      occurredAt: true,
-      outputTokens: true,
-      provider: true,
-      requestedModel: true,
-      servedModel: true,
-      stripeMeterAttemptCount: true,
-      stripeMeterIdentifier: true,
-      stripeMeterStatus: true,
-      totalTokens: true,
-      updatedAt: true,
-    },
-  });
-
-  const candidates = await Promise.all(records.map(async (record) => {
-    const stripeCustomerId = record.member.billingRef
-      ? (await readHostedMemberBillingPrivateState(record.member.billingRef, prisma)).stripeCustomerId
-      : null;
-
-    if (!stripeCustomerId || !isAssistantUsageCredentialSource(record.credentialSource)) {
-      return null;
-    }
-
-    return {
-      apiKeyEnv: record.apiKeyEnv,
-      credentialSource: record.credentialSource,
-      id: record.id,
-      inputTokens: record.inputTokens,
-      memberId: record.memberId,
-      occurredAt: record.occurredAt,
-      outputTokens: record.outputTokens,
-      provider: record.provider,
-      requestedModel: record.requestedModel,
-      servedModel: record.servedModel,
-      stripeCustomerId,
-      stripeMeterAttemptCount: record.stripeMeterAttemptCount,
-      stripeMeterIdentifier: normalizeOptionalString(
-        record.stripeMeterIdentifier,
-        "stripeMeterIdentifier",
-      ),
-      stripeMeterStatus: normalizeHostedAiUsageStripeMeterStatus(record.stripeMeterStatus),
-      totalTokens: record.totalTokens,
-      updatedAt: record.updatedAt,
-    } satisfies HostedAiUsageStripeCandidate;
-  }));
-
-  return candidates.flatMap((candidate) => candidate ? [candidate] : []);
-}
-
-function isAssistantUsageCredentialSource(
-  value: string | null,
-): value is AssistantUsageCredentialSource {
-  return value === "member" || value === "platform" || value === "unknown";
-}
-
-function normalizeHostedAiUsageStripeMeterStatus(
-  value: string,
-): HostedAiUsageStripeMeterStatus {
-  if (
-    value === "failed"
-    || value === "metered"
-    || value === "pending"
-    || value === "processing"
-    || value === "skipped"
-  ) {
-    return value;
-  }
-
-  throw new TypeError(`Unsupported hosted AI usage Stripe meter status: ${value}`);
-}
-
-export async function claimHostedAiUsageStripeMetering(input: {
-  attemptedAt?: Date | string;
-  candidate: HostedAiUsageStripeCandidate;
-  leaseMs: number;
-  prisma?: HostedAiUsageClient;
-}): Promise<HostedAiUsageStripeMeterLease | null> {
-  const attemptedAt = normalizeHostedAiUsageDate(
-    input.attemptedAt ?? new Date().toISOString(),
-    "attemptedAt",
-  );
-  const leaseMs = normalizePositiveInteger(input.leaseMs, "leaseMs");
-  const leaseExpiresAt = new Date(attemptedAt.getTime() + leaseMs);
-  const prisma = input.prisma ?? getPrisma();
-
-  const claimed = await prisma.hostedAiUsage.updateMany({
-    where: {
-      id: input.candidate.id,
-      stripeMeterIdentifier: normalizeOptionalString(
-        input.candidate.stripeMeterIdentifier,
-        "stripeMeterIdentifier",
-      ),
-      stripeMeterStatus: input.candidate.stripeMeterStatus,
-      stripeMeterAttemptCount: input.candidate.stripeMeterAttemptCount,
-      updatedAt: input.candidate.updatedAt,
-      OR: buildHostedAiUsageStripeMeterDueWhere(attemptedAt),
-    },
-    data: {
-      stripeMeterAttemptCount: {
-        increment: 1,
-      },
-      stripeMeterError: null,
-      stripeMeterIdentifier: normalizeOptionalString(
-        input.candidate.stripeMeterIdentifier,
-        "stripeMeterIdentifier",
-      ),
-      stripeMeterLastAttemptedAt: attemptedAt,
-      stripeMeterNextAttemptAt: leaseExpiresAt,
-      stripeMeterStatus: "processing",
-      stripeMeteredAt: null,
-    },
-  });
-
-  if (claimed.count !== 1) {
-    return null;
-  }
-
-  const claimedRow = await prisma.hostedAiUsage.findUnique({
-    where: {
-      id: input.candidate.id,
-    },
-    select: {
-      stripeMeterAttemptCount: true,
-      updatedAt: true,
-    },
-  });
-
-  if (!claimedRow) {
-    throw new HostedAiUsageStripeMeterClaimLostError(input.candidate.id);
-  }
-
-  return {
-    attemptCount: claimedRow.stripeMeterAttemptCount,
-    leaseExpiresAt,
-    updatedAt: claimedRow.updatedAt,
-  };
-}
-
-export async function markHostedAiUsageStripeMetered(input: {
-  attemptedAt?: Date | string;
-  claim: HostedAiUsageStripeMeterLease;
-  expectedIdentifier?: string | null;
-  id: string;
-  identifier: string;
-  prisma?: HostedAiUsageClient;
-}): Promise<void> {
-  const attemptedAt = normalizeHostedAiUsageDate(input.attemptedAt ?? new Date().toISOString(), "attemptedAt");
-
-  await updateHostedAiUsageStripeMeterState({
-    claim: input.claim,
-    expectedIdentifier: normalizeOptionalString(input.expectedIdentifier, "expectedIdentifier"),
-    id: input.id,
-    incrementAttemptCount: false,
-    prisma: input.prisma,
-    stripeMeterError: null,
-    stripeMeterIdentifier: input.identifier,
-    stripeMeterLastAttemptedAt: attemptedAt,
-    stripeMeterNextAttemptAt: null,
-    stripeMeterStatus: "metered",
-    stripeMeteredAt: attemptedAt,
-  });
-}
-
-export async function markHostedAiUsageStripeSkipped(input: {
-  attemptedAt?: Date | string;
-  claim: HostedAiUsageStripeMeterLease;
-  expectedIdentifier?: string | null;
-  id: string;
-  message: string;
-  prisma?: HostedAiUsageClient;
-}): Promise<void> {
-  const attemptedAt = normalizeHostedAiUsageDate(input.attemptedAt ?? new Date().toISOString(), "attemptedAt");
-
-  await updateHostedAiUsageStripeMeterState({
-    claim: input.claim,
-    expectedIdentifier: normalizeOptionalString(input.expectedIdentifier, "expectedIdentifier"),
-    id: input.id,
-    incrementAttemptCount: false,
-    prisma: input.prisma,
-    stripeMeterError: input.message,
-    stripeMeterIdentifier: null,
-    stripeMeterLastAttemptedAt: attemptedAt,
-    stripeMeterNextAttemptAt: null,
-    stripeMeterStatus: "skipped",
-    stripeMeteredAt: null,
-  });
-}
-
-export async function markHostedAiUsageStripeRetryableFailure(input: {
-  attemptedAt?: Date | string;
-  claim: HostedAiUsageStripeMeterLease;
-  expectedIdentifier?: string | null;
-  id: string;
-  identifier?: string | null;
-  message: string;
-  nextAttemptAt: Date | string;
-  prisma?: HostedAiUsageClient;
-}): Promise<void> {
-  const attemptedAt = normalizeHostedAiUsageDate(input.attemptedAt ?? new Date().toISOString(), "attemptedAt");
-
-  await updateHostedAiUsageStripeMeterState({
-    claim: input.claim,
-    expectedIdentifier: normalizeOptionalString(input.expectedIdentifier, "expectedIdentifier"),
-    id: input.id,
-    incrementAttemptCount: false,
-    prisma: input.prisma,
-    stripeMeterError: input.message,
-    stripeMeterIdentifier: normalizeOptionalString(input.identifier, "identifier"),
-    stripeMeterLastAttemptedAt: attemptedAt,
-    stripeMeterNextAttemptAt: normalizeHostedAiUsageDate(input.nextAttemptAt, "nextAttemptAt"),
-    stripeMeterStatus: "pending",
-    stripeMeteredAt: null,
-  });
-}
-
-export async function markHostedAiUsageStripeFailed(input: {
-  attemptedAt?: Date | string;
-  claim: HostedAiUsageStripeMeterLease;
-  expectedIdentifier?: string | null;
-  id: string;
-  identifier?: string | null;
-  message: string;
-  prisma?: HostedAiUsageClient;
-}): Promise<void> {
-  const attemptedAt = normalizeHostedAiUsageDate(input.attemptedAt ?? new Date().toISOString(), "attemptedAt");
-
-  await updateHostedAiUsageStripeMeterState({
-    claim: input.claim,
-    expectedIdentifier: normalizeOptionalString(input.expectedIdentifier, "expectedIdentifier"),
-    id: input.id,
-    incrementAttemptCount: false,
-    prisma: input.prisma,
-    stripeMeterError: input.message,
-    stripeMeterIdentifier: normalizeOptionalString(input.identifier, "identifier"),
-    stripeMeterLastAttemptedAt: attemptedAt,
-    stripeMeterNextAttemptAt: null,
-    stripeMeterStatus: "failed",
-    stripeMeteredAt: null,
-  });
-}
-
-export async function markHostedAiUsageStripeProgress(input: {
-  attemptedAt?: Date | string;
-  claim: HostedAiUsageStripeMeterLease;
-  expectedIdentifier?: string | null;
-  id: string;
-  identifier: string;
-  prisma?: HostedAiUsageClient;
-}): Promise<HostedAiUsageStripeMeterLease> {
-  const attemptedAt = normalizeHostedAiUsageDate(
-    input.attemptedAt ?? new Date().toISOString(),
-    "attemptedAt",
-  );
-
-  return updateHostedAiUsageStripeMeterState({
-    claim: input.claim,
-    expectedIdentifier: normalizeOptionalString(input.expectedIdentifier, "expectedIdentifier"),
-    id: input.id,
-    incrementAttemptCount: false,
-    prisma: input.prisma,
-    stripeMeterError: null,
-    stripeMeterIdentifier: normalizeOptionalString(input.identifier, "identifier"),
-    stripeMeterLastAttemptedAt: attemptedAt,
-    stripeMeterNextAttemptAt: input.claim.leaseExpiresAt,
-    stripeMeterStatus: "processing",
-    stripeMeteredAt: null,
-    returnUpdatedLease: true,
-  });
-}
-
-async function updateHostedAiUsageStripeMeterState(input: {
-  claim?: HostedAiUsageStripeMeterLease;
-  expectedIdentifier?: string | null;
-  id: string;
-  incrementAttemptCount: boolean;
-  prisma?: HostedAiUsageClient;
-  returnUpdatedLease?: boolean;
-  stripeMeterError: string | null;
-  stripeMeterIdentifier: string | null;
-  stripeMeterLastAttemptedAt: Date | null;
-  stripeMeterNextAttemptAt: Date | null;
-  stripeMeterStatus: HostedAiUsageStripeMeterStatus;
-  stripeMeteredAt: Date | null;
-}): Promise<HostedAiUsageStripeMeterLease> {
-  const prisma = input.prisma ?? getPrisma();
-
-  const updated = await prisma.hostedAiUsage.updateMany({
-    where: {
-      id: input.id,
-      stripeMeterStatus: input.claim ? "processing" : "pending",
-      ...(input.claim
-        ? {
-            updatedAt: input.claim.updatedAt,
-            stripeMeterAttemptCount: input.claim.attemptCount,
-            stripeMeterIdentifier: normalizeOptionalString(
-              input.expectedIdentifier,
-              "expectedIdentifier",
-            ),
-          }
-        : {}),
-    },
-    data: {
-      stripeMeterError: input.stripeMeterError,
-      stripeMeterIdentifier: input.stripeMeterIdentifier,
-      stripeMeterLastAttemptedAt: input.stripeMeterLastAttemptedAt,
-      stripeMeterNextAttemptAt: input.stripeMeterNextAttemptAt,
-      stripeMeterStatus: input.stripeMeterStatus,
-      stripeMeteredAt: input.stripeMeteredAt,
-      ...(input.incrementAttemptCount
-        ? {
-            stripeMeterAttemptCount: {
-              increment: 1,
-            },
-          }
-        : {}),
-    },
-  });
-
-  if (input.claim && updated.count !== 1) {
-    throw new HostedAiUsageStripeMeterClaimLostError(input.id);
-  }
-
-  if (!input.claim || !input.returnUpdatedLease) {
-    return input.claim ?? {
-      attemptCount: 0,
-      leaseExpiresAt: input.stripeMeterNextAttemptAt ?? new Date(0),
-      updatedAt: new Date(0),
-    };
-  }
-
-  const refreshedRow = await prisma.hostedAiUsage.findUnique({
-    where: {
-      id: input.id,
-    },
-    select: {
-      stripeMeterAttemptCount: true,
-      updatedAt: true,
-    },
-  });
-
-  if (!refreshedRow) {
-    throw new HostedAiUsageStripeMeterClaimLostError(input.id);
-  }
-
-  return {
-    attemptCount: refreshedRow.stripeMeterAttemptCount,
-    leaseExpiresAt: input.claim.leaseExpiresAt,
-    updatedAt: refreshedRow.updatedAt,
-  };
-}
-
 export async function recordHostedAiUsageRecords(input: {
   accountAllowance?: boolean;
-  aiUsageBillingMode?: HostedAiUsageBillingMode;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
-  const aiUsageBillingMode = input.aiUsageBillingMode ?? readHostedAiUsageBillingMode();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
   const recordedIds: string[] = [];
 
@@ -529,7 +75,7 @@ export async function recordHostedAiUsageRecords(input: {
         where: {
           id: record.usageId,
         },
-        create: buildHostedAiUsageCreateData(record, memberId, aiUsageBillingMode),
+        create: buildHostedAiUsageCreateData(record, memberId),
         update: {},
         select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
       });
@@ -538,6 +84,10 @@ export async function recordHostedAiUsageRecords(input: {
         memberId,
         record,
         storedRecord,
+      });
+      await markHostedAiUsageStripeExportSkippedTx({
+        id: storedRecord.id,
+        tx,
       });
 
       if (input.accountAllowance === true) {
@@ -571,59 +121,6 @@ async function runHostedAiUsageRecordTransaction<T>(
   }
 
   return run(prisma as Prisma.TransactionClient);
-}
-
-export async function markHostedAiUsageStripeMeteringDisabled(input: {
-  limit?: number;
-  message?: string;
-  now?: Date | string;
-  prisma?: HostedAiUsageClient;
-} = {}): Promise<number> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = normalizeHostedAiUsageDate(input.now ?? new Date().toISOString(), "now");
-  const records = await prisma.hostedAiUsage.findMany({
-    where: buildHostedAiUsageStripeMeterDisabledWhere(now),
-    orderBy: [
-      {
-        stripeMeterNextAttemptAt: "asc",
-      },
-      {
-        occurredAt: "asc",
-      },
-      {
-        createdAt: "asc",
-      },
-    ],
-    take: normalizePositiveInteger(input.limit ?? 32, "limit"),
-    select: {
-      id: true,
-    },
-  });
-
-  const ids = records.map((record) => record.id);
-
-  if (ids.length === 0) {
-    return 0;
-  }
-
-  const updated = await prisma.hostedAiUsage.updateMany({
-    where: {
-      id: {
-        in: ids,
-      },
-      ...buildHostedAiUsageStripeMeterDisabledWhere(now),
-    },
-    data: {
-      stripeMeterError: input.message ?? HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
-      stripeMeterIdentifier: null,
-      stripeMeterLastAttemptedAt: now,
-      stripeMeterNextAttemptAt: null,
-      stripeMeterStatus: "skipped",
-      stripeMeteredAt: null,
-    },
-  });
-
-  return updated.count;
 }
 
 function dedupeHostedAiUsageRecords(
@@ -685,7 +182,6 @@ function stringifyHostedAiUsageRecordForComparison(
 function buildHostedAiUsageCreateData(
   record: AssistantUsageRecord,
   memberId: string,
-  aiUsageBillingMode: HostedAiUsageBillingMode,
 ): Prisma.HostedAiUsageUncheckedCreateInput {
   return {
     id: record.usageId,
@@ -723,13 +219,29 @@ function buildHostedAiUsageCreateData(
     cachedInputTokens: record.cachedInputTokens,
     cacheWriteTokens: record.cacheWriteTokens,
     totalTokens: record.totalTokens,
-    ...(aiUsageBillingMode === "disabled"
-      ? {
-          stripeMeterError: HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
-          stripeMeterStatus: "skipped" as const,
-        }
-      : {}),
+    stripeMeterError: HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE,
+    stripeMeterStatus: "skipped",
   };
+}
+
+async function markHostedAiUsageStripeExportSkippedTx(input: {
+  id: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedAiUsage.updateMany({
+    where: {
+      id: input.id,
+      stripeMeterSource: "murph",
+      stripeMeterStatus: {
+        in: ["pending", "processing"],
+      },
+    },
+    data: {
+      stripeMeterError: HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE,
+      stripeMeterNextAttemptAt: null,
+      stripeMeterStatus: "skipped",
+    },
+  });
 }
 
 function assertStoredHostedAiUsageMatchesRecord(input: {
@@ -941,46 +453,6 @@ function normalizeHostedAiUsageDate(value: Date | string, label: string): Date {
   return date;
 }
 
-function buildHostedAiUsageStripeMeterDueWhere(
-  now: Date,
-): Prisma.HostedAiUsageWhereInput["OR"] {
-  return [
-    {
-      stripeMeterNextAttemptAt: null,
-    },
-    {
-      stripeMeterNextAttemptAt: {
-        lte: now,
-      },
-    },
-  ];
-}
-
-function buildHostedAiUsageStripeMeterDisabledWhere(
-  now: Date,
-): Prisma.HostedAiUsageWhereInput {
-  return {
-    stripeMeterSource: "murph",
-    OR: [
-      {
-        stripeMeterStatus: "pending",
-      },
-      {
-        stripeMeterStatus: "processing",
-        OR: buildHostedAiUsageStripeMeterDueWhere(now),
-      },
-    ],
-  };
-}
-
-function normalizePositiveInteger(value: number, label: string): number {
-  if (!Number.isInteger(value) || value < 1) {
-    throw new RangeError(`Hosted AI usage ${label} must be a positive integer.`);
-  }
-
-  return value;
-}
-
 function requireHostedAiUsageMemberId(
   record: AssistantUsageRecord,
   trustedUserId: string | null,
@@ -998,20 +470,4 @@ function requireHostedAiUsageMemberId(
   }
 
   return record.memberId;
-}
-
-function normalizeOptionalString(
-  value: string | null | undefined,
-  label: string,
-): string | null {
-  if (value == null) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError(`Hosted AI usage ${label} must be a string when provided.`);
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }

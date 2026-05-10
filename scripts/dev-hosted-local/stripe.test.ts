@@ -38,24 +38,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
       ],
-      missingUsagePriceKeys: [],
       secretMode: "placeholder",
-    });
-  });
-
-  it("requires usage price ids only when the local usage-meter fallback is enabled", () => {
-    expect(
-      evaluateHostedLocalStripeCheckoutEnv({
-        HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
-        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly",
-        HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY: "price_meter_replace_me",
-        STRIPE_SECRET_KEY: "rk_test_checkout",
-      }),
-    ).toEqual({
-      configuredPlanLabels: [],
-      missingFlatPriceKeys: ["HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY"],
-      missingUsagePriceKeys: ["HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY"],
-      secretMode: "test",
     });
   });
 });

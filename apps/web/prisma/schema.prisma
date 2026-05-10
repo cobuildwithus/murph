@@ -664,7 +664,7 @@ model HostedAiUsage {
   allowancePricingVersion    String?      @map("allowance_pricing_version")
   allowancePricingSnapshotJson Json?      @map("allowance_pricing_snapshot_json")
   allowanceCounted           Boolean      @default(false) @map("allowance_counted")
-  stripeMeterStatus          String       @default("pending") @map("stripe_meter_status")
+  stripeMeterStatus          String       @default("skipped") @map("stripe_meter_status")
   stripeMeterAttemptCount    Int          @default(0) @map("stripe_meter_attempt_count")
   stripeMeterLastAttemptedAt DateTime?    @map("stripe_meter_last_attempted_at")
   stripeMeterNextAttemptAt   DateTime?    @map("stripe_meter_next_attempt_at")

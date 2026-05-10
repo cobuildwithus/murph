@@ -747,14 +747,6 @@ export function resolveHostedStripeSubscriptionBillingPlanCode(
     }
   }
 
-  for (const code of HOSTED_BILLING_PLAN_CODES) {
-    const expectedUsagePriceId =
-      process.env[getHostedBillingPlanDefinition(code).usagePriceIdEnvKey];
-    if (expectedUsagePriceId && priceIds.includes(expectedUsagePriceId)) {
-      return code;
-    }
-  }
-
   return parseHostedBillingPlanCode(subscription.metadata?.billingPlanCode);
 }
 

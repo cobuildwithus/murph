@@ -177,7 +177,6 @@ function createHostedOnboardingEnvironment(
   overrides: Partial<HostedOnboardingEnvironment>,
 ): HostedOnboardingEnvironment {
   return {
-    aiUsageBillingMode: "disabled",
     contactPrivacyKeyring: {
       currentVersion: "v1",
       keysByVersion: {
@@ -202,11 +201,6 @@ function createHostedOnboardingEnvironment(
       launch_monthly: null,
     },
     stripeSecretKey: null,
-    stripeUsageMeterEventName: null,
-    stripeUsagePriceIdsByPlan: {
-      launch_edge_monthly: null,
-      launch_monthly: null,
-    },
     stripeWebhookSecret: null,
     telegramBotUsername: null,
     telegramWebhookSecret: null,

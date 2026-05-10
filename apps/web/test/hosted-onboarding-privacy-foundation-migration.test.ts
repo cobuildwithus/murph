@@ -215,6 +215,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAiUsageStripeMeterSkippedMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026051000_hosted_ai_usage_stripe_meter_skipped/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -243,6 +250,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050801_device_webhook_trace_claim_token",
       "2026050802_device_connect_intent",
       "2026050900_hosted_web_session_row_cap_index",
+      "2026051000_hosted_ai_usage_stripe_meter_skipped",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -434,6 +442,18 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe_meter_status", "stripe_meter_next_attempt_at", "occurred_at")',
+    );
+    expect(schema).toContain(
+      'stripeMeterStatus          String       @default("skipped") @map("stripe_meter_status")',
+    );
+    expect(hostedAiUsageStripeMeterSkippedMigrationSql).toContain(
+      'ALTER TABLE "hosted_ai_usage"',
+    );
+    expect(hostedAiUsageStripeMeterSkippedMigrationSql).toContain(
+      'ALTER COLUMN "stripe_meter_status" SET DEFAULT \'skipped\'',
+    );
+    expect(hostedAiUsageStripeMeterSkippedMigrationSql).toContain(
+      '"stripe_meter_status" IN (\'pending\', \'processing\')',
     );
     expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_ai_usage_turn_attempt_provider_request_idx" ON "hosted_ai_usage"("turn_id", "attempt_count", "provider_request_ordinal")',

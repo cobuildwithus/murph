@@ -12,7 +12,7 @@ calendar ends, give them a clear way to start the paid Pulse plan immediately.
 The product behavior is:
 
 - Trial usage runs out.
-- The app shows a plain billing CTA: `Start Pulse plan`.
+- The Home banner shows a plain billing CTA: `Start Pulse`.
 - The user confirms that their trial ends now and Pulse starts at `$8 / month`
   once billing is confirmed.
 - Stripe ends the existing Pulse trial immediately and invoices the first paid
@@ -66,7 +66,7 @@ Recommended exhausted-trial banner:
 
 - Title: `Trial credits are used up`
 - Body: `Start your Pulse plan now to keep Murph replying.`
-- CTA: `Start Pulse plan`
+- CTA: `Start Pulse`
 
 Recommended confirmation dialog:
 
@@ -195,12 +195,12 @@ Payment-recovery states bypass mutation eligibility and must not call
 Canonical Pulse subscription shape for this MVP:
 
 - exactly one configured Pulse recurring price
-- exactly one configured Pulse metered usage price when metering is enabled
-- no unknown active subscription items
+- no unknown active licensed subscription items
 - no duplicate known items
 - recurring item quantity is `1`
-- metered usage item has no quantity
 - monthly interval only
+- legacy hosted AI usage metered items with the retired usage-price marker and
+  without quantities may be deleted as part of the trial-end update
 
 Reject unsupported Stripe states with a safe conflict error and support-oriented
 copy. Do not reinterpret Dashboard-created schedules, unknown subscription
@@ -224,7 +224,7 @@ Algorithm:
 2. Require active, non-suspended member state.
 3. Require local Pulse Trial billing state.
 4. Require Stripe customer and subscription refs.
-5. Load the configured Pulse recurring and usage price ids.
+5. Load the configured Pulse recurring price id.
 6. Retrieve the Stripe subscription with `items.data.price`, `latest_invoice`,
    and `latest_invoice.payment_intent` expanded.
 7. Confirm the Stripe customer matches the billing ref.
@@ -263,7 +263,7 @@ Use a deterministic idempotency key based on:
 - Stripe subscription id
 - command name, such as `start-paid-pulse`
 - current trial end timestamp
-- configured Pulse recurring and usage price ids
+- configured Pulse recurring price id
 
 Do not include metadata in this update. If metadata needs cleanup, do it only
 after invoice-paid reconciliation proves the subscription is paid.
@@ -285,8 +285,8 @@ Reasoning:
 Do not use `pending_if_incomplete` in the first version. It supports
 `trial_end`, but Stripe pending-update semantics are a worse fit for this
 feature because the product intent is to end the trial now and let Stripe own
-invoice collection. Pending updates also have expiry behavior around metered
-items that is more complex than needed for trial-to-paid Pulse.
+invoice collection. Pending updates also have expiry and partial-application
+behavior that is more complex than needed for trial-to-paid Pulse.
 
 If Stripe returns a hosted invoice URL for a payment-needed invoice, send the
 user there. Stripe's Hosted Invoice Page is the lowest-complexity payment
@@ -332,8 +332,8 @@ feature needs focused checks around early trial ending:
   allowance before payment succeeds.
 - `invoice.paid` for the first non-zero Pulse invoice after an early trial end
   must write `currentBillingPhase: "paid"`.
-- Reconciliation must identify Pulse from configured Pulse recurring and usage
-  price ids even if historical `checkoutOffer` metadata remains
+- Reconciliation must identify Pulse from configured Pulse recurring price ids
+  even if historical `checkoutOffer` metadata remains
   `pulse_trial_7d`.
 - Trial redemption metadata can remain for audit history; paid phase is the
   entitlement signal.
@@ -357,7 +357,7 @@ Use:
 
 - title: `Trial credits are used up`
 - body: `Start your Pulse plan now to keep Murph replying.`
-- action: `Start Pulse plan`
+- action: `Start Pulse`
 
 Do not route exhausted trial users to Settings as the primary action.
 
@@ -409,13 +409,14 @@ Do not add:
 ## Required Tests
 
 - UX: exhausted trial usage produces `reason: "ai_usage_limit_exceeded"` with
-  `userNotice.code: "trial_usage_limit_reached"`, renders `Start Pulse plan` on
-  Home and Settings, and does not route primarily to Settings.
+  `userNotice.code: "trial_usage_limit_reached"`, renders `Start Pulse` on Home
+  and Settings, and does not route primarily to Settings.
 - Route guards: the route accepts no body and preserves origin, app-session,
   active-member, suspended-member, and local Pulse Trial eligibility checks.
 - Stripe safety: the service verifies customer/subscription match, rejects
-  unsupported states, schedules, and noncanonical items, and calls Stripe with
-  `trial_end: "now"` plus a deterministic idempotency key.
+  unsupported states, schedules, and noncanonical licensed items, drops only
+  marked legacy hosted AI usage metered items when present, and calls Stripe
+  with `trial_end: "now"` plus a deterministic idempotency key.
 - Payment recovery: `payment_required` is returned only with a Stripe-hosted
   payment URL for the same subscription/customer and never grants paid
   allowance.
@@ -430,10 +431,9 @@ Do not add:
 Use a Test Clock flow:
 
 1. Create a canonical Pulse Trial subscription through Checkout.
-2. Verify the subscription is `trialing` and has the Pulse recurring and usage
-   prices.
+2. Verify the subscription is `trialing` and has the Pulse recurring price.
 3. Simulate exhausted trial usage in local state.
-4. Click `Start Pulse plan`.
+4. Click `Start Pulse`.
 5. Verify Stripe receives `trial_end=now`.
 6. Verify Stripe creates the first paid Pulse invoice and starts a new billing
    period.
