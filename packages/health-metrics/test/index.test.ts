@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  assessMurphAgeInputBundle,
   buildMetricSeries,
   calculateMurphAge,
   createCustomMetricDefinition,
@@ -39,6 +40,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("alk-phos")?.key, "alkaline-phosphatase");
   assert.equal(resolveMetricDefinition("WBC")?.key, "white-blood-cell-count");
   assert.equal(resolveMetricDefinition("RDW")?.key, "red-cell-distribution-width");
+  assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
+  assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
+  assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
+  assert.equal(resolveMetricDefinition("waist")?.key, "waist-circumference");
   assert.equal(resolveMetricDefinition("unknown metric"), null);
   assert.equal(
     resolveMetricDefinitionForBiomarker("biomarker:resting-heart-rate")?.key,
@@ -51,6 +56,7 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:blood-oxygen-spo2")?.key, "spo2");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:estimated-vo2max")?.key, "estimated-vo2-max");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:apolipoprotein-b")?.key, "apob");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:systolic-blood-pressure")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],
@@ -120,6 +126,26 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "%",
     value: 18.4,
   }).canonicalUnit, "percent");
+  assert.equal(normalizeMetricValue({
+    metricKey: "systolic-blood-pressure",
+    unit: "mmHg",
+    value: 118,
+  }).canonicalValue, 118);
+  assert.equal(normalizeMetricValue({
+    metricKey: "diastolic-blood-pressure",
+    unit: "mm_hg",
+    value: 72,
+  }).canonicalUnit, "mmHg");
+  assert.equal(normalizeMetricValue({
+    metricKey: "bmi",
+    unit: "kg/m2",
+    value: 23.4,
+  }).canonicalUnit, "kg/m^2");
+  assert.equal(normalizeMetricValue({
+    metricKey: "waist-circumference",
+    unit: "in",
+    value: 32,
+  }).canonicalValue, 81.28);
   assert.equal(normalizeMetricValue({
     metricKey: "hba1c",
     unit: "pct",
@@ -1495,6 +1521,131 @@ test("calculates Murph Age from calibrated demographic, wearable, and lab featur
   assert.equal(result.moduleAttributions.find((module) => module.moduleId === "biomarkers")?.contributionYears, 1.7);
 });
 
+test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wearable context", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const lab9 = assessMurphAgeInputBundle({
+    asOf,
+    points: [
+      labMetricPoint("albumin", "g/dL", 4.4),
+      labMetricPoint("creatinine", "mg/dL", 0.9),
+      labMetricPoint("hba1c", "percent", 5.2),
+      labMetricPoint("alkaline-phosphatase", "U/L", 65),
+      labMetricPoint("white-blood-cell-count", "10^3/uL", 5.5),
+      labMetricPoint("lymphocyte-percentage", "percent", 32),
+      labMetricPoint("red-cell-distribution-width", "percent", 12.5),
+      labMetricPoint("hdl-c", "mg/dL", 58),
+      labMetricPoint("triglycerides", "mg/dL", 95),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:systolic-blood-pressure:2026-05-08:device:0",
+        metricKey: "systolic-blood-pressure",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "device_sbp",
+        sourceKind: "measurement",
+        unit: "mmHg",
+        value: 118,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:diastolic-blood-pressure:2026-05-08:device:0",
+        metricKey: "diastolic-blood-pressure",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "device_dbp",
+        sourceKind: "measurement",
+        unit: "mmHg",
+        value: 72,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:bmi:2026-05-08:device:0",
+        metricKey: "bmi",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "device_bmi",
+        sourceKind: "measurement",
+        unit: "kg/m2",
+        value: 23.2,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:waist-circumference:2026-05-08:device:0",
+        metricKey: "waist-circumference",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "device_waist",
+        sourceKind: "measurement",
+        unit: "cm",
+        value: 82,
+      }),
+    ],
+  });
+
+  assert.equal(lab9.status, "ready");
+  assert.equal(lab9.bundleId, "lab9-bp-body");
+  assert.equal(lab9.recommendedCardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(lab9.availableFeatureKeys.includes("glycemia"), true);
+  assert.equal(lab9.selectedMetricKeys.includes("hba1c"), true);
+  assert.equal(lab9.selectedMetricKeys.includes("systolic-blood-pressure"), true);
+
+  const lab5 = assessMurphAgeInputBundle({
+    asOf,
+    points: [
+      labMetricPoint("glucose", "mg/dL", 92),
+      labMetricPoint("creatinine", "mg/dL", 0.9),
+      labMetricPoint("hdl-c", "mg/dL", 58),
+      labMetricPoint("triglycerides", "mg/dL", 95),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:bmi:2026-05-08:fallback:0",
+        metricKey: "bmi",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "fallback_bmi",
+        sourceKind: "measurement",
+        unit: "kg/m^2",
+        value: 23.2,
+      }),
+    ],
+  });
+
+  assert.equal(lab5.status, "ready");
+  assert.equal(lab5.bundleId, "lab5-bp-bmi");
+  assert.equal(lab5.recommendedCardId, "lab5_bp_bmi_transport_research");
+  assert.deepEqual(lab5.availableFeatureKeys.sort(), ["bmi", "creatinine", "glycemia", "hdl-c", "triglycerides"]);
+
+  const wearable = assessMurphAgeInputBundle({
+    asOf,
+    points: [
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:steps:2026-05-08:wearable:0",
+        metricKey: "steps",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_steps_context",
+        sourceKind: "wearable-summary",
+        unit: "count",
+        value: 9000,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:resting-heart-rate:2026-05-08:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_rhr_context",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 60,
+      }),
+    ],
+  });
+
+  assert.equal(wearable.status, "context-only");
+  assert.equal(wearable.bundleId, "wearable-context");
+  assert.equal(wearable.recommendedCardId, "wearable_context_no_risk");
+  assert.equal(wearable.warnings.some((warning) => warning.message.includes("do not score wearables")), true);
+
+  const insufficient = assessMurphAgeInputBundle({ asOf, points: [] });
+  assert.equal(insufficient.status, "abstain");
+  assert.equal(insufficient.recommendedCardId, "none");
+});
+
 test("Murph Age calculator applies model calibration and log feature transforms", () => {
   const calibratedModel: MurphAgeRiskModel = {
     calibration: { intercept: 3, slope: 1 },
@@ -1884,6 +2035,19 @@ function fixtureReferenceRiskCurve(): MurphAgeRiskModel["referenceRiskCurve"] {
     { ageYears: 60, riskProbability: 0.1 },
     { ageYears: 80, riskProbability: 0.3 },
   ];
+}
+
+function labMetricPoint(metricKey: string, unit: string, value: number): MetricPoint {
+  return metricPoint({
+    effectiveDate: "2026-05-01",
+    id: `metric-point:${metricKey}:2026-05-01:lab:0`,
+    metricKey,
+    observedAt: "2026-05-01T08:00:00.000Z",
+    recordId: `lab_${metricKey.replaceAll("-", "_")}`,
+    sourceKind: "test-result",
+    unit,
+    value,
+  });
 }
 
 function metricPoint(input: {

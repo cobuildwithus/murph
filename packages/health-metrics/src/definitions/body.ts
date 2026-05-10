@@ -2,6 +2,28 @@ import type { MetricDefinition } from "../types.ts";
 
 export const BODY_METRICS = [
   {
+    aliases: ["bmi", "body-mass-index", "body_mass_index"],
+    biomarkerKey: null,
+    canonicalUnit: "kg/m^2",
+    category: "body",
+    displayName: "BMI",
+    displayUnit: "kg/m^2",
+    key: "bmi",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 45 },
+    valuePrecision: 1,
+  },
+  {
+    aliases: ["waist", "waist_circumference", "waist-circumference-cm"],
+    biomarkerKey: null,
+    canonicalUnit: "cm",
+    category: "body",
+    displayName: "Waist circumference",
+    displayUnit: "cm",
+    key: "waist-circumference",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 45 },
+    valuePrecision: 1,
+  },
+  {
     aliases: ["weight", "body_weight", "bodyWeight", "bodyweight", "weightKg"],
     biomarkerKey: null,
     canonicalUnit: "kg",
