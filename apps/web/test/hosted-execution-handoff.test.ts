@@ -132,8 +132,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeAccepted: null,
-      directRunnerNudgeDeferred: true,
+      directRunnerNudgeStatus: "deferred",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -196,8 +195,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       runId: "workflow-run-123",
     });
     await expect(handoff).resolves.toMatchObject({
-      directRunnerNudgeAccepted: null,
-      directRunnerNudgeDeferred: true,
+      directRunnerNudgeStatus: "deferred",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -240,8 +238,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeAccepted: null,
-      directRunnerNudgeDeferred: true,
+      directRunnerNudgeStatus: "deferred",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -275,8 +272,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeAccepted: null,
-      directRunnerNudgeDeferred: true,
+      directRunnerNudgeStatus: "deferred",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -319,8 +315,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeAccepted: null,
-      directRunnerNudgeDeferred: true,
+      directRunnerNudgeStatus: "deferred",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -351,8 +346,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
         userId: "user-123",
       }),
     ).resolves.toMatchObject({
-      directRunnerNudgeAccepted: false,
-      directRunnerNudgeDeferred: false,
+      directRunnerNudgeStatus: "not-accepted",
       reason: "workflow-start-failed",
       started: false,
     });
@@ -400,8 +394,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
         userId: "user-123",
       }),
     ).resolves.toMatchObject({
-      directRunnerNudgeAccepted: true,
-      directRunnerNudgeDeferred: false,
+      directRunnerNudgeStatus: "accepted",
       reason: "workflow-start-failed",
       started: false,
       workflowStarted: false,
@@ -454,8 +447,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
         userId: "user-123",
       }),
     ).resolves.toMatchObject({
-      directRunnerNudgeAccepted: false,
-      directRunnerNudgeDeferred: false,
+      directRunnerNudgeStatus: "not-accepted",
       reason: "workflow-start-failed",
       started: false,
       workflowStarted: false,
@@ -497,8 +489,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "telegram",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeAccepted: null,
-      directRunnerNudgeDeferred: true,
+      directRunnerNudgeStatus: "deferred",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,

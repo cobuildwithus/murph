@@ -78,7 +78,7 @@ Done:
 - Patched pending-nudge checkpoint handoff to queue the same continuation drive in the current isolate and changed hosted-web webhook success to return after durable workflow handoff while observing direct runner nudge asynchronously.
 - Focused Cloudflare/web regressions, full Cloudflare verify, full hosted-web verify, assistant-runtime typecheck/test, diff hygiene, and privacy scans passed for the audit-blocker follow-up.
 - Pushed the audit-blocker follow-up to main, then received a Pro simplification target: success-path handoff results should not report `runnerNudgeAccepted: false` when the optional direct nudge is merely deferred.
-- Renamed the handoff/read-receipt contract to explicit direct-runner nudge metadata, using `directRunnerNudgeAccepted: null` plus `directRunnerNudgeDeferred: true` for success-path deferred observation.
+- Renamed the handoff/read-receipt contract to an explicit `directRunnerNudgeStatus` enum, using `deferred` for success-path deferred observation.
 - Focused hosted-web handoff/Linq dispatch regressions and assistant-runtime typecheck passed for the Pro simplification follow-up.
 
 Now:
