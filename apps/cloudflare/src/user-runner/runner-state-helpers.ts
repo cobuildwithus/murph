@@ -7,6 +7,11 @@
 import {
   summarizeHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_MAILBOX_LANES,
+  type HostedMailboxLane,
+  type HostedRuntimeRedactedJson,
+} from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
@@ -36,6 +41,7 @@ export interface RunnerMetaRow {
   last_error_code: string | null;
   last_invocation_at: string | null;
   deferred_checkpoint_required: number;
+  deferred_checkpoint_mailbox_status_json: string | null;
   idle_shutdown_checkpoint_due_at: string | null;
   idle_shutdown_checkpoint_workspace_version: string | null;
   next_wake_at: string | null;
@@ -70,6 +76,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     last_error_code: null,
     last_invocation_at: null,
     deferred_checkpoint_required: 0,
+    deferred_checkpoint_mailbox_status_json: null,
     idle_shutdown_checkpoint_due_at: null,
     idle_shutdown_checkpoint_workspace_version: null,
     next_wake_at: null,
@@ -120,6 +127,10 @@ export function projectRunnerStateRecord(input: {
       },
       schema: "murph.hosted-runner.v2",
       deferredCheckpointRequired: input.meta.deferred_checkpoint_required === 1,
+      deferredCheckpointMailboxStatus:
+        parseRunnerDeferredCheckpointMailboxStatus(
+          input.meta.deferred_checkpoint_mailbox_status_json,
+        ),
       idleShutdownCheckpointDueAt: alarm?.kind === "idle_checkpoint"
         ? alarm.dueAt
         : input.meta.idle_shutdown_checkpoint_due_at,
@@ -155,6 +166,63 @@ export function resolveRunnerNextWakeAt(input: {
   preferredWakeAt?: string | null;
 }): string | null {
   return normalizePreferredWakeAt(input.preferredWakeAt ?? null);
+}
+
+export function stringifyRunnerDeferredCheckpointMailboxStatus(
+  value: HostedRuntimeRedactedJson | null | undefined,
+): string | null {
+  const normalized = normalizeRunnerDeferredCheckpointMailboxStatus(value);
+  return normalized ? JSON.stringify(normalized) : null;
+}
+
+function parseRunnerDeferredCheckpointMailboxStatus(
+  value: string | null,
+): HostedRuntimeRedactedJson | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return normalizeRunnerDeferredCheckpointMailboxStatus(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRunnerDeferredCheckpointMailboxStatus(
+  value: unknown,
+): HostedRuntimeRedactedJson | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const parsed: HostedRuntimeRedactedJson = {};
+  const record = Object.fromEntries(Object.entries(value));
+  for (const lane of HOSTED_MAILBOX_LANES) {
+    const key = buildHostedMailboxImportedSeqKey(lane);
+    const normalized = normalizeNonNegativeIntegerString(record[key]);
+    if (normalized !== null) {
+      parsed[key] = normalized;
+    }
+  }
+
+  return Object.keys(parsed).length > 0 ? parsed : null;
+}
+
+function buildHostedMailboxImportedSeqKey(lane: HostedMailboxLane): string {
+  return `hostedMailbox${lane.slice(0, 1).toUpperCase()}${lane.slice(1)}ImportedSeq`;
+}
+
+function normalizeNonNegativeIntegerString(value: unknown): string | null {
+  if (typeof value === "string" && /^[0-9]+$/u.test(value)) {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return String(value);
+  }
+
+  return null;
 }
 
 function normalizePreferredWakeAt(value: string | null): string | null {

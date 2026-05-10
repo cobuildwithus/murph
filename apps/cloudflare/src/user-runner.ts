@@ -1,7 +1,10 @@
 import type {
   HostedAiUsageAllowDecision,
+  HostedMailboxLane,
+  HostedMailboxLaneLag,
   HostedRunnerNudgeResult,
   HostedRunnerNudgeRequest,
+  HostedRuntimeRedactedJson,
   HostedRunnerStatusResponse,
   HostedRuntimeWebStatusResponse,
   HostedWorkspaceReadResponse,
@@ -398,6 +401,12 @@ export class HostedUserRunner {
     const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId, {
       logLimit: input.logLimit,
     });
+    const mailboxLag = mergeHostedRunnerDeferredCheckpointMailboxLag({
+      mailboxLag: webStatus.mailboxLag,
+      redactedStatus: record.deferredCheckpointRequired
+        ? record.deferredCheckpointMailboxStatus
+        : null,
+    });
 
     return {
       ...webStatus,
@@ -409,6 +418,7 @@ export class HostedUserRunner {
         earliestIsoDate(record.nextWakeAt, record.idleShutdownCheckpointDueAt),
         webStatus.workspace?.nextWakeAt ?? null,
       ),
+      mailboxLag,
       userId: record.userId,
       workspace: webStatus.workspace,
     };
@@ -948,7 +958,9 @@ export class HostedUserRunner {
             });
           } catch (error) {
             if (result.deferredCheckpointRequired === true) {
-              await this.stateStore.markDeferredCheckpointRequired();
+              await this.stateStore.markDeferredCheckpointRequired({
+                redactedStatus: result.redactedStatus ?? null,
+              });
               await this.scheduleHostedWakeRetryAlarm({
                 userId: initialRecord.userId,
               });
@@ -1480,7 +1492,9 @@ export class HostedUserRunner {
     workspaceVersion: string;
   }): Promise<void> {
     const record = input.result.deferredCheckpointRequired === true
-      ? await this.stateStore.markDeferredCheckpointRequired()
+      ? await this.stateStore.markDeferredCheckpointRequired({
+          redactedStatus: input.result.redactedStatus ?? null,
+        })
       : await this.stateStore.readState();
     if (record.pendingNudge) {
       await this.queuePendingNudgeContinuationAfterInvocation({
@@ -2535,6 +2549,59 @@ function applyMinimumFutureWakeAt(input: {
   }
 
   return new Date(minimumWakeAtMs).toISOString();
+}
+
+function mergeHostedRunnerDeferredCheckpointMailboxLag(input: {
+  mailboxLag: readonly HostedMailboxLaneLag[];
+  redactedStatus: HostedRuntimeRedactedJson | null;
+}): HostedMailboxLaneLag[] {
+  const redactedStatus = input.redactedStatus;
+  if (!redactedStatus) {
+    return [...input.mailboxLag];
+  }
+
+  return input.mailboxLag.map((lag) => {
+    const webImportedSeq = readNonNegativeBigInt(lag.importedSeq) ?? 0n;
+    const deferredImportedSeq = readHostedMailboxImportedSeqForLane(
+      redactedStatus,
+      lag.lane,
+    );
+    const importedSeq = deferredImportedSeq > webImportedSeq
+      ? deferredImportedSeq
+      : webImportedSeq;
+    const maxSeq = readNonNegativeBigInt(lag.maxSeq) ?? 0n;
+
+    return {
+      ...lag,
+      importedSeq: importedSeq.toString(),
+      lag: (maxSeq > importedSeq ? maxSeq - importedSeq : 0n).toString(),
+      maxSeq: maxSeq.toString(),
+    };
+  });
+}
+
+function readHostedMailboxImportedSeqForLane(
+  redactedStatus: HostedRuntimeRedactedJson,
+  lane: HostedMailboxLane,
+): bigint {
+  const key = `hostedMailbox${lane.slice(0, 1).toUpperCase()}${lane.slice(1)}ImportedSeq`;
+  return readNonNegativeBigInt(redactedStatus[key]) ?? 0n;
+}
+
+function readNonNegativeBigInt(value: unknown): bigint | null {
+  if (typeof value === "bigint" && value >= 0n) {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return BigInt(value);
+  }
+
+  if (typeof value === "string" && /^[0-9]+$/u.test(value)) {
+    return BigInt(value);
+  }
+
+  return null;
 }
 
 function resolvePreemptingIdleShutdownCheckpointDueAt(input: {

@@ -6,7 +6,7 @@
 
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 4;
+const RUNNER_STATE_SCHEMA_VERSION = 5;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -38,6 +38,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       last_error_code TEXT,
       last_invocation_at TEXT,
       deferred_checkpoint_required INTEGER NOT NULL DEFAULT 0,
+      deferred_checkpoint_mailbox_status_json TEXT,
       idle_shutdown_checkpoint_due_at TEXT,
       idle_shutdown_checkpoint_workspace_version TEXT,
       next_wake_at TEXT,
@@ -93,6 +94,12 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   ensureRunnerStateTableColumn(
     sql,
     "runner_meta",
+    "deferred_checkpoint_mailbox_status_json",
+    "TEXT",
+  );
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
     "idle_shutdown_checkpoint_due_at",
     "TEXT",
   );
@@ -128,6 +135,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "last_error_code",
       "last_invocation_at",
       "deferred_checkpoint_required",
+      "deferred_checkpoint_mailbox_status_json",
       "idle_shutdown_checkpoint_due_at",
       "idle_shutdown_checkpoint_workspace_version",
       "next_wake_at",

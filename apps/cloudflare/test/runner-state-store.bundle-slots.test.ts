@@ -215,13 +215,14 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_container_stopped_at");
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_orphan_observed_at");
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_worker_version_id");
+    expect(readRunnerMetaColumns(db)).toContain("deferred_checkpoint_mailbox_status_json");
     expect(readRunnerMetaColumns(db)).toContain("idle_shutdown_checkpoint_due_at");
     expect(readRunnerMetaColumns(db)).toContain("idle_shutdown_checkpoint_workspace_version");
     expect(
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(4);
+    ).toBe(5);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
@@ -303,11 +304,12 @@ describe("RunnerStateStore schema guard", () => {
     const { db, store } = createRunnerStateStoreHarness(setupV3Schema);
 
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_container_stopped_at");
+    expect(readRunnerMetaColumns(db)).toContain("deferred_checkpoint_mailbox_status_json");
     expect(
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(4);
+    ).toBe(5);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
