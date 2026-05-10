@@ -1,10 +1,17 @@
-import { promises as fs } from "node:fs";
-
 import type { ParseRequest, ProviderRunResult } from "../contracts/parse.js";
 import type { ParserProvider } from "../contracts/provider.js";
-import { buildMarkdown, isTextLikeArtifact, splitTextIntoBlocks } from "../shared.js";
+import {
+  assertFileSizeAtMost,
+  buildMarkdown,
+  DEFAULT_TEXT_FILE_PROVIDER_MAX_INPUT_BYTES,
+  isTextLikeArtifact,
+  readUtf8IfExists,
+  splitTextIntoBlocks,
+} from "../shared.js";
 
-export function createTextFileProvider(): ParserProvider {
+export function createTextFileProvider(options: {
+  maxInputBytes?: number;
+} = {}): ParserProvider {
   return {
     id: "text-file",
     locality: "local",
@@ -25,7 +32,12 @@ export function createTextFileProvider(): ParserProvider {
       );
     },
     async run(request): Promise<ProviderRunResult> {
-      const content = await fs.readFile(request.inputPath, "utf8");
+      const maxInputBytes =
+        options.maxInputBytes ?? DEFAULT_TEXT_FILE_PROVIDER_MAX_INPUT_BYTES;
+      await assertFileSizeAtMost(request.inputPath, maxInputBytes, "Text attachment");
+      const content = await readUtf8IfExists(request.inputPath, {
+        maxBytes: maxInputBytes,
+      }) ?? "";
       const trimmed = content.trim();
       const isMarkdown = request.artifact.fileName?.toLowerCase().endsWith(".md") ?? false;
       const blocks = splitTextIntoBlocks(trimmed, {

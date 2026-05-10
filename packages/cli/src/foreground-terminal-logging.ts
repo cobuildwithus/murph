@@ -78,7 +78,9 @@ export function formatAssistantRunEventForTerminal(
     return formatAssistantEventLine(
       'inbox daemon failed',
       undefined,
-      event.details ?? null,
+      options.unsafeDetails
+        ? event.details ?? null
+        : event.safeDetails ?? 'daemon failure details hidden',
     )
   }
 

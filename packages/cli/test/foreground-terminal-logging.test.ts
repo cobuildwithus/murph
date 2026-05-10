@@ -232,7 +232,7 @@ test('assistant terminal logging covers routed, failure, skipped, replied, and d
         details: 'lost inbox runtime lease',
       }),
     ),
-    'inbox daemon failed: lost inbox runtime lease',
+    'inbox daemon failed: daemon failure details hidden',
   )
 })
 

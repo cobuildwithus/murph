@@ -10,6 +10,7 @@ import type {
 } from "@murphai/runtime-state";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
+import { readRequestBodyText } from "../json.ts";
 import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
 import type { HostedRunnerStuckInvocationTestResult } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
@@ -117,7 +118,12 @@ export function decodeRouteParam(value: string): string {
 
 export async function readCachedRequestText(
   context: Pick<WorkerRouteContext, "request" | "requestText">,
+  options: {
+    limitBytes?: number;
+  } = {},
 ): Promise<string> {
-  context.requestText ??= context.request.text();
+  context.requestText ??= readRequestBodyText(context.request, {
+    limitBytes: options.limitBytes,
+  });
   return context.requestText;
 }

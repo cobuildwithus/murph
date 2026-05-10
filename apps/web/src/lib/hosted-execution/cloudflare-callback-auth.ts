@@ -15,6 +15,7 @@ import {
 } from "./internal-request-nonces";
 
 const DEFAULT_HOSTED_CLOUDFLARE_CALLBACK_KEY_ID = "v1";
+const DEFAULT_HOSTED_CLOUDFLARE_CALLBACK_MAX_BODY_BYTES = 256 * 1024;
 const HOSTED_CLOUDFLARE_CALLBACK_MAX_TIMESTAMP_SKEW_MS = 60_000;
 const HOSTED_CLOUDFLARE_CALLBACK_NONCE_MIN_LENGTH = 16;
 const HOSTED_CLOUDFLARE_CALLBACK_SIGNING_ALGORITHM: EcKeyImportParams = {
@@ -56,22 +57,12 @@ export async function requireHostedCloudflareCallbackRequest(
 ): Promise<string> {
   const verification = requireHostedCloudflareCallbackVerificationEnvironment(process.env);
   const userId = requireHostedExecutionUserId(request);
-  const payload = options.payloadText ?? (options.maxBodyBytes === undefined
-    ? await request.clone().text()
-    : (await readRawBodyBuffer(request.clone(), {
-        limitBytes: options.maxBodyBytes,
-      })).toString("utf8"));
-  if (
-    options.payloadText !== undefined
-    && options.maxBodyBytes !== undefined
-    && new TextEncoder().encode(options.payloadText).byteLength > options.maxBodyBytes
-  ) {
-    throw new RangeError(`Request body exceeded ${options.maxBodyBytes} bytes.`);
-  }
   const url = new URL(request.url);
   const { keyId, nonce, signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
   const normalizedNonce = normalizeOptionalString(nonce);
   const normalizedKeyId = normalizeOptionalString(keyId);
+  const maxBodyBytes =
+    options.maxBodyBytes ?? DEFAULT_HOSTED_CLOUDFLARE_CALLBACK_MAX_BODY_BYTES;
   const maxTimestampSkewMs =
     options.maxTimestampSkewMs ?? HOSTED_CLOUDFLARE_CALLBACK_MAX_TIMESTAMP_SKEW_MS;
 
@@ -82,22 +73,6 @@ export async function requireHostedCloudflareCallbackRequest(
   const publicJwk = verification.publicKeysById[normalizedKeyId];
 
   if (!publicJwk) {
-    throw unauthorizedCloudflareCallbackError();
-  }
-
-  const verified = await verifyHostedCloudflareCallbackSignature({
-    key: await importHostedCloudflareCallbackPublicKey(publicJwk, normalizedKeyId),
-    method: request.method,
-    nonce: normalizedNonce,
-    path: url.pathname,
-    payload,
-    search: url.search,
-    signature,
-    timestamp,
-    userId,
-  });
-
-  if (!verified) {
     throw unauthorizedCloudflareCallbackError();
   }
 
@@ -112,6 +87,26 @@ export async function requireHostedCloudflareCallbackRequest(
 
   const nowMs = options.nowMs ?? Date.now();
   if (Math.abs(nowMs - timestampMs) > maxTimestampSkewMs) {
+    throw unauthorizedCloudflareCallbackError();
+  }
+
+  const payload = await readHostedCloudflareCallbackPayload(request, {
+    maxBodyBytes,
+    payloadText: options.payloadText,
+  });
+  const verified = await verifyHostedCloudflareCallbackSignature({
+    key: await importHostedCloudflareCallbackPublicKey(publicJwk, normalizedKeyId),
+    method: request.method,
+    nonce: normalizedNonce,
+    path: url.pathname,
+    payload,
+    search: url.search,
+    signature,
+    timestamp,
+    userId,
+  });
+
+  if (!verified) {
     throw unauthorizedCloudflareCallbackError();
   }
 
@@ -136,6 +131,26 @@ export async function requireHostedCloudflareCallbackRequest(
   }
 
   return userId;
+}
+
+async function readHostedCloudflareCallbackPayload(
+  request: Request,
+  input: {
+    maxBodyBytes: number;
+    payloadText?: string;
+  },
+): Promise<string> {
+  if (input.payloadText !== undefined) {
+    if (new TextEncoder().encode(input.payloadText).byteLength > input.maxBodyBytes) {
+      throw new RangeError(`Request body exceeded ${input.maxBodyBytes} bytes.`);
+    }
+
+    return input.payloadText;
+  }
+
+  return (await readRawBodyBuffer(request.clone(), {
+    limitBytes: input.maxBodyBytes,
+  })).toString("utf8");
 }
 
 function requireHostedCloudflareCallbackVerificationEnvironment(

@@ -16,6 +16,7 @@ const MAX_JSON_SAMPLE_ITEMS = 3
 const MAX_JSON_SAMPLE_OBJECT_KEYS = 8
 const MAX_JSON_SAMPLE_CHARS = 700
 const MAX_JSON_SAMPLE_STRING_CHARS = 120
+const MAX_STRUCTURED_ATTACHMENT_ANALYSIS_CHARS = 2_000_000
 
 export type ModelEvidenceFragmentKind =
   | 'attachment_extracted_text'
@@ -173,6 +174,18 @@ function buildLargeTabularSummary(input: {
       continue
     }
 
+    if (text.length > MAX_STRUCTURED_ATTACHMENT_ANALYSIS_CHARS) {
+      return {
+        source,
+        text: renderOversizedStructuredAttachmentSummary({
+          attachment: input.attachment,
+          format: 'tabular',
+          source,
+          textLength: text.length,
+        }),
+      }
+    }
+
     const profile = analyzeTabularText(text)
     if (!profile) {
       continue
@@ -213,7 +226,10 @@ function isTabularSummarySourceCandidate(
     looksTabularFromMetadata(attachment.fileName) ||
     looksTabularFromMetadata(attachment.mime) ||
     looksTabularFromMetadata(source.path) ||
-    analyzeTabularText(text) !== null
+    (
+      text.length <= MAX_STRUCTURED_ATTACHMENT_ANALYSIS_CHARS &&
+      analyzeTabularText(text) !== null
+    )
   )
 }
 
@@ -231,7 +247,10 @@ function shouldSuppressSourceForTabularSummary(
     looksTabularFromMetadata(attachment.fileName) ||
     looksTabularFromMetadata(attachment.mime) ||
     looksTabularFromMetadata(source.path) ||
-    analyzeTabularText(text) !== null
+    (
+      text.length <= MAX_STRUCTURED_ATTACHMENT_ANALYSIS_CHARS &&
+      analyzeTabularText(text) !== null
+    )
   )
 }
 
@@ -263,6 +282,18 @@ function buildLargeJsonSummary(input: {
       !isJsonSummarySourceCandidate(input.attachment, source, text)
     ) {
       continue
+    }
+
+    if (text.length > MAX_STRUCTURED_ATTACHMENT_ANALYSIS_CHARS) {
+      return {
+        source,
+        text: renderOversizedStructuredAttachmentSummary({
+          attachment: input.attachment,
+          format: 'JSON',
+          source,
+          textLength: text.length,
+        }),
+      }
     }
 
     const profile = analyzeJsonText(text)
@@ -305,12 +336,15 @@ function isJsonSummarySourceCandidate(
     looksJsonFromMetadata(attachment.fileName) ||
     looksJsonFromMetadata(attachment.mime) ||
     looksJsonFromMetadata(source.path) ||
-    parseJsonText(text) !== null
+    (
+      text.length <= MAX_STRUCTURED_ATTACHMENT_ANALYSIS_CHARS &&
+      parseJsonText(text) !== null
+    )
   )
 }
 
 function shouldSuppressSourceForJsonSummary(
-  _attachment: ModelEvidenceAttachmentMetadata,
+  attachment: ModelEvidenceAttachmentMetadata,
   source: ModelEvidenceSource,
   text: string,
 ): boolean {
@@ -318,7 +352,37 @@ function shouldSuppressSourceForJsonSummary(
     return false
   }
 
-  return parseJsonText(text) !== null
+  return (
+    looksJsonFromMetadata(attachment.fileName) ||
+    looksJsonFromMetadata(attachment.mime) ||
+    looksJsonFromMetadata(source.path) ||
+    (
+      text.length <= MAX_STRUCTURED_ATTACHMENT_ANALYSIS_CHARS &&
+      parseJsonText(text) !== null
+    )
+  )
+}
+
+function renderOversizedStructuredAttachmentSummary(input: {
+  attachment: ModelEvidenceAttachmentMetadata
+  format: string
+  source: ModelEvidenceSource
+  textLength: number
+}): string {
+  return [
+    `Large ${input.format} attachment summary:`,
+    `fileName: ${input.attachment.fileName ?? 'unknown'}`,
+    `mime: ${input.attachment.mime ?? 'unknown'}`,
+    `byteSize: ${
+      typeof input.attachment.byteSize === 'number'
+        ? input.attachment.byteSize
+        : 'unknown'
+    }`,
+    `sourcePath: ${input.source.path ?? 'unknown'}`,
+    `textLength: ${input.textLength}`,
+    'Structured parsing was skipped because the extracted text exceeds the local analysis budget.',
+    'A bounded text excerpt is available in the regular attachment fragment.',
+  ].join('\n')
 }
 
 function looksJsonFromMetadata(value: string | null | undefined): boolean {

@@ -481,6 +481,7 @@ export async function abortHostedInvitePhoneCode(input: {
         prisma: tx,
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: now,
       });
     }
 

@@ -1,5 +1,13 @@
 import { execFile, spawn } from 'node:child_process'
-import { chmodSync, closeSync, openSync } from 'node:fs'
+import {
+  chmodSync,
+  closeSync,
+  constants as fsConstants,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+} from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -339,13 +347,44 @@ async function ensurePrivateDeviceDaemonDirectory(directoryPath: string): Promis
     recursive: true,
     mode: DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE,
   })
+  const stats = lstatSync(directoryPath)
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new Error('Device sync daemon runtime directory must be a real directory.')
+  }
   chmodSync(directoryPath, DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE)
 }
 
 function openPrivateDeviceDaemonLogFile(filePath: string): number {
-  const fileDescriptor = openSync(filePath, 'a', DEVICE_DAEMON_LOG_FILE_MODE)
-  chmodSync(filePath, DEVICE_DAEMON_LOG_FILE_MODE)
-  return fileDescriptor
+  try {
+    const stats = lstatSync(filePath)
+    if (stats.isSymbolicLink() || stats.isDirectory()) {
+      throw new Error('Device sync daemon log path must be a regular file.')
+    }
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+  }
+
+  const noFollowFlag = typeof fsConstants.O_NOFOLLOW === 'number'
+    ? fsConstants.O_NOFOLLOW
+    : 0
+  const fileDescriptor = openSync(
+    filePath,
+    fsConstants.O_APPEND | fsConstants.O_CREAT | fsConstants.O_WRONLY | noFollowFlag,
+    DEVICE_DAEMON_LOG_FILE_MODE,
+  )
+
+  try {
+    if (!fstatSync(fileDescriptor).isFile()) {
+      throw new Error('Device sync daemon log descriptor must be a regular file.')
+    }
+    fchmodSync(fileDescriptor, DEVICE_DAEMON_LOG_FILE_MODE)
+    return fileDescriptor
+  } catch (error) {
+    closeSync(fileDescriptor)
+    throw error
+  }
 }
 
 export function isMissingFileError(error: unknown): boolean {

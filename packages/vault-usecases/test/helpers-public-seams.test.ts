@@ -488,6 +488,15 @@ describe("helper barrel exports", () => {
         name: "VaultCliError",
         code: "invalid_export_pack",
       });
+
+      await writeFile(path.join(tempDir, "outside.txt"), "outside", "utf8");
+      await symlink(path.join(tempDir, "outside.txt"), path.join(tempDir, "linked.txt"));
+      await expect(
+        materializeExportPack(tempDir, [{ path: "linked.txt", contents: "nope" }]),
+      ).rejects.toMatchObject({
+        name: "VaultCliError",
+        code: "invalid_export_pack",
+      });
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

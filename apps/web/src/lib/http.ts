@@ -60,6 +60,8 @@ export type JsonLogStringSanitizer = (
 ) => string | null;
 
 const JSON_LOG_STRING_MAX_LENGTH = 240;
+const DEFAULT_JSON_BODY_LIMIT_BYTES = 128 * 1024;
+const DEFAULT_RAW_BODY_LIMIT_BYTES = 1024 * 1024;
 const JSON_ERROR_RESPONSE_DETAIL_SAFE_KEYS = new Set([
   "code",
   "operationName",
@@ -141,12 +143,8 @@ async function readRequestBodyText(
   request: Request,
   options: JsonBodyReadOptions,
 ): Promise<string> {
-  if (options.limitBytes === undefined) {
-    return request.text();
-  }
-
   return (await readRawBodyBuffer(request, {
-    limitBytes: options.limitBytes,
+    limitBytes: options.limitBytes ?? DEFAULT_JSON_BODY_LIMIT_BYTES,
   })).toString("utf8");
 }
 
@@ -154,11 +152,7 @@ export async function readRawBodyBuffer(
   request: Request,
   options: { limitBytes?: number } = {},
 ): Promise<Buffer> {
-  const limitBytes = options.limitBytes;
-
-  if (limitBytes === undefined) {
-    return Buffer.from(await request.arrayBuffer());
-  }
+  const limitBytes = options.limitBytes ?? DEFAULT_RAW_BODY_LIMIT_BYTES;
 
   const declaredContentLength = request.headers.get("content-length");
 
@@ -273,6 +267,19 @@ export function createJsonErrorResponse(
     );
   }
 
+  if (isRequestBodyTooLargeError(error)) {
+    logJsonError("warn", error, options);
+    return NextResponse.json(
+      {
+        error: {
+          code: "REQUEST_BODY_TOO_LARGE",
+          message: "Request body too large.",
+        },
+      },
+      buildJsonResponseInit(options, 413),
+    );
+  }
+
   if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     logJsonError("warn", error, options);
     return NextResponse.json(
@@ -296,6 +303,10 @@ export function createJsonErrorResponse(
     },
     buildJsonResponseInit(options, 500),
   );
+}
+
+function isRequestBodyTooLargeError(error: unknown): error is RangeError {
+  return error instanceof RangeError && error.message.startsWith("Request body exceeded ");
 }
 
 export function createJsonRouteHelpers(

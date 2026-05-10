@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { randomBytes } from "node:crypto"
+import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 import {
@@ -651,9 +652,114 @@ export async function materializeExportPack(
       )
     }
 
-    await mkdir(path.dirname(targetPath), { recursive: true })
-    await writeFile(targetPath, file.contents, "utf8")
+    const targetDirectory = await ensureExportPackMaterializationDirectory(
+      absoluteOutDir,
+      path.dirname(relativePath),
+    )
+    await writeExportPackFileSafely({
+      contents: file.contents,
+      originalPath: file.path,
+      targetDirectory,
+      targetPath,
+    })
   }
+}
+
+async function ensureExportPackMaterializationDirectory(
+  absoluteOutDir: string,
+  relativeDirectory: string,
+): Promise<string> {
+  await mkdir(absoluteOutDir, { recursive: true })
+  await assertExportPackMaterializationPathIsDirectory(absoluteOutDir, ".")
+
+  const segments = relativeDirectory
+    .replace(/\\/gu, "/")
+    .split("/")
+    .filter((segment) => segment.length > 0 && segment !== ".")
+  let current = absoluteOutDir
+
+  for (const segment of segments) {
+    current = path.join(current, segment)
+    await mkdir(current, { recursive: false }).catch(async (error) => {
+      if (!isAlreadyExistsError(error)) {
+        throw error
+      }
+    })
+    await assertExportPackMaterializationPathIsDirectory(current, segment)
+  }
+
+  return current
+}
+
+async function writeExportPackFileSafely(input: {
+  contents: string
+  originalPath: string
+  targetDirectory: string
+  targetPath: string
+}): Promise<void> {
+  await assertExportPackMaterializationTargetIsSafe(input.targetPath, input.originalPath)
+  const tempPath = path.join(
+    input.targetDirectory,
+    `.${path.basename(input.targetPath)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+  )
+
+  try {
+    await writeFile(tempPath, input.contents, "utf8")
+    await rename(tempPath, input.targetPath)
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
+async function assertExportPackMaterializationPathIsDirectory(
+  candidatePath: string,
+  displayPath: string,
+): Promise<void> {
+  const stats = await lstat(candidatePath)
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new VaultCliError(
+      "invalid_export_pack",
+      `Export pack output path traversed a non-directory or symbolic link: "${displayPath}".`,
+    )
+  }
+}
+
+async function assertExportPackMaterializationTargetIsSafe(
+  targetPath: string,
+  originalPath: string,
+): Promise<void> {
+  try {
+    const stats = await lstat(targetPath)
+    if (stats.isSymbolicLink() || stats.isDirectory()) {
+      throw new VaultCliError(
+        "invalid_export_pack",
+        `Export pack file path targeted a non-file or symbolic link: "${originalPath}".`,
+      )
+    }
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+  }
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "EEXIST"
+  )
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  )
 }
 
 export function toJournalLookupId(date: string) {

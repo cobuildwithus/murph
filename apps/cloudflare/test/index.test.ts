@@ -246,6 +246,47 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("rejects replayed deploy-signed managed container smoke requests", async () => {
+    const env = createWorkerEnv();
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const headers = await createHostedWebCallbackSignatureHeaders({
+      environment: callbackSigning,
+      method: "POST",
+      nonce: "0123456789abcdef0123456789abcdef",
+      path: url.pathname,
+      payload: "",
+      search: url.search,
+    });
+
+    const firstResponse = await worker.fetch(new Request(url, {
+      headers,
+      method: "POST",
+    }), env);
+    const replayResponse = await worker.fetch(new Request(url, {
+      headers,
+      method: "POST",
+    }), env);
+
+    expect(firstResponse.status).toBe(200);
+    expect(replayResponse.status).toBe(401);
+  });
+
+  it("rejects oversized deploy smoke request bodies before signature verification", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/deploy/container-smoke", {
+        body: "x".repeat(4097),
+        method: "POST",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Request body too large.",
+    });
+  });
+
   it("uses a version-specific deploy smoke Durable Object name when version metadata is present", async () => {
     const baseEnv = createWorkerEnv();
     const runnerGetByName = vi.fn(createRunnerContainerNamespace().getByName);

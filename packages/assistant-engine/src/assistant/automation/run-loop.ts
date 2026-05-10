@@ -36,6 +36,7 @@ import {
 } from '../input-source.js'
 import {
   listAssistantInputEvents,
+  ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
@@ -334,7 +335,7 @@ async function stageImportedCaptureAssistantInputEvent(input: {
   vault: string
 }): Promise<void> {
   const text = typeof input.capture.text === 'string'
-    ? input.capture.text
+    ? clampImportedCaptureText(input.capture.text)
     : null
   const stored = await upsertAssistantInputEvent({
     vault: input.vault,
@@ -449,6 +450,16 @@ async function stageImportedCaptureAssistantInputEvent(input: {
       providerState: 'completed',
     })
   })
+}
+
+function clampImportedCaptureText(value: string): string {
+  if (value.length <= ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH) {
+    return value
+  }
+
+  const omittedChars = value.length - ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH
+  const suffix = `\n\n[truncated ${omittedChars} characters before assistant input staging]`
+  return `${value.slice(0, Math.max(0, ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH - suffix.length))}${suffix}`
 }
 
 async function refreshAssistantInputAttachmentEvidenceForParserDrain(input: {

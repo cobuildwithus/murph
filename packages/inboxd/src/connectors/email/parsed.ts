@@ -47,14 +47,28 @@ interface ParsedMimeEntity {
 
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
+const MAX_MIME_DEPTH = 32;
+const MAX_MIME_PARTS = 256;
+const MAX_EMAIL_ATTACHMENTS = 64;
+const MAX_DECODED_MIME_BYTES = 50 * 1024 * 1024;
+
+interface MimeParseBudget {
+  attachmentCount: number;
+  decodedBytes: number;
+  partCount: number;
+}
 
 export function parseRawEmailMessage(
   input: Uint8Array | ArrayBuffer | string,
 ): ParsedEmailMessage {
   const rawBytes = toRawEmailBytes(input);
   const rawText = utf8Decoder.decode(rawBytes);
-  const entity = parseMimeEntity(rawText);
-  const collected = collectMimeLeafContent(entity);
+  const budget = createMimeParseBudget();
+  const entity = parseMimeEntity(rawText, {
+    budget,
+    depth: 0,
+  });
+  const collected = collectMimeLeafContent(entity, budget);
 
   return {
     attachments: collected.attachments,
@@ -142,7 +156,21 @@ export function readRawEmailHeaderValue(
   };
 }
 
-function parseMimeEntity(rawEntity: string): ParsedMimeEntity {
+function parseMimeEntity(
+  rawEntity: string,
+  context: {
+    budget: MimeParseBudget;
+    depth: number;
+  },
+): ParsedMimeEntity {
+  if (context.depth > MAX_MIME_DEPTH) {
+    throw new RangeError(`Email MIME depth exceeded ${MAX_MIME_DEPTH}.`);
+  }
+  context.budget.partCount += 1;
+  if (context.budget.partCount > MAX_MIME_PARTS) {
+    throw new RangeError(`Email MIME part count exceeded ${MAX_MIME_PARTS}.`);
+  }
+
   const { bodyText, headers } = splitRawEmailEntity(rawEntity);
   const { params: contentDispositionParams, value: contentDisposition } = parseHeaderParams(
     headers["content-disposition"] ?? null,
@@ -163,7 +191,12 @@ function parseMimeEntity(rawEntity: string): ParsedMimeEntity {
     headers,
     parts:
       normalizedContentType?.startsWith("multipart/") && boundary
-        ? splitMultipartBody(bodyText, boundary).map((part) => parseMimeEntity(part))
+        ? splitMultipartBody(bodyText, boundary).map((part) =>
+            parseMimeEntity(part, {
+              budget: context.budget,
+              depth: context.depth + 1,
+            })
+          )
         : [],
   };
 }
@@ -274,7 +307,7 @@ function splitMultipartBody(bodyText: string, boundary: string): string[] {
   return parts.filter((part) => part.trim().length > 0);
 }
 
-function collectMimeLeafContent(entity: ParsedMimeEntity): {
+function collectMimeLeafContent(entity: ParsedMimeEntity, budget: MimeParseBudget): {
   attachments: ParsedEmailAttachment[];
   html: string | null;
   text: string | null;
@@ -285,7 +318,7 @@ function collectMimeLeafContent(entity: ParsedMimeEntity): {
     const attachments: ParsedEmailAttachment[] = [];
 
     for (const part of entity.parts) {
-      const nested = collectMimeLeafContent(part);
+      const nested = collectMimeLeafContent(part, budget);
       text ??= nested.text;
       html ??= nested.html;
       attachments.push(...nested.attachments);
@@ -304,10 +337,16 @@ function collectMimeLeafContent(entity: ParsedMimeEntity): {
       ?? null,
   );
   const contentBytes = decodeMimeBodyBytes(entity.bodyText, entity.contentTransferEncoding);
+  consumeDecodedMimeBytes(budget, contentBytes.byteLength);
   const contentType = entity.contentType ?? "text/plain";
   const isAttachment = isMimeAttachment(entity, fileName);
 
   if (isAttachment) {
+    budget.attachmentCount += 1;
+    if (budget.attachmentCount > MAX_EMAIL_ATTACHMENTS) {
+      throw new RangeError(`Email attachment count exceeded ${MAX_EMAIL_ATTACHMENTS}.`);
+    }
+
     return {
       attachments: [
         {
@@ -345,6 +384,21 @@ function collectMimeLeafContent(entity: ParsedMimeEntity): {
     html: null,
     text: null,
   };
+}
+
+function createMimeParseBudget(): MimeParseBudget {
+  return {
+    attachmentCount: 0,
+    decodedBytes: 0,
+    partCount: 0,
+  };
+}
+
+function consumeDecodedMimeBytes(budget: MimeParseBudget, byteLength: number): void {
+  budget.decodedBytes += byteLength;
+  if (budget.decodedBytes > MAX_DECODED_MIME_BYTES) {
+    throw new RangeError(`Email decoded MIME content exceeded ${MAX_DECODED_MIME_BYTES} bytes.`);
+  }
 }
 
 function isMimeAttachment(entity: ParsedMimeEntity, fileName: string | null): boolean {

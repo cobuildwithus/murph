@@ -3,7 +3,10 @@ import path from "node:path";
 import type { ParseRequest, ParsedBlock, ProviderRunResult } from "../contracts/parse.js";
 import type { ParserProvider } from "../contracts/provider.js";
 import {
+  assertFileSizeAtMost,
   buildMarkdown,
+  DEFAULT_AUDIO_PROVIDER_MAX_INPUT_BYTES,
+  DEFAULT_PARSER_TRANSCRIPT_MAX_BYTES,
   describeExecutableAvailability,
   readConfiguredEnvValue,
   requireExecutable,
@@ -19,6 +22,8 @@ export interface WhisperCppProviderOptions {
   language?: string;
   translate?: boolean;
   extraArgs?: string[];
+  maxInputBytes?: number;
+  maxTranscriptBytes?: number;
   resolvedToolState?: {
     available: boolean;
     reason: string;
@@ -112,6 +117,11 @@ export function createWhisperCppProvider(
         throw new TypeError(resolvedToolState?.reason ?? "Whisper model path is not configured.");
       }
 
+      await assertFileSizeAtMost(
+        request.inputPath,
+        options.maxInputBytes ?? DEFAULT_AUDIO_PROVIDER_MAX_INPUT_BYTES,
+        "Audio attachment",
+      );
       const outputBase = path.join(request.scratchDirectory, `${request.artifact.attachmentId}.whisper`);
       const args = [
         "-m",
@@ -127,8 +137,14 @@ export function createWhisperCppProvider(
         ...(options.extraArgs ?? []),
       ];
       await runCommand(command, args);
-      const textOutput = (await readUtf8IfExists(`${outputBase}.txt`))?.trim() ?? "";
-      const srtOutput = await readUtf8IfExists(`${outputBase}.srt`);
+      const maxTranscriptBytes =
+        options.maxTranscriptBytes ?? DEFAULT_PARSER_TRANSCRIPT_MAX_BYTES;
+      const textOutput = (await readUtf8IfExists(`${outputBase}.txt`, {
+        maxBytes: maxTranscriptBytes,
+      }))?.trim() ?? "";
+      const srtOutput = await readUtf8IfExists(`${outputBase}.srt`, {
+        maxBytes: maxTranscriptBytes,
+      });
       const srtBlocks = srtOutput ? parseSrtBlocks(srtOutput) : [];
       const text = textOutput || srtBlocks.map((block) => block.text).join(" ").trim();
 

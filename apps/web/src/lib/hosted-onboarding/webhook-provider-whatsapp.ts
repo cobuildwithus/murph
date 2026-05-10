@@ -22,6 +22,7 @@ import {
   parseHostedWhatsAppInboundTexts,
 } from "./whatsapp";
 import {
+  buildHostedWhatsAppConsentCommandEventId,
   grantHostedWhatsAppMessagingConsentTx,
   readHostedWhatsAppMessagingConsentGrantedTx,
   revokeHostedWhatsAppMessagingConsentTx,
@@ -155,12 +156,22 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
   }
 
   const command = parseWhatsAppCommand(input.inboundText.text);
+  const eventId = buildHostedWhatsAppWebhookEventId(input.inboundText.externalMessageId);
   if (command === "stop") {
-    await revokeHostedWhatsAppMessagingConsentTx({
+    const consentWrite = await revokeHostedWhatsAppMessagingConsentTx({
+      eventId: buildHostedWhatsAppConsentCommandEventId({
+        action: "revoked",
+        externalMessageId: input.inboundText.externalMessageId,
+      }),
       memberId: member.id,
       now: input.inboundText.receivedAt,
       prisma: input.prisma,
     });
+    if (consentWrite.duplicate || consentWrite.stale) {
+      return consentWrite.duplicate
+        ? buildWhatsAppInboundTextDuplicatePlan()
+        : buildWhatsAppInboundTextNoWakePlan("stale-whatsapp-command");
+    }
     return {
       commandHandled: true,
       duplicate: false,
@@ -171,11 +182,20 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
   }
 
   if (command === "start") {
-    await grantHostedWhatsAppMessagingConsentTx({
+    const consentWrite = await grantHostedWhatsAppMessagingConsentTx({
+      eventId: buildHostedWhatsAppConsentCommandEventId({
+        action: "granted",
+        externalMessageId: input.inboundText.externalMessageId,
+      }),
       memberId: member.id,
       now: input.inboundText.receivedAt,
       prisma: input.prisma,
     });
+    if (consentWrite.duplicate || consentWrite.stale) {
+      return consentWrite.duplicate
+        ? buildWhatsAppInboundTextDuplicatePlan()
+        : buildWhatsAppInboundTextNoWakePlan("stale-whatsapp-command");
+    }
     return {
       commandHandled: true,
       duplicate: false,
@@ -203,7 +223,6 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("whatsapp-consent-required");
   }
 
-  const eventId = buildHostedWhatsAppWebhookEventId(input.inboundText.externalMessageId);
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionWhatsAppConversationMessageWake({
       eventId,
@@ -254,7 +273,7 @@ async function lookupHostedMemberByWhatsAppPhoneNumber(input: {
     return null;
   }
 
-  const identityRecord = await input.prisma.hostedMemberIdentity.findFirst({
+  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
     where: {
       phoneLookupKey: {
         in: phoneLookupKeys,
@@ -267,8 +286,13 @@ async function lookupHostedMemberByWhatsAppPhoneNumber(input: {
       member: true,
     },
   });
+  const membersById = new Map<string, HostedMember>();
 
-  return identityRecord?.member ?? null;
+  for (const identityRecord of identityRecords) {
+    membersById.set(identityRecord.member.id, identityRecord.member);
+  }
+
+  return membersById.size === 1 ? [...membersById.values()][0] ?? null : null;
 }
 
 function buildWhatsAppInboundTextNoWakePlan(reason: string): {
@@ -283,6 +307,22 @@ function buildWhatsAppInboundTextNoWakePlan(reason: string): {
     duplicate: false,
     ignored: true,
     reason,
+    wakeHandoff: null,
+  };
+}
+
+function buildWhatsAppInboundTextDuplicatePlan(): {
+  commandHandled: false;
+  duplicate: true;
+  ignored: true;
+  reason: string;
+  wakeHandoff: null;
+} {
+  return {
+    commandHandled: false,
+    duplicate: true,
+    ignored: true,
+    reason: "duplicate-webhook-event",
     wakeHandoff: null,
   };
 }

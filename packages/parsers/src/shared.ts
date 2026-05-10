@@ -44,6 +44,11 @@ const SAFE_CHILD_PROCESS_ENV_KEYS = new Set([
 const SAFE_CHILD_PROCESS_ENV_PREFIXES = ["LC_"];
 const COMMAND_TERMINATION_GRACE_MS = 1_000;
 
+export const DEFAULT_TEXT_FILE_PROVIDER_MAX_INPUT_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_IMAGE_PROVIDER_MAX_INPUT_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_AUDIO_PROVIDER_MAX_INPUT_BYTES = 512 * 1024 * 1024;
+export const DEFAULT_PARSER_TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
+
 function resolvePreservedChildProcessEnvKey(key: string): string | null {
   const normalizedKey = key.toUpperCase();
   return (
@@ -99,12 +104,36 @@ export async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-export async function readUtf8IfExists(filePath: string): Promise<string | null> {
+export async function readUtf8IfExists(
+  filePath: string,
+  options: {
+    maxBytes?: number;
+  } = {},
+): Promise<string | null> {
   if (!(await fileExists(filePath))) {
     return null;
   }
 
+  if (options.maxBytes !== undefined) {
+    await assertFileSizeAtMost(filePath, options.maxBytes, "Parser text artifact");
+  }
+
   return fs.readFile(filePath, "utf8");
+}
+
+export async function assertFileSizeAtMost(
+  filePath: string,
+  maxBytes: number,
+  label: string,
+): Promise<void> {
+  const fileStats = await fs.stat(filePath);
+  if (!fileStats.isFile()) {
+    throw new TypeError(`${label} must be a file.`);
+  }
+
+  if (fileStats.size > maxBytes) {
+    throw new RangeError(`${label} exceeded ${maxBytes} bytes.`);
+  }
 }
 
 export function normalizeRelativePath(relativePath: string): string {
