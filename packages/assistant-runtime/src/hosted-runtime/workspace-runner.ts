@@ -193,6 +193,7 @@ export interface HostedWorkspaceRunnerResult {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
   deferredCheckpointRequired: boolean;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
 }
 
@@ -295,6 +296,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         initialMailboxImport,
       }),
       initialMailboxImport,
+      latestMailboxImport: checkpointRequestSession.latestMailboxImport()
+        ?? initialMailboxImport,
       latestWorkspace: checkpointRequestSession.latestWorkspace()
         ?? initialMailboxImport.checkpoint?.workspace
         ?? input.workspace,
@@ -407,6 +410,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         initialMailboxImport,
       }),
     initialMailboxImport,
+    latestMailboxImport: checkpointRequestSession.latestMailboxImport()
+      ?? initialMailboxImport,
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,

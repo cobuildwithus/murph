@@ -1378,8 +1378,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       let caught: unknown;
+      let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>> | null = null;
       try {
-        await runHostedWorkspaceUntilIdleOrBudget({
+        result = await runHostedWorkspaceUntilIdleOrBudget({
           checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
             attemptId: "attempt_synthetic_runner_active_turn",
             expectedWorkspaceVersion: "0",
@@ -1512,12 +1513,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }
 
       assert.equal(caught, undefined);
+      assert.ok(result);
       assert.deepEqual(events, [
         "refresh:start",
         "refresh:done",
         "list",
       ]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.equal(result.deferredCheckpointRequired, true);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [

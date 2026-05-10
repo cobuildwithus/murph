@@ -2113,41 +2113,48 @@ describe("hosted workspace runtime entrypoint", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      await expect(
-        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
-          createCheckpointSnapshot,
-          async importItem(item) {
-            events.push(`import:${item.item.laneSeq}`);
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            mailboxPort,
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        createCheckpointSnapshot,
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
           }),
-          async runAssistantPhase(input) {
-            const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
-            if (typeof refreshMailbox !== "function") {
-              throw new Error("Expected hosted mailbox refresh to be installed.");
-            }
-            const refresh = await refreshMailbox({
-              requestId: "request_synthetic_entrypoint_active_turn_refresh",
-            });
-            assert.deepEqual(refresh, {
-              progressed: true,
-              reason: "ingested_input",
-            });
-            return {};
-          },
-          vaultRoot,
         }),
-      ).resolves.toMatchObject({
-        status: "idle",
+        async runAssistantPhase(input) {
+          const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
+          if (typeof refreshMailbox !== "function") {
+            throw new Error("Expected hosted mailbox refresh to be installed.");
+          }
+          const refresh = await refreshMailbox({
+            requestId: "request_synthetic_entrypoint_active_turn_refresh",
+          });
+          assert.deepEqual(refresh, {
+            progressed: true,
+            reason: "ingested_input",
+          });
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+            redactedStatus: {
+              hostedMailboxConversationImportedSeq: "0",
+              hostedMailboxSystemImportedSeq: "999",
+            },
+          };
+        },
+        vaultRoot,
       });
 
+      assert.equal(result.status, "idle");
+      assert.ok(result.redactedStatus);
+      assert.equal(result.redactedStatus["hostedMailboxConversationImportedSeq"], "1");
+      assert.equal(result.redactedStatus["hostedMailboxSystemImportedSeq"], "0");
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch:1",

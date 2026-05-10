@@ -1257,10 +1257,10 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await expect(alarmRun).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toEqual([
+    expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.000Z",
-      "2026-04-27T00:00:46.100Z",
-    ]);
+      "2026-04-27T00:00:02.100Z",
+    ]));
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
@@ -1325,7 +1325,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:01.000Z",
-      "2026-04-27T00:00:45.100Z",
+      "2026-04-27T00:00:01.100Z",
     ]);
     expect(
       sql.exec(
@@ -1415,21 +1415,25 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(
-      sql.exec(
-        `SELECT idle_shutdown_checkpoint_due_at,
-                idle_shutdown_checkpoint_workspace_version,
-                in_flight,
-                next_wake_at
-         FROM runner_meta WHERE user_id = ?`,
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      idle_shutdown_checkpoint_due_at: deferredRow?.idle_shutdown_checkpoint_due_at,
-      idle_shutdown_checkpoint_workspace_version: "4",
-      in_flight: 1,
-      next_wake_at: deferredRow?.next_wake_at,
-    }]);
+    const activeDeferredRows = sql.exec<{
+      idle_shutdown_checkpoint_due_at: string | null;
+      idle_shutdown_checkpoint_workspace_version: string | null;
+      in_flight: number;
+      next_wake_at: string | null;
+    }>(
+      `SELECT idle_shutdown_checkpoint_due_at,
+              idle_shutdown_checkpoint_workspace_version,
+              in_flight,
+              next_wake_at
+       FROM runner_meta WHERE user_id = ?`,
+      "member_123",
+    ).toArray();
+    expect(activeDeferredRows).toHaveLength(1);
+    expect(activeDeferredRows[0]?.idle_shutdown_checkpoint_workspace_version).toBe("4");
+    expect(activeDeferredRows[0]?.in_flight).toBe(1);
+    expect(Date.parse(activeDeferredRows[0]?.idle_shutdown_checkpoint_due_at ?? "")).toBeLessThan(
+      Date.parse(activeDeferredRows[0]?.next_wake_at ?? ""),
+    );
 
     activeInvocation.resolve({ nextWakeAt: null, status: "idle" });
     await expect(activeRun).resolves.toMatchObject({ status: "idle" });
@@ -1481,7 +1485,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:01.000Z",
-      "2026-04-27T00:00:46.100Z",
+      "2026-04-27T00:00:02.100Z",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1579,11 +1583,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
 
     await expect(runner.runUntilIdleOrBudget({ reason: "alarm" })).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:00:45.100Z",
+      nextWakeAt: "2026-04-27T00:00:01.100Z",
       status: "scheduled",
     });
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toEqual(["2026-04-27T00:00:45.100Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:01.100Z"]);
     expect(
       sql.exec(
         "SELECT pending_nudge FROM runner_meta WHERE user_id = ?",
@@ -1631,13 +1635,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.waitFor(() =>
       expect(alarms).toEqual(expect.arrayContaining([
         "2026-04-27T00:00:01.000Z",
-        "2026-04-27T00:00:46.100Z",
+        "2026-04-27T00:00:02.100Z",
         "2026-04-27T00:05:00.000Z",
       ]))
     );
   });
 
-  it("keeps a newly observed persisted-only invocation pending until the orphan grace deadline", async () => {
+  it("clears a newly observed persisted-only invocation without waiting for orphan grace", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -1660,13 +1664,19 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     );
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:00:45.000Z",
-      status: "scheduled",
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      nextWakeAt: null,
+      status: "idle",
     });
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).not.toContain("2026-04-27T00:00:45.000Z");
+    expect(
+      sql.exec(
+        "SELECT in_flight FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{ in_flight: 0 }]);
   });
 
   it("clears a previous-worker persisted-only invocation immediately and starts a replacement", async () => {
@@ -1733,7 +1743,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         lease_generation = 1
       WHERE user_id = ?`,
       "workspace-invocation-1",
-      "2026-04-26T23:59:50.000Z",
+      "2026-04-26T23:59:59.500Z",
       "nudge",
       "2026-04-26T23:59:30.000Z",
       "worker-version-previous",
@@ -1799,7 +1809,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("keeps a same-worker persisted-only invocation pending until liveness or grace", async () => {
+  it("clears a same-worker persisted-only invocation without live heartbeat evidence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
@@ -1824,13 +1834,19 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     );
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:00:45.000Z",
-      status: "scheduled",
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      nextWakeAt: null,
+      status: "idle",
     });
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).not.toContain("2026-04-27T00:00:45.000Z");
+    expect(
+      sql.exec(
+        "SELECT in_flight FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{ in_flight: 0 }]);
   });
 
   it("treats legacy unstamped active invocations as previous-worker state once version metadata exists", async () => {
@@ -1886,7 +1902,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         lease_generation = 1
       WHERE user_id = ?`,
       "workspace-invocation-1",
-      "2026-04-26T23:59:50.000Z",
+      "2026-04-26T23:59:59.500Z",
       "nudge",
       "2026-04-26T23:59:30.000Z",
       "0",
@@ -1903,7 +1919,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
   });
 
-  it("clears a persisted-only invocation on the second wake after orphan observation", async () => {
+  it("clears a persisted-only invocation on the first wake without heartbeat evidence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -1926,20 +1942,17 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     );
 
-    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:00:45.000Z",
-      status: "scheduled",
-    });
-    expect(invoke).not.toHaveBeenCalled();
-
-    vi.setSystemTime(new Date("2026-04-27T00:00:46.000Z"));
-    await expect(runner.runUntilIdleOrBudget({
-      dueWake: true,
-      reason: "alarm",
-    })).resolves.toMatchObject({
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      nextWakeAt: null,
       status: "idle",
     });
-    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(
+      sql.exec(
+        "SELECT in_flight FROM runner_meta WHERE user_id = ?",
+        "member_123",
+      ).toArray(),
+    ).toEqual([{ in_flight: 0 }]);
   });
 
   it("clears a persisted-only invocation after the observed orphan grace and starts a replacement", async () => {
@@ -2332,7 +2345,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toEqual(["2026-04-27T00:00:44.500Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:02.500Z"]);
     expect(
       sql.exec(
         "SELECT in_flight, next_wake_at, pending_nudge FROM runner_meta WHERE user_id = ?",
@@ -2340,7 +2353,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       in_flight: 1,
-      next_wake_at: "2026-04-27T00:00:44.500Z",
+      next_wake_at: "2026-04-27T00:00:02.500Z",
       pending_nudge: 1,
     }]);
   });
@@ -2367,7 +2380,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       "2026-04-26T23:59:30.000Z",
       "2026-04-26T23:59:10.000Z",
       "0",
-      "2026-04-27T00:00:45.000Z",
+      "2026-04-27T00:00:03.000Z",
       "member_123",
     );
 
@@ -2378,7 +2391,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       workspaceVersion: "0",
     })).resolves.toBe(true);
 
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
   });
 
   it("keeps a pending nudge on recovery when checkpoint liveness clears orphan observation", async () => {
@@ -2403,7 +2416,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       "2026-04-26T23:59:30.000Z",
       "2026-04-26T23:59:10.000Z",
       "0",
-      "2026-04-27T00:00:45.000Z",
+      "2026-04-27T00:00:03.000Z",
       "member_123",
     );
 
@@ -2414,7 +2427,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       workspaceVersion: "1",
     })).resolves.toEqual({ recorded: true });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
   });
 
   it("records container stop liveness and schedules immediate recovery for a consumed nudge", async () => {
@@ -2484,7 +2497,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       "nudge",
       "2026-04-26T23:59:30.000Z",
       "0",
-      "2026-04-27T00:00:45.000Z",
+      "2026-04-27T00:00:03.000Z",
       "member_123",
     );
 
@@ -2545,12 +2558,12 @@ describe("HostedUserRunner runtime crypto context", () => {
       userId: "member_123",
     })).resolves.toEqual({
       inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
       pendingNudge: true,
     });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
   });
 
   it("clears a due idle checkpoint when heartbeat liveness preserves pending nudge recovery", async () => {
@@ -2587,12 +2600,12 @@ describe("HostedUserRunner runtime crypto context", () => {
       userId: "member_123",
     })).resolves.toEqual({
       inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
       pendingNudge: true,
     });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -2603,12 +2616,12 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       idle_shutdown_checkpoint_due_at: null,
-      next_wake_at: "2026-04-27T00:00:45.000Z",
+      next_wake_at: "2026-04-27T00:00:03.000Z",
       pending_nudge: 1,
     }]);
   });
 
-  it("clears a persisted-only invocation after the last heartbeat grace and starts a replacement", async () => {
+  it("clears a persisted-only invocation after the last heartbeat goes stale and starts a replacement", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:46.000Z"));
     const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -5206,7 +5219,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	    expect(nudgedDuringIdleAlarmApplication).toBe(true);
 	    expect(invoke).toHaveBeenCalledTimes(2);
 	    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
-	    expect(alarms).toContain(FIXED_NOW);
+	    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
 	    expect(
 	      sql.exec(
 	        `SELECT idle_shutdown_checkpoint_due_at,

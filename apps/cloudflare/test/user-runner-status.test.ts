@@ -91,7 +91,92 @@ describe("HostedUserRunner status", () => {
       workspace: null,
     });
   });
+
+  it("reports effective workspace mailbox status while a checkpoint is deferred", async () => {
+    const { runner, sql } = createRunnerStatusHarness();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
+      boundUserId?: string;
+      path: string;
+    }) => {
+      expect(input.path).toBe(HOSTED_RUNTIME_STATUS_PATH);
+      expect(input.boundUserId).toBe("member_123");
+      return Response.json({
+        mailboxLag: [
+          {
+            importedSeq: "1",
+            lag: "0",
+            lane: "system",
+            maxSeq: "1",
+          },
+          {
+            importedSeq: "585",
+            lag: "1",
+            lane: "conversation",
+            maxSeq: "586",
+          },
+        ],
+        userId: "member_123",
+        workspace: createWorkspace({
+          redactedStatus: {
+            hostedMailboxConversationImportedSeq: "585",
+            hostedMailboxSystemImportedSeq: "1",
+            hostedRuntimeOtherStatus: "preserved",
+          },
+        }),
+      });
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET deferred_checkpoint_required = 1,
+           deferred_checkpoint_mailbox_status_json = ?
+       WHERE user_id = ?`,
+      JSON.stringify({
+        hostedMailboxConversationImportedSeq: "586",
+        hostedMailboxSystemImportedSeq: "0",
+      }),
+      "member_123",
+    );
+
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      mailboxLag: [
+        {
+          importedSeq: "1",
+          lag: "0",
+          lane: "system",
+          maxSeq: "1",
+        },
+        {
+          importedSeq: "586",
+          lag: "0",
+          lane: "conversation",
+          maxSeq: "586",
+        },
+      ],
+      userId: "member_123",
+      workspace: {
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "586",
+          hostedMailboxSystemImportedSeq: "1",
+          hostedRuntimeOtherStatus: "preserved",
+        },
+      },
+    });
+  });
 });
+
+function createWorkspace(input: {
+  redactedStatus: Record<string, unknown> | null;
+}) {
+  return {
+    createdAt: "2026-04-27T00:00:00.000Z",
+    redactedStatus: input.redactedStatus,
+    snapshotRef: null,
+    updatedAt: "2026-04-27T00:00:00.000Z",
+    userId: "member_123",
+    version: "1876",
+  };
+}
 
 function createRunnerStatusHarness() {
   const sql = createTestSqlStorage();

@@ -400,6 +400,11 @@ describe("createHostedAssistantInputSource", () => {
       limit: 1,
       sourceId: "linq",
     });
+    const afterPreferred = await source.listInputCandidates({
+      afterCursor: preferred.cursor,
+      limit: 1,
+      sourceId: "linq",
+    });
 
     expect(fullPage.inputs.map((candidate) => candidate.event.inputId)).toEqual([
       older.inputId,
@@ -414,6 +419,8 @@ describe("createHostedAssistantInputSource", () => {
       preferred.inputId,
     ]);
     expect(second.nextCursor).toEqual(preferred.cursor);
+    expect(afterPreferred.inputs).toEqual([]);
+    expect(afterPreferred.nextCursor).toEqual(preferred.cursor);
   });
 
   it("can coalesce foreground replay prompt content without hiding terminal candidates", async () => {
@@ -480,7 +487,10 @@ describe("createHostedAssistantInputSource", () => {
       latest.inputId,
     ]);
     expect(listed.nextCursor).toEqual(latest.cursor);
-    expect(afterLatest.inputs).toEqual([]);
+    expect(afterLatest.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      latest.inputId,
+    ]);
+    expect(afterLatest.inputs[0]?.event.text).toBe("latest foreground note");
     expect(afterLatest.nextCursor).toEqual(latest.cursor);
   });
 
