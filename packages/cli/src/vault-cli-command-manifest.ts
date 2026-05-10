@@ -1451,7 +1451,7 @@ export const vaultCliCommandDescriptors = [
     ],
     directVaultServiceBindings: {
       core: [
-        'upsertRegimen',
+        'saveSupplement',
         'stopRegimen',
       ],
       query: [
@@ -1511,6 +1511,7 @@ export const vaultCliCommandDescriptors = [
       core: [
         'scaffoldRegimen',
         'upsertRegimen',
+        'saveRegimen',
         'stopRegimen',
         'upsertPrivateProtocol',
       ],

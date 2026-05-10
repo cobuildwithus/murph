@@ -534,6 +534,10 @@ export const readEntitySchema = z.object({
   links: z.array(entityRefSchema),
 })
 
+export const savedEntitySnapshotSchema = readEntitySchema.omit({
+  markdown: true,
+})
+
 export const listEntitySchema = readEntitySchema
   .omit({
     markdown: true,
@@ -656,6 +660,7 @@ export type ExperimentCreateResult = z.infer<
 >
 export type JournalEnsureResult = z.infer<typeof journalEnsureResultSchema>
 export type ReadEntity = z.infer<typeof readEntitySchema>
+export type SavedEntitySnapshot = z.infer<typeof savedEntitySnapshotSchema>
 export interface ListEntity extends Omit<ReadEntity, 'markdown' | 'data'> {
   [key: string]: any
   data: any

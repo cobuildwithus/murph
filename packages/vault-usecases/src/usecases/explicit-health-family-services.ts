@@ -1,6 +1,5 @@
 import {
   healthEntityDefinitionByKind,
-  jsonObjectSchema,
   safeParseContract,
   type JsonObject,
 } from "@murphai/contracts";
@@ -22,7 +21,11 @@ import type {
   PrivateProtocolSummaryResult,
   QueryRuntimeModule,
   QueryServices,
+  RegimenSaveInput,
+  RegimenSaveResult,
   StopRegimenInput,
+  SupplementSaveInput,
+  SupplementSaveResult,
 } from "./types.js";
 import {
   healthRegistryFamilies,
@@ -34,12 +37,26 @@ import {
   asListEnvelope,
   assertNoReservedPayloadKeys,
   buildEntityLinks,
+  firstRawString,
   optionalStringArray,
+  readRegistryRecordDocument,
+  readRegistryRecordEntity,
   readJsonPayload,
   recordPath,
   requirePayloadObjectField,
+  toKeyedRecord,
   toListEntity,
 } from "./shared.js";
+import {
+  toRegimenListEntity,
+  toRegimenReadEntity,
+  toSavedEntitySnapshot,
+  toSupplementListEntity,
+  toSupplementReadEntity,
+} from "./regimen-read-entities.js";
+import {
+  normalizeRepeatableFlagOption,
+} from "../option-utils.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -110,30 +127,6 @@ const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "path",
   "markdown",
   "body",
-]);
-
-const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
-  "id",
-  "regimenId",
-  "slug",
-  "title",
-  "markdown",
-  "body",
-  "relativePath",
-  "path",
-  "attributes",
-]);
-
-const REGIMEN_ENTITY_OMIT_KEYS = new Set([
-  "id",
-  "regimenId",
-  "slug",
-  "title",
-  "markdown",
-  "body",
-  "relativePath",
-  "path",
-  "attributes",
 ]);
 
 function parseRegistryPayloadWithSharedSchema(
@@ -268,58 +261,10 @@ function firstNonEmptyString(
   return null;
 }
 
-function firstRawString(
-  record: object,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = Reflect.get(record, key);
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
 function stringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     : [];
-}
-
-function stripUndefinedJsonFields(value: unknown): unknown {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => stripUndefinedJsonFields(entry))
-      .filter((entry) => entry !== undefined);
-  }
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value)
-        .map(([key, entry]) => [key, stripUndefinedJsonFields(entry)] as const)
-        .filter(([, entry]) => entry !== undefined),
-    );
-  }
-
-  return value;
-}
-
-function toKeyedRecord(value: object): JsonObject {
-  const result = safeParseContract(
-    jsonObjectSchema,
-    stripUndefinedJsonFields(value),
-  );
-  if (!result.success) {
-    throw new VaultCliError("contract_invalid", "Expected a JSON-compatible object.", {
-      issues: result.errors,
-    });
-  }
-
-  return result.data;
 }
 
 function requireScaffoldTemplate(
@@ -343,6 +288,250 @@ function buildEventLedgerUpsertResult(
     lookupId: String(result.record.id),
     ledgerFile: result.relativePath,
     created: true as const,
+  };
+}
+
+interface SupplementIngredientRecord {
+  compound: string;
+  label?: string;
+  amount?: number;
+  unit?: string;
+  active?: boolean;
+  note?: string;
+}
+
+interface SingleIngredientInput {
+  compound?: string;
+  label?: string;
+  amount?: number;
+  unit?: string;
+  active?: boolean;
+  note?: string;
+}
+
+function buildSingleIngredient(
+  input: SingleIngredientInput,
+  missingCompoundMessage: string,
+): SupplementIngredientRecord[] | undefined {
+  if (!input.compound) {
+    if (
+      input.active !== undefined ||
+      input.amount !== undefined ||
+      input.label !== undefined ||
+      input.note !== undefined ||
+      input.unit !== undefined
+    ) {
+      throw new VaultCliError(
+        "invalid_option",
+        missingCompoundMessage,
+      );
+    }
+
+    return undefined;
+  }
+
+  return [
+    {
+      compound: input.compound,
+      label: input.label,
+      amount: input.amount,
+      unit: input.unit,
+      active: input.active,
+      note: input.note,
+    },
+  ];
+}
+
+function buildRegimenIngredient(options: {
+  ingredientActive?: boolean;
+  ingredientAmount?: number;
+  ingredientCompound?: string;
+  ingredientLabel?: string;
+  ingredientNote?: string;
+  ingredientUnit?: string;
+}): SupplementIngredientRecord[] | undefined {
+  return buildSingleIngredient(
+    {
+      active: options.ingredientActive,
+      amount: options.ingredientAmount,
+      compound: options.ingredientCompound,
+      label: options.ingredientLabel,
+      note: options.ingredientNote,
+      unit: options.ingredientUnit,
+    },
+    "--ingredient-compound is required when ingredient fields are provided.",
+  );
+}
+
+function buildSupplementIngredient(options: {
+  amount?: number;
+  compound?: string;
+  ingredientActive?: boolean;
+  ingredientLabel?: string;
+  note?: string;
+  unit?: string;
+}): SupplementIngredientRecord[] | undefined {
+  return buildSingleIngredient(
+    {
+      active: options.ingredientActive,
+      amount: options.amount,
+      compound: options.compound,
+      label: options.ingredientLabel,
+      note: options.note,
+      unit: options.unit,
+    },
+    "--compound is required when ingredient fields are provided.",
+  );
+}
+
+function normalizeComparableText(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function namesCouldReferToSameDose(input: {
+  compound?: string;
+  substance?: string;
+}): boolean {
+  const substance = normalizeComparableText(input.substance);
+  const compound = normalizeComparableText(input.compound);
+
+  return substance === undefined || compound === undefined || substance === compound;
+}
+
+function validateSupplementSaveInput(input: {
+  amount?: number;
+  compound?: string;
+  dose?: number;
+  doseUnit?: string;
+  substance?: string;
+  unit?: string;
+}) {
+  if (input.doseUnit !== undefined && input.dose === undefined) {
+    throw new VaultCliError("invalid_option", "--dose-unit requires --dose.");
+  }
+
+  if (
+    input.dose !== undefined &&
+    input.amount !== undefined &&
+    input.dose === input.amount &&
+    input.doseUnit !== undefined &&
+    input.unit !== undefined &&
+    normalizeComparableText(input.doseUnit) !== normalizeComparableText(input.unit) &&
+    namesCouldReferToSameDose(input)
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "--dose-unit and --unit describe the same numeric dose but use different units. Use --dose-unit for the top-level dose and --unit for the ingredient amount.",
+    );
+  }
+}
+
+function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string } & JsonObject {
+  const payload = toKeyedRecord({
+    regimenId: input.regimenId,
+    slug: input.slug,
+    allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
+    title: input.title,
+    kind: input.kind,
+    status: input.status,
+    startedOn: input.startedOn,
+    stoppedOn: input.stoppedOn,
+    substance: input.substance,
+    dose: input.dose,
+    unit: input.unit,
+    schedule: input.schedule,
+    brand: input.brand,
+    manufacturer: input.manufacturer,
+    servingSize: input.servingSize,
+    ingredients: buildRegimenIngredient(input),
+    relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, "related-goal-id"),
+    relatedConditionIds: normalizeRepeatableFlagOption(
+      input.relatedConditionId,
+      "related-condition-id",
+    ),
+    relatedRegimenIds: normalizeRepeatableFlagOption(
+      input.relatedRegimenId,
+      "related-regimen-id",
+    ),
+    group: input.group,
+  });
+
+  return {
+    ...payload,
+    vaultRoot: input.vault,
+  };
+}
+
+function buildSupplementSavePayload(
+  input: SupplementSaveInput,
+): { vaultRoot: string } & JsonObject {
+  validateSupplementSaveInput(input);
+
+  const payload = toKeyedRecord({
+    regimenId: input.regimenId,
+    slug: input.slug,
+    allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
+    title: input.title,
+    kind: "supplement",
+    status: input.status,
+    startedOn: input.startedOn,
+    stoppedOn: input.stoppedOn,
+    substance: input.substance,
+    dose: input.dose,
+    unit: input.doseUnit,
+    schedule: input.schedule,
+    brand: input.brand,
+    manufacturer: input.manufacturer,
+    servingSize: input.servingSize,
+    ingredients: buildSupplementIngredient(input),
+    relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, "related-goal-id"),
+    relatedConditionIds: normalizeRepeatableFlagOption(
+      input.relatedConditionId,
+      "related-condition-id",
+    ),
+    relatedRegimenIds: normalizeRepeatableFlagOption(
+      input.relatedRegimenId,
+      "related-regimen-id",
+    ),
+    group: input.group ?? "supplement",
+  });
+
+  return {
+    ...payload,
+    vaultRoot: input.vault,
+  };
+}
+
+function toRegimenSaveResult(
+  vault: string,
+  result: Awaited<ReturnType<CoreRuntimeModule["upsertRegimen"]>>,
+): RegimenSaveResult {
+  const regimenId = String(result.record.entity.regimenId);
+
+  return {
+    vault,
+    regimenId,
+    lookupId: regimenId,
+    path: recordPath(result.record),
+    created: Boolean(result.created),
+    entity: toSavedEntitySnapshot(toRegimenReadEntity(result.record)),
+  };
+}
+
+function toSupplementSaveResult(
+  vault: string,
+  result: Awaited<ReturnType<CoreRuntimeModule["upsertRegimen"]>>,
+): SupplementSaveResult {
+  const regimenId = String(result.record.entity.regimenId);
+
+  return {
+    vault,
+    regimenId,
+    lookupId: regimenId,
+    path: recordPath(result.record),
+    created: Boolean(result.created),
+    entity: toSavedEntitySnapshot(toSupplementReadEntity(result.record)),
   };
 }
 
@@ -466,20 +655,6 @@ function toNestedHealthEntityData(record: object) {
   );
 }
 
-function readRegistryRecordEntity(record: object): Record<string, unknown> {
-  const entity = Reflect.get(record, "entity")
-  return typeof entity === "object" && entity !== null && !Array.isArray(entity)
-    ? toKeyedRecord(entity)
-    : toKeyedRecord(record)
-}
-
-function readRegistryRecordDocument(record: object): Record<string, unknown> {
-  const document = Reflect.get(record, "document")
-  return typeof document === "object" && document !== null && !Array.isArray(document)
-    ? toKeyedRecord(document)
-    : toKeyedRecord(record)
-}
-
 function toBloodTestReadEntity(record: object) {
   const data = toNestedHealthEntityData(record);
 
@@ -526,106 +701,6 @@ function toBloodTestListEntity(record: object) {
       relatedIds: stringArray(Reflect.get(record, "relatedIds")),
     }),
   })
-}
-
-function toSupplementEntityData(record: object) {
-  const rawRecord = readRegistryRecordEntity(record);
-
-  return Object.fromEntries(
-    Object.entries(rawRecord).filter(
-      ([key, value]) =>
-        !SUPPLEMENT_ENTITY_OMIT_KEYS.has(key) && value !== undefined,
-    ),
-  );
-}
-
-function toSupplementReadEntity(record: object) {
-  const rawRecord = readRegistryRecordEntity(record);
-  const rawDocument = readRegistryRecordDocument(record);
-  const data = toSupplementEntityData(record);
-  const id =
-    firstRawString(rawRecord, ["id"]) ??
-    firstRawString(rawRecord, ["regimenId"]) ??
-    "";
-
-  return {
-    id,
-    kind: "supplement" as const,
-    title: firstRawString(rawRecord, ["title"]),
-    occurredAt: firstRawString(rawRecord, ["startedOn"]),
-    path: firstRawString(rawDocument, ["relativePath", "path"]),
-    markdown: firstRawString(rawDocument, ["markdown", "body"]),
-    data,
-    links: buildEntityLinks({
-      data,
-    }),
-  };
-}
-
-function toSupplementListEntity(record: object) {
-  const rawRecord = readRegistryRecordEntity(record)
-  const rawDocument = readRegistryRecordDocument(record)
-  const data = toSupplementEntityData(record)
-  const id =
-    firstRawString(rawRecord, ["id"]) ??
-    firstRawString(rawRecord, ["regimenId"]) ??
-    ""
-
-  return toListEntity({
-    id,
-    kind: "supplement" as const,
-    title: firstRawString(rawRecord, ["title"]),
-    occurredAt: firstRawString(rawRecord, ["startedOn"]),
-    path: firstRawString(rawDocument, ["relativePath", "path"]),
-    markdown: firstRawString(rawDocument, ["markdown", "body"]),
-    data,
-    links: buildEntityLinks({
-      data,
-    }),
-  })
-}
-
-function toRegimenEntityData(record: object) {
-  const rawRecord = readRegistryRecordEntity(record);
-  const data = Object.fromEntries(
-    Object.entries(rawRecord).filter(
-      ([key, value]) =>
-        !REGIMEN_ENTITY_OMIT_KEYS.has(key) && value !== undefined,
-    ),
-  );
-  const regimenId = firstRawString(rawRecord, ["regimenId", "id"]);
-  if (regimenId) {
-    data.regimenId = regimenId;
-  }
-  return data;
-}
-
-function toRegimenReadEntity(record: object) {
-  const rawRecord = readRegistryRecordEntity(record);
-  const rawDocument = readRegistryRecordDocument(record);
-  const data = toRegimenEntityData(record);
-  const id =
-    firstRawString(rawRecord, ["id"]) ??
-    firstRawString(rawRecord, ["regimenId"]) ??
-    "";
-
-  return {
-    id,
-    kind: "regimen" as const,
-    title: firstRawString(rawRecord, ["title"]),
-    occurredAt: firstRawString(rawRecord, ["startedOn"]),
-    path: firstRawString(rawDocument, ["relativePath", "path"]),
-    markdown: firstRawString(rawDocument, ["markdown", "body"]),
-    data,
-    links: buildEntityLinks({
-      data,
-    }),
-  };
-}
-
-function toRegimenListEntity(record: object) {
-  const entity = toRegimenReadEntity(record);
-  return toListEntity(entity);
 }
 
 function toPrivateProtocolSummary(
@@ -809,6 +884,18 @@ export function createExplicitHealthCoreServices(
         created: Boolean(result.created),
       };
     },
+    async saveRegimen(input: RegimenSaveInput) {
+      const { core } = await loadRuntime();
+      const result = await core.upsertRegimen(buildRegimenSavePayload(input));
+
+      return toRegimenSaveResult(input.vault, result);
+    },
+    async saveSupplement(input: SupplementSaveInput) {
+      const { core } = await loadRuntime();
+      const result = await core.upsertRegimen(buildSupplementSavePayload(input));
+
+      return toSupplementSaveResult(input.vault, result);
+    },
     async upsertPrivateProtocol(input) {
       const { core } = await loadRuntime();
       const result = await core.upsertProtocol({
@@ -861,6 +948,8 @@ export function createExplicitHealthCoreServices(
     | "upsertAllergy"
     | "scaffoldRegimen"
     | "upsertRegimen"
+    | "saveRegimen"
+    | "saveSupplement"
     | "scaffoldBloodTest"
     | "upsertBloodTest"
     | "scaffoldFamilyMember"

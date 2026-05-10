@@ -5,19 +5,19 @@ import {
   type FrontmatterObject,
   type FrontmatterValue,
 } from "@murphai/contracts";
-import {
-  upsertRegimen,
-} from "@murphai/core";
 import { requestIdFromOptions, withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
+import {
+  localDateSchema,
+  pathSchema,
+  savedEntitySnapshotSchema,
+} from "@murphai/operator-config/vault-cli-contracts";
 import {
   healthListResultSchema,
   healthShowResultSchema,
   inputFileOptionSchema,
   loadJsonInputObject,
   normalizeInputFileOption,
-  normalizeRepeatableFlagOption,
   type VaultServices,
 } from "@murphai/vault-usecases";
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
@@ -25,18 +25,19 @@ import { suggestedCommandsCta } from "./command-factory-primitives.js";
 const protocolSlugSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, "Expected a lowercase kebab-case slug.");
-type RegimenUpsertInput = Parameters<typeof upsertRegimen>[0];
-type SupplementIngredientRecord = NonNullable<RegimenUpsertInput["ingredients"]>[number];
 
 const regimenKindSchema = z.enum(REGIMEN_KINDS);
 const regimenStatusSchema = z.enum(REGIMEN_STATUSES);
 
-const regimenSaveResultSchema = z.object({
+const regimenImportJsonResultSchema = z.object({
   vault: pathSchema,
   regimenId: z.string().min(1),
   lookupId: z.string().min(1),
   path: pathSchema.optional(),
   created: z.boolean(),
+});
+const regimenTypedSaveResultSchema = regimenImportJsonResultSchema.extend({
+  entity: savedEntitySnapshotSchema,
 });
 
 const regimenScaffoldResultSchema = z.object({
@@ -175,114 +176,6 @@ async function loadPrivateProtocolUpsertPayload(inputFile: string): Promise<{
   };
 }
 
-function buildProtocolIngredients(options: {
-  ingredientActive?: boolean;
-  ingredientAmount?: number;
-  ingredientCompound?: string;
-  ingredientLabel?: string;
-  ingredientNote?: string;
-  ingredientUnit?: string;
-}): SupplementIngredientRecord[] | undefined {
-  if (!options.ingredientCompound) {
-    if (
-      options.ingredientActive !== undefined ||
-      options.ingredientAmount !== undefined ||
-      options.ingredientLabel !== undefined ||
-      options.ingredientNote !== undefined ||
-      options.ingredientUnit !== undefined
-    ) {
-      throw new VaultCliError(
-        "invalid_option",
-        "--ingredient-compound is required when ingredient fields are provided.",
-      );
-    }
-
-    return undefined;
-  }
-
-  return [
-    {
-      compound: options.ingredientCompound,
-      label: options.ingredientLabel,
-      amount: options.ingredientAmount,
-      unit: options.ingredientUnit,
-      active: options.ingredientActive,
-      note: options.ingredientNote,
-    },
-  ];
-}
-
-function buildRegimenSaveInput(input: {
-  brand?: string;
-  dose?: number;
-  group?: string;
-  ingredientActive?: boolean;
-  ingredientAmount?: number;
-  ingredientCompound?: string;
-  ingredientLabel?: string;
-  ingredientNote?: string;
-  ingredientUnit?: string;
-  kind: z.infer<typeof regimenKindSchema>;
-  manufacturer?: string;
-  regimenId?: string;
-  relatedConditionId?: string[];
-  relatedGoalId?: string[];
-  relatedRegimenId?: string[];
-  schedule?: string;
-  servingSize?: string;
-  slug?: string;
-  startedOn?: string;
-  status?: z.infer<typeof regimenStatusSchema>;
-  stoppedOn?: string;
-  substance?: string;
-  title: string;
-  unit?: string;
-  vault: string;
-}): RegimenUpsertInput {
-  return {
-    vaultRoot: input.vault,
-    regimenId: input.regimenId,
-    slug: input.slug,
-    allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
-    title: input.title,
-    kind: input.kind,
-    status: input.status,
-    startedOn: input.startedOn,
-    stoppedOn: input.stoppedOn,
-    substance: input.substance,
-    dose: input.dose,
-    unit: input.unit,
-    schedule: input.schedule,
-    brand: input.brand,
-    manufacturer: input.manufacturer,
-    servingSize: input.servingSize,
-    ingredients: buildProtocolIngredients(input),
-    relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, "related-goal-id"),
-    relatedConditionIds: normalizeRepeatableFlagOption(
-      input.relatedConditionId,
-      "related-condition-id",
-    ),
-    relatedRegimenIds: normalizeRepeatableFlagOption(
-      input.relatedRegimenId,
-      "related-regimen-id",
-    ),
-    group: input.group,
-  };
-}
-
-function toRegimenSaveResult(
-  vault: string,
-  result: Awaited<ReturnType<typeof upsertRegimen>>,
-) {
-  return {
-    vault,
-    regimenId: String(result.record.entity.regimenId),
-    lookupId: String(result.record.entity.regimenId),
-    path: result.record.document.relativePath,
-    created: Boolean(result.created),
-  };
-}
-
 function toPrivateProtocolListItem(
   protocol: z.infer<typeof privateProtocolDetailSchema>,
 ): PrivateProtocolListItem {
@@ -373,7 +266,7 @@ export function registerProtocolCommands(
     options: withBaseOptions({
       input: inputFileOptionSchema,
     }),
-    output: regimenSaveResultSchema,
+    output: regimenImportJsonResultSchema,
     async run(context) {
       const result = await services.core.upsertRegimen({
         vault: context.options.vault,
@@ -531,38 +424,36 @@ export function registerProtocolCommands(
         "Optional related regimen id. Repeat --related-regimen-id for multiple values.",
       ),
     }),
-    output: regimenSaveResultSchema,
+    output: regimenTypedSaveResultSchema,
     async run(context) {
-      const result = await upsertRegimen(
-        buildRegimenSaveInput({
-          regimenId: context.options.id,
-          title: context.args.title,
-          slug: context.options.slug,
-          kind: context.options.kind,
-          status: context.options.status,
-          startedOn: context.options.startedOn,
-          stoppedOn: context.options.stoppedOn,
-          schedule: context.options.schedule,
-          brand: context.options.brand,
-          manufacturer: context.options.manufacturer,
-          servingSize: context.options.servingSize,
-          substance: context.options.substance,
-          dose: context.options.dose,
-          unit: context.options.unit,
-          ingredientCompound: context.options.ingredientCompound,
-          ingredientLabel: context.options.ingredientLabel,
-          ingredientAmount: context.options.ingredientAmount,
-          ingredientUnit: context.options.ingredientUnit,
-          ingredientNote: context.options.ingredientNote,
-          ingredientActive: context.options.ingredientActive,
-          group: context.options.group,
-          relatedGoalId: context.options.relatedGoalId,
-          relatedConditionId: context.options.relatedConditionId,
-          relatedRegimenId: context.options.relatedRegimenId,
-          vault: context.options.vault,
-        }),
-      );
-      const saved = toRegimenSaveResult(context.options.vault, result);
+      const saved = await services.core.saveRegimen({
+        brand: context.options.brand,
+        dose: context.options.dose,
+        group: context.options.group,
+        ingredientActive: context.options.ingredientActive,
+        ingredientAmount: context.options.ingredientAmount,
+        ingredientCompound: context.options.ingredientCompound,
+        ingredientLabel: context.options.ingredientLabel,
+        ingredientNote: context.options.ingredientNote,
+        ingredientUnit: context.options.ingredientUnit,
+        kind: context.options.kind,
+        manufacturer: context.options.manufacturer,
+        regimenId: context.options.id,
+        relatedConditionId: context.options.relatedConditionId,
+        relatedGoalId: context.options.relatedGoalId,
+        relatedRegimenId: context.options.relatedRegimenId,
+        requestId: requestIdFromOptions(context.options),
+        schedule: context.options.schedule,
+        servingSize: context.options.servingSize,
+        slug: context.options.slug,
+        startedOn: context.options.startedOn,
+        status: context.options.status,
+        stoppedOn: context.options.stoppedOn,
+        substance: context.options.substance,
+        title: context.args.title,
+        unit: context.options.unit,
+        vault: context.options.vault,
+      });
 
       return context.ok(saved, {
         cta: suggestedCommandsCta([

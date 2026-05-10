@@ -75,6 +75,8 @@ const coreServiceMethodNames = [
   "projectAssessment",
   "scaffoldRegimen",
   "upsertRegimen",
+  "saveRegimen",
+  "saveSupplement",
   "stopRegimen",
   ...healthCoreServiceMethodNames,
 ] satisfies ReadonlyArray<keyof CoreWriteServices & string>

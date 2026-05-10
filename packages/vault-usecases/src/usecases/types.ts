@@ -5,6 +5,8 @@ import type {
   ExperimentStatus,
   HealthCommonsExperimentOnboardingPositiveDisposition,
   MealNutrition,
+  RegimenKind,
+  RegimenStatus,
 } from "@murphai/contracts"
 import type {
   DocumentImportResult,
@@ -16,6 +18,7 @@ import type {
   ListEntity,
   MealAddResult,
   SamplesImportCsvResult,
+  SavedEntitySnapshot,
   ShowResult,
   VaultInitResult,
   VaultValidateResult,
@@ -88,6 +91,68 @@ export interface PrivateProtocolUpsertResult {
   effectiveSpecHash: string
   created: boolean
 }
+
+type RegistryScheduleText = string
+
+export interface RegimenSaveInput extends CommandContext {
+  regimenId?: string
+  slug?: string
+  kind: RegimenKind
+  status?: RegimenStatus
+  startedOn?: string
+  stoppedOn?: string
+  schedule?: RegistryScheduleText
+  brand?: string
+  manufacturer?: string
+  servingSize?: string
+  substance?: string
+  dose?: number
+  unit?: string
+  ingredientCompound?: string
+  ingredientLabel?: string
+  ingredientAmount?: number
+  ingredientUnit?: string
+  ingredientNote?: string
+  ingredientActive?: boolean
+  group?: string
+  relatedGoalId?: string[]
+  relatedConditionId?: string[]
+  relatedRegimenId?: string[]
+  title: string
+}
+
+export interface SupplementSaveInput extends CommandContext {
+  regimenId?: string
+  slug?: string
+  status?: RegimenStatus
+  startedOn?: string
+  stoppedOn?: string
+  schedule?: RegistryScheduleText
+  group?: string
+  substance?: string
+  dose?: number
+  doseUnit?: string
+  brand?: string
+  manufacturer?: string
+  servingSize?: string
+  compound?: string
+  ingredientLabel?: string
+  amount?: number
+  unit?: string
+  ingredientActive?: boolean
+  note?: string
+  relatedGoalId?: string[]
+  relatedConditionId?: string[]
+  relatedRegimenId?: string[]
+  title: string
+}
+
+export interface RegimenSaveResult extends UpsertRecordResult {
+  regimenId: string
+  entity: SavedEntitySnapshot
+}
+
+export interface SupplementSaveResult extends RegimenSaveResult {}
 
 export interface PrivateProtocolListInput extends HealthListInput {
   commonsProtocol?: string
@@ -993,6 +1058,8 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       input: string
     },
   ): Promise<UpsertRecordResult & { regimenId: string }>
+  saveRegimen(input: RegimenSaveInput): Promise<RegimenSaveResult>
+  saveSupplement(input: SupplementSaveInput): Promise<SupplementSaveResult>
   upsertPrivateProtocol(input: PrivateProtocolUpsertInput): Promise<PrivateProtocolUpsertResult>
   stopRegimen(input: StopRegimenInput): Promise<StopRegimenResult>
 }
