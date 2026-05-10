@@ -125,7 +125,6 @@ import {
   readAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import * as assistantRuntimeRootFacade from '../src/assistant-runtime.ts'
-import * as assistantRuntimeFacade from '../src/assistant/runtime.ts'
 import {
   openAssistantConversation,
   sendAssistantMessage,
@@ -638,8 +637,8 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
   assert.equal(automationEngineMocks.runAssistantAutomationLocal.mock.calls.length, 2)
 })
 
-test('assistant facade modules re-export the package runtime and daemon-aware seams', () => {
-  assert.equal(assistantRuntimeFacade.runAssistantChat, runtimeModuleMocks.runAssistantChat)
+test('assistant facade modules expose the package runtime and daemon-aware seams', () => {
+  assert.equal(assistantRuntimeRootFacade.runAssistantChat, runtimeModuleMocks.runAssistantChat)
   assert.equal(
     assistantAutomationFacade.runAssistantAutomation,
     runAssistantAutomation,
@@ -654,10 +653,6 @@ test('assistant facade modules re-export the package runtime and daemon-aware se
   )
   assert.equal(
     Reflect.has(assistantAutomationFacade, 'scanAssistantInboxOnce'),
-    false,
-  )
-  assert.equal(
-    Reflect.has(assistantRuntimeFacade, 'scanAssistantInboxOnce'),
     false,
   )
   assert.equal(

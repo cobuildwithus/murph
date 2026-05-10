@@ -55,7 +55,7 @@ vi.mock('node:fs/promises', () => ({
   access: commandMocks.access,
 }))
 
-vi.mock('../src/assistant/runtime.js', () => ({
+vi.mock('../src/assistant-runtime.js', () => ({
   runAssistantAutomation: commandMocks.runAssistantAutomation,
   runAssistantChat: commandMocks.runAssistantChat,
   sendAssistantMessage: commandMocks.sendAssistantMessage,
