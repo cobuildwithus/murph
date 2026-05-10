@@ -228,14 +228,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
   })
 
-  it('does not expose review-gpt or ChatGPT thread package-script helpers', () => {
+  it('exposes only the package-backed review-gpt runner', () => {
     const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
       path.join(repoRoot, 'pnpm-workspace.yaml'),
       'utf8',
     )
     const removedScripts = [
-      'review:gpt',
       'review:gpt:full',
       'review:gpt:protocol',
       'review:gpt:protocol:all',
@@ -253,6 +252,9 @@ describe('monorepo release flow coverage audit', () => {
       'chatgpt:thread:wake',
     ]
 
+    expect(rootPackageJson.scripts?.['review:gpt']).toBe(
+      'cobuild-review-gpt --config scripts/review-gpt.config.sh',
+    )
     for (const scriptName of removedScripts) {
       expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
     }
@@ -266,11 +268,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBeUndefined()
-    expect(pnpmWorkspace).not.toContain('@cobuild/review-gpt')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.88')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.88')
     expect(pnpmWorkspace).not.toContain('patchedDependencies:')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)

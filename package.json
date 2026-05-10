@@ -57,6 +57,7 @@
     "plan:open": "bash scripts/open-exec-plan.sh",
     "plan:close": "bash scripts/close-exec-plan.sh",
     "task:finish": "bash scripts/finish-task",
+    "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
     "onboard": "bash scripts/setup-host.sh",
     "chat": "pnpm exec tsx packages/cli/src/bin.ts assistant chat",
     "setup:inbox": "bash scripts/setup-inbox-local.sh",
@@ -75,6 +76,7 @@
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",
+    "@cobuild/review-gpt": "^0.5.88",
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.1.5",
     "tsx": "^4.20.6",
